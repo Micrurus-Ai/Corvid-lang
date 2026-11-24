@@ -22,6 +22,35 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 regular expressions on the interpreter
+
+Five String methods match regular expressions: `contains_regex`,
+`find_regex`, `find_all_regex`, `replace_regex` and `split_regex`.
+
+Decisions:
+
+- **Only literal patterns, checked at compile time.** The checker parses
+  each pattern with `corvid-text`, which compiles it with the same
+  `regex` crate the runtime uses, so an accepted pattern cannot fail at
+  run time. A pattern in a variable is refused; run-time patterns need a
+  validated pattern value and wait for a program that needs one.
+- **A literal replacement is a checked template; any other replacement
+  is inserted verbatim.** The checker reads `$` references exactly as
+  the crate does, so `$1a`, a reference to a missing group and a stray
+  `$` are compile errors instead of silent empty expansions. The IR
+  lowerer picks the verbatim kind for a non-literal replacement, using
+  the same literal test as the checker, so user data is never expanded.
+- **`RegexMatch` is a compiler-known record**, like `JsonError`, with
+  character positions so `substring(m.start, m.end)` round-trips, and
+  `groups[i]` numbered as `$i` is. It is nameable in signatures and has
+  no JSON form.
+- **`split_regex` refuses patterns that can match empty text**, read
+  from the parsed pattern's minimum length, as `split("")` is refused.
+
+Found on the way: `JsonError` is not registered as a resolver builtin,
+so it cannot be written in a signature, though `Type::compiler_known`
+knows it. `RegexMatch` is registered; `JsonError` is left for B01.
+
 ## 2026-11-24 - B03 text and encoding: encoders, decoders and UUID parsing
 
 [The proposal](docs/proposals/b03-text-and-encoding.md) settles the

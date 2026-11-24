@@ -2,8 +2,10 @@
 //!
 //! Every rule behind the text builtin methods lives here once: the
 //! interpreter and the native runtime both call these functions, so the
-//! two tiers cannot disagree on an encoding. The crate depends on no
-//! other Corvid crate, so the checker can use it too.
+//! two tiers cannot disagree on an encoding or a match. The crate
+//! depends on no other Corvid crate, so the checker uses it too, to
+//! validate regex pattern and replacement literals with the parser the
+//! runtime compiles them with.
 //!
 //! Text crosses every encoder as its UTF-8 bytes. Decoders return a
 //! message naming the first problem and its position, counted in
@@ -11,6 +13,7 @@
 //! malformed input.
 
 pub mod encoding;
+pub mod regex;
 pub mod uuid;
 
 pub use encoding::{

@@ -909,6 +909,7 @@ mod match_check;
 mod expr;
 mod import_call;
 mod json_methods;
+mod regex_methods;
 mod signature_types;
 mod tables;
 mod ops;

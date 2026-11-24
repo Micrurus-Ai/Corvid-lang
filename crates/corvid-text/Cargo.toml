@@ -3,7 +3,11 @@ name = "corvid-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Text and encoding rules for Corvid: base64, hex and URL-component codecs and UUID parsing and formatting. The checker, the interpreter and the native runtime all call this one implementation."
+description = "Text and encoding rules for Corvid: base64, hex and URL-component codecs, UUID parsing and formatting, and regular expressions. The checker, the interpreter and the native runtime all call this one implementation."
 
 [dependencies]
 base64 = "0.22"
+# The checker validates pattern literals with the same parser and
+# compiler the runtime uses, so a pattern that passes cannot fail later.
+regex = "1"
+regex-syntax = "0.8"

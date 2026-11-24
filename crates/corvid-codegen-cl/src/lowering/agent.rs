@@ -459,6 +459,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "internal compiler error: `JsonError` reached native lowering; `compile_to_object` represents it as a record first",
             span,
         )),
+        Type::RegexMatch => Err(CodegenError::not_supported(
+            "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
+            span,
+        )),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

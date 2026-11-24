@@ -182,6 +182,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
         Type::JsonValue => named_type("JsonValue", span),
         Type::JsonBuilder => named_type("JsonBuilder", span),
         Type::JsonError => named_type("JsonError", span),
+        Type::RegexMatch => named_type("RegexMatch", span),
         Type::Function { .. } | Type::RouteParams(_) | Type::Unknown => named_type("Nothing", span),
     }
 }

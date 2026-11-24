@@ -28,7 +28,13 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.decode_url_component() -> Result<String, String>`
 - `String.parse_uuid() -> Result<String, String>`
 
-The encoders and decoders work on the text's UTF-8 bytes. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
+- `String.contains_regex(pattern: String) -> Bool`
+- `String.find_regex(pattern: String) -> Option<RegexMatch>`
+- `String.find_all_regex(pattern: String) -> List<RegexMatch>`
+- `String.replace_regex(pattern: String, replacement: String) -> String`
+- `String.split_regex(pattern: String) -> List<String>`
+
+The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must be a string literal, which the compiler checks. A `RegexMatch` has the fields `text: String`, `start: Int`, `end: Int` and `groups: List<Option<String>>`. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
 

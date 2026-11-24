@@ -327,6 +327,31 @@ pub enum BuiltinMethodKind {
     /// `String.parse_uuid() -> Result<String, String>` — the canonical
     /// lowercase hyphenated form of any common UUID spelling.
     StringParseUuid,
+
+    // ----- regular expressions (B03) ------------------------------
+    //
+    // The pattern (always the first argument) must be a string literal;
+    // the checker validates it with `corvid_text::regex::check_pattern`,
+    // the parser the runtime compiles it with, so no invalid pattern
+    // reaches either tier. Positions count characters. All are pure.
+    /// `String.contains_regex(pattern: String) -> Bool`.
+    StringContainsRegex,
+    /// `String.find_regex(pattern: String) -> Option<RegexMatch>`.
+    StringFindRegex,
+    /// `String.find_all_regex(pattern: String) -> List<RegexMatch>`.
+    StringFindAllRegex,
+    /// `String.replace_regex(pattern: String, replacement: String) ->
+    /// String` with a literal replacement: a template whose `$1` and
+    /// `${name}` references the checker validated.
+    StringReplaceRegex,
+    /// The same call with a replacement computed at run time, which is
+    /// inserted exactly as written. The IR lowerer selects this kind
+    /// through [`refine_builtin_method_kind`]; the table never returns
+    /// it.
+    StringReplaceRegexVerbatim,
+    /// `String.split_regex(pattern: String) -> List<String>` — the
+    /// checker refuses patterns that can match the empty string.
+    StringSplitRegex,
 }
 
 impl BuiltinMethodKind {
@@ -352,7 +377,62 @@ impl BuiltinMethodKind {
             StringEncodeBase64 | StringEncodeBase64Url | StringEncodeHex | StringEncodeUrlComponent
         )
     }
+
+    /// The B03 regular-expression methods, whose first argument is a
+    /// pattern literal.
+    pub fn is_regex(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringContainsRegex
+                | StringFindRegex
+                | StringFindAllRegex
+                | StringReplaceRegex
+                | StringReplaceRegexVerbatim
+                | StringSplitRegex
+        )
+    }
 }
+
+/// The value of a string-literal argument, which is the only form a
+/// regex pattern or a replacement template may take. The checker and
+/// the IR lowerer both decide literal-ness here.
+pub fn string_literal_argument(arg: &corvid_ast::Expr) -> Option<&str> {
+    match arg {
+        corvid_ast::Expr::Literal { value: corvid_ast::Literal::String(text), .. } => Some(text),
+        _ => None,
+    }
+}
+
+/// The kind a call executes as, given its arguments, when the table's
+/// kind depends on them: `replace_regex` with a replacement computed at
+/// run time inserts it verbatim instead of expanding `$` references.
+pub fn refine_builtin_method_kind(kind: BuiltinMethodKind, args: &[corvid_ast::Expr]) -> BuiltinMethodKind {
+    match kind {
+        BuiltinMethodKind::StringReplaceRegex
+            if args.get(1).is_some_and(|replacement| string_literal_argument(replacement).is_none()) =>
+        {
+            BuiltinMethodKind::StringReplaceRegexVerbatim
+        }
+        other => other,
+    }
+}
+
+/// The fields of the compiler-known `RegexMatch` record, in display
+/// order. The checker types `m.start` from this list and both tiers
+/// build `RegexMatch` values from it.
+pub fn regex_match_fields() -> [(&'static str, Type); 4] {
+    [
+        ("text", Type::String),
+        ("start", Type::Int),
+        ("end", Type::Int),
+        ("groups", Type::List(Box::new(Type::Option(Box::new(Type::String))))),
+    ]
+}
+
+/// The type id runtime `RegexMatch` records carry, reserved like
+/// [`JSON_ERROR_TYPE_ID`].
+pub const REGEX_MATCH_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1);
 
 /// The fields of the compiler-known `JsonError` record, in display
 /// order. The checker types `error.path` from this list and the
@@ -462,6 +542,27 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             sig(StringDecodeUrlComponent, vec![], text_result())
         }
         (Type::String, "parse_uuid") => sig(StringParseUuid, vec![], text_result()),
+        (Type::String, "contains_regex") => sig(StringContainsRegex, vec![Type::String], Type::Bool),
+        (Type::String, "find_regex") => sig(
+            StringFindRegex,
+            vec![Type::String],
+            Type::Option(Box::new(Type::RegexMatch)),
+        ),
+        (Type::String, "find_all_regex") => sig(
+            StringFindAllRegex,
+            vec![Type::String],
+            Type::List(Box::new(Type::RegexMatch)),
+        ),
+        (Type::String, "replace_regex") => sig(
+            StringReplaceRegex,
+            vec![Type::String, Type::String],
+            Type::String,
+        ),
+        (Type::String, "split_regex") => sig(
+            StringSplitRegex,
+            vec![Type::String],
+            Type::List(Box::new(Type::String)),
+        ),
         (Type::List(_), "length") => sig(ListLength, vec![], Type::Int),
         (Type::List(elem), "append") => sig(ListAppend, vec![(**elem).clone()], Type::Nothing),
         (Type::List(elem), "contains") => sig(ListContains, vec![(**elem).clone()], Type::Bool),

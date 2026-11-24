@@ -45,7 +45,8 @@ pub use law_check::{
 };
 pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_NAME};
 pub use builtin_methods::{
-    builtin_method, json_error_fields, type_method, BuiltinMethodKind, BuiltinMethodSig, JSON_ERROR_TYPE_ID,
+    builtin_method, json_error_fields, refine_builtin_method_kind, regex_match_fields, type_method,
+    BuiltinMethodKind, BuiltinMethodSig, JSON_ERROR_TYPE_ID, REGEX_MATCH_TYPE_ID,
 };
 pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};
 pub use type_receiver::{type_receiver, TypeReceiver};

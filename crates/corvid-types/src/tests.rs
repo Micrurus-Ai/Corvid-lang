@@ -2,6 +2,7 @@ use super::*;
 use corvid_resolve::{resolve, ResolveErrorKind};
 use corvid_syntax::{lex, parse_file};
 
+mod regex_methods;
 mod text_methods;
 
 fn check(src: &str) -> Checked {

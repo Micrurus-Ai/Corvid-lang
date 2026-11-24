@@ -71,6 +71,7 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::DbHandle
         | Type::JsonValue
         | Type::JsonBuilder
+        | Type::RegexMatch
         | Type::Unknown => false,
     }
 }

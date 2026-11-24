@@ -107,6 +107,10 @@ pub enum BuiltIn {
     /// `Item` argument is an ordinary type and resolves normally.
     /// Call: `Page(items: List<T>, next_cursor: Option<String>) -> Page<T>`.
     Page,
+    /// B03 — `RegexMatch`, the compiler-known record `find_regex` and
+    /// `find_all_regex` return. Nameable so helper agents can take a
+    /// match as a parameter; only the regex methods construct one.
+    RegexMatch,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -208,6 +212,8 @@ impl SymbolTable {
         // Slice 51f — HTTP-boundary upload / pagination heads.
         self.builtins.insert("Upload".into(), BuiltIn::Upload);
         self.builtins.insert("Page".into(), BuiltIn::Page);
+        // B03 — see the `BuiltIn::RegexMatch` docstring.
+        self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
     }
 
     /// Insert a top-level declaration.

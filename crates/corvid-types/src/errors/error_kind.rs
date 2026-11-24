@@ -55,6 +55,21 @@ pub enum TypeErrorKind {
     /// replaced. The runtime no longer decodes JSON for it.
     RetiredJsonDecoderTool { tool: String, replacement: String },
 
+    /// A regex method (`find_regex`, `replace_regex`, ...) whose
+    /// pattern is not a string literal, so the compiler cannot check it.
+    RegexPatternNotLiteral { method: String },
+
+    /// A regex pattern literal the regex parser rejects.
+    InvalidRegexPattern { method: String, problem: String },
+
+    /// A `replace_regex` replacement literal that refers to a group the
+    /// pattern does not have, or uses `$` in a way that is not a group
+    /// reference.
+    InvalidRegexReplacement { problem: String, hint: String },
+
+    /// `split_regex` with a pattern that can match the empty string.
+    RegexSplitMatchesEmpty { pattern: String },
+
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
     BareFunctionReference { name: String },
@@ -556,6 +571,18 @@ impl TypeErrorKind {
             Self::RetiredJsonDecoderTool { tool, .. } => format!(
                 "tool `{tool}` follows the retired `decode_<Type>_from_json` convention; the runtime no longer decodes JSON for it"
             ),
+            Self::RegexPatternNotLiteral { method } => format!(
+                "the pattern passed to `{method}` must be a string literal, so the compiler can check it"
+            ),
+            Self::InvalidRegexPattern { method, problem } => {
+                format!("invalid regular expression in `{method}`: {problem}")
+            }
+            Self::InvalidRegexReplacement { problem, .. } => {
+                format!("invalid `replace_regex` replacement: {problem}")
+            }
+            Self::RegexSplitMatchesEmpty { pattern } => format!(
+                "`split_regex` needs a pattern that cannot match empty text, but `{pattern}` can"
+            ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
             }
@@ -996,6 +1023,16 @@ impl TypeErrorKind {
             }
             Self::NoJsonForm { hint, .. } => Some(hint.clone()),
             Self::RetiredJsonDecoderTool { replacement, .. } => Some(replacement.clone()),
+            Self::RegexPatternNotLiteral { .. } => Some(
+                "write the pattern inline, such as `text.find_regex(\"[0-9]+\")`; to search for text computed at run time, use `contains`, which needs no escaping".into(),
+            ),
+            Self::InvalidRegexPattern { .. } => Some(
+                "patterns use Rust `regex` syntax; backslashes are doubled inside Corvid strings, as in `\"\\\\d+\"`".into(),
+            ),
+            Self::InvalidRegexReplacement { hint, .. } => Some(hint.clone()),
+            Self::RegexSplitMatchesEmpty { .. } => Some(
+                "require at least one character, for example `\",\\\\s*\"` instead of `\"\\\\s*\"`".into(),
+            ),
             Self::TypeAsValue { name } => Some(format!(
                 "to create a value of type `{name}`, call a tool or prompt that returns one"
             )),

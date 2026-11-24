@@ -154,6 +154,9 @@ fn is_native_value_type(ty: &Type) -> bool {
         Type::JsonValue | Type::JsonBuilder => false,
         // Native code represents JsonError as a record of strings.
         Type::JsonError => true,
+        // B03 — regular expressions run on the interpreter until the
+        // native regex slice.
+        Type::RegexMatch => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.

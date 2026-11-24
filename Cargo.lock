@@ -1118,6 +1118,8 @@ name = "corvid-text"
 version = "0.0.1"
 dependencies = [
  "base64",
+ "regex",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -1143,6 +1145,7 @@ dependencies = [
  "corvid-guarantees",
  "corvid-resolve",
  "corvid-syntax",
+ "corvid-text",
  "serde",
  "toml 0.8.23",
 ]

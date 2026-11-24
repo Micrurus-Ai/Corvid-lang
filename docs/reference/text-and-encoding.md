@@ -1,8 +1,8 @@
 # Text and encoding
 
-Corvid's text methods encode and decode text, and parse UUIDs. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
+Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Encoding and UUID parsing run on the interpreter. Native code, regular expressions and UUID generation follow. [Proposal](../proposals/b03-text-and-encoding.md)
+Status: B03 in progress. Encoding, UUID parsing and regular expressions run on the interpreter. Native code and UUID generation follow. [Proposal](../proposals/b03-text-and-encoding.md)
 
 ## Encoding
 
@@ -64,6 +64,83 @@ agent order_key(raw: String) -> Result<String, String>:
 
 It accepts every version and variant, including the nil UUID. Anything else returns an `Err` that quotes the input, such as ``Err("not a UUID: `nope` (expected 32 hex digits, optionally hyphenated 8-4-4-4-12)")``.
 
+## Regular expressions
+
+```corvid
+agent order_numbers(text: String) -> List<String>:
+    numbers: List<String> = []
+    for m in text.find_all_regex("#(\\d+)"):
+        numbers.append(m.groups[1].unwrap_or(""))
+    return numbers
+
+agent us_to_iso(text: String) -> String:
+    return text.replace_regex("(?<month>\\d{2})/(?<day>\\d{2})/(?<year>\\d{4})", "${year}-${month}-${day}")
+```
+
+| Method | Result |
+| --- | --- |
+| `text.contains_regex(pattern)` | `Bool`: whether the pattern matches anywhere in the text |
+| `text.find_regex(pattern)` | `Option<RegexMatch>`: the first match |
+| `text.find_all_regex(pattern)` | `List<RegexMatch>`: every match, left to right, without overlaps |
+| `text.replace_regex(pattern, replacement)` | `String`: every match replaced |
+| `text.split_regex(pattern)` | `List<String>`: the text between matches |
+
+### The compiler checks every pattern
+
+The pattern must be a string literal, and the compiler parses it. An invalid pattern is a compile error naming the problem and its position in the pattern:
+
+```text
+invalid regular expression in `find_regex`: unclosed group at position 0
+```
+
+A pattern held in a variable is a compile error too, because the compiler could not check it. To search for text computed at run time, use `contains`, which needs no escaping.
+
+Corvid strings treat `\` as an escape, so a pattern doubles its backslashes: write `"\\d+"` for `\d+`.
+
+### Syntax
+
+Patterns use the syntax of Rust's `regex` crate, which is the familiar Perl and Python syntax: classes such as `[a-z]` and `\d`, groups, alternation, `*`, `+`, `?` and `{n,m}` repetition, anchors, `(?i)` for case-insensitive matching, and named groups written `(?<name>...)` or `(?P<name>...)`. Backreferences such as `\1` and lookaround such as `(?=...)` are not supported, and the compiler says so. In exchange, matching takes time proportional to the length of the text for every pattern, so no pattern or input can stall a server.
+
+Matching is Unicode-aware. `.` matches one character, and `\w`, `\d` and `\s` include letters, digits and spaces from every script. `(?i)` folds case with Unicode's simple case folding.
+
+### `RegexMatch`
+
+`find_regex` and `find_all_regex` return `RegexMatch` records. `RegexMatch` can be named in a signature, such as `agent describe(m: RegexMatch) -> String`.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `text` | `String` | The matched text. |
+| `start` | `Int` | The position of the first matched character. |
+| `end` | `Int` | The position just after the match. |
+| `groups` | `List<Option<String>>` | The capture groups. `groups[0]` is the whole match, `groups[1]` is the first group, and so on. A group that took no part in the match is `None`. |
+
+Positions count characters, like `length()` and `substring`, so `text.substring(m.start, m.end)` is always `m.text`. A group's index is the number its replacement reference uses: `groups[1]` and `$1` are the same group.
+
+A `RegexMatch` has no JSON form, because its positions point into one particular text. Copy the fields you need into a record you declare to send or store them.
+
+### Replacements
+
+In a replacement written as a string literal:
+
+- `$1` or `${1}` inserts group 1, and `$0` inserts the whole match.
+- `$name` or `${name}` inserts the named group.
+- `$$` inserts a dollar sign.
+
+The compiler checks every reference. A group the pattern does not define is a compile error, and so is a `$` that starts no reference. `$1a` is read as a group named `1a`, so the compiler suggests `${1}a` to follow group 1 with the letter `a`.
+
+A replacement computed at run time, such as a parameter, is inserted exactly as written, with no `$` expansion. Data from a user can never be read as a template:
+
+```corvid
+agent mask(text: String, replacement: String) -> String:
+    return text.replace_regex("\\d+", replacement)
+```
+
+`mask("pin 1234", "$1")` returns `"pin $1"`.
+
+### Splitting
+
+`split_regex` keeps empty pieces, as `split` does: `"a, b,,c".split_regex(",\\s*")` is `["a", "b", "", "c"]`. A pattern that can match empty text, such as `"\\s*"`, is a compile error, because splitting on an empty match has no single sensible result. Require at least one character instead.
+
 ## One implementation
 
-Every rule on this page lives in one Rust crate, `corvid-text`. The interpreter calls it now, and native code will call the same functions, so the two tiers cannot disagree on an encoding.
+Every rule on this page lives in one Rust crate, `corvid-text`. The interpreter calls it now, and native code will call the same functions, so the two tiers cannot disagree on an encoding or a match. The compiler checks patterns and replacements with the same crate, so a pattern it accepts is a pattern the runtime compiles.

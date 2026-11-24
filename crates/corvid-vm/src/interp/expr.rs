@@ -783,6 +783,10 @@ pub(super) fn eval_builtin_method(
             let s = want_string(&recv, span)?;
             super::text_methods::eval_text_method(kind, &s, span)
         }
+        _ if kind.is_regex() => {
+            let s = want_string(&recv, span)?;
+            super::text_methods::eval_regex_method(kind, &s, &args, span)
+        }
 
         _ => {
             let s = want_string(&recv, span)?;
