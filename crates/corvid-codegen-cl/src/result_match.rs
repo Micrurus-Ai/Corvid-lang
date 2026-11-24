@@ -27,7 +27,7 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::FieldAccess { target, .. } => operand_supported(target),
         IrExprKind::BuiltinMethod { receiver, args, kind } => {
             use corvid_types::BuiltinMethodKind::*;
-            (crate::native_string_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode))
+            (crate::native_string_method(*kind) || crate::native_text_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode))
                 && operand_supported(receiver)
                 && args.iter().all(operand_supported)
         }

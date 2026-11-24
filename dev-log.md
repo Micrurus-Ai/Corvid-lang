@@ -22,6 +22,21 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 encoding and UUID parsing compile to native code
+
+The eight encoding methods and `parse_uuid` now compile. Each is one
+call into a `corvid-runtime` entry point that calls the `corvid-text`
+function the interpreter calls, so the tiers share every rule and every
+error message. Encoders return a String; decoders fill a native
+`Result<String, String>` payload slot and return its tag, the shape
+`parse_int` already uses.
+
+One table in the code generator names the runtime symbol and call shape
+of each method. The import declarations, the lowering, the tier picker
+and native match arms all read it, so a method is native in all four
+places or none. Parity tests compare both tiers on encoded text, Ok and
+Err results and `?` propagation, with balanced allocations.
+
 ## 2026-11-24 - B03 UUID generation
 
 `std/uuid` adds `uuid_v4()` and `uuid_v7()`, both returning the

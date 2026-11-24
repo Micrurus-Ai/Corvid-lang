@@ -112,6 +112,21 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let string_parse_int_id = module
         .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
+    // B03 text methods: encoders take the text and return a String;
+    // decoders also take a Result payload slot and return its tag,
+    // the `corvid_string_parse_int` shape.
+    let mut text_methods = Vec::new();
+    for kind in crate::text_methods::NATIVE_TEXT_METHODS {
+        let Some((symbol, shape)) = crate::text_methods::native_text_symbol(kind) else { continue };
+        let sig = match shape {
+            crate::text_methods::NativeTextShape::Encoder => &char_len_sig,
+            crate::text_methods::NativeTextShape::Decoder => &char_at_sig,
+        };
+        let id = module
+            .declare_function(symbol, Linkage::Import, sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
+        text_methods.push((kind, id));
+    }
     // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
     let mut json_decode_sig = module.make_signature();
     for _ in 0..6 {
@@ -1245,6 +1260,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_replace,
         string_split,
         string_parse_int: string_parse_int_id,
+        text_methods,
         json_decode_typed: json_decode_typed_id,
         json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,

@@ -126,7 +126,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Regular expressions on the interpreter: `contains_regex`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex`, with the pattern and a literal replacement checked at compile time, and the `RegexMatch` record with character positions and capture groups. [Regular expressions](reference/text-and-encoding.md#regular-expressions)
 - [ ] `JsonError` cannot be written in a signature: the resolver does not register it, though the checker knows the name. Register it as `RegexMatch` is. Found during B03; belongs to B01.
 - [x] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted. [Generating UUIDs](reference/text-and-encoding.md#generating-uuids)
-- [ ] Native encoding and UUID parsing, with parity tests.
+- [x] Native encoding and UUID parsing, with parity tests. Native code calls the `corvid-text` functions the interpreter calls, and a decoder fills a native `Result<String, String>`.
 - [ ] Native regular expressions, with parity tests.
 - [ ] Patterns built at run time, through a validated pattern value. Deferred until a backend example needs one.
 - [ ] Named-group lookup on `RegexMatch` checked against the pattern's group names.

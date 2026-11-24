@@ -60,6 +60,7 @@ mod prompt_exports;
 mod replay_exports;
 mod state;
 mod strings;
+mod text;
 mod tokio_handle;
 mod tool_iter;
 mod typed_json;

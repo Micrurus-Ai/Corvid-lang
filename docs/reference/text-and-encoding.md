@@ -2,7 +2,7 @@
 
 Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Encoding, UUID parsing and regular expressions run on the interpreter, and so does UUID generation from `std/uuid`. Native code follows. [Proposal](../proposals/b03-text-and-encoding.md)
+Status: B03 in progress. Everything here runs on the interpreter. Encoding and UUID parsing also compile to native code, with the same results and messages. Native regular expressions follow; native UUID generation waits for native stdlib tools. [Proposal](../proposals/b03-text-and-encoding.md)
 
 ## Encoding
 
@@ -159,4 +159,4 @@ agent mask(text: String, replacement: String) -> String:
 
 ## One implementation
 
-Every rule on this page lives in one Rust crate, `corvid-text`. The interpreter calls it now, and native code will call the same functions, so the two tiers cannot disagree on an encoding or a match. The compiler checks patterns and replacements with the same crate, so a pattern it accepts is a pattern the runtime compiles.
+Every rule on this page lives in one Rust crate, `corvid-text`. The interpreter calls it directly, and native code calls the same functions through the runtime, so the two tiers cannot disagree on an encoding or a match. Parity tests run each method on both tiers and compare the results, including error messages and positions. The compiler checks patterns and replacements with the same crate, so a pattern it accepts is a pattern the runtime compiles.
