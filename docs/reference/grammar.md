@@ -126,10 +126,12 @@ type_alias_body   ::= type_ref
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
 
 # B09: a stored record type and the database that holds it.
-# `table`, `database`, `key`, `engine`, `location`, `tables` and `env`
-# are contextual: they stay ordinary identifiers elsewhere.
-table_decl        ::= 'table' IDENT ':' INDENT table_field+ DEDENT
-table_field       ::= 'key'? type_field
+# `table`, `database`, `key`, `engine`, `location`, `tables`, `env`,
+# `renamed`, `from` and `retired` are contextual: they stay ordinary
+# identifiers elsewhere, and a field may be named `retired`.
+table_decl        ::= 'table' IDENT ':' INDENT (table_field | table_retired)+ DEDENT
+table_field       ::= 'key'? IDENT ':' type_ref ('renamed' 'from' IDENT)? NEWLINE
+table_retired     ::= 'retired' IDENT (',' IDENT)* NEWLINE
 database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
 database_setting  ::= 'engine' ':' IDENT NEWLINE
                     | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE

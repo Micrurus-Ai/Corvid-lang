@@ -1,19 +1,17 @@
 //! `corvid migrate plan <source>` (B09): write the migration that
-//! creates the tables a program declares.
+//! brings the stored tables to the program's declarations.
 //!
 //! The migration files are the schema's history, so the planner applies
 //! every existing migration to an empty in-memory database and compares
 //! the declared tables with what that leaves. A table no migration
-//! creates gets a `CREATE TABLE` in a new migration file for review. A
-//! table whose columns differ from the declaration is reported; planning
-//! changes to existing tables is slice P3, so the planner refuses rather
-//! than guess.
+//! creates gets a `CREATE TABLE`; a stored table that differs gets the
+//! change [`plan_table_change`] plans, or its refusals. The new file is
+//! checked by running it on the history before it is written.
 
 use crate::migrate_cmd::{migration_version, scan_migration_files};
 use anyhow::{bail, Context, Result};
-use corvid_runtime::tables::create_table_sql;
+use corvid_runtime::tables::{create_table_sql, plan_table_change, StoredColumn};
 use rusqlite::Connection;
-use std::collections::BTreeSet;
 use std::path::Path;
 
 pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Result<u8> {
@@ -40,47 +38,66 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
             .with_context(|| format!("migration `{}` does not apply in order to an empty database", migration.name))?;
     }
 
-    let mut new_tables = Vec::new();
+    let mut created = Vec::new();
     let mut changed = Vec::new();
+    let mut refusals = Vec::new();
     for schema in &schemas {
-        let existing = existing_columns(&history, &schema.name)?;
-        if existing.is_empty() {
-            new_tables.push(schema);
+        let stored = stored_columns(&history, &schema.name)?;
+        if stored.is_empty() {
+            created.push(schema);
             continue;
         }
-        let declared: BTreeSet<String> = schema.columns.iter().map(|(name, _)| name.clone()).collect();
-        if declared != existing {
-            let added: Vec<_> = declared.difference(&existing).cloned().collect();
-            let removed: Vec<_> = existing.difference(&declared).cloned().collect();
-            changed.push(format!(
-                "table `{}`: declared but not migrated {:?}; migrated but not declared {:?}",
-                schema.name, added, removed
-            ));
+        match plan_table_change(schema, &stored) {
+            Ok(None) => {}
+            Ok(Some(change)) => changed.push((schema, change)),
+            Err(reasons) => refusals.extend(reasons),
         }
     }
-    if !changed.is_empty() {
-        for change in &changed {
-            eprintln!("{change}");
+    if !refusals.is_empty() {
+        for refusal in &refusals {
+            eprintln!("refused: {refusal}");
         }
-        bail!(
-            "these tables differ from what the migrations create; planning changes to existing tables arrives in B09 P3, so write that migration by hand"
-        );
+        eprintln!("plan: no migration written; change the declarations as each refusal says, then plan again");
+        return Ok(1);
     }
-    if new_tables.is_empty() {
-        println!("plan: the migrations already create every declared table");
+    if created.is_empty() && changed.is_empty() {
+        println!("plan: the migrations already match every declared table");
         return Ok(0);
     }
 
-    let names: Vec<&str> = new_tables.iter().map(|t| t.name.as_str()).collect();
     let mut sql = format!(
         "-- Planned by `corvid migrate plan` from {}. Review before `corvid migrate up`.\n\n",
         source.display()
     );
-    for table in &new_tables {
+    for table in &created {
+        sql.push_str(&format!("-- Create `{}`.\n", table.name));
         sql.push_str(&create_table_sql(table));
         sql.push('\n');
     }
-    let file_name = format!("{}_create_{}.sql", next_version(&migrations), names.join("_").to_lowercase());
+    for (table, change) in &changed {
+        for line in &change.summary {
+            sql.push_str(&format!("-- `{}`: {line}.\n", table.name));
+        }
+        for statement in &change.statements {
+            sql.push_str(statement);
+            sql.push('\n');
+        }
+        sql.push('\n');
+    }
+
+    // The plan must bring the history to the declarations exactly;
+    // check that before handing it to a person.
+    history.execute_batch(&sql).context("the planned migration does not run on the migrated schema")?;
+    for schema in &schemas {
+        let stored = stored_columns(&history, &schema.name)?;
+        if !matches!(plan_table_change(schema, &stored), Ok(None)) {
+            bail!("the planned migration leaves table `{}` different from its declaration; this is a planner bug", schema.name);
+        }
+    }
+
+    let verb = if changed.is_empty() { "create" } else { "change" };
+    let names: Vec<&str> = created.iter().copied().chain(changed.iter().map(|(t, _)| *t)).map(|t| t.name.as_str()).collect();
+    let file_name = format!("{}_{verb}_{}.sql", next_version(&migrations), names.join("_").to_lowercase());
     if dry_run {
         println!("plan: would write {}\n\n{sql}", dir.join(&file_name).display());
         return Ok(0);
@@ -91,13 +108,22 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
         bail!("`{}` already exists", path.display());
     }
     std::fs::write(&path, sql).with_context(|| format!("cannot write `{}`", path.display()))?;
-    println!("plan: wrote {} creating {}", path.display(), names.join(", "));
+    println!("plan: wrote {} for {}", path.display(), names.join(", "));
     Ok(0)
 }
 
-fn existing_columns(history: &Connection, table: &str) -> Result<BTreeSet<String>> {
-    let mut statement = history.prepare("SELECT name FROM pragma_table_info(?1)")?;
-    let columns = statement.query_map([table], |row| row.get::<_, String>(0))?;
+/// A table's columns as the migrations left them; empty if no migration
+/// creates it.
+fn stored_columns(history: &Connection, table: &str) -> Result<Vec<StoredColumn>> {
+    let mut statement = history.prepare("SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1)")?;
+    let columns = statement.query_map([table], |row| {
+        Ok(StoredColumn {
+            name: row.get(0)?,
+            sql_type: row.get(1)?,
+            not_null: row.get::<_, i64>(2)? != 0,
+            primary_key: row.get::<_, i64>(3)? != 0,
+        })
+    })?;
     Ok(columns.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -132,6 +158,8 @@ mod tests {
                 ("tags".into(), Type::List(Box::new(Type::String))),
                 ("revision".into(), Type::Int),
             ],
+            renamed: Vec::new(),
+            retired: Vec::new(),
         }
     }
 
@@ -140,10 +168,12 @@ mod tests {
         let sql = create_table_sql(&schema());
         assert_eq!(
             sql,
-            "CREATE TABLE \"Shelf\" (\n    \"shelf\" INTEGER PRIMARY KEY NOT NULL,\n    \"title\" TEXT NOT NULL,\n    \"note\" TEXT,\n    \"tags\" TEXT NOT NULL,\n    \"revision\" INTEGER NOT NULL\n);\n"
+            "CREATE TABLE \"Shelf\" (\n    \"shelf\" INTEGER PRIMARY KEY NOT NULL,\n    \"title\" TEXT NOT NULL,\n    \"note\" TEXT,\n    \"tags\" JSON TEXT NOT NULL,\n    \"revision\" INTEGER NOT NULL\n);\n"
         );
         let history = Connection::open_in_memory().unwrap();
         history.execute_batch(&sql).expect("the statement runs");
-        assert_eq!(existing_columns(&history, "Shelf").unwrap().len(), 5);
+        let stored = stored_columns(&history, "Shelf").unwrap();
+        assert_eq!(stored.len(), 5);
+        assert_eq!(plan_table_change(&schema(), &stored).unwrap(), None, "a created table matches its declaration");
     }
 }

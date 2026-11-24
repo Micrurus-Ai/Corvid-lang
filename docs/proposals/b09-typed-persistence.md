@@ -106,7 +106,7 @@ agent shelves_of(user: String) -> List<Shelf>:
    the existing `corvid migrate up` applies. A rename is declared,
    `title: String renamed from name`, because the planner cannot tell
    a rename from a drop and an add. Dropping a column loses data, so
-   it is declared too: `retired: legacy_note`. A plan that would drop
+   it is declared too: `retired legacy_note`. A plan that would drop
    an undeclared column is refused with the column's name.
 8. **One query plan, a dialect per engine.** Queries lower to a small
    relational plan in the runtime; SQLite, Postgres and MySQL each
@@ -131,7 +131,7 @@ agent shelves_of(user: String) -> List<Shelf>:
 - [x] P2. Typed queries: `where`, `order_by`, `descending`, `take`,
   `all`, and the compile-time check that a condition can run in the
   database.
-- [ ] P3. Migrations from declaration changes: added and altered
+- [x] P3. Migrations from declaration changes: added and altered
   columns, `renamed from`, `retired`, and refusal of undeclared drops.
 - [ ] P4. Postgres, with the cross-engine query suite.
 - [ ] P5. MySQL on the same suite.
@@ -152,8 +152,26 @@ agent shelves_of(user: String) -> List<Shelf>:
   runs. Results are ordered by key when nothing else decides, and `==`
   is SQL `IS`, so `== None` finds missing values and no condition is left
   undecided by `NULL`.
+- `retired` is written without a colon, `retired legacy_note`, not
+  `retired: legacy_note` as first proposed: with a colon the line reads as
+  a field, and `retired: Bool` is too common a field to reserve.
+- Simpler spellings considered for the history clauses: `@renamed(from: title)`
+  adds an attribute's punctuation for no extra meaning; `name: String was title`
+  is shorter but does not say a rename happened; `drop legacy_note` reads as
+  an action that runs every time the program starts. `renamed from title`
+  and `retired legacy_note` read as plain statements of the table's history.
+- A new required field is refused rather than filled. Corvid fields have
+  no defaults, and inventing a value for stored rows would be a hidden
+  default; the refusal gives the path (add an `Option`, fill it, make it
+  required). The only type changes planned are those that convert every
+  value exactly; the rest are refused with the add-fill-retire path.
+- `Bool` and JSON-stored fields get their own SQL types, `BOOLEAN` and
+  `JSON TEXT`, instead of sharing `INTEGER` and `TEXT`, so the stored
+  schema records how each column is stored and the planner can see every
+  change. Tables created by P1's migrations with a `Bool` or JSON field
+  plan as a type change and are refused; recreate them.
 
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.
-  The proposal uses words, matching `where` refinements.
+  P3 ships the words, matching `where` refinements.

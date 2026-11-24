@@ -154,7 +154,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
 - [x] P1b. Table operations are recorded in the trace as `table:<Table>.<op>` calls, and a replay serves reads and write outcomes from it without opening the database.
 - [x] P2. Typed queries (`where`, `order_by`, `descending`, `take`, `all`), refused at compile time when a condition cannot run in the database. A chain runs as one parameterized `SELECT`, ordered by key when nothing else decides, and is recorded and replayed as `table:<Table>.query`.
-- [ ] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`).
+- [x] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`). New `Option` fields add a column; exact type changes rebuild the table inside the migration's transaction; undeclared drops, new required fields, lossy type changes and key changes are refused with what to do instead. The planner runs each plan on the migrated schema before writing it.
 - [ ] P4. Postgres, with a query suite every engine runs.
 - [ ] P5. MySQL.
 - [ ] P6. Native target.

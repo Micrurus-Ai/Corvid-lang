@@ -4,6 +4,29 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Migrations from declaration changes (B09 P3)
+
+`corvid migrate plan` now plans changes to stored tables, not just new
+ones. The planner compares a declaration with the columns the existing
+migrations leave and refuses to guess about data: a rename is declared
+with `renamed from`, a drop with `retired`, and a stored column the
+table no longer names is refused by name. A new required field is
+refused rather than filled, because Corvid fields have no defaults and a
+made-up value would be a hidden default; the message gives the
+add-as-Option, fill, tighten path. Type changes are planned only where
+every value converts exactly; they rebuild the table, and `migrate up`
+already runs each migration in one transaction, so a failed tightening
+leaves the table as it was. The plan is run on the migrated schema and
+re-checked before it is written, so a planner bug surfaces before a
+person sees the file.
+
+`Bool` and JSON-stored fields now get the SQL types `BOOLEAN` and
+`JSON TEXT`. Sharing `INTEGER` and `TEXT` hid an `Int` to `Bool` or
+`String` to list change from the planner. Tables created hours ago by
+P1's migrations with such fields are refused as a type change and must
+be recreated. `retired` dropped the colon the proposal gave it, so a
+field may still be named `retired`.
+
 ## 2026-11-24 - Typed table queries (B09 P2)
 
 `Shelf.where(fn (s) -> condition)` and `Shelf.all()`, with optional

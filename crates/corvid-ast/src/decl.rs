@@ -1273,6 +1273,22 @@ pub struct TableDecl {
     pub record: TypeDecl,
     /// The field marked `key`, if any.
     pub key: Option<Ident>,
+    /// `title: String renamed from name`: columns whose stored name
+    /// was different. The migration planner renames the stored column
+    /// instead of dropping it and adding a new one (B09 P3).
+    pub renamed: Vec<TableRename>,
+    /// `retired legacy_note`: stored columns the table no longer has.
+    /// Dropping a column loses its data, so the planner drops only the
+    /// columns named here (B09 P3).
+    pub retired: Vec<Ident>,
+}
+
+/// One `renamed from` clause: the declared field and the name its
+/// column was stored under.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableRename {
+    pub field: Ident,
+    pub from: Ident,
 }
 
 impl TableDecl {
