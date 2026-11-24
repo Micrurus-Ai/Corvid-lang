@@ -1011,3 +1011,26 @@ fn panel_preview() -> ui.View:
 ```
 
 Use `settings_panel(children)` or `ui.grid(children)` when you already have a list, including a list built in a loop. Use `ui.grid([])` for an empty grid.
+
+## Read order activity and upload a CSV
+
+The [orders server](../../examples/orders_api/src/main.cor) declares its request and receipt types in Corvid. Generate their TypeScript definitions with `corvid contract ts-client examples/orders_api/src/main.cor --out generated`. Start the example with `corvid serve examples/orders_api/src/main.cor --mode mock`. In a browser client using the same origin, pass the generated item type when reading a stream and the generated receipt type when sending a file.
+
+```ts
+import { CorvidClient } from "@corvid/client";
+import type { ImportReceipt, OrderEvent } from "./generated/types";
+
+const client = new CorvidClient({ baseUrl: location.origin });
+const controller = new AbortController();
+for await (const event of client.routeStream<OrderEvent>("/orders/activity", controller.signal)) {
+  console.log(event.id, event.status);
+}
+
+// file is a File selected by the user. A progress event counts multipart bytes.
+const receipt = await client.upload<ImportReceipt>("/orders/import", file, (loaded, total) => {
+  console.log(total ? Math.round(100 * loaded / total) + "%" : loaded + " bytes sent");
+}, controller.signal);
+console.log(receipt.filename, receipt.bytes);
+```
+
+Call `controller.abort()` when the user cancels. Create a fresh controller for a retry. The upload promise resolves when the server sends its receipt. A search can use the same cancellation mechanism through `client.request<OrderPage>("GET", path, undefined, controller.signal)`. With React, pass the signal from `useCorvidPaginated((cursor, signal) => ...)` to the page request. Its `reset()` discards accumulated items and starts a fresh first page. An older response arriving afterward cannot append items or replace the new error state.

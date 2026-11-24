@@ -42,14 +42,83 @@ export class CorvidClient {
   }
 
   /** A typed low-level request against a declared route. */
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method,
       credentials: "include",
       headers: body === undefined ? this.headers : { "content-type": "application/json", ...this.headers },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
     return this.parse<T>(res);
+  }
+
+  /** Send a file to a multipart POST route. Progress counts multipart body bytes. */
+  upload<T>(path: string, file: File, onProgress: (loaded: number, total?: number) => void,
+            signal?: AbortSignal): Promise<T> {
+    return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", this.baseUrl + path);
+      xhr.withCredentials = true;
+      for (const [name, value] of Object.entries(this.headers)) {
+        if (name.toLowerCase() !== "content-type") xhr.setRequestHeader(name, value);
+      }
+      const abort = () => xhr.abort();
+      xhr.upload.onprogress = event => onProgress(event.loaded, event.lengthComputable ? event.total : undefined);
+      xhr.onerror = () => reject(new CorvidError(0, null, "Upload connection failed"));
+      xhr.onabort = () => reject(signal?.reason ?? new DOMException("Upload cancelled", "AbortError"));
+      xhr.onload = () => {
+        const response = new Response(xhr.responseText || null, { status: xhr.status });
+        resolve(this.parse<T>(response));
+      };
+      xhr.onloadend = () => signal?.removeEventListener("abort", abort);
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
+  /** Read the JSON values yielded by a GET route returning Stream<T>. */
+  async *routeStream<T>(path: string, signal?: AbortSignal): AsyncGenerator<T> {
+    const response = await this.doFetch(this.baseUrl + path, {
+      headers: { ...this.headers, accept: "text/event-stream" }, credentials: "include", signal,
+    });
+    if (!response.ok || !response.body) throw new CorvidError(response.status, await safeJson(response));
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    let event = "message";
+    let data: string[] = [];
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new CorvidError(response.status, null, "Stream ended before completion");
+        buffer += chunk.value;
+        let newline: number;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline).replace(/\r$/, "");
+          buffer = buffer.slice(newline + 1);
+          if (line === "") {
+            if (event === "done") return;
+            if (event === "error") throw new CorvidError(response.status, data.join("\n"), "Stream failed");
+            if (event === "message" && data.length) yield JSON.parse(data.join("\n")) as T;
+            event = "message";
+            data = [];
+          } else if (line.startsWith("event:")) {
+            event = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            data.push(line.slice(5).replace(/^ /, ""));
+          }
+        }
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } finally {
+        reader.releaseLock();
+      }
+    }
   }
 
   /** Invoke a streaming agent and consume its typed SSE event stream. */

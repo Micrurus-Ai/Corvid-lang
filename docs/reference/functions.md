@@ -527,3 +527,12 @@ These projections read their nearest mounted record. Supply paths with `bind` an
 See [Keep a record in browser memory](../book/19-browser-views.md#keep-a-record-in-browser-memory).
 
 The earlier names `ui.local_field` and `ui.local_checkbox` are supported aliases for `ui.field` and `ui.checkbox`.
+
+### TypeScript browser route client
+
+- `CorvidClient.request<T>(method, path, body?, signal?): Promise<T>` fetches a JSON route and accepts an optional abort signal.
+- `CorvidClient.upload<T>(path, file, onProgress, signal?): Promise<T>` posts one multipart field named `file` with session credentials. The callback receives bytes sent and an optional total for the encoded request body. Success resolves to the JSON receipt. HTTP errors carry the status and parsed error body in `CorvidError`. Aborting rejects with the signal's reason.
+- `CorvidClient.routeStream<T>(path, signal?): AsyncGenerator<T>` reads JSON items from a Corvid GET route returning `Stream<T>`. A named `done` event ends iteration. An error event, malformed JSON or a truncated stream rejects the iteration. Breaking from the loop closes the reader.
+- `useCorvidPaginated(fetchPage)` supplies `(cursor?, signal?)` to the page loader. Reset aborts a pending request and starts the first page. Unmount aborts the active request. A failure retains earlier pages so `loadMore()` can retry the same cursor.
+
+See [Read order activity and upload a CSV](../book/19-browser-views.md#read-order-activity-and-upload-a-csv).
