@@ -165,6 +165,13 @@ test image_dimensions_preserve_zero_and_omit_negative_values:
     assert ui.image_with_dimensions("/map", "", -1, 0).html == "<img src=\"/map\" alt=\"\" height=\"0\">"
     assert ui.image_with_dimensions("/map", "", 0, -1).html == "<img src=\"/map\" alt=\"\" width=\"0\">"
 
+test responsive_image_preserves_candidates_and_escapes_attributes:
+    candidates = "/map.png?v=2&day=1 320w, /map-wide.png 800w"
+    map_image = ui.responsive_image("/map.png", "River & trail", candidates, "(width < 40em) 100vw, 40em")
+    assert map_image.html == "<img src=\"/map.png\" alt=\"River &amp; trail\" srcset=\"/map.png?v=2&amp;day=1 320w, /map-wide.png 800w\" sizes=\"(width &lt; 40em) 100vw, 40em\">"
+    assert ui.responsive_image("/map", "", "/map\" 2x", "").html == "<img src=\"/map\" alt=\"\" srcset=\"/map&quot; 2x\">"
+    assert ui.responsive_image("/map", "", "", "100vw").html == ui.image("/map", "").html
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -240,7 +247,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("39 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("40 passed"),
         "{good:?}"
     );
     fs::write(

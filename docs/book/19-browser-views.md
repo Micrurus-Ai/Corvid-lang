@@ -121,6 +121,14 @@ Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to
 
 When you know the image size, pass its width and height in CSS pixels. The trail guide uses `ui.image_with_dimensions(marker_url, "Green circle trail marker", 24, 24)` so the browser can reserve space before the marker loads.
 
+If your layout displays a map at the viewport width up to 640 CSS pixels, pass that expected width in `sizes`. The browser can use it to choose between the image files listed in `srcset`. The `320w` and `640w` descriptors give the files’ actual pixel widths.
+
+```corvid-fragment
+fn trail_map() -> View:
+    candidates = "/images/map-320.png 320w, /images/map-640.png 640w"
+    return ui.responsive_image("/images/map-320.png", "Trail forks left at the bridge", candidates, "(max-width: 640px) 100vw, 640px")
+```
+
 To show a visible caption below an image, use `ui.figure("Follow this marker to the lookout.", [marker])`, where `marker` is the image view. The image's alternative text describes the marker. The caption tells readers where it leads.
 
 ### Attach application data to a group
