@@ -1,6 +1,7 @@
 ﻿"""Build the sketchbook and exercise offline editing, synchronization and upgrades."""
 
 import argparse
+from contextlib import ExitStack
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -13,6 +14,13 @@ from playwright.sync_api import expect, sync_playwright
 
 class SketchFixture(SimpleHTTPRequestHandler):
     """A conditional HTTP resource and a deliberately incomplete shell update."""
+
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".wasm": "application/wasm",
+    }
 
     def reply(self, status, body=b"", content_type="application/json", revision=None):
         self.send_response(status)
@@ -31,7 +39,7 @@ class SketchFixture(SimpleHTTPRequestHandler):
                            revision=self.server.revision)
         elif self.server.incomplete_update and self.path == "/offline.js":
             source = (Path(self.directory) / "offline.js").read_bytes()
-            self.reply(200, source.replace(b'"v2"', b'"interrupted"'),
+            self.reply(200, source.replace(b'const version = prefix +', b'const version = prefix + "interrupted-" +'),
                        "application/javascript")
         elif self.server.incomplete_update and self.path == "/raster.mjs":
             self.reply(503)
@@ -66,15 +74,17 @@ def verify(cli, channel):
     project = Path(__file__).resolve().parents[1] / "examples/drawing_editor"
     subprocess.run([cli, "build", "src/stroke.cor", "--target", "wasm"], cwd=project, check=True)
     handler = partial(SketchFixture, directory=project)
-    with sync_playwright() as playwright, ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+    with sync_playwright() as playwright, ThreadingHTTPServer(("127.0.0.1", 0), handler) as server, ExitStack() as cleanup:
         server.lock = Lock()
         server.document = {"version": 1, "cells": []}
         server.revision = 1
         server.inject_conflict = False
         server.incomplete_update = False
         Thread(target=server.serve_forever, daemon=True).start()
+        cleanup.callback(server.shutdown)
         browser = playwright.chromium.launch(channel=channel)
         context = browser.new_context()
+        context.on("console", lambda message: print(message.text) if message.type == "error" else None)
         page = context.new_page()
         base = f"http://127.0.0.1:{server.server_port}/"
         old_tab = context.new_page()
@@ -96,6 +106,7 @@ def verify(cli, channel):
         })""") == "VersionError"
         old_tab.goto(base)
         expect(old_tab.get_by_role("status")).to_have_text("Drag to draw.")
+        expect(old_tab.locator("#sync-status")).to_have_text("Drawing synchronized.")
         context.set_offline(True)
         canvas = page.locator("canvas")
         page.mouse.move(*point(canvas, 10, 20))
@@ -140,7 +151,7 @@ def verify(cli, channel):
           return installed;
         }""")
         assert state == "redundant"
-        server.shutdown()
+        cleanup.close()
         context.set_offline(True)
         assert page.reload().from_service_worker
         expect(page.get_by_role("status")).to_have_text("Drag to draw.")

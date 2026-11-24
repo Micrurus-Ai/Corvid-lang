@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
@@ -8,20 +9,25 @@ test("the scoped worker serves its shell and built Wasm from an offline cache", 
   const files = new Map();
   const requests = new Map();
   const cache = {
-    async addAll(entries) {
-      for (const { url } of entries) {
-        const path = new URL("../" + url.slice(base.length), import.meta.url);
-        files.set(url, await readFile(path));
+    async add(request) {
+      const path = new URL("../" + request.url.slice(base.length), import.meta.url);
+      const bytes = await readFile(path);
+      if (path.pathname.endsWith(".wasm")) {
+        assert.equal(request.integrity, "sha256-" + createHash("sha256").update(bytes).digest("base64"));
       }
+      files.set(request.url, new Response(bytes));
     },
-    match: url => files.get(url),
+    async addAll(entries) {
+      for (const entry of entries) await this.add(entry);
+    },
+    match: url => files.get(url)?.clone(),
   };
   const self = {
     registration: { scope: base },
     addEventListener: (event, callback) => requests.set(event, callback),
   };
   const code = await readFile(new URL("../offline.js", import.meta.url), "utf8");
-  runInNewContext(code, { self, caches: { open: async () => cache }, URL, Request });
+  runInNewContext(code, { self, caches: { open: async () => cache }, URL, Request, btoa });
   await new Promise(resolve => requests.get("install")({ waitUntil: resolve }));
   function offline(path, mode) {
     let response;
@@ -31,12 +37,18 @@ test("the scoped worker serves its shell and built Wasm from an offline cache", 
     });
     return response;
   }
-  assert.match((await offline("", "navigate")).toString(), /<canvas /);
-  for (const asset of ["editor.js", "drawing-store.js", "stroke-worker.js", "raster.mjs",
-    "target/wasm/stroke.js"]) {
-    assert.ok((await offline(asset, "cors")).length > 0, asset);
+  const shell = await offline("", "navigate");
+  assert.match(await shell.text(), /<canvas /);
+  for (const asset of ["editor.js", "drawing-store.js", "stroke-worker.js", "raster.mjs"]) {
+    const module = await offline(asset, "cors");
+    assert.ok((await module.text()).length > 0, asset);
   }
-  const { instance } = await WebAssembly.instantiate(await offline("target/wasm/stroke.wasm", "cors"));
+  const loader = await offline("target/wasm/stroke.js", "cors");
+  const loaderSource = await loader.text();
+  const [, relativeWasm] = loaderSource.match(/new URL\('([^']+\.wasm\?[^']+)'/);
+  const wasmUrl = new URL(relativeWasm, base + "target/wasm/stroke.js");
+  const response = await offline(wasmUrl.href.slice(base.length), "cors");
+  const { instance } = await WebAssembly.instantiate(await response.arrayBuffer());
   assert.equal(instance.exports.steps(2n, 3n), 3n);
   assert.equal(offline("other", "navigate"), undefined);
 });
