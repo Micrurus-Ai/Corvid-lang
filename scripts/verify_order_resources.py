@@ -65,11 +65,24 @@ def verify(args):
                 page.route(url + "/client-trial/", lambda route: route.fulfill(
                     content_type="text/html", body="<!doctype html><title>Order client check</title>"))
                 page.goto(url + "/client-trial/")
-                page.evaluate("""async () => {
-                    const checks = await import('/client-trial/order_resources.js');
-                    await checks.checkOrders(location.origin);
-                    await checks.checkOrderUpload(location.origin);
-                }""")
+                for stage in ("checkOrders", "checkOrderUpload"):
+                    print(f"Starting browser {stage}", flush=True)
+                    page.evaluate("""async stage => {
+                        let timer;
+                        const deadline = new Promise((_, reject) => {
+                            timer = setTimeout(() => reject(new Error(stage + " timed out after 60s")), 60000);
+                        });
+                        try {
+                            const run = async () => {
+                                const checks = await import('/client-trial/order_resources.js');
+                                await checks[stage](location.origin);
+                            };
+                            await Promise.race([run(), deadline]);
+                        } finally {
+                            clearTimeout(timer);
+                        }
+                    }""", stage)
+                    print(f"Passed browser {stage}", flush=True)
                 from verify_rgb_picker import check as check_rollback, package_picker
                 picker = package_picker(cli, build / "picker")
                 with serve(cli, picker, env) as picker_url:
