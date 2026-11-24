@@ -21,7 +21,9 @@ use serde_json::Value as J;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod migration;
 mod query;
+pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
 
 /// How a field's values are stored.
@@ -37,12 +39,34 @@ pub enum ColumnKind {
 }
 
 impl ColumnKind {
+    /// The declared SQL type. Each kind has its own, so the stored
+    /// schema records how a column is stored and the migration planner
+    /// can see a change from `Int` to `Bool` or from `String` to a
+    /// JSON-stored type. `BOOLEAN` has SQLite's numeric affinity, which
+    /// keeps 0 and 1 as integers; `JSON TEXT` contains `TEXT`, so its
+    /// affinity is text and JSON such as `5` is never turned into a
+    /// number.
     pub fn sql_type(self) -> &'static str {
         match self {
-            Self::Integer | Self::Boolean => "INTEGER",
+            Self::Integer => "INTEGER",
             Self::Real => "REAL",
-            Self::Text | Self::Json => "TEXT",
+            Self::Text => "TEXT",
+            Self::Boolean => "BOOLEAN",
+            Self::Json => "JSON TEXT",
         }
+    }
+
+    /// The kind a stored column's declared type names, if Corvid
+    /// created it.
+    pub fn from_sql_type(sql_type: &str) -> Option<Self> {
+        Some(match sql_type.trim().to_ascii_uppercase().as_str() {
+            "INTEGER" => Self::Integer,
+            "REAL" => Self::Real,
+            "TEXT" => Self::Text,
+            "BOOLEAN" => Self::Boolean,
+            "JSON TEXT" => Self::Json,
+            _ => return None,
+        })
     }
 }
 
@@ -75,16 +99,25 @@ pub fn untainted(mut ty: &Type) -> &Type {
 }
 
 /// A table's declared shape: its name, key and typed columns, with
-/// `revision` last.
+/// `revision` last, and the history clauses the migration planner reads.
 #[derive(Debug, Clone)]
 pub struct TableSchema {
     pub name: String,
     pub key: String,
     pub columns: Vec<(String, Type)>,
+    /// `(field, old name)` for each `renamed from`.
+    pub renamed: Vec<(String, String)>,
+    /// Stored columns declared `retired`.
+    pub retired: Vec<String>,
 }
 
 /// The `CREATE TABLE` statement for a declared table.
 pub fn create_table_sql(table: &TableSchema) -> String {
+    create_table_named(table, &table.name)
+}
+
+/// [`create_table_sql`] under another name, for rebuilding a table.
+fn create_table_named(table: &TableSchema, name: &str) -> String {
     let columns = table
         .columns
         .iter()
@@ -96,7 +129,7 @@ pub fn create_table_sql(table: &TableSchema) -> String {
         })
         .collect::<Vec<_>>()
         .join(",\n");
-    format!("CREATE TABLE {} (\n{columns}\n);\n", quote(&table.name))
+    format!("CREATE TABLE {} (\n{columns}\n);\n", quote(name))
 }
 
 /// One table as an operation sees it.

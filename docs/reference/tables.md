@@ -143,31 +143,72 @@ with a divergence naming the operation.
 | `Int` | `INTEGER` |
 | `Float` | `REAL` |
 | `String` | `TEXT` |
-| `Bool` | `INTEGER`, 0 or 1 |
+| `Bool` | `BOOLEAN`, 0 or 1 |
 | `Option<T>` | `T`'s column, nullable |
-| `Option<Option<T>>`, records, lists, maps, sums | `TEXT` holding the value's public JSON |
+| `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON |
 
 The table is named as declared, and columns as the fields are named.
+Each kind of field has its own column type, so the stored schema records
+how every column is stored and the migration planner can see a change
+from `Int` to `Bool` or from `String` to a list. `JSON TEXT` columns keep
+SQLite's text handling, so JSON such as `5` is never read back as a
+number.
 
 ## Migrations
 
 ```sh
-corvid migrate plan src/main.cor     # writes migrations/NNN_create_<tables>.sql
+corvid migrate plan src/main.cor     # writes migrations/NNN_create_<tables>.sql or NNN_change_<tables>.sql
 corvid migrate up --database library.sqlite
 ```
 
 `corvid migrate plan` applies the existing migrations in `migrations/`
-to an empty in-memory database and writes a new migration creating each
-declared table they do not create. Review it, then apply it with
-`corvid migrate up`, passing the database the `location` names. A table
-whose columns differ from what the migrations create is reported and
-refused; planning changes to existing tables is slice P3. A program that
-uses a table no migration created fails with a message naming these
-commands.
+to an empty in-memory database, compares what that leaves with the
+declared tables, and writes one new migration that brings the stored
+tables to the declarations. It runs the new migration on that database
+before writing it, so a plan that would fail is never written. Review
+it, then apply it with `corvid migrate up`, passing the database the
+`location` names. `migrate up` runs each migration in one transaction,
+so a migration that fails changes nothing. A program that uses a table
+no migration created fails with a message naming these commands.
+
+The planner never guesses about data. A rename and a drop are declared
+in the table:
+
+```corvid
+table Shelf:
+    key shelf: Int
+    name: String renamed from title
+    note: Option<String>
+    retired legacy_note, old_owner
+```
+
+| Declaration change | Migration |
+| --- | --- |
+| A new table | `CREATE TABLE` |
+| `name: String renamed from title` | renames the stored column `title` to `name`, keeping its values |
+| `retired legacy_note` | drops the stored column and its data |
+| A new `Option<T>` field | adds the column; stored rows have `None` |
+| `T` to `Option<T>`, `Option<T>` to `T`, `Int` to `Float` | rebuilds the table, copying every row; making a column required fails, changing nothing, while any row has no value |
+
+Everything else is refused, naming the column and what to do instead:
+
+- A stored column the table no longer declares, unless it is `retired`
+  or named in a `renamed from`, because dropping it would lose data.
+- A new field that is not an `Option`, because stored rows have no value
+  for it. Add it as an `Option`, fill it, then make it required.
+- A type change that does not convert every value exactly, such as
+  `String` to `Int`. Add a new column, fill it from the old one, then
+  retire the old one.
+- A changed key. Create a new table.
+
+`renamed from` and `retired` may stay in the source after their
+migration has run; the planner does nothing for a name no longer stored.
+A name in either clause cannot also be a declared field, and each stored
+name appears in one clause. `retired` written without a colon is the
+clause, so a table may still have a field named `retired: Bool`.
 
 ## Not yet
 
 These are later slices of [B09](../proposals/b09-typed-persistence.md):
-migrations of changed tables with declared renames and drops, Postgres and MySQL,
-and the native target. Programs that
-use tables run on the interpreter.
+Postgres and MySQL, and the native target. Programs that use tables run
+on the interpreter.

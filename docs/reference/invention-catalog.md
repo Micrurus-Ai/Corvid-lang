@@ -953,8 +953,10 @@ the row was read at, and a conflict is an ordinary typed value holding
 the row stored now. A query, `Shelf.where(fn (s) -> s.owner == owner)`
 with optional `order_by`, `descending` and `take`, is a `List<Shelf>`
 run as one parameterized query, and a condition the database cannot run
-is a compile error. `corvid migrate plan` writes the migration that
-creates declared tables.
+is a compile error. `corvid migrate plan` writes the migrations that
+create and change declared tables. A rename (`renamed from`) and a drop
+(`retired`) are declared, so the planner never mistakes one for the
+other, and a change that would lose data is refused by name.
 
 ```corvid
 database library:

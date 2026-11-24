@@ -135,12 +135,26 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Byte-list encoders and decoders, with B04's byte representation.
 - [ ] Native UUID generation, with native dispatch of the other stdlib tools.
 
+**B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/b06-decimal-and-time.md)
+
+- [ ] Decimal on the interpreter: the `corvid-decimal` crate, the `Decimal` type, `Decimal("…")` checked at compile time, `parse_decimal`, conversions to and from `Int` and `Float`, `+ - * %` and comparisons with `Int` widening, a compile error for mixing with `Float`, `/` refused in favour of the six `divide_<mode>` methods, the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`.
+- [ ] Duration and Instant on the interpreter: the `corvid-time` crate, the unit constructors on `Int` with a compile error for `days()`, duration and instant arithmetic, ISO 8601 and RFC 3339 parsing and formatting, and `time_now` in `std/time`.
+- [ ] Time zones on the interpreter: `TimeZone` checked at compile time against the bundled database, `ZonedTime`, `in_zone`, `parse_zoned_time` with errors for gaps and folds, `add_days`, `add_months` and `add_years`, the Berlin daylight-saving acceptance test, the queue scheduler moved onto `corvid-time`, and the database version recorded in traces.
+- [ ] Currency formatting: `format_currency` and `format_currency_checked` with CLDR data, an explicit locale and no rounding.
+- [ ] JSON, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs for all five types.
+- [ ] Native Decimal, with parity tests.
+- [ ] Native Duration, Instant, TimeZone and ZonedTime, with parity tests.
+- [ ] A decimal literal suffix (`19.99d`). Agree the lexical rule with frontend development first.
+- [ ] Decimal, Instant, Duration and ZonedTime as B09 table columns. Coordinate with the main line after the JSON slice.
+- [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
+- [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
+
 **B09 typed persistence** (in progress). [Proposal](proposals/b09-typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
 - [x] P1b. Table operations are recorded in the trace as `table:<Table>.<op>` calls, and a replay serves reads and write outcomes from it without opening the database.
 - [x] P2. Typed queries (`where`, `order_by`, `descending`, `take`, `all`), refused at compile time when a condition cannot run in the database. A chain runs as one parameterized `SELECT`, ordered by key when nothing else decides, and is recorded and replayed as `table:<Table>.query`.
-- [ ] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`).
+- [x] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`). New `Option` fields add a column; exact type changes rebuild the table inside the migration's transaction; undeclared drops, new required fields, lossy type changes and key changes are refused with what to do instead. The planner runs each plan on the migrated schema before writing it.
 - [ ] P4. Postgres, with a query suite every engine runs.
 - [ ] P5. MySQL.
 - [ ] P6. Native target.
