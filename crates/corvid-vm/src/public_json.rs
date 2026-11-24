@@ -16,7 +16,7 @@ use crate::value::{BoxedValue, EnumValue, ListValue, MapValue, StructValue, Valu
 use corvid_ir::IrType;
 use corvid_resolve::DefId;
 use corvid_types::Type;
-use serde_json::{json, Map, Value as J};
+use serde_json::{json, Value as J};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -122,112 +122,122 @@ impl corvid_public_json::ValueBuilder for InterpreterValues {
     }
 }
 
-/// Encode `value` as compact public JSON text: `value.to_json()`.
-pub fn encode_public_json_text(value: &Value) -> Result<String, String> {
-    encode_public_json(value).map(|json| json.to_string())
+/// Encode `value`, of type `ty`, as compact public JSON text with sorted
+/// object keys: `value.to_json()`.
+pub fn encode_public_json_text(
+    value: &Value,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Result<String, String> {
+    corvid_public_json::encode_text(value, ty, types_by_id, &mut InterpreterValues)
 }
 
-/// Encode `value` as public JSON. Values with no public JSON form
-/// (closures, handles, streams, builders) are reported by name; the
-/// checker rejects `to_json` on those types, so this is a backstop
-/// for host boundaries.
-pub fn encode_public_json(value: &Value) -> Result<J, String> {
-    Ok(match value {
-        Value::Int(n) => J::from(*n),
-        Value::Float(f) => {
-            if !f.is_finite() {
-                return Err(format!("the Float {f} has no JSON form"));
-            }
-            J::from(*f)
+/// Encode `value`, of type `ty`, as public JSON. The walk follows the
+/// type, the way native code must, so both tiers produce the same JSON.
+/// Types with no public JSON form (functions, handles, streams,
+/// builders) are reported by name; the checker rejects `to_json` on
+/// them, so this is a backstop for host boundaries.
+pub fn encode_public_json(
+    value: &Value,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Result<J, String> {
+    corvid_public_json::encode(value, ty, types_by_id, &mut InterpreterValues)
+}
+
+fn mismatch(expected: &str, value: &Value) -> String {
+    format!("the value is {} where its type says {expected}", value.type_name())
+}
+
+impl corvid_public_json::ValueReader for InterpreterValues {
+    type Value = Value;
+
+    fn int(&mut self, value: &Value) -> Result<i64, String> {
+        match value {
+            Value::Int(n) => Ok(*n),
+            other => Err(mismatch("Int", other)),
         }
-        Value::String(s) => J::String(s.to_string()),
-        Value::Bool(b) => J::Bool(*b),
-        Value::Nothing | Value::OptionNone => J::Null,
-        Value::OptionSome(inner) => encode_public_json(&inner.get())?,
-        Value::Struct(s) => {
-            let mut object = Map::new();
-            let mut failure = None;
-            s.with_fields(|fields| {
-                for (name, field) in fields {
-                    match encode_public_json(field) {
-                        Ok(encoded) => {
-                            object.insert(name.clone(), encoded);
-                        }
-                        Err(reason) => {
-                            failure.get_or_insert(reason);
-                        }
-                    }
-                }
-            });
-            if let Some(reason) = failure {
-                return Err(reason);
-            }
-            J::Object(object)
+    }
+    fn float(&mut self, value: &Value) -> Result<f64, String> {
+        match value {
+            Value::Float(f) => Ok(*f),
+            Value::Int(n) => Ok(*n as f64),
+            other => Err(mismatch("Float", other)),
         }
-        Value::List(items) => J::Array(
-            items.iter_cloned().iter().map(encode_public_json).collect::<Result<_, _>>()?,
-        ),
-        Value::Map(map) => {
-            let entries = map.entries_cloned();
-            if entries.iter().all(|(key, _)| matches!(key, Value::String(_))) {
-                let mut object = Map::new();
-                for (key, item) in &entries {
-                    if let Value::String(key) = key {
-                        object.insert(key.to_string(), encode_public_json(item)?);
-                    }
-                }
-                J::Object(object)
-            } else {
-                J::Array(
-                    entries
-                        .iter()
-                        .map(|(key, item)| {
-                            Ok(J::Array(vec![encode_public_json(key)?, encode_public_json(item)?]))
-                        })
-                        .collect::<Result<_, String>>()?,
-                )
-            }
+    }
+    fn bool(&mut self, value: &Value) -> Result<bool, String> {
+        match value {
+            Value::Bool(b) => Ok(*b),
+            other => Err(mismatch("Bool", other)),
         }
-        Value::Enum(variant) => json!({
-            "tag": "variant",
-            "type": variant.type_name(),
-            "variant": variant.variant_name(),
-            "fields": variant
-                .fields_cloned()
-                .iter()
-                .map(encode_public_json)
-                .collect::<Result<Vec<_>, _>>()?,
-        }),
-        // `tag` repeats which key is present. The contract schema allows it,
-        // and existing clients branch on it.
-        Value::ResultOk(inner) => json!({ "tag": "ok", "ok": encode_public_json(&inner.get())? }),
-        Value::ResultErr(inner) => json!({ "tag": "err", "err": encode_public_json(&inner.get())? }),
-        Value::Grounded(grounded) => {
-            let sources: Vec<J> = grounded
-                .provenance
-                .entries
-                .iter()
-                .map(|entry| {
-                    json!({
-                        "kind": entry.kind.label(),
-                        "name": entry.name,
-                        "timestamp_ms": entry.timestamp_ms,
-                    })
-                })
-                .collect();
-            json!({ "value": encode_public_json(&grounded.inner.get())?, "sources": sources })
+    }
+    fn string(&mut self, value: &Value) -> Result<String, String> {
+        match value {
+            Value::String(s) => Ok(s.to_string()),
+            other => Err(mismatch("String", other)),
         }
-        Value::JsonValue(json) => (**json).clone(),
-        Value::Weak(_) => return Err("a weak reference has no JSON form".into()),
-        Value::Closure(_) => return Err("a function has no JSON form".into()),
-        Value::DbHandle(_) => return Err("a database handle has no JSON form".into()),
-        Value::JsonBuilder(_) => {
-            return Err("a JSON builder has no JSON form; call json_object_finish".into())
+    }
+    fn option(&mut self, _option: &Type, value: &Value) -> Result<Option<Value>, String> {
+        Ok(match value {
+            Value::OptionNone | Value::Nothing => None,
+            Value::OptionSome(inner) => Some(inner.get()),
+            // A payload stored without its `Some` wrapper.
+            other => Some(other.clone()),
+        })
+    }
+    fn list(&mut self, _list: &Type, value: &Value) -> Result<Vec<Value>, String> {
+        match value {
+            Value::List(items) => Ok(items.iter_cloned()),
+            other => Err(mismatch("a List", other)),
         }
-        Value::Stream(_) => return Err("a stream has no single JSON form".into()),
-        Value::Partial(_) => return Err("a partial value has no JSON form".into()),
-        Value::ResumeToken(_) => return Err("a resume token has no JSON form".into()),
-    })
+    }
+    fn map(&mut self, _map: &Type, value: &Value) -> Result<Vec<(Value, Value)>, String> {
+        match value {
+            Value::Map(map) => Ok(map.entries_cloned()),
+            other => Err(mismatch("a Map", other)),
+        }
+    }
+    fn result(&mut self, _result: &Type, value: &Value) -> Result<(bool, Value), String> {
+        match value {
+            Value::ResultOk(inner) => Ok((true, inner.get())),
+            Value::ResultErr(inner) => Ok((false, inner.get())),
+            other => Err(mismatch("a Result", other)),
+        }
+    }
+    fn record(&mut self, record: &IrType, value: &Value) -> Result<Vec<Value>, String> {
+        let Value::Struct(fields) = value else { return Err(mismatch(&record.name, value)) };
+        record
+            .fields
+            .iter()
+            .map(|field| match fields.get_field(&field.name) {
+                Some(field_value) => Ok(field_value),
+                None if matches!(field.ty, Type::Option(_)) => Ok(Value::OptionNone),
+                None => Err(format!("the `{}` value has no `{}` field", record.name, field.name)),
+            })
+            .collect()
+    }
+    fn variant(&mut self, sum: &IrType, value: &Value) -> Result<(usize, Vec<Value>), String> {
+        match value {
+            Value::Enum(variant) => Ok((variant.variant_index() as usize, variant.fields_cloned())),
+            other => Err(mismatch(&sum.name, other)),
+        }
+    }
+    fn grounded(&mut self, _grounded: &Type, value: &Value) -> Result<(Value, Vec<J>), String> {
+        let Value::Grounded(grounded) = value else { return Ok((value.clone(), Vec::new())) };
+        let sources = grounded
+            .provenance
+            .entries
+            .iter()
+            .map(|entry| json!({ "kind": entry.kind.label(), "name": entry.name, "timestamp_ms": entry.timestamp_ms }))
+            .collect();
+        Ok((grounded.inner.get(), sources))
+    }
+    fn json(&mut self, value: &Value) -> Result<J, String> {
+        match value {
+            Value::JsonValue(json) => Ok((**json).clone()),
+            other => Err(mismatch("JsonValue", other)),
+        }
+    }
 }
 
 #[cfg(test)]

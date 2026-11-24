@@ -106,6 +106,9 @@ struct ServeState {
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
     ir: IrFile,
+    /// The program's declarations, shared with streamed replies, which
+    /// encode chunks after the request handler returns.
+    declared_types: Arc<Vec<IrType>>,
     runtime: Runtime,
     approval_queue: Arc<ApprovalQueueRuntime>,
     /// `approval_id -> PendingInvocation` so the transition handler
@@ -360,6 +363,7 @@ pub(crate) fn cmd_serve(
         io_policy,
         rag_embedder,
         http_policy,
+        declared_types: Arc::new(ir.types.clone()),
         ir,
         runtime,
         approval_queue,
@@ -1325,7 +1329,7 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome, meta.response_kind, state.quantity_page)
+    finish(outcome, meta.response_kind, state.quantity_page, reply_encoding(&state, &meta.handler_agent))
 }
 
 enum RouteRequestBody {
@@ -1534,7 +1538,38 @@ fn capture_pending_invocation_if_queued(
 /// (slice `E0-serve-5`), 403 when an `approve` boundary denied (kept
 /// for the case where a non-queue approver is wired in — defensive),
 /// 500 otherwise.
-fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, quantity_page: bool) -> Response {
+/// How a handler's reply becomes public JSON: the encoder follows the
+/// handler's declared return type through the program's declarations.
+#[derive(Clone)]
+struct ReplyEncoding {
+    ty: Type,
+    types: Arc<Vec<IrType>>,
+}
+
+impl ReplyEncoding {
+    fn encode(&self, value: &Value, ty: &Type) -> Result<serde_json::Value, String> {
+        let types_by_id: HashMap<DefId, &IrType> = self.types.iter().map(|t| (t.id, t)).collect();
+        encode_public_json(value, ty, &types_by_id)
+    }
+}
+
+fn reply_encoding(state: &ServeState, agent: &str) -> ReplyEncoding {
+    let ty = state
+        .ir
+        .agents
+        .iter()
+        .find(|candidate| candidate.name == agent)
+        .map(|candidate| candidate.return_ty.clone())
+        .unwrap_or(Type::Unknown);
+    ReplyEncoding { ty, types: state.declared_types.clone() }
+}
+
+fn finish(
+    outcome: Result<Value, RunError>,
+    response_kind: RouteResponseKind,
+    quantity_page: bool,
+    reply: ReplyEncoding,
+) -> Response {
     match outcome {
         // A Stream-returning handler responds as Server-Sent Events:
         // each chunk flushes to the client the moment it arrives
@@ -1542,11 +1577,15 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, qu
         // modern AI-app transport, straight from the language's
         // Stream type with zero glue.
         Ok(Value::Stream(stream)) => {
+            let chunk_ty = match &reply.ty {
+                Type::Stream(item) => (**item).clone(),
+                other => other.clone(),
+            };
             let sse = async_stream::stream! {
                 loop {
                     match stream.next().await {
                         Some(Ok(chunk)) => {
-                            let payload = match encode_public_json(&chunk) {
+                            let payload = match reply.encode(&chunk, &chunk_ty) {
                                 Ok(payload) => payload,
                                 Err(reason) => {
                                     yield Ok(axum::response::sse::Event::default()
@@ -1584,7 +1623,7 @@ fn finish(outcome: Result<Value, RunError>, response_kind: RouteResponseKind, qu
             }
             axum::response::Html(document).into_response()
         }
-        Ok(value) => match encode_public_json(&value) {
+        Ok(value) => match reply.encode(&value, &reply.ty) {
             Ok(body) => (StatusCode::OK, Json(body)).into_response(),
             Err(reason) => internal_error("unencodable_response", &reason),
         },
@@ -1804,6 +1843,7 @@ async fn approve_approval(
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .tool_registry(state.host_tools.clone())
         .build();
+    let reply = reply_encoding(&state, &invocation.agent);
     let outcome = run_ir_with_runtime(
         &state.ir,
         Some(&invocation.agent),
@@ -1851,7 +1891,7 @@ async fn approve_approval(
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "status": "approved",
-                    "result": encode_public_json(&value).unwrap_or_else(|reason| {
+                    "result": reply.encode(&value, &reply.ty).unwrap_or_else(|reason| {
                         serde_json::json!({ "error": "unencodable_response", "detail": reason })
                     }),
                 })),

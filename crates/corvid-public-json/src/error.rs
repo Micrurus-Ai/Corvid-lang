@@ -50,6 +50,23 @@ impl std::fmt::Display for JsonDecodeError {
 
 impl std::error::Error for JsonDecodeError {}
 
+/// The record declaration of the compiler-known `JsonError`: the
+/// reserved [`corvid_types::JSON_ERROR_TYPE_ID`] and the String fields
+/// [`corvid_types::json_error_fields`] lists, in that order.
+pub fn json_error_decl() -> corvid_ir::IrType {
+    let span = corvid_ast::Span::new(0, 0);
+    corvid_ir::IrType {
+        id: corvid_types::JSON_ERROR_TYPE_ID,
+        name: "JsonError".into(),
+        fields: corvid_types::json_error_fields()
+            .into_iter()
+            .map(|(name, ty)| corvid_ir::IrField { name: name.into(), ty, refinement: None, span })
+            .collect(),
+        variants: Vec::new(),
+        span,
+    }
+}
+
 /// Parse JSON text. Text that is not JSON fails at the root path,
 /// naming where the text stopped making sense.
 pub fn parse_json_text(text: &str) -> Result<J, JsonDecodeError> {

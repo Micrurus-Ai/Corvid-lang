@@ -4,6 +4,21 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - `to_json` follows the type
+
+The public JSON encoder moved into `corvid-public-json` beside the
+decoder, behind a `ValueReader` trait, and it now walks the value's
+checked type instead of inspecting the value. Native code cannot tell
+what a value is from its bits, so a shared encoder had to be
+type-directed; the interpreter now uses the same one for
+`value.to_json()`, HTTP replies, streamed chunks and approval results.
+
+One output changes: an empty map whose keys are not `String` encodes as
+`[]`, the array-of-pairs form, instead of `{}`, which no decoder
+accepted back. `Page<Item>` replies are encoded from `Type::page_fields`,
+the envelope's one field list, which the interpreter now builds pages
+from too.
+
 ## 2026-11-24 - `T.from_json` compiles to native code
 
 Native programs now decode typed JSON. The runtime runs the shared

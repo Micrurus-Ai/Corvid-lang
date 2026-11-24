@@ -9,8 +9,7 @@
 //! [`corvid_types::JSON_ERROR_TYPE_ID`] and the fields
 //! [`corvid_types::json_error_fields`] lists, in that order.
 
-use corvid_ast::Span;
-use corvid_ir::{IrField, IrFile, IrType};
+use corvid_ir::{IrFile, IrType};
 use corvid_types::{Type, JSON_ERROR_TYPE_ID};
 
 /// Rewrite every `JsonError` in `ir` as the record, and declare the
@@ -23,19 +22,10 @@ pub(crate) fn represent_json_error_as_record(ir: &mut IrFile) {
     }
 }
 
-/// The record declaration native code uses for `JsonError`.
+/// The record declaration native code uses for `JsonError`, the one
+/// the public JSON mapping defines.
 pub fn json_error_record() -> IrType {
-    let span = Span::new(0, 0);
-    IrType {
-        id: JSON_ERROR_TYPE_ID,
-        name: "JsonError".into(),
-        fields: corvid_types::json_error_fields()
-            .into_iter()
-            .map(|(name, ty)| IrField { name: name.into(), ty, refinement: None, span })
-            .collect(),
-        variants: Vec::new(),
-        span,
-    }
+    corvid_public_json::json_error_decl()
 }
 
 /// Replace `JsonError` anywhere inside `ty`; report whether it occurred.

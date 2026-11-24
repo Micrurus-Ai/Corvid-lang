@@ -59,7 +59,8 @@ fn decode(json: J, ty: &Type, unknown: UnknownFields) -> Result<Value, JsonDecod
 
 fn round_trip(json: J, ty: &Type) -> J {
     let value = decode(json, ty, UnknownFields::Reject).expect("decodes");
-    encode_public_json(&value).expect("encodes")
+    let fixture = Fixture::new();
+    encode_public_json(&value, ty, &fixture.types()).expect("encodes")
 }
 
 const NOTE: Type = Type::Struct(DefId(1));
@@ -191,11 +192,22 @@ fn a_json_error_value_carries_every_checker_declared_field() {
 #[test]
 fn encoded_text_is_compact_with_sorted_keys() {
     let value = decode(json!({"title": "a", "tag": "x"}), &NOTE, UnknownFields::Reject).unwrap();
-    assert_eq!(encode_public_json_text(&value).unwrap(), r#"{"tag":"x","title":"a"}"#);
+    assert_eq!(encode_public_json_text(&value, &NOTE, &Fixture::new().types()).unwrap(), r#"{"tag":"x","title":"a"}"#);
 }
 
 #[test]
 fn values_without_a_json_form_are_reported() {
-    assert!(encode_public_json(&Value::Float(f64::NAN)).is_err());
-    assert_eq!(encode_public_json(&Value::Nothing), Ok(J::Null));
+    let types = HashMap::new();
+    assert!(encode_public_json(&Value::Float(f64::NAN), &Type::Float, &types).is_err());
+    assert_eq!(encode_public_json(&Value::Nothing, &Type::Nothing, &types), Ok(J::Null));
+    assert!(encode_public_json(&Value::Int(1), &Type::DbHandle, &types).is_err());
+}
+
+/// The encoder follows the type, so an empty map with non-String keys
+/// still encodes as an array of pairs and decodes back.
+#[test]
+fn an_empty_map_with_int_keys_round_trips_as_an_empty_array() {
+    let ty = Type::Map(Box::new(Type::Int), Box::new(Type::String));
+    assert_eq!(round_trip(json!([]), &ty), json!([]));
+    assert_eq!(round_trip(json!([[1, "a"]]), &ty), json!([[1, "a"]]));
 }
