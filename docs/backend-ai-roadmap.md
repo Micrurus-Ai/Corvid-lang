@@ -114,7 +114,9 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] The ABI emitter reads the checker's table too, so the descriptor describes aliases and imported types exactly as the compiled program uses them. Its own resolver, which returned `Unknown` for every imported type, is deleted.
 - [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first. [Proposal](proposals/b01-json-field-keys.md)
 - [x] Retire the `decode_<Type>_from_json` tool convention in favour of `T.from_json`. Declaring such a tool is a compile error naming the replacement, and the book, tour and reference now use `from_json`. [Retired convention](reference/stdlib/json.md#retired-the-decode_type_from_json-tool-convention)
-- [ ] Native target support.
+- [x] Native decoding. `T.from_json` and `T.from_json_strict` compile to native code through the decoder the interpreter uses, now in `corvid-public-json`. The compiler embeds one decode plan per target type, naming the typeinfo of every shape the runtime allocates, so the runtime never decides a native layout. `JsonError` is an ordinary native record, so `problem.message` works in match arms. Parity tests compare both tiers and check that a failed decode releases what it built.
+- [ ] Native encoding. Make `value.to_json()` walk the type instead of the value, share it between both tiers, and compile it natively. This also fixes an empty map with non-String keys, which encodes as `{}` and decodes back as an error.
+- [ ] An absent field typed `Tainted<Option<T>>` decodes as `None`, as an absent `Option<T>` field does. Today it is reported as missing.
 - [ ] Swift, Kotlin and Python SDK sum types use the wire shape, and the SDKs describe `JsonError`.
 
 **Test infrastructure**

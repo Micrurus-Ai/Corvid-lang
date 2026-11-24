@@ -548,8 +548,8 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // mentioning these types to the interpreter.
         Type::JsonValue => false,
         Type::JsonBuilder => false,
-        // B01 — typed JSON decoding is interpreter-tier until the
-        // native target gains the public JSON mapping.
+        // `compile_to_object` rewrites `JsonError` as an ordinary
+        // record before lowering, so lowering never sees it.
         Type::JsonError => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles

@@ -112,6 +112,15 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let string_parse_int_id = module
         .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
+    // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
+    let mut json_decode_sig = module.make_signature();
+    for _ in 0..6 {
+        json_decode_sig.params.push(AbiParam::new(I64));
+    }
+    json_decode_sig.returns.push(AbiParam::new(I64));
+    let json_decode_typed_id = module
+        .declare_function("corvid_json_decode_typed", Linkage::Import, &json_decode_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_decode_typed: {e}"), Span::new(0, 0)))?;
     let string_char_at_id = module
         .declare_function(STRING_CHAR_AT_SYMBOL, Linkage::Import, &char_at_sig)
         .map_err(|e| {
@@ -1209,7 +1218,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         overflow: overflow_func_id,
         retain: retain_id,
         release: release_id,
-        structural_eq, equality_layouts: Default::default(),
+        structural_eq, equality_layouts: Default::default(), json_decode_plans: Default::default(),
         list_map_int, list_filter_int, list_fold_int, list_test_int,
         list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,
@@ -1227,6 +1236,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_replace,
         string_split,
         string_parse_int: string_parse_int_id,
+        json_decode_typed: json_decode_typed_id,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,

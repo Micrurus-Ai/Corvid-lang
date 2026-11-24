@@ -63,6 +63,13 @@ public fn data_value(value: String, content: List<View>) -> View:
 public fn time_value(datetime: String, content: List<View>) -> View:
     return View("<time datetime=\"" + escaped(datetime) + "\">" + children(content) + "</time>")
 
+# The event module formats a calendar date in the surrounding language.
+public fn localized_date(iso_date: String, fallback: String) -> View:
+    return View("<time data-corvid-local-date datetime=\"" + escaped(iso_date) + "\">" + escaped(fallback) + "</time>")
+
+public fn localized_quantity(amount: Int, unit: String, fallback: String) -> View:
+    return View("<data data-corvid-unit=\"" + escaped(unit) + "\" value=\"" + amount.to_string() + "\">" + escaped(fallback) + "</data>")
+
 fn heading(tag: String, label: String) -> View:
     return View("<" + tag + ">" + escaped(label) + "</" + tag + ">")
 
@@ -383,6 +390,10 @@ public fn page_with_landmarks(language: String, title: String, header: List<View
 # Supply application-authored CSS, just as for a literal style element.
 public fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String:
     return document_page(" lang=\"" + escaped(language) + "\"", title, "<style>" + trusted_css + "</style>", main_landmark(content))
+
+public fn localized_page(language: String, direction: String, title: String, trusted_css: String, content: List<View>) -> String:
+    attributes = " lang=\"" + escaped(language) + "\" dir=\"" + escaped(direction) + "\""
+    return document_page(attributes, title, "<style>" + trusted_css + "</style>", main_landmark(content + [event_module()]))
 
 public type IntCallback:
     export_name: String

@@ -1,0 +1,15 @@
+# Convert a world coordinate to a position in CSS pixels.
+agent screen_position(world: Int, scale: Int, offset: Int) -> Int:
+    return world * scale + offset
+
+# Use half-open bounds so two adjoining tiles never share an edge.
+agent contains_pixel(pixel: Int, start: Int, size: Int) -> Bool:
+    return pixel >= start and pixel < start + size
+
+agent zoom_level(current: Int, change: Int) -> Int:
+    proposed = current + change
+    if proposed < 1:
+        return 1
+    if proposed > 4:
+        return 4
+    return proposed

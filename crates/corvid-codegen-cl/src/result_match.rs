@@ -23,6 +23,8 @@ fn operand_supported(expr: &IrExpr) -> bool {
                 operand_supported(left) && operand_supported(right)
             }
         IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),
+        // `Err(problem) -> problem.message`: a record field read.
+        IrExprKind::FieldAccess { target, .. } => operand_supported(target),
         IrExprKind::BuiltinMethod { receiver, args, kind } => {
             use corvid_types::BuiltinMethodKind::*;
             (crate::native_string_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength))

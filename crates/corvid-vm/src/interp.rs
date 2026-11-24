@@ -38,7 +38,9 @@ pub use test_runner::{
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
 };
 
-use self::expr::{eval_binop, eval_builtin_method, eval_json_decode, eval_literal, eval_unop, require_bool};
+use self::expr::{
+    eval_binop, eval_builtin_method, eval_json_decode, eval_json_encode, eval_literal, eval_unop, require_bool,
+};
 use self::grounding::{maybe_ground_tool_result, tool_has_retrieval_effect};
 use crate::conv::{json_to_value, value_to_json};
 use crate::env::Env;
@@ -586,6 +588,12 @@ impl<'ir> Interpreter<'ir> {
                     // `T` of the call's checked `Result<T, JsonError>`.
                     if matches!(kind, Bmk::JsonDecode | Bmk::JsonDecodeStrict) {
                         return eval_json_decode(*kind, &recv, &expr.ty, &self.types_by_id, expr.span)
+                            .map(ExprFlow::Value);
+                    }
+                    // `value.to_json()` (B01) walks the receiver's
+                    // checked type, as native code must.
+                    if matches!(kind, Bmk::JsonEncode) {
+                        return eval_json_encode(&recv, &receiver.ty, &self.types_by_id, expr.span)
                             .map(ExprFlow::Value);
                     }
                 }
@@ -1170,11 +1178,13 @@ impl<'ir> Interpreter<'ir> {
                 let page = crate::value::StructValue::new(
                     DefId(0),
                     "Page",
-                    vec![
-                        ("items".to_string(), items_v),
-                        ("next_cursor".to_string(), next_cursor_field),
-                        ("has_more".to_string(), Value::Bool(has_more)),
-                    ],
+                    // Field names come from Type::page_fields, the
+                    // envelope's one definition.
+                    corvid_types::Type::page_fields(&corvid_types::Type::Unknown)
+                        .into_iter()
+                        .map(|(name, _)| name.to_string())
+                        .zip([items_v, next_cursor_field, Value::Bool(has_more)])
+                        .collect::<Vec<_>>(),
                 );
                 Ok(ExprFlow::Value(Value::Struct(page)))
             },

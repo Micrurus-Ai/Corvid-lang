@@ -75,6 +75,7 @@ pub mod lineage_redact;
 pub mod lineage_render;
 pub mod llm;
 pub mod models;
+pub mod native_layout;
 mod native_trace;
 pub mod observation_handles;
 pub mod observe;

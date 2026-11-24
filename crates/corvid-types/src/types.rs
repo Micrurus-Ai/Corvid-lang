@@ -184,6 +184,17 @@ pub enum Type {
 }
 
 impl Type {
+    /// The fields of a `Page<Item>` envelope in declaration order:
+    /// the items, the cursor of the next page if there is one, and
+    /// whether there is one.
+    pub fn page_fields(item: &Type) -> [(&'static str, Type); 3] {
+        [
+            ("items", Type::List(Box::new(item.clone()))),
+            ("next_cursor", Type::Option(Box::new(Type::String))),
+            ("has_more", Type::Bool),
+        ]
+    }
+
     /// The type a bare compiler-known name denotes in source (`Int`,
     /// `DbHandle`, `JsonValue`, ...), or `None` for a name that must be
     /// looked up among declarations. The checker, the IR lowerer and

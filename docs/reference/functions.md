@@ -458,6 +458,9 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn redirect_page(language: String, title: String, destination: String) -> String` renders a document with an immediate HTML refresh and a visible link labeled with the title. Supply a trusted application URL including any required query string. The route serves HTML with the normal success status.
 - `fn page_with_landmarks(language: String, title: String, header: List<View>, content: List<View>, footer: List<View>) -> String` renders `header`, `main` and `footer` as direct children of `body`. Each list renders in order, including an empty list which leaves its landmark empty. The language attribute and document title are HTML-escaped.
 - `fn page_in_language(language: String, title: String, content: List<View>) -> String` renders a document with an escaped `lang` attribute on `html`. Supply a language tag such as `en` or `fr-CA`. The title is escaped and child views appear in order inside `main`.
+- `fn localized_page(language: String, direction: String, title: String, trusted_css: String, content: List<View>) -> String` renders an interactive document with escaped root language and direction, application-authored CSS, a main landmark and the event module. Pass a BCP 47 language tag and HTML direction (`ltr`, `rtl` or `auto`).
+- `fn localized_date(iso_date: String, fallback: String) -> View` renders a semantic time with escaped fallback text. At page startup the event module formats a valid YYYY-MM-DD calendar date using the nearest language and a long date format in UTC, preserving the day across time zones.
+- `fn localized_quantity(amount: Int, unit: String, fallback: String) -> View` renders a data element with an integer value and escaped fallback text. At page startup the event module uses the nearest language and a browser Intl unit identifier such as `day` or `kilometer` to choose digits, grouping and plural unit names. Unsupported units and invalid language tags retain the fallback.
 - `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String` inserts application-authored CSS verbatim in a document-level style element. Place optional CSS `@import` rules before style rules. The browser resolves relative import URLs against the document's base URL. Keep user input out of the stylesheet.
 - `fn class_group(classes: String, content: List<View>) -> View` renders a div with an escaped class attribute and its children in order. Supply space-separated CSS class names. Each wrapper participates in the normal CSS cascade and custom property inheritance.
 - `fn action(label: String, handler: String) -> View`
@@ -543,6 +546,18 @@ Run `python scripts/derive_browser_bindings.py INPUT.webidl OUTPUT.d.ts` to deri
 In the file preview, `BlobBinding.arrayBuffer() -> Promise<ArrayBuffer>` reads a selected file and `ClipboardBinding.writeText(data: string) -> Promise<void>` writes the preview on user activation. Check each operation before calling it and handle exceptions or rejected promises. The DOM library supplies the observer callback, nullable file selection and worker transfer-list signatures. The worker receives ownership of the buffer passed in the transfer list. [IDL and adapter](../../examples/file_preview/file_access.webidl) · [Worker](../../examples/file_preview/decode_file.ts)
 
 The example's `open_preview() -> ui.ElementCallback` and `close_preview() -> ui.ElementCallback` bindings invoke the element's synchronous `start_preview() -> Nothing` and `stop_preview() -> Nothing` methods through `ui.owned_element`. Setup installs per-element subscriptions. Release cancels those subscriptions and any live worker. Use the same lifecycle interface to own another browser extension. [Learning guide](../book/19-browser-views.md#use-a-browser-api-newer-than-corvid)
+
+### Landscape editor viewport
+
+The scene editor builds three example agents for its browser worker. The generated JavaScript loader accepts Corvid `Int` arguments as `bigint`.
+
+| Example agent | Result |
+| --- | --- |
+| `screen_position(world: Int, scale: Int, offset: Int) -> Int` | CSS pixel coordinate along one axis, equal to `world * scale + offset`. |
+| `contains_pixel(pixel: Int, start: Int, size: Int) -> Bool` | True from `start` up to, and excluding, `start + size`. |
+| `zoom_level(current: Int, change: Int) -> Int` | Sum of the current level and signed change, clamped to 1 through 4 inclusive. |
+
+[Build and use the landscape editor](../book/19-browser-views.md#edit-landscape-tiles-with-a-webgl-canvas)
 
 ### TypeScript browser route client
 

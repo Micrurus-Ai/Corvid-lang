@@ -31,6 +31,8 @@ pub mod result_match;
 
 mod assignment;
 pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
+pub use lowering::native_json_decode_target;
+mod json_error_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
@@ -67,7 +69,11 @@ pub fn compile_to_object(
     // every agent. Codegen downstream consults borrow_sig at call
     // sites to skip the callee-entry retain + scope-exit release
     // pair for Borrowed parameters.
-    let (ir_analyzed, _summaries) = ownership::analyze(ir.clone());
+    // `JsonError` becomes an ordinary record before ownership analysis,
+    // so its values are reference counted like any record's.
+    let mut ir = ir.clone();
+    json_error_record::represent_json_error_as_record(&mut ir);
+    let (ir_analyzed, _summaries) = ownership::analyze(ir);
 
     let mut module = module::make_host_object_module(module_name)?;
     let _func_ids =

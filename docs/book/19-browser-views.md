@@ -185,6 +185,19 @@ fn trail_page(title: String) -> String:
 
 Pass the document's primary language to `ui.page_in_language`. For example, `"en"` sets `lang="en"` on the root HTML element so readers and speech tools can identify the language of the page.
 
+For an interactive translated screen, choose the labels in Corvid and pass the language and reading direction to `ui.localized_page`. Use logical CSS properties such as `padding-inline` to follow that direction. The event module formats units and calendar dates using the surrounding language. Supply readable fallback text for the initial HTML.
+
+```corvid
+fn departure_summary() -> String:
+    departure = ui.localized_date("2028-06-14", "١٤ يونيو ٢٠٢٨")
+    stay = ui.localized_quantity(2, "day", "يومان")
+    return ui.localized_page("ar-EG", "rtl", "الرحلة", "", [ui.paragraph([departure]), ui.paragraph([stay])])
+```
+
+The [trip calendar](../../examples/trip_calendar/src/main.cor) serves English at `/` and Arabic at `/ar`. Its destination field accepts composition input and keyboard selection. The selected option has a visible outline in forced colors. The list appears without animation when the reader requests reduced motion.
+
+**Device-dependent checks (pending)**. On a device with an Arabic input method, compose a city name, commit it, and select the suggestion. With a screen reader, check pronunciation, the field label, expanded state and selected suggestion in both languages. At native browser zoom of 200% and 400%, check reading order, clipping and keyboard focus. In an OS contrast theme, inspect focus and selection. Record the device, OS, browser, assistive technology, settings and observations. The automated [Edge checks](../../scripts/verify_trip_calendar.py) exercise browser semantics, emulated media preferences, zoomed layout and composition events.
+
 Use `ui.page_with_landmarks` when navigation or footer links belong to the whole document. It places the three lists of views in a page-level header, main region and footer, in that order.
 
 ```corvid-fragment
@@ -788,6 +801,21 @@ Wait for “Drawing saved.” before reloading. Each worker response writes its 
 To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
 
 The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
+
+## Edit landscape tiles with a WebGL canvas
+
+From the repository root, build the example and serve it on loopback.
+
+```sh
+python scripts/verify_scene_editor.py --cli target/debug/corvid.exe --build-only
+python -m http.server 8000 --bind 127.0.0.1 --directory examples/scene_editor
+```
+
+Open `http://127.0.0.1:8000/`. Drag to pan, zoom in, then click a tile. Move it with the directional buttons and choose **Undo move** to return it to its previous world coordinates. Undo works across tile selections and preserves the current view. The labeled selector, pan and zoom buttons, and tile position list let you make the same edits with a keyboard, including while graphics are unavailable.
+
+The module worker loads the Corvid viewport from Wasm. For each axis, `screen_position(world, scale, offset)` multiplies the world coordinate by the zoom level and adds the pan in CSS pixels. The worker uses `contains_pixel(pixel, start, size)` on both axes to pick the topmost tile. The far edge belongs to the next cell. `zoom_level(current, change)` limits magnification to 1–4. The main thread schedules a single pending animation frame for scene, size and density updates. WebGL draws the tiles in device pixels. After context restoration it redraws from the worker's latest scene.
+
+Choose **Start camera** for a local muted preview. Denying access leaves the editor usable. **Stop camera** releases the tracks. To exercise the browser paths with Python Playwright and Edge, run `python scripts/verify_scene_editor.py --cli target/debug/corvid.exe --channel msedge`. The trial uses a synthetic camera, a display scale factor of two and the WebGL context loss extension. [Example source](../../examples/scene_editor)
 
 ### Check the storefront across browsers and devices
 

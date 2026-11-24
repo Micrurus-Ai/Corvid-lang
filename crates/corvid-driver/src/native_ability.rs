@@ -108,6 +108,8 @@ fn is_refcounted_type(ty: &Type) -> bool {
         Type::String
         | Type::Struct(_)
         | Type::ImportedStruct(_)
+        // Native code represents JsonError as a record of strings.
+        | Type::JsonError
         | Type::List(_)
         | Type::Weak(_, _)
         | Type::Result(_, _)
@@ -141,7 +143,9 @@ fn is_native_value_type(ty: &Type) -> bool {
         // Phase 33R5b-a — same rationale for JsonValue and
         // JsonBuilder. Interpreter-tier only until the cdylib
         // bridging slice ships.
-        Type::JsonValue | Type::JsonBuilder | Type::JsonError => false,
+        Type::JsonValue | Type::JsonBuilder => false,
+        // Native code represents JsonError as a record of strings.
+        Type::JsonError => true,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.
@@ -347,6 +351,13 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 || matches!(kind, corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr) => {
             scan_expr(receiver, current_return_ty, context)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
+        }
+        IrExprKind::BuiltinMethod {
+            kind: corvid_types::BuiltinMethodKind::JsonDecode | corvid_types::BuiltinMethodKind::JsonDecodeStrict,
+            receiver,
+            ..
+        } if matches!(&expr.ty, Type::Result(target, _) if corvid_codegen_cl::native_json_decode_target(target, context.types)) => {
+            scan_expr(receiver, current_return_ty, context)
         }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),

@@ -4,6 +4,53 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - `to_json` follows the type
+
+The public JSON encoder moved into `corvid-public-json` beside the
+decoder, behind a `ValueReader` trait, and it now walks the value's
+checked type instead of inspecting the value. Native code cannot tell
+what a value is from its bits, so a shared encoder had to be
+type-directed; the interpreter now uses the same one for
+`value.to_json()`, HTTP replies, streamed chunks and approval results.
+
+One output changes: an empty map whose keys are not `String` encodes as
+`[]`, the array-of-pairs form, instead of `{}`, which no decoder
+accepted back. `Page<Item>` replies are encoded from `Type::page_fields`,
+the envelope's one field list, which the interpreter now builds pages
+from too.
+
+## 2026-11-24 - `T.from_json` compiles to native code
+
+Native programs now decode typed JSON. The runtime runs the shared
+decoder from `corvid-public-json` and builds native heap values for
+it, so a compiled program accepts the JSON the interpreter accepts and
+reports the same `path`, `expected`, `found` and `message`.
+
+Decisions:
+
+- **The compiler decides every layout; the runtime follows a plan.**
+  For each target type the compiler embeds a decode plan: the type,
+  the declarations it reaches, and the typeinfo of each shape the
+  decoder allocates (records, variants, lists, boxed options,
+  results). Whether an option is boxed comes from the same
+  `option_uses_wrapper` the rest of the backend uses, and slot sizes
+  and offsets come from `corvid_runtime::native_layout`, which the code
+  generator now re-exports instead of defining its own constants. A
+  test in `corvid-public-json` checks that the plan names every shape
+  the decoder builds.
+- **`JsonError` is a record in native code.** Before ownership
+  analysis, `compile_to_object` rewrites `JsonError` as a record of
+  four strings with the reserved id the interpreter already used, so
+  field access, reference counting, tracing and equality need no new
+  code. A new IR visitor, `for_each_compiled_type_mut`, reaches every
+  type slot; its matches are exhaustive, so a new IR node cannot be
+  skipped silently.
+- **Field reads are allowed in native match arms,** which
+  `Err(problem) -> problem.message` needs.
+- **`to_json` stays on the interpreter for now.** Native encoding needs
+  a type-directed encoder shared by both tiers, which is the next
+  increment.
+
 ## 2026-11-24 - One JSON decoder for the interpreter and native code
 
 Native `T.from_json` must accept exactly the JSON the interpreter

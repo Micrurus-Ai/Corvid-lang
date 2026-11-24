@@ -8,9 +8,11 @@
 mod imports;
 pub use imports::imported_source_modules;
 pub mod lower;
+mod type_visit;
 pub mod types;
 
 pub use lower::{lower, lower_with_modules};
+pub use type_visit::for_each_compiled_type_mut;
 pub use types::*;
 
 #[cfg(test)]
