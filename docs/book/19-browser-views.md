@@ -35,6 +35,8 @@ The trail page uses `@media screen and (prefers-color-scheme: dark)` to set a da
 
 Tab to **Trail note** to see the focus outline in that card's accent color. Press Space to open the note. The browser sets the disclosure's `open` attribute, so `.trail-card details[open] > summary` makes its label bold and applies the accent. Press Space again to restore the closed style.
 
+On screen, the open note sits below the card without moving its neighbors. The card provides the positioning context for the note, and `.trail-card:has(details[open])` raises the whole card above its closed neighbors. The list uses `isolation: isolate` to keep those stacking levels local. In print, an open note follows its summary in the normal flow.
+
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
 
 ```corvid-fragment

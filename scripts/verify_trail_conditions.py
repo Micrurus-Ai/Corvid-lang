@@ -47,6 +47,24 @@ def check_cards(page, url):
     page.keyboard.press("Space")
     expect(forest_toggle).to_have_css("font-weight", "400")
 
+    page.set_viewport_size({"width": 360, "height": 720})
+    river_top = river.bounding_box()["y"]
+    forest_toggle.press("Space")
+    note = forest.get_by_text("Pine needles cover the upper path.")
+    expect(note).to_have_css("position", "absolute")
+    assert river.bounding_box()["y"] == river_top
+    assert note.evaluate("""(note, riverTop) => {
+        const bounds = note.getBoundingClientRect();
+        return document.elementFromPoint(bounds.left + bounds.width / 2, riverTop + 2) === note;
+    }""", river_top)
+
+    page.emulate_media(media="print")
+    expect(note).to_have_css("position", "static")
+    assert note.bounding_box()["y"] + note.bounding_box()["height"] <= river.bounding_box()["y"]
+    forest_toggle.press("Space")
+    page.emulate_media(media="screen")
+    page.set_viewport_size({"width": 960, "height": 720})
+
     # Keep the wide viewport and constrain only the forest card.
     forest.evaluate("card => card.style.maxInlineSize = '18rem'")
     expect(forest.locator(".trail-summary")).to_have_css("flex-direction", "column")

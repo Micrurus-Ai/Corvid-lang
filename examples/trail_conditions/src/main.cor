@@ -16,6 +16,15 @@ fn conditions_page() -> String:
 .trail-card details { margin-block-start: .75rem }
 .trail-card details[open] > summary { color: var(--trail-accent); font-weight: bold }
 .trail-card summary:focus-visible { outline: 2px solid var(--trail-accent); outline-offset: 2px }
+@media screen {
+    .trail-list { isolation: isolate }
+    .trail-card { position: relative; z-index: 0 }
+    .trail-card:has(details[open]) { z-index: 1 }
+    .trail-card details[open] > p {
+        position: absolute; inset-inline: 0; top: 100%; margin: 0; padding: 1rem;
+        color: CanvasText; background: Canvas; border: 2px solid var(--trail-accent)
+    }
+}
 @container trail-card (min-width: 24rem) {
     .trail-summary { flex-direction: row; align-items: baseline; justify-content: space-between }
 }
