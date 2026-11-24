@@ -144,6 +144,10 @@ fn direction_marker() -> ui.View:
 
 `ui.svg_graphic` renders an inline image at the width of its container. Give the whole graphic a name that conveys its meaning. The four numbers in the view box specify its left edge, top edge, width and height. Use `ui.svg_path` for each shape in paint order. Pass an empty transform to use the original coordinates.
 
+The [trail junction example](../../examples/trail_junction/src/main.cor) turns two arrows into a route diagram. Each arrow sits inside a native link and its SVG label names the destination. Both arrows use the same two paths. Rotating the west arrow 180 degrees around the center of its view box points it toward the bridge. The links share the available width as the diagram scales.
+
+Run `corvid serve examples/trail_junction/src/main.cor` and open the displayed address. Click an arrow, or Tab to it and press Enter. The link selects the matching trail heading and the stylesheet underlines it.
+
 ### Attach application data to a group
 
 `ui.data_group` wraps child views in a `div` with a custom data attribute. Supply the name after `data-`. For example, `trail-id` produces `data-trail-id`. The name must contain at least one character and may use lowercase ASCII letters, digits and hyphens. An invalid name returns `Err`. The value can contain quotes or other text because Corvid escapes it.

@@ -1,0 +1,37 @@
+import "std:ui" as ui
+
+fn direction_link(destination: String, label: String, transform: String) -> ui.View:
+    shaft = ui.svg_path("M1 2 H8 V4 H1 Z", transform)
+    tip = ui.svg_path("M8 0 L11 3 L8 6 Z", transform)
+    arrow = ui.svg_graphic(label, "0 0 12 6", [shaft, tip])
+    return ui.link_with_content(destination, [arrow])
+
+fn junction_page() -> String:
+    choices = ui.navigation("Trail junction", [
+        direction_link("#bridge", "West to the bridge", "rotate(180 6 3)"),
+        direction_link("#lookout", "East to the lookout", "")
+    ])
+    styles = """nav { display: flex; gap: 1rem; max-width: 30rem }
+nav a { flex: 1; min-width: 0 }
+nav svg { display: block; fill: currentColor }
+nav a:focus-visible { outline: 3px solid currentColor; outline-offset: 2px }
+h2:target { text-decoration: underline }"""
+    return ui.styled_page("en", "Trail junction", styles, [
+        ui.h1("Trail junction"),
+        ui.text("Choose the left arrow for the bridge or the right arrow for the lookout."),
+        choices,
+        ui.section("bridge", "Bridge", [ui.text("Follow the river west to the footbridge.")]),
+        ui.section("lookout", "Lookout", [ui.text("Climb the ridge east to the lookout.")])
+    ])
+
+test junction_links_named_arrows_to_their_trail_descriptions:
+    page = junction_page()
+    assert page.contains("<a href=\"#bridge\" tabindex=\"0\"><svg role=\"img\" aria-label=\"West to the bridge\"")
+    assert page.contains("transform=\"rotate(180 6 3)\"")
+    assert page.contains("<a href=\"#lookout\" tabindex=\"0\"><svg role=\"img\" aria-label=\"East to the lookout\"")
+    assert page.contains("<h2 id=\"bridge\">Bridge</h2>")
+    assert page.contains("<h2 id=\"lookout\">Lookout</h2>")
+
+server trail_junction:
+    route GET "/" -> html:
+        return junction_page()
