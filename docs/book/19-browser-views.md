@@ -190,6 +190,14 @@ fn trail_guide_page() -> String:
     return ui.page_with_landmarks("en", "Trail guide", header, [route_section], [ui.link("Back to route", "#route")])
 ```
 
+### Give each trail stop a shareable address
+
+Run `corvid serve examples/trail_itinerary/src/main.cor` and open `/trails/river/stops/lookout?days=2`. The route pattern `/trails/{trail}/stops/{stop}` supplies two strings. Its `query VisitPlan` declaration requires an integer named `days`. Refreshing or opening the address in a new tab supplies the same three values to the renderer.
+
+Use `ui.navigation_page("en", title, description, content)` to put the stop name in the tab title and the visit summary in the document description. Build destinations with ordinary `ui.link` calls. Follow **Ridge bridge** and use Back to return to the lookout. The browser restores the scroll position. The page remembers the focused element by HTML ID or a link's unique destination and restores focus without scrolling. Give controls stable IDs when several links share a destination.
+
+For a moved page, return `ui.redirect_page("en", "River lookout", "/trails/river/stops/lookout?days=2")` from the old route. Its HTML refresh works with scripting disabled and the document also contains a link. Unmatched paths receive the server's ordinary 404 response. For a document that displays live text, `ui.stream_text` closes its active stream on departure. [Trail itinerary source](../../examples/trail_itinerary/src/main.cor)
+
 ### Group navigation links
 
 To link to a named section, pair `ui.link("Packing note", "#packing")` with `ui.section("packing", "Packing note", [form])`. The section starts with an `h2`. Its ID gives the link a destination, and the heading supplies the region's name through `aria-labelledby`. Choose a unique, nonempty ID without whitespace. Child views follow the heading in list order.

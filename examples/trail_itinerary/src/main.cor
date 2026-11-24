@@ -1,0 +1,44 @@
+import "std:ui" as ui
+
+type VisitPlan:
+    days: Int
+
+fn lookout_path() -> String:
+    return "/trails/river/stops/lookout?days=2"
+
+fn bridge_path() -> String:
+    return "/trails/ridge/stops/bridge?days=3"
+
+fn stop_page(trail: String, stop: String, days: Int) -> String:
+    title = stop + " on the " + trail + " trail"
+    description = "Visit " + stop + " during a " + days.to_string() + "-day walk."
+    stops = ui.navigation("Trail stops", [
+        ui.link("River lookout", lookout_path()), ui.link("Ridge bridge", bridge_path())
+    ])
+    content = [ui.h1(title), ui.text(description),
+        ui.section("preparation", "Prepare for the walk", [
+            ui.text("Check the weather at the trailhead and carry enough water for the return trip."),
+            ui.text("Leave a copy of your itinerary with someone before setting out.")
+        ]), stops]
+    return ui.navigation_page("en", title, description, content)
+
+test route_metadata_escapes_stop_names:
+    page = stop_page("river", "Mill & \"Lock\"", 4)
+    assert page.contains("<title>Mill &amp; &quot;Lock&quot; on the river trail</title>")
+    assert page.contains("content=\"Visit Mill &amp; &quot;Lock&quot; during a 4-day walk.\"")
+
+test moved_document_keeps_the_query_in_its_fallback_link:
+    url = "/stops?trail=ridge&days=3"
+    page = ui.redirect_page("en", "New itinerary", url)
+    assert page.contains("content=\"0;url=/stops?trail=ridge&amp;days=3\"")
+    assert page.contains(ui.link("New itinerary", url).html)
+
+server trail_itinerary:
+    route GET "/" -> html:
+        return ui.page("Trail itinerary", [ui.link("River lookout", lookout_path())])
+
+    route GET "/lookout" -> html:
+        return ui.redirect_page("en", "River lookout", lookout_path())
+
+    route GET "/trails/{trail}/stops/{stop}" query VisitPlan -> html:
+        return stop_page(path.trail, path.stop, query.days)
