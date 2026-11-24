@@ -164,6 +164,52 @@ def finish(tree, branch):
     return True
 
 
+def verify_blocked_browser(tree, state, task, report):
+    suites = [name for name in ("trail_conditions", "trail_guide", "browser_stream")
+              if f"verify_{name}.py" in report["verification"]]
+    if not suites:
+        return False
+    revision = git(tree, "rev-parse", "HEAD")
+    receipt = state / f"verification-{revision}.txt"
+    previous = receipt.read_text(encoding="utf-8") if receipt.exists() else ""
+    results = []
+    for suite in suites:
+        title = f"Browser check for {suite} at {revision}"
+        if title in previous:
+            continue
+        workflow = "frontend-browser-check.yml"
+        def gh(*args):
+            return subprocess.check_output(["gh", *args], cwd=tree, text=True).strip()
+
+        def find_run():
+            runs = json.loads(gh("run", "list", "--workflow", workflow, "--branch", "main",
+                                 "--limit", "100", "--json", "displayTitle,databaseId"))
+            return next((r["databaseId"] for r in runs if r["displayTitle"] == title), None)
+
+        run = find_run()
+        if run is None:
+            gh("workflow", "run", workflow, "--ref", "main",
+               "-f", f"revision={revision}", "-f", f"suite={suite}")
+            for _ in range(12):
+                time.sleep(5)
+                run = find_run()
+                if run is not None:
+                    break
+        if run is None:
+            raise RuntimeError(f"GitHub has not listed the dispatched run: {title}")
+        write(state / "current.json", {"task": task, "head": revision,
+                                       "status": "waiting for browser check", "run": run})
+        while True:
+            result = json.loads(gh("run", "view", str(run), "--json", "status,conclusion,url"))
+            if result["status"] == "completed":
+                break
+            time.sleep(30)
+        results.append(f"{title}: {result['conclusion']}. {result['url']}")
+    if results:
+        receipt.write_text("\n".join(filter(None, [previous, *results])) + "\n", encoding="utf-8")
+    return bool(results)
+
+
 def run_task(tree, state, task, title, check):
     branch = BRANCHES[task]
     note = state / f"{task}.json"
@@ -210,6 +256,8 @@ def run_task(tree, state, task, title, check):
         if status == "complete":
             if finish(tree, branch):
                 return
+            continue
+        if status == "blocked" and verify_blocked_browser(tree, state, task, report):
             continue
         if status != "continue":
             return
