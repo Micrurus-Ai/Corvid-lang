@@ -50,8 +50,7 @@ failure); `url` makes one JSON-RPC POST per call.
 ## Decoding structured output
 
 MCP tools return text content; pair with `std/json`'s typed
-accessors or the typed-decoder convention to decode structured
-payloads.
+accessors or `T.from_json(text)` to decode structured payloads.
 
 ## Non-scope (v1)
 

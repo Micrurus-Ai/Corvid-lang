@@ -5,7 +5,9 @@
 //! signatures. This file decides what the table cannot see: whether a
 //! type, including every field of its records and variants, has a
 //! public JSON form in the requested direction, and whether encoding
-//! it must keep a `Tainted` marking on the resulting text.
+//! it must keep a `Tainted` marking on the resulting text. It also
+//! refuses tools declared for the retired `decode_<Type>_from_json`
+//! convention, which these methods replace.
 
 use super::Checker;
 use crate::builtin_methods::{type_method, BuiltinMethodSig};
@@ -116,6 +118,46 @@ impl<'a> Checker<'a> {
                 Type::String
             }
         }
+    }
+
+    /// Refuses a tool declared in the shape of the retired
+    /// `decode_<Type>_from_json` convention: a name of that form and a
+    /// `Result<T, String>` return. The runtime used to decode JSON for
+    /// such a tool in place of calling it; it no longer does, so the
+    /// declaration would compile into a tool with no implementation.
+    /// The condition is the one the runtime matched, so a tool that was
+    /// never decoded by the runtime is unaffected.
+    pub(super) fn check_retired_json_decoder_tool(&mut self, tool: &corvid_ast::ToolDecl) {
+        let name = tool.name.name.as_str();
+        let Some(middle) = name.strip_prefix("decode_").and_then(|rest| rest.strip_suffix("_from_json")) else {
+            return;
+        };
+        if middle.is_empty() {
+            return;
+        }
+        // The signature's own check already reported a bad return
+        // type; resolving it again must not repeat that.
+        let mark = self.errors.len();
+        let return_ty = self.type_ref_to_type(&tool.return_ty);
+        self.errors.truncate(mark);
+        let Type::Result(target, err) = return_ty else { return };
+        if !matches!(*err, Type::String) {
+            return;
+        }
+        let replacement = match target.as_ref() {
+            Type::Struct(_) | Type::ImportedStruct(_) => {
+                let target = self.json_type_name(&target);
+                format!("delete the tool and call `{target}.from_json(text)`, which returns `Result<{target}, JsonError>`")
+            }
+            other => format!(
+                "delete the tool, name the target with `type Decoded = {}`, and call `Decoded.from_json(text)`",
+                self.json_type_name(other)
+            ),
+        };
+        self.errors.push(TypeError::new(
+            TypeErrorKind::RetiredJsonDecoderTool { tool: name.to_string(), replacement },
+            tool.name.span,
+        ));
     }
 
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`

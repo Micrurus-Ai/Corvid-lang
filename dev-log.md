@@ -4,6 +4,35 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - B01 third increment: retire the `decode_<Type>_from_json` convention
+
+Declaring `tool decode_<X>_from_json(text: String) -> Result<X, String>`
+used to make the interpreter decode JSON in place of calling the tool.
+`T.from_json` now does that job, so the convention is retired rather
+than kept as a second decoder.
+
+Decisions:
+
+- **Retire, don't re-point.** Moving the convention onto the public
+  mapping would have left two spellings of one operation, one of them
+  triggered by a tool's name, which is a hidden behaviour the program
+  never states. One way to decode is easier to learn and cannot drift.
+- **Refuse loudly at compile time.** Without the interception, such a
+  declaration would compile into a tool with no implementation and fail
+  only when called. The checker now refuses it and names the
+  replacement call (`User.from_json(text)`, or an alias for a list
+  target). The refusal matches exactly the shape the runtime used to
+  intercept, so a tool that was never decoded by the runtime is
+  unaffected; a test pins that.
+- **Migration is one line and keeps `?`.**
+  `User.from_json(text).map_err(fn (e) -> e.message)?` works in any
+  agent returning `Result<_, String>`. The book chapter, the tour, the
+  README catalog, the reference pages and the driver tests all use it.
+- **Guarantees unchanged.** `json.parse_safety_no_panic` and
+  `json.field_type_safety_at_access_boundary` keep their ids; their
+  descriptions and test references now cite `from_json`, and
+  `core-semantics.md` was regenerated from the registry.
+
 ## 2026-11-23 - B01 second increment: `T.from_json(text)` and `value.to_json()`
 
 Programs can now read and write JSON text through the same public

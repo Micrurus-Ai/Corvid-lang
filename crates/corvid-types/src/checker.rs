@@ -805,8 +805,8 @@ impl<'a> Checker<'a> {
                 Decl::Type(t) => self.check_field_refinements(t),
                 Decl::Identity(i) => self.check_identity(i),
                 Decl::Connector(c) => self.check_connector(c),
-                Decl::Tool(_)
-                | Decl::Store(_)
+                Decl::Tool(t) => self.check_retired_json_decoder_tool(t),
+                Decl::Store(_)
                 | Decl::Import(_)
                 | Decl::Effect(_)
                 | Decl::Schedule(_) => {}

@@ -50,6 +50,11 @@ pub enum TypeErrorKind {
         hint: String,
     },
 
+    /// A tool declared as `decode_<Type>_from_json(text: String) ->
+    /// Result<T, String>`, the retired convention `T.from_json`
+    /// replaced. The runtime no longer decodes JSON for it.
+    RetiredJsonDecoderTool { tool: String, replacement: String },
+
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
     BareFunctionReference { name: String },
@@ -528,6 +533,9 @@ impl TypeErrorKind {
             Self::NoJsonForm { method, ty, reason, .. } => {
                 format!("`{method}` is not available for `{ty}`: {reason}")
             }
+            Self::RetiredJsonDecoderTool { tool, .. } => format!(
+                "tool `{tool}` follows the retired `decode_<Type>_from_json` convention; the runtime no longer decodes JSON for it"
+            ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
             }
@@ -940,6 +948,7 @@ impl TypeErrorKind {
                 Some("use `.field` only on values of a user-declared `type`".into())
             }
             Self::NoJsonForm { hint, .. } => Some(hint.clone()),
+            Self::RetiredJsonDecoderTool { replacement, .. } => Some(replacement.clone()),
             Self::TypeAsValue { name } => Some(format!(
                 "to create a value of type `{name}`, call a tool or prompt that returns one"
             )),
