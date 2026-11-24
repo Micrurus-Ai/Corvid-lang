@@ -46,6 +46,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_parse_int: FuncId,
     /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
     pub json_decode_typed: FuncId,
+    /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.
+    pub json_encode_typed: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older

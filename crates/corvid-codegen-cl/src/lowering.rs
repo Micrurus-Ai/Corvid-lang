@@ -51,9 +51,9 @@ mod agent;
 use agent::*;
 mod entry;
 use entry::*;
-mod json_decode;
-pub use json_decode::native_json_decode_target;
-use json_decode::lower_json_decode;
+mod public_json;
+pub use public_json::native_public_json_type;
+use public_json::{lower_json_decode, lower_json_encode};
 
 pub fn lower_file(
     ir: &IrFile,

@@ -388,6 +388,21 @@ pub(super) fn lower_expr(
             }
             Ok(result)
         }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::JsonEncode, receiver, .. } => {
+            if is_refcounted_type(&receiver.ty) {
+                let (value, borrowed) = lower_container_maybe_borrowed(
+                    builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+                )?;
+                let text = lower_json_encode(builder, module, runtime, &receiver.ty, value, expr.span)?;
+                if !borrowed {
+                    emit_release(builder, module, runtime, value);
+                }
+                Ok(text)
+            } else {
+                let value = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+                lower_json_encode(builder, module, runtime, &receiver.ty, value, expr.span)
+            }
+        }
         IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
             "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
             expr.span,

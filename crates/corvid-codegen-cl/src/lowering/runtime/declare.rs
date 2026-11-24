@@ -121,6 +121,15 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let json_decode_typed_id = module
         .declare_function("corvid_json_decode_typed", Linkage::Import, &json_decode_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare json_decode_typed: {e}"), Span::new(0, 0)))?;
+    // corvid_json_encode_typed(value, plan, plan_len, typeinfos) -> String
+    let mut json_encode_sig = module.make_signature();
+    for _ in 0..4 {
+        json_encode_sig.params.push(AbiParam::new(I64));
+    }
+    json_encode_sig.returns.push(AbiParam::new(I64));
+    let json_encode_typed_id = module
+        .declare_function("corvid_json_encode_typed", Linkage::Import, &json_encode_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_encode_typed: {e}"), Span::new(0, 0)))?;
     let string_char_at_id = module
         .declare_function(STRING_CHAR_AT_SYMBOL, Linkage::Import, &char_at_sig)
         .map_err(|e| {
@@ -1237,6 +1246,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_split,
         string_parse_int: string_parse_int_id,
         json_decode_typed: json_decode_typed_id,
+        json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,

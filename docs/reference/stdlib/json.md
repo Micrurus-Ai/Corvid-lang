@@ -101,13 +101,13 @@ The methods are pure, so `@deterministic` code may call them and replay
 reproduces their results. Encoding a `Float` that is NaN or infinite
 stops the program, because JSON has no form for it.
 
-`from_json` and `from_json_strict` also compile to native code. Both
-targets run the same decoder, so a compiled program accepts exactly the
-JSON the interpreter accepts and fails with the same `path`,
-`expected`, `found` and `message`. A target type the native target
-cannot hold, such as a map whose keys are not `String`, runs on the
-interpreter. Programs that call `to_json` run on the interpreter until
-native encoding lands.
+All three methods also compile to native code. Both targets run the
+same mapping, so a compiled program accepts exactly the JSON the
+interpreter accepts, fails with the same `path`, `expected`, `found`
+and `message`, and encodes to the same text. A type the native target
+cannot hold runs on the interpreter: a map whose keys are not
+`String`, a `JsonValue`, or a `Grounded` value, whose sources native
+code does not keep.
 
 ## Public JSON mapping
 
@@ -402,11 +402,11 @@ gates the URL through `[http] allow`. End-to-end through
   `json_object_*_tool` typed-Value dispatch methods.
 - `crates/corvid-vm/src/interp.rs` — `dispatch_stdlib_json_tool`
   interpreter routing branch.
-- `crates/corvid-public-json` — the public mapping's decoder, which
-  the interpreter and native code share, and the decode plan native
-  code embeds for each `from_json` target.
-- `crates/corvid-vm/src/public_json.rs` — interpreter values for that
-  decoder, and the `to_json` encoder.
+- `crates/corvid-public-json` — the public mapping's decoder and
+  encoder, which the interpreter and native code share, and the plan
+  native code embeds for each type it decodes or encodes.
+- `crates/corvid-vm/src/public_json.rs` — interpreter values for the
+  mapping's decoder and encoder.
 - `crates/corvid-runtime/src/ffi_bridge/typed_json.rs` — native values
-  for that decoder.
+  for that decoder and encoder.
 - `std/json.cor` — the tool declarations + envelope types.

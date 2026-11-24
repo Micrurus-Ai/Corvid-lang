@@ -356,7 +356,12 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             kind: corvid_types::BuiltinMethodKind::JsonDecode | corvid_types::BuiltinMethodKind::JsonDecodeStrict,
             receiver,
             ..
-        } if matches!(&expr.ty, Type::Result(target, _) if corvid_codegen_cl::native_json_decode_target(target, context.types)) => {
+        } if matches!(&expr.ty, Type::Result(target, _) if corvid_codegen_cl::native_public_json_type(target, context.types)) => {
+            scan_expr(receiver, current_return_ty, context)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::JsonEncode, receiver, .. }
+            if corvid_codegen_cl::native_public_json_type(&receiver.ty, context.types) =>
+        {
             scan_expr(receiver, current_return_ty, context)
         }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),

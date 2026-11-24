@@ -1,11 +1,11 @@
-//! `T.from_json(text)` for native programs.
+//! `T.from_json(text)` and `value.to_json()` for native programs.
 //!
-//! Compiled code passes the JSON text, the decode plan the compiler
-//! wrote for `T`, and a table of typeinfo pointers the plan indexes.
-//! Decoding runs the shared public JSON decoder (`corvid-public-json`),
-//! so a native program accepts exactly the JSON the interpreter accepts
-//! and fails with the same path, expectation and finding. This module
-//! only builds native heap values for it, laid out as
+//! Compiled code passes the JSON text or the value, the plan the
+//! compiler wrote for the type, and a table of typeinfo pointers the
+//! plan indexes. Both directions run the shared public JSON mapping
+//! (`corvid-public-json`), so a native program accepts and produces
+//! exactly the JSON the interpreter does. This module only builds and
+//! reads native heap values for it, laid out as
 //! [`crate::native_layout`] describes.
 
 use crate::abi::CorvidString;
@@ -238,5 +238,105 @@ impl NativeValues<'_> {
             payload.add(RESULT_PAYLOAD_OFFSET as usize).cast::<i64>().write(value.bits);
         }
         Slot::reference(payload.cast())
+    }
+}
+
+/// Encode `value`, whose type is the plan's root, as compact public JSON
+/// text with sorted keys. The value is borrowed; the caller owns the
+/// returned string. A value with no JSON form, which the checker leaves
+/// only for a NaN or infinite `Float`, stops the program with the
+/// interpreter's `to_json:` message.
+///
+/// # Safety
+/// `value` must be a live native value of the plan's root type, and
+/// `plan`, `plan_len` and `typeinfos` must be as for
+/// [`corvid_json_decode_typed`].
+#[no_mangle]
+pub unsafe extern "C" fn corvid_json_encode_typed(
+    value: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+) -> CorvidString {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let mut reader = NativeValues { plan: &plan, typeinfos };
+    match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
+        Ok(text) => crate::ffi_bridge::string_from_rust(text),
+        Err(reason) => {
+            eprintln!("corvid: to_json: {reason}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Read the `index`th 8-byte slot of the payload at `pointer`, starting
+/// `first_offset` bytes in.
+unsafe fn slot_at(pointer: i64, first_offset: i32, index: usize) -> i64 {
+    let address = pointer as usize + first_offset as usize + index * SLOT_BYTES as usize;
+    unsafe { (address as *const i64).read() }
+}
+
+impl corvid_public_json::ValueReader for NativeValues<'_> {
+    type Value = Slot;
+
+    fn int(&mut self, value: &Slot) -> Result<i64, String> {
+        Ok(value.bits)
+    }
+    fn float(&mut self, value: &Slot) -> Result<f64, String> {
+        Ok(f64::from_bits(value.bits as u64))
+    }
+    /// A Bool occupies the low byte of its slot.
+    fn bool(&mut self, value: &Slot) -> Result<bool, String> {
+        Ok(value.bits & 0xff != 0)
+    }
+    fn string(&mut self, value: &Slot) -> Result<String, String> {
+        // SAFETY: a native String slot holds a live descriptor pointer;
+        // `CorvidString` has no destructor, so viewing it releases nothing.
+        let text: CorvidString = unsafe { std::mem::transmute(value.bits as *const u8) };
+        Ok(unsafe { text.as_str() }.to_string())
+    }
+    fn option(&mut self, option: &Type, value: &Slot) -> Result<Option<Slot>, String> {
+        if value.bits == 0 {
+            return Ok(None);
+        }
+        let boxed = self.typeinfo(&Shape::Type(option.clone())).is_some();
+        Ok(Some(if boxed { Slot::scalar(unsafe { slot_at(value.bits, OPTION_PAYLOAD_OFFSET, 0) }) } else { *value }))
+    }
+    /// A list payload is `{length, data, capacity}`.
+    fn list(&mut self, _list: &Type, value: &Slot) -> Result<Vec<Slot>, String> {
+        let length = unsafe { slot_at(value.bits, 0, 0) } as usize;
+        let data = unsafe { slot_at(value.bits, 0, 1) };
+        Ok((0..length).map(|index| Slot::scalar(unsafe { slot_at(data, 0, index) })).collect())
+    }
+    /// A map payload points at `{count, key, value, key, value, ...}`.
+    fn map(&mut self, _map: &Type, value: &Slot) -> Result<Vec<(Slot, Slot)>, String> {
+        let entries = unsafe { slot_at(value.bits, 0, 0) };
+        let count = unsafe { slot_at(entries, 0, 0) } as usize;
+        Ok((0..count)
+            .map(|index| unsafe {
+                (Slot::scalar(slot_at(entries, SLOT_BYTES, 2 * index)), Slot::scalar(slot_at(entries, SLOT_BYTES, 2 * index + 1)))
+            })
+            .collect())
+    }
+    fn result(&mut self, _result: &Type, value: &Slot) -> Result<(bool, Slot), String> {
+        let tag = unsafe { slot_at(value.bits, RESULT_TAG_OFFSET, 0) };
+        Ok((tag == RESULT_TAG_OK, Slot::scalar(unsafe { slot_at(value.bits, RESULT_PAYLOAD_OFFSET, 0) })))
+    }
+    fn record(&mut self, record: &IrType, value: &Slot) -> Result<Vec<Slot>, String> {
+        Ok((0..record.fields.len()).map(|index| Slot::scalar(unsafe { slot_at(value.bits, 0, index) })).collect())
+    }
+    /// A variant payload is the tag slot, then the variant's fields.
+    fn variant(&mut self, sum: &IrType, value: &Slot) -> Result<(usize, Vec<Slot>), String> {
+        let index = unsafe { slot_at(value.bits, 0, 0) } as usize;
+        let variant = sum.variants.get(index).ok_or_else(|| format!("`{}` has no variant {index}", sum.name))?;
+        let fields = (0..variant.fields.len()).map(|field| Slot::scalar(unsafe { slot_at(value.bits, 0, field + 1) })).collect();
+        Ok((index, fields))
+    }
+    fn grounded(&mut self, _grounded: &Type, _value: &Slot) -> Result<(Slot, Vec<J>), String> {
+        Err("native code keeps no provenance for a `Grounded` value; encode it on the interpreter".into())
+    }
+    fn json(&mut self, _value: &Slot) -> Result<J, String> {
+        Err("`JsonValue` has no native form".into())
     }
 }
