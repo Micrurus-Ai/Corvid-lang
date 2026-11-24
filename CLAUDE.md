@@ -21,6 +21,18 @@ How to apply:
 3. **Safety choices that remove failure modes count as both "powerful" and "easier"** — checked arithmetic everywhere, compile-time gates over runtime surprises.
 4. Record the rationale per slice in `ROADMAP.md` and `dev-log.md`. No per-decision escalation needed; decide against these criteria and write it down.
 
+## Built for the hardest work on earth
+
+**Every decision, every line of code and every piece of syntax must make Corvid the strongest and most powerful language there is: one that every kind of organization, from space and rocket companies to small teams, chooses to solve complicated problems and build powerful, complex applications.** Set by the CTO 2026-11-24.
+
+How to apply:
+
+1. **Hold every feature to the most demanding user.** Ask whether it would be trusted where failure is expensive: flight software, finance, medicine, infrastructure. That means exact semantics, checked arithmetic, deterministic replay, failures that are typed values or loud errors, and nothing that works only in a demo.
+2. **It must work at full scale from day one.** The same grammar, types and tools serve a ten-line script and a large codebase owned by many teams. Check that a feature stays fast, verifiable and understandable with thousands of files, many authors and heavy concurrent load.
+3. **Power comes from composition, not from size.** Prefer a few features that combine cleanly with effects, provenance, approval, replay and budgets over many special cases. Power and the [simplicity rule](#syntax-as-simple-as-it-can-be) are never traded: the strongest version of a feature is also the easiest to read.
+4. **Prove it.** A claim of power, speed or safety ships with a test, benchmark or runnable example that shows it, as the invention shipping contract requires.
+5. **No ceiling.** When a design would block a hard but real use (hard real-time limits, very large data, formal verification, embedded or offline targets), name the limit in the roadmap as planned work instead of designing it out.
+
 ## Syntax as simple as it can be
 
 **Every piece of syntax is as simple, readable and understandable as it can possibly be.** Set by the CTO 2026-11-24. Before adding or changing syntax, ask: *if Steve Jobs were shipping this, would he ship it like this?* If the answer is no, simplify until it is yes.
