@@ -7,13 +7,9 @@ on:
         description: Full Git commit to build and test
         required: true
       suite:
-        description: Browser test suite
+        description: Comma-separated browser test suite names
         required: true
-        type: choice
-        options:
-          - trail_conditions
-          - trail_guide
-          - browser_stream
+        type: string
 
 permissions:
   contents: read
@@ -43,10 +39,11 @@ jobs:
           SUITE: ${{ inputs.suite }}
         run: |
           $cli = (Resolve-Path target/debug/corvid.exe).Path
-          switch ($env:SUITE) {
-            'trail_conditions' { python -B scripts/verify_trail_conditions.py --cli $cli --channel msedge }
-            'trail_guide' { python -B scripts/verify_trail_guide.py --cli $cli --channel msedge }
-            'browser_stream' { python -B scripts/verify_browser_stream.py $cli --channel msedge }
-            default { throw 'Unknown browser test suite' }
+          foreach ($suite in $env:SUITE.Split(',')) {
+            if ($suite -cnotmatch '^[a-z][a-z0-9_]*$') { throw 'Invalid browser suite name' }
+            $script = "scripts/verify_$suite.py"
+            Write-Host "Running $script"
+            if ($suite -eq 'browser_stream') { python -B $script $cli --channel msedge }
+            else { python -B $script --cli $cli --channel msedge }
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
-          exit $LASTEXITCODE
