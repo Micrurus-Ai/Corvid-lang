@@ -11,6 +11,17 @@ from tempfile import TemporaryDirectory
 from verify_reading_list import check_search, check_search_http, serve
 
 
+def route_client_modules(page, url, dist):
+    modules = {url + "/client-trial/" + path.relative_to(dist).as_posix(): path
+               for path in dist.rglob("*.js")}
+
+    def serve_module(route):
+        route.fulfill(path=modules[route.request.url], content_type="text/javascript")
+
+    for address in modules:
+        page.route(address, serve_module)
+
+
 def verify(args):
     root = Path(__file__).resolve().parents[1]
     project = root / "examples/orders_api"
@@ -59,9 +70,7 @@ def verify(args):
                 browser = playwright.chromium.launch(channel=args.channel)
                 page = browser.new_page()
                 # Serve only compiled test modules locally. All API requests reach Corvid.
-                for module in dist.rglob("*.js"):
-                    page.route(url + "/client-trial/" + module.relative_to(dist).as_posix(),
-                               lambda route, path=module: route.fulfill(path=path, content_type="text/javascript"))
+                route_client_modules(page, url, dist)
                 page.route(url + "/client-trial/", lambda route: route.fulfill(
                     content_type="text/html", body="<!doctype html><title>Order client check</title>"))
                 page.goto(url + "/client-trial/")
