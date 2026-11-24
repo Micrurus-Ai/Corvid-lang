@@ -103,3 +103,20 @@ async fn a_record_with_an_alias_typed_field_decodes() {
         other => panic!("expected a String, got {other:?}"),
     }
 }
+
+/// The ABI descriptor reads the same checker table as IR lowering, so
+/// an alias-typed parameter is described by its target, not as a
+/// record named after the alias.
+#[test]
+fn the_abi_describes_an_alias_typed_parameter_by_its_target() {
+    // A C-exported agent takes scalars and scalar-field records, so the
+    // alias here names a scalar.
+    let source = "type Cents = Int\n\npub extern \"c\"\nagent double(amount: Cents) -> Int:\n    return amount * 2\n";
+    let abi = corvid_driver::compile_to_abi_with_config(source, "main.cor", "2026-11-23T00:00:00Z", None)
+        .unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+    let agent = abi.agents.iter().find(|a| a.name == "double").expect("double is exported");
+    let described = format!("{:?}", agent.params[0].ty);
+    let returned = format!("{:?}", agent.return_type);
+    assert_eq!(described, returned, "the alias must be described as its target, Int");
+    assert!(!described.contains("Cents"), "the alias name must not appear as a record: {described}");
+}

@@ -1,6 +1,6 @@
 //! Records the resolved type of every type reference IR lowering
-//! reads: parameters, return types, record and variant fields, and
-//! route inputs and outputs.
+//! and ABI emission read: parameters, return types, record, variant
+//! and store fields, and route inputs and outputs.
 //!
 //! The checker already resolves most of these while checking, and
 //! `type_ref_to_type` records each result in `type_refs`. This sweep
@@ -58,13 +58,17 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                Decl::Store(store) => {
+                    for field in &store.fields {
+                        self.record(&field.ty);
+                    }
+                }
                 Decl::Import(_)
                 | Decl::Effect(_)
                 | Decl::Model(_)
                 | Decl::Eval(_)
                 | Decl::Test(_)
                 | Decl::Schedule(_)
-                | Decl::Store(_)
                 | Decl::Identity(_) => {}
             }
         }

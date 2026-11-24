@@ -12,7 +12,7 @@ use crate::tool_contract::emit_tool_contract;
 use crate::type_description::{emit_type_description, StructNames};
 use corvid_ast::{
     AgentAttribute, Decl, DimensionValue, File, OwnershipAnnotation, OwnershipMode, PromptDecl,
-    Span, StoreDecl, ToolDecl, TypeRef, WeakEffectRow,
+    Span, StoreDecl, ToolDecl, TypeRef,
 };
 use corvid_ir::{
     IrAgent, IrCallKind, IrExpr, IrExprKind, IrFile, IrPrompt, IrRoutePattern, IrTool,
@@ -33,7 +33,7 @@ pub struct EmitOptions<'a> {
 pub fn emit_abi(
     file: &File,
     resolved: &Resolved,
-    _checked: &Checked,
+    checked: &Checked,
     ir: &IrFile,
     registry: &EffectRegistry,
     opts: &EmitOptions<'_>,
@@ -91,6 +91,7 @@ pub fn emit_abi(
                 agent,
                 file,
                 resolved,
+                checked,
                 registry,
                 &summaries,
                 &prompt_map,
@@ -107,6 +108,7 @@ pub fn emit_abi(
             emit_prompt(
                 prompt,
                 resolved,
+                checked,
                 registry,
                 ast_prompts.get(&prompt.name).copied(),
                 &type_names,
@@ -121,6 +123,7 @@ pub fn emit_abi(
             emit_tool(
                 tool,
                 resolved,
+                checked,
                 registry,
                 tool_map.get(&tool.name).copied(),
                 &type_names,
@@ -149,7 +152,7 @@ pub fn emit_abi(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Store(store) => Some(emit_store(store, resolved, &type_names)),
+            Decl::Store(store) => Some(emit_store(store, resolved, checked, &type_names)),
             _ => None,
         })
         .collect();
@@ -183,14 +186,14 @@ fn emit_claim_guarantees() -> Vec<AbiClaimGuarantee> {
         .collect()
 }
 
-fn emit_store(store: &StoreDecl, resolved: &Resolved, names: &StructNames) -> AbiStore {
+fn emit_store(store: &StoreDecl, resolved: &Resolved, checked: &Checked, names: &StructNames) -> AbiStore {
     let fields = store
         .fields
         .iter()
         .map(|field| AbiField {
             name: field.name.name.clone(),
             r#type: emit_type_description(
-                &resolve_typeref_to_type(&field.ty, resolved),
+                &resolve_typeref_to_type(&field.ty, checked),
                 resolved,
                 names,
             ),
@@ -250,69 +253,26 @@ pub fn normalize_source_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, resolved: &Resolved) -> Type {
-    match ty {
-        TypeRef::Named { name, .. } => Type::compiler_known(&name.name).unwrap_or_else(|| {
-            resolved
-                .symbols
-                .lookup_def(&name.name)
-                .map(Type::Struct)
-                .unwrap_or(Type::Unknown)
-        }),
-        // Qualified types (`alias.TypeName`) parse but don't yet
-        // resolve — the cross-file module loader is
-        // `lang-cor-imports-basic-resolve`'s job. Emit `Unknown` so
-        // ABI emission doesn't crash; the type checker has already
-        // surfaced a `CorvidImportNotYetResolved` error on the same
-        // span so the user sees precise feedback.
-        TypeRef::Qualified { .. } => Type::Unknown,
-        TypeRef::Generic { name, args, .. } => match name.name.as_str() {
-            "List" | "Stream" if args.len() == 1 => {
-                Type::List(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Option" if args.len() == 1 => {
-                Type::Option(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Grounded" if args.len() == 1 => {
-                Type::Grounded(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Partial" if args.len() == 1 => {
-                Type::Partial(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "ResumeToken" if args.len() == 1 => {
-                Type::ResumeToken(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Upload" if args.len() == 1 => {
-                Type::Upload(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Page" if args.len() == 1 => {
-                Type::Page(Box::new(resolve_typeref_to_type(&args[0], resolved)))
-            }
-            "Result" if args.len() == 2 => Type::Result(
-                Box::new(resolve_typeref_to_type(&args[0], resolved)),
-                Box::new(resolve_typeref_to_type(&args[1], resolved)),
-            ),
-            _ => Type::Unknown,
-        },
-        TypeRef::Weak { inner, effects, .. } => Type::Weak(
-            Box::new(resolve_typeref_to_type(inner, resolved)),
-            effects.unwrap_or_else(WeakEffectRow::any),
-        ),
-        TypeRef::Function { params, ret, .. } => Type::Function {
-            params: params
-                .iter()
-                .map(|param| resolve_typeref_to_type(param, resolved))
-                .collect(),
-            ret: Box::new(resolve_typeref_to_type(ret, resolved)),
-            effect: corvid_ast::Effect::Safe,
-        },
-    }
+/// The type a type reference stands for, as the checker resolved it
+/// (`Checked::type_refs`), with aliases expanded and imported types
+/// resolved. The ABI reads the same table IR lowering does, so the
+/// descriptor can never disagree with the compiled program about a
+/// type. The checker records every signature and field position, so a
+/// missing entry is a compiler bug.
+pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, checked: &Checked) -> Type {
+    checked.type_refs.get(&ty.span()).cloned().unwrap_or_else(|| {
+        panic!(
+            "internal compiler error: the type checker did not record the type reference at {:?}; \
+             add its position to `record_signature_types`",
+            ty.span()
+        )
+    })
 }
-
 fn emit_agent(
     agent: &IrAgent,
     file: &File,
     resolved: &Resolved,
+    checked: &Checked,
     registry: &EffectRegistry,
     summaries: &HashMap<corvid_resolve::DefId, corvid_types::AgentEffectSummary>,
     prompt_map: &HashMap<corvid_resolve::DefId, &IrPrompt>,
@@ -327,7 +287,7 @@ fn emit_agent(
         return emit_ir_only_agent(agent, resolved, names);
     };
     let summary = summaries.get(&agent.id);
-    let approval = analyze_agent_approval_contract(file, resolved, registry, ast_agent, names);
+    let approval = analyze_agent_approval_contract(file, resolved, checked, registry, ast_agent, names);
     let effects = summary
         .map(|summary| emit_effects_from_composed(&summary.composed))
         .unwrap_or_default();
@@ -338,7 +298,7 @@ fn emit_agent(
                 _ => None,
             },
         );
-    let declared_return_ty = resolve_typeref_to_type(&ast_agent.return_ty, resolved);
+    let declared_return_ty = resolve_typeref_to_type(&ast_agent.return_ty, checked);
     AbiAgent {
         name: agent.name.clone(),
         symbol: agent.name.clone(),
@@ -350,7 +310,7 @@ fn emit_agent(
             .map(|param| AbiParam {
                 name: param.name.name.clone(),
                 ty: emit_type_description(
-                    &resolve_typeref_to_type(&param.ty, resolved),
+                    &resolve_typeref_to_type(&param.ty, checked),
                     resolved,
                     names,
                 ),
@@ -358,7 +318,7 @@ fn emit_agent(
                     Some(emit_param_ownership(
                         &param.ty,
                         param.ownership.as_ref(),
-                        resolved,
+                        checked,
                     ))
                 } else {
                     None
@@ -370,7 +330,7 @@ fn emit_agent(
             Some(emit_return_ownership(
                 &ast_agent.return_ty,
                 ast_agent.return_ownership.as_ref(),
-                resolved,
+                checked,
             ))
         } else {
             None
@@ -433,6 +393,7 @@ fn emit_ir_only_agent(agent: &IrAgent, resolved: &Resolved, names: &StructNames)
 fn emit_prompt(
     prompt: &IrPrompt,
     resolved: &Resolved,
+    checked: &Checked,
     registry: &EffectRegistry,
     ast_prompt: Option<&PromptDecl>,
     names: &StructNames,
@@ -448,7 +409,7 @@ fn emit_prompt(
                     .map(|param| AbiParam {
                         name: param.name.name.clone(),
                         ty: emit_type_description(
-                            &resolve_typeref_to_type(&param.ty, resolved),
+                            &resolve_typeref_to_type(&param.ty, checked),
                             resolved,
                             names,
                         ),
@@ -470,7 +431,7 @@ fn emit_prompt(
         return_type: ast_prompt
             .map(|prompt| {
                 emit_type_description(
-                    &resolve_typeref_to_type(&prompt.return_ty, resolved),
+                    &resolve_typeref_to_type(&prompt.return_ty, checked),
                     resolved,
                     names,
                 )
@@ -499,6 +460,7 @@ fn emit_prompt(
 fn emit_tool(
     tool: &IrTool,
     resolved: &Resolved,
+    checked: &Checked,
     registry: &EffectRegistry,
     ast_tool: Option<&ToolDecl>,
     names: &StructNames,
@@ -514,7 +476,7 @@ fn emit_tool(
                     .map(|param| AbiParam {
                         name: param.name.name.clone(),
                         ty: emit_type_description(
-                            &resolve_typeref_to_type(&param.ty, resolved),
+                            &resolve_typeref_to_type(&param.ty, checked),
                             resolved,
                             names,
                         ),
@@ -535,7 +497,7 @@ fn emit_tool(
         return_type: ast_tool
             .map(|tool_decl| {
                 emit_type_description(
-                    &resolve_typeref_to_type(&tool_decl.return_ty, resolved),
+                    &resolve_typeref_to_type(&tool_decl.return_ty, checked),
                     resolved,
                     names,
                 )
@@ -985,12 +947,12 @@ fn source_line(source: &str, span: Span) -> u32 {
 fn emit_param_ownership(
     ty: &TypeRef,
     declared: Option<&OwnershipAnnotation>,
-    resolved: &Resolved,
+    checked: &Checked,
 ) -> AbiOwnership {
     if let Some(declared) = declared {
         return emit_declared_ownership(declared, None);
     }
-    match resolve_typeref_to_type(ty, resolved) {
+    match resolve_typeref_to_type(ty, checked) {
         Type::String | Type::TraceId => AbiOwnership {
             mode: AbiOwnershipMode::Borrowed,
             lifetime: Some("call".to_string()),
@@ -1007,9 +969,9 @@ fn emit_param_ownership(
 fn emit_return_ownership(
     ty: &TypeRef,
     declared: Option<&OwnershipAnnotation>,
-    resolved: &Resolved,
+    checked: &Checked,
 ) -> AbiOwnership {
-    let inferred_destructor = match resolve_typeref_to_type(ty, resolved) {
+    let inferred_destructor = match resolve_typeref_to_type(ty, checked) {
         Type::String | Type::TraceId => Some(AbiDestructor {
             kind: AbiDestructorKind::Drop,
             symbol: "corvid_free_string".to_string(),

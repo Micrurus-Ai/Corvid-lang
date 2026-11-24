@@ -5,7 +5,7 @@ use crate::schema::{
 use crate::type_description::{emit_type_description, StructNames};
 use corvid_ast::{Block, Decl, Effect, Expr, File, Stmt, ToolDecl};
 use corvid_resolve::Resolved;
-use corvid_types::EffectRegistry;
+use corvid_types::{Checked, EffectRegistry};
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, Clone)]
@@ -18,6 +18,7 @@ pub struct ApprovalAnalysis {
 pub fn analyze_agent_approval_contract(
     file: &File,
     resolved: &Resolved,
+    checked: &Checked,
     registry: &EffectRegistry,
     agent: &corvid_ast::AgentDecl,
     names: &StructNames,
@@ -28,6 +29,7 @@ pub fn analyze_agent_approval_contract(
     collect_contract_from_block(
         &agent.body,
         resolved,
+        checked,
         registry,
         &tools,
         &mut labels,
@@ -69,6 +71,7 @@ pub fn collect_all_approval_sites(
 fn collect_contract_from_block(
     block: &Block,
     resolved: &Resolved,
+    checked: &Checked,
     registry: &EffectRegistry,
     tools: &HashMap<String, &ToolDecl>,
     labels: &mut Vec<AbiApprovalLabel>,
@@ -100,7 +103,7 @@ fn collect_contract_from_block(
                                 .map(|param| AbiParam {
                                     name: param.name.name.clone(),
                                     ty: emit_type_description(
-                                        &crate::emit::resolve_typeref_to_type(&param.ty, resolved),
+                                        &crate::emit::resolve_typeref_to_type(&param.ty, checked),
                                         resolved,
                                         names,
                                     ),
@@ -140,6 +143,7 @@ fn collect_contract_from_block(
                 collect_contract_from_block(
                     then_block,
                     resolved,
+                    checked,
                     registry,
                     tools,
                     labels,
@@ -150,6 +154,7 @@ fn collect_contract_from_block(
                     collect_contract_from_block(
                         else_block,
                         resolved,
+                        checked,
                         registry,
                         tools,
                         labels,
@@ -162,6 +167,7 @@ fn collect_contract_from_block(
                 collect_contract_from_block(
                     body,
                     resolved,
+                    checked,
                     registry,
                     tools,
                     labels,

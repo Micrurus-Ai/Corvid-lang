@@ -4,6 +4,16 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - The ABI descriptor reads the checker's types
+
+The third copy of type resolution, in the ABI emitter, is gone.
+`emit_abi` already received the checker's result and ignored it; it now
+reads `Checked::type_refs`, the table IR lowering reads. The old copy
+expanded no aliases and returned `Unknown` for every imported type, so
+a signed library's descriptor could describe an alias-typed parameter
+as a record named after the alias. Store fields join the checker's
+sweep because the ABI describes them. A missing entry is the same
+internal compiler error lowering raises.
 ## 2026-11-23 - One resolver for type references: aliases expand everywhere
 
 Fixing "aliases declared in another module" turned up a wider bug. IR
