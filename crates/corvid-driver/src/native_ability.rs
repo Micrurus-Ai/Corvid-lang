@@ -12,6 +12,7 @@
 //! rather than a codegen-internal one; (c) cheap - O(IR nodes) walk
 //! with early exit.
 
+use corvid_codegen_cl::NativeTypeQuestion;
 use corvid_ir::{IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrImportSource, IrStmt};
 use corvid_types::Type;
 
@@ -135,91 +136,15 @@ impl std::fmt::Display for NotNativeReason {
     }
 }
 
-fn is_refcounted_type(ty: &Type) -> bool {
-    match ty {
-        Type::String
-        // B06 — a native `Decimal`, time, currency or locale value is a
-        // String holding its canonical text.
-        | Type::Decimal
-        | Type::Duration
-        | Type::Instant
-        | Type::TimeZone
-        | Type::ZonedTime
-        | Type::Currency
-        | Type::Locale
-        | Type::Struct(_)
-        | Type::ImportedStruct(_)
-        // Native code represents JsonError as a record of strings.
-        | Type::JsonError
-        | Type::List(_)
-        | Type::Weak(_, _)
-        | Type::Result(_, _)
-        | Type::Partial(_)
-        | Type::ResumeToken(_) => true,
-        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
-        Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type(inner),
-        _ => false,
-    }
-}
-
+/// The driver asks the code generator's own native type checks, as they
+/// apply to a whole program before lowering (see `NativeTypeQuestion`), so
+/// the two can never disagree about which types run natively.
 fn is_native_value_type(ty: &Type) -> bool {
-    match ty {
-        Type::Map(_, _) => corvid_codegen_cl::native_string_map(ty),
-        Type::Int | Type::Bool | Type::Float | Type::String => true,
-        Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
-        Type::Option(_) => is_native_option_type(ty),
-        Type::Result(ok, err) => is_native_value_type(ok) && is_native_value_type(err),
-        Type::Grounded(inner) => is_native_value_type(inner),
-        Type::Tainted(inner) => is_native_value_type(inner),
-        // TraceId requires replay-runtime support on the native
-        // tier (Phase 21 slice 21-inv-E-4 + E-runtime). Until then,
-        // a program using replay routes to the interpreter tier.
-        Type::TraceId => false,
-        // Phase 33S3a — `DbHandle` is interpreter-tier only; the
-        // driver's tier-picker checks this function and routes any
-        // program mentioning `DbHandle` (including transitively
-        // through agent signatures) to the interpreter so the user
-        // never sees a confusing native-codegen error mid-build.
-        Type::DbHandle => false,
-        // Phase 33R5b-a — same rationale for JsonValue and
-        // JsonBuilder. Interpreter-tier only until the cdylib
-        // bridging slice ships.
-        Type::JsonValue | Type::JsonBuilder => false,
-        // Native code represents JsonError as a record of strings.
-        Type::JsonError => true,
-        // B03 — regular expressions run on the interpreter until the
-        // native regex slice.
-        Type::RegexMatch => false,
-        // B06 — a native `Decimal`, time, currency or locale value is a
-        // String holding its canonical text; every operation calls the
-        // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
-        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
-        // `Bytes` runs on the interpreter until the native cryptography
-        // slice; `native_ability` refuses any program that mentions it.
-        Type::Bytes => false,
-        // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
-        // by `corvid serve`; the tier-picker routes any program
-        // mentioning them to the interpreter tier, mirroring `DbHandle`.
-        Type::Upload(_) | Type::Page(_) => false,
-        Type::Function { .. } => corvid_codegen_cl::native_callback_type(ty),
-        Type::Nothing
-        | Type::Stream(_)
-        | Type::Partial(_)
-        | Type::ResumeToken(_)
-        | Type::RouteParams(_)
-        | Type::Unknown => false,
-    }
-}
-
-fn is_native_wide_option_type(ty: &Type) -> bool {
-    matches!(ty, Type::Option(inner) if matches!(&**inner, Type::Int | Type::Bool | Type::Float))
+    corvid_codegen_cl::is_native_value_type_for(ty, NativeTypeQuestion::Program)
 }
 
 fn is_native_option_type(ty: &Type) -> bool {
-    match ty {
-        Type::Option(inner) => is_refcounted_type(inner) || is_native_wide_option_type(ty),
-        _ => false,
-    }
+    corvid_codegen_cl::is_native_option_type_for(ty, NativeTypeQuestion::Program)
 }
 
 fn is_native_option_expr_type(ty: &Type) -> bool {

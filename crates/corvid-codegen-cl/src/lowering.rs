@@ -37,6 +37,7 @@ mod equality;
 pub use equality::{supports_structural_comparison, uses_structural_equality};
 mod runtime;
 use runtime::*;
+pub use runtime::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod expr;
 use expr::*;
 mod stmt;
