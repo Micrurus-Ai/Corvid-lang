@@ -1322,6 +1322,10 @@ pub struct DatabaseDecl {
     pub name: Ident,
     pub engine: Option<Ident>,
     pub location: Option<DatabaseLocation>,
+    /// `tls: required` or `tls: disabled`: whether a networked engine's
+    /// connection is encrypted. Required for Postgres, refused for
+    /// SQLite (B09 P4).
+    pub tls: Option<Ident>,
     pub tables: Vec<Ident>,
     pub span: Span,
 }

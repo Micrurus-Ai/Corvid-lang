@@ -41,12 +41,42 @@ has no defaults:
 
 | Setting | Meaning |
 | --- | --- |
-| `engine:` | `sqlite`. `postgres` and `mysql` are refused with a pointer to their roadmap slices until they run. |
-| `location:` | A path, `"library.sqlite"`, or `env("NAME")`, the environment variable that holds the path. A path is opened relative to the directory the program runs in. |
+| `engine:` | `sqlite` or `postgres`. `mysql` is refused with a pointer to its roadmap slice until it runs. |
+| `location:` | For SQLite, a path, `"library.sqlite"`, or `env("NAME")`, the environment variable that holds the path; a path is opened relative to the directory the program runs in. For Postgres, `env("NAME")` holding the connection string. |
+| `tls:` | Postgres only: `required` or `disabled`. |
 | `tables:` | The tables it holds, separated by commas. |
 
 Leaving out a setting is a compile error that names it and its allowed
 values. Every table must be listed in exactly one `database` block.
+
+### Postgres
+
+```corvid
+database library:
+    engine: postgres
+    location: env("LIBRARY_DATABASE_URL")
+    tls: required
+    tables: Shelf
+```
+
+A Postgres `location` is the environment variable that holds the
+connection string, such as `postgres://app@db.example.com/library`; a
+string written in source is a compile error, because a connection
+string usually holds a password. `tls:` is required:
+
+| `tls:` | Connection |
+| --- | --- |
+| `required` | Encrypted, and the server's certificate must verify against the standard web roots; a server whose certificate does not verify is refused. |
+| `disabled` | Not encrypted, for a database on the same machine or a private network. |
+
+A SQLite database is a file, so a SQLite block refuses `tls:`.
+
+Every operation, query, conflict and replay behaves the same on both
+engines; only the SQL differs. A program moves from SQLite to Postgres by
+changing its `database` block, with no change to the code that reads and
+writes rows. `corvid migrate plan` does not plan Postgres migrations yet
+(slice P4b); it refuses a Postgres program and asks for the migration to
+be written by hand.
 
 ## Operations
 
@@ -138,14 +168,14 @@ with a divergence naming the operation.
 
 ## Storage
 
-| Field type | Column |
-| --- | --- |
-| `Int` | `INTEGER` |
-| `Float` | `REAL` |
-| `String` | `TEXT` |
-| `Bool` | `BOOLEAN`, 0 or 1 |
-| `Option<T>` | `T`'s column, nullable |
-| `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON |
+| Field type | SQLite column | Postgres column |
+| --- | --- | --- |
+| `Int` | `INTEGER` | `bigint` |
+| `Float` | `REAL` | `double precision` |
+| `String` | `TEXT` | `text` |
+| `Bool` | `BOOLEAN`, 0 or 1 | `boolean` |
+| `Option<T>` | `T`'s column, nullable | `T`'s column, nullable |
+| `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON | `jsonb` holding the value's public JSON |
 
 The table is named as declared, and columns as the fields are named.
 Each kind of field has its own column type, so the stored schema records
@@ -210,5 +240,5 @@ clause, so a table may still have a field named `retired: Bool`.
 ## Not yet
 
 These are later slices of [B09](../proposals/b09-typed-persistence.md):
-Postgres and MySQL, and the native target. Programs that use tables run
+migration planning for Postgres, MySQL, and the native target. Programs that use tables run
 on the interpreter.

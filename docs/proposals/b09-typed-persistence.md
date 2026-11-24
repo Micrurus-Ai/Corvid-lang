@@ -133,7 +133,12 @@ agent shelves_of(user: String) -> List<Shelf>:
   database.
 - [x] P3. Migrations from declaration changes: added and altered
   columns, `renamed from`, `retired`, and refusal of undeclared drops.
-- [ ] P4. Postgres, with the cross-engine query suite.
+- [ ] P4. Postgres, with the cross-engine query suite. Split in two:
+  - [x] P4a. Tables run on Postgres: every operation and query, recorded
+    and replayed, with the same test suite run on both engines.
+  - [ ] P4b. `corvid migrate plan` for Postgres, planning against a
+    scratch database the developer names, because Postgres migrations
+    cannot be replayed into in-memory SQLite.
 - [ ] P5. MySQL on the same suite.
 - [ ] P6. Native target.
 - [ ] P7. Port `examples/reading_list` from hand-written SQL to tables.
@@ -170,6 +175,48 @@ agent shelves_of(user: String) -> List<Shelf>:
   schema records how each column is stored and the planner can see every
   change. Tables created by P1's migrations with a `Bool` or JSON field
   plan as a type change and are refused; recreate them.
+
+## Postgres (P4)
+
+```corvid
+database library:
+    engine: postgres
+    location: env("LIBRARY_DATABASE_URL")
+    tls: required
+    tables: Shelf
+```
+
+- **The location comes from the environment.** A Postgres connection
+  string usually carries a password, so `location:` must be `env("NAME")`;
+  a string written in source is a compile error.
+- **TLS is declared.** Whether credentials and rows cross the network
+  encrypted is a security decision with two reasonable answers (a
+  hosted database needs TLS, a local one may not), so a Postgres block
+  must say `tls: required` or `tls: disabled`, and leaving it out is a
+  compile error. `required` verifies the server's certificate against
+  the standard web roots; a private certificate authority is later work.
+  A SQLite block refuses `tls:`, because a file has no connection.
+- **Same meaning, each engine's SQL.** Every operation and query renders
+  through a dialect: parameters are `$1` with an explicit type cast, `==`
+  is `IS NOT DISTINCT FROM`, the string tests use `strpos`, and columns
+  are `BIGINT`, `DOUBLE PRECISION`, `TEXT`, `BOOLEAN` and `JSONB`. A
+  recorded query holds its SQL, so a replay of a Postgres run is checked
+  against Postgres SQL.
+- **One suite, both engines.** The table and query tests run on SQLite
+  always and on Postgres when `CORVID_TEST_POSTGRES_URL` names a test
+  database; without it they print `skipping:` for Postgres.
+- **Across the tiers.** The engine is a deployment choice the backend
+  owns, so nothing about it reaches the frontend or an assistant: a
+  screen and an agent see the same typed rows, conflicts and query
+  results on either engine, and moving from SQLite to Postgres changes
+  no UI or agent code. That is the point of the slice, and the shared
+  test suite proves it. What the backend learns here that the other
+  tiers will use is the row type and its refinements, which B10's
+  actions carry to forms and assistant tools from the one table
+  declaration.
+- **One connection per location in P4a.** Writes are compare-and-set, so
+  concurrent connections stay correct; a connection pool is planned with
+  B19's concurrency work, not designed out.
 
 ## Open questions for review
 

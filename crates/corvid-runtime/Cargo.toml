@@ -30,6 +30,13 @@ tokio = { workspace = true }
 futures = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 postgres = "0.19"
+# B09 P4: tables on Postgres use the async client (the blocking one cannot
+# run inside the interpreter's runtime) with rustls on the ring provider,
+# the TLS stack reqwest already uses here.
+tokio-postgres = "0.7"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+webpki-roots = "1"
 argon2 = "0.5"
 base64 = "0.22"
 jsonwebtoken = "9.3"

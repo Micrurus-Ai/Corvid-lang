@@ -2320,6 +2320,7 @@ impl<'a> Lowerer<'a> {
                 name: database.name.name.clone(),
                 engine: database.engine.as_ref()?.name.clone(),
                 location: database.location.clone()?,
+                tls: database.tls.as_ref().map(|tls| tls.name.clone()),
             },
         })
     }

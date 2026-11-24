@@ -251,6 +251,7 @@ mod tests {
             columns: columns.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
             renamed: renamed.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
             retired: retired.iter().map(|s| s.to_string()).collect(),
+            engine: crate::tables::TableEngine::Sqlite,
         }
     }
 
