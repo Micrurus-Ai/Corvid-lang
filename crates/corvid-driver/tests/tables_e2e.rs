@@ -1,20 +1,21 @@
-//! B09 P1 — typed table operations run end to end on SQLite through the
-//! interpreter: insert, get, save and delete, with revision-checked
-//! writes whose conflicts come back as typed `Result` values.
+//! B09 P1 and P4 — typed table operations run end to end through the
+//! interpreter on SQLite and, when `CORVID_TEST_POSTGRES_URL` is set, on
+//! Postgres: insert, get, save and delete, with revision-checked writes
+//! whose conflicts come back as typed `Result` values.
 
 use corvid_driver::{compile_to_ir, run_ir_with_runtime};
 use corvid_runtime::Runtime;
 use corvid_vm::Value;
 
-const SCHEMA: &str = "CREATE TABLE \"Shelf\" (\"shelf\" INTEGER PRIMARY KEY NOT NULL, \"owner\" TEXT NOT NULL, \
-\"title\" TEXT NOT NULL, \"note\" TEXT, \"tags\" TEXT NOT NULL, \"revision\" INTEGER NOT NULL)";
+#[path = "support/table_engines.rs"]
+mod table_engines;
+use table_engines::TestDatabase;
 
-fn program(path: &str) -> String {
+fn program(settings: &str) -> String {
     format!(
         r#"
 database library:
-    engine: sqlite
-    location: "{path}"
+{settings}
     tables: Shelf
 
 table Shelf:
@@ -68,57 +69,80 @@ agent main() -> String:
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn table_operations_run_with_revision_checked_writes() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("library.sqlite").to_string_lossy().replace('\\', "/");
-    let runtime = Runtime::builder().build();
-    let setup = runtime.db_registry().open(&path).expect("open database");
-    runtime.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
-
-    let ir = compile_to_ir(&program(&path)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
-    let out = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect("program runs");
-    let Value::String(text) = out else { panic!("expected text, got {out:?}") };
-    assert_eq!(
-        text.as_ref(),
-        "inserted r1 | taken by Reading | Reading fiction r1 | saved r2 | conflict with r2 Novels | \
-         conflict with r2 Novels | deleted Novels | absent | conflict with nothing"
-    );
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let runtime = Runtime::builder().build();
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let out = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect("program runs");
+        let Value::String(text) = out else { panic!("expected text, got {out:?}") };
+        assert_eq!(
+            text.as_ref(),
+            "inserted r1 | taken by Reading | Reading fiction r1 | saved r2 | conflict with r2 Novels | \
+             conflict with r2 Novels | deleted Novels | absent | conflict with nothing",
+            "on {}",
+            database.label()
+        );
+        database.finish().await;
+    }
 }
 
 /// P1b: a recorded run replays from its trace alone. The database is
-/// deleted before the replay, and the replay neither needs it nor
+/// removed before the replay, and the replay neither needs it nor
 /// recreates it, yet every read and every write outcome comes back as
 /// recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_run_replays_its_table_operations_without_the_database() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("library.sqlite");
-    let location = path.to_string_lossy().replace('\\', "/");
-    let ir = compile_to_ir(&program(&location)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
 
-    let trace_dir = tempfile::tempdir().expect("trace dir");
-    let record = Runtime::builder().trace_to(trace_dir.path()).build();
-    let setup = record.db_registry().open(&location).expect("open database");
-    record.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
-    let recorded = run_ir_with_runtime(&ir, Some("main"), vec![], &record).await.expect("recorded run");
-    let trace = record.tracer().path().to_path_buf();
-    drop(record);
-    let raw = std::fs::read_to_string(&trace).expect("trace readable");
-    assert!(raw.contains("table:Shelf.save"), "table operations are recorded");
+        let trace_dir = tempfile::tempdir().expect("trace dir");
+        let record = Runtime::builder().trace_to(trace_dir.path()).build();
+        let recorded = run_ir_with_runtime(&ir, Some("main"), vec![], &record).await.expect("recorded run");
+        let trace = record.tracer().path().to_path_buf();
+        drop(record);
+        let raw = std::fs::read_to_string(&trace).expect("trace readable");
+        assert!(raw.contains("table:Shelf.save"), "table operations are recorded on {}", database.label());
 
-    std::fs::remove_file(&path).expect("remove the database");
-    let replay = Runtime::builder().replay_from(&trace).build();
-    let replayed = run_ir_with_runtime(&ir, Some("main"), vec![], &replay).await.expect("replay from the trace");
-    assert_eq!(replayed, recorded);
-    assert!(!path.exists(), "a replay never opens the database");
+        database.remove().await;
+        let replay = Runtime::builder().replay_from(&trace).build();
+        let replayed = run_ir_with_runtime(&ir, Some("main"), vec![], &replay).await.expect("replay from the trace");
+        assert_eq!(replayed, recorded, "on {}", database.label());
+        assert!(database.is_gone().await, "a replay never opens the database on {}", database.label());
+        database.finish().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_table_names_the_migration_commands() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("empty.sqlite").to_string_lossy().replace('\\', "/");
-    let ir = compile_to_ir(&program(&path)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
-    let runtime = Runtime::builder().build();
-    let error = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect_err("no table yet");
-    let message = format!("{error}");
-    assert!(message.contains("corvid migrate plan"), "{message}");
+    for database in TestDatabase::every_engine().await {
+        let ir = compile_to_ir(&program(&database.settings())).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        let error = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect_err("no table yet");
+        let message = format!("{error}");
+        assert!(message.contains("corvid migrate plan"), "on {}: {message}", database.label());
+        database.finish().await;
+    }
+}
+/// P4: `tls: required` verifies the server's certificate, so a server
+/// with a self-signed certificate (the local test server's) is refused
+/// before any row is read, with the declaration named.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_required_tls_connection_refuses_an_unverified_server() {
+    for database in TestDatabase::every_engine().await {
+        if !matches!(database, TestDatabase::Postgres { .. }) {
+            database.finish().await;
+            continue;
+        }
+        let source = program(&database.settings().replace("tls: disabled", "tls: required"));
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        let error = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect_err("an unverified server is refused");
+        let message = format!("{error}");
+        assert!(message.contains("tls: required"), "{message}");
+        database.finish().await;
+    }
 }

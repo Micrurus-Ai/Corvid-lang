@@ -10,7 +10,7 @@
 
 use crate::migrate_cmd::{migration_version, scan_migration_files};
 use anyhow::{bail, Context, Result};
-use corvid_runtime::tables::{create_table_sql, plan_table_change, StoredColumn};
+use corvid_runtime::tables::{create_table_sql, plan_table_change, StoredColumn, TableEngine};
 use rusqlite::Connection;
 use std::path::Path;
 
@@ -26,6 +26,14 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
     if schemas.is_empty() {
         println!("plan: `{}` declares no tables", source.display());
         return Ok(0);
+    }
+    if let Some(table) = schemas.iter().find(|t| t.engine != TableEngine::Sqlite) {
+        eprintln!(
+            "plan: table `{}` is in a {} database; planning its migrations arrives in B09 P4b, so write that migration by hand for now",
+            table.name,
+            table.engine.name()
+        );
+        return Ok(1);
     }
 
     let history = Connection::open_in_memory().context("open an in-memory database")?;
@@ -160,6 +168,7 @@ mod tests {
             ],
             renamed: Vec::new(),
             retired: Vec::new(),
+            engine: corvid_runtime::tables::TableEngine::Sqlite,
         }
     }
 

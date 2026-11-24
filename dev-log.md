@@ -73,6 +73,36 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - Tables on Postgres (B09 P4a)
+
+`engine: postgres` runs every table operation and query on Postgres. A
+Postgres `location` must be `env("NAME")`, because a connection string
+usually holds a password, and `tls: required | disabled` must be stated,
+because whether credentials and rows cross the network encrypted has
+two reasonable answers; leaving either out is a compile error. `tls:
+required` verifies the server's certificate against the web roots, and
+the local test server's self-signed certificate is refused, which a
+test shows.
+
+Each statement now renders through an engine dialect: `$1` parameters
+with an explicit type, `IS NOT DISTINCT FROM` for `==`, `strpos`, `left`
+and `right` for the string tests, and `jsonb` columns read back as text,
+so the interpreter sees identical values on both engines. Tables use
+the async Postgres client; the blocking one panics inside the
+interpreter's runtime. The TLS connector is written on the `rustls` and
+`tokio-rustls` already in the lock, on the `ring` provider, rather than
+a bridge crate that could pull in a second crypto backend.
+
+The table and query suites now run unchanged on both engines, creating
+their tables from the program's declarations through the runtime's own
+`CREATE TABLE`. Each Postgres test gets its own schema. Across the tiers,
+the engine is a backend deployment choice: screens and agents see the
+same typed rows and conflicts either way, so moving to Postgres changes
+no UI or agent code. `tables.rs` was split first (storage schema, then
+recorded operations) so the engine work landed in focused modules.
+Planning Postgres migrations is P4b, and a connection pool is planned
+with B19.
+
 ## 2026-11-24 - Migrations from declaration changes (B09 P3)
 
 `corvid migrate plan` now plans changes to stored tables, not just new

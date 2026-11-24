@@ -1,12 +1,14 @@
 //! Table storage (B09): the SQL behind `Shelf.get`, `Shelf.insert`,
 //! `Shelf.save` and `Shelf.delete`; queries live in [`query`].
 //!
-//! Operations run through the same [`crate::db::DbHandleRegistry`] the
-//! `std.db` tools use, so they share its per-file writer lock, its
-//! parameter-only binding (values never become SQL text) and its
-//! replay write quarantine. Rows travel as [`DbValue`]s in column
-//! order, with `revision` last; the interpreter converts its own
-//! values to and from them.
+//! On SQLite, operations run through the same
+//! [`crate::db::DbHandleRegistry`] the `std.db` tools use, so they share
+//! its per-file writer lock and parameter-only binding. On Postgres they
+//! run on an asynchronous connection per location ([`postgres`]). Either
+//! way values never become SQL text, and [`dialect`] spells each
+//! statement for its engine. Rows travel as [`DbValue`]s in column
+//! order, with `revision` last; the interpreter converts its own values
+//! to and from them.
 //!
 //! Every write is a compare-and-set on `revision`: `save` and `delete`
 //! succeed only when the stored row still has the revision the caller
@@ -19,15 +21,19 @@ use corvid_ast::DatabaseLocation;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod dialect;
 mod migration;
+mod postgres;
 mod query;
 mod recorded;
 mod schema;
+pub use dialect::TableEngine;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
-pub use schema::{column_kind, create_table_sql, untainted, ColumnKind, TableSchema};
-use schema::{create_table_named, quote};
+pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
+use postgres::PostgresTables;
 use recorded::{call_name, json_row, row_json, value_json};
+use schema::{create_table_named, quote};
 
 /// One table as an operation sees it.
 #[derive(Debug, Clone, Copy)]
@@ -36,17 +42,26 @@ pub struct TableRef<'a> {
     pub key: &'a str,
     /// Column names in declaration order, with `revision` last.
     pub columns: &'a [String],
+    /// How each column is stored, in [`Self::columns`] order.
+    pub kinds: &'a [ColumnKind],
     pub location: &'a DatabaseLocation,
+    pub engine: TableEngine,
 }
 
 /// A row's values, in [`TableRef::columns`] order.
 pub type Row = Vec<DbValue>;
 
-/// The open database handle for each location, shared by a runtime's
-/// table operations.
+/// The open connection for each database, shared by a runtime's table
+/// operations.
 #[derive(Default, Clone)]
 pub struct TableDatabases {
-    handles: Arc<Mutex<HashMap<String, Arc<DbHandleInner>>>>,
+    connections: Arc<Mutex<HashMap<String, TableConnection>>>,
+}
+
+#[derive(Clone)]
+enum TableConnection {
+    Sqlite(Arc<DbHandleInner>),
+    Postgres(Arc<PostgresTables>),
 }
 
 /// Where a declared location points now.
@@ -62,42 +77,71 @@ pub fn resolve_location(location: &DatabaseLocation) -> Result<String, RuntimeEr
 }
 
 impl Runtime {
-    fn table_handle(&self, table: &TableRef<'_>) -> Result<Arc<DbHandleInner>, RuntimeError> {
-        let path = resolve_location(table.location)?;
-        let mut handles = self.table_databases.handles.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(handle) = handles.get(&path) {
-            return Ok(handle.clone());
+    async fn table_connection(&self, table: &TableRef<'_>) -> Result<TableConnection, RuntimeError> {
+        let location = resolve_location(table.location)?;
+        let id = format!("{}:{location}", table.engine.name());
+        if let Some(connection) = self.table_databases.connections.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+            return Ok(connection.clone());
         }
-        let handle = self.db_registry().open(&path)?;
-        handles.insert(path, handle.clone());
-        Ok(handle)
+        let connection = match table.engine {
+            TableEngine::Sqlite => TableConnection::Sqlite(self.db_registry().open(&location)?),
+            TableEngine::Postgres { tls } => TableConnection::Postgres(Arc::new(PostgresTables::connect(&location, tls).await?)),
+        };
+        let mut connections = self.table_databases.connections.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(connections.entry(id).or_insert(connection).clone())
+    }
+
+    /// Run a write; the number of rows it changed.
+    async fn table_execute(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<u64, RuntimeError> {
+        let changed = match self.table_connection(table).await? {
+            TableConnection::Sqlite(handle) => {
+                self.db_registry().execute_queued(&handle, sql, params).await.map(|r| r.rows_affected)
+            }
+            TableConnection::Postgres(connection) => connection.execute(sql, params).await,
+        };
+        changed.map_err(|e| named(table, e))
+    }
+
+    /// Run a read; its rows in [`TableRef::columns`] order.
+    async fn table_select(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<Vec<Row>, RuntimeError> {
+        let rows = match self.table_connection(table).await? {
+            TableConnection::Sqlite(handle) => self
+                .db_registry()
+                .query(handle.handle_id, sql, params)
+                .map(|rows| rows.rows.into_iter().map(|cells| ordered_row(table, cells)).collect()),
+            TableConnection::Postgres(connection) => connection.select(sql, params, table.columns).await,
+        };
+        rows.map_err(|e| named(table, e))
     }
 
     /// `Shelf.get(key)`.
     async fn table_get_live(&self, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
-        let handle = self.table_handle(table)?;
-        self.select_row(&handle, table, key)
+        self.select_row(table, key).await
     }
 
     /// `Shelf.insert(row)`: `Ok` with the stored row (revision 1), or
     /// `Err` with the row already stored under that key.
     async fn table_insert_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Row>, RuntimeError> {
-        let handle = self.table_handle(table)?;
         let (columns, mut values) = split_revision(table, row)?;
         let names = columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
-        let marks = (1..=values.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let marks = values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| table.engine.mark(i + 1, table.kinds[i], value))
+            .collect::<Vec<_>>()
+            .join(", ");
         let sql = format!(
             "INSERT INTO {} ({names}, {}) VALUES ({marks}, 1) ON CONFLICT DO NOTHING",
             quote(table.name),
             quote(corvid_ast::TableDecl::REVISION_FIELD)
         );
-        let inserted = self.db_registry().execute_queued(&handle, &sql, &values).await.map_err(|e| named(table, e))?;
+        let inserted = self.table_execute(table, &sql, &values).await?;
         let key = key_value(table, &values)?;
-        if inserted.rows_affected == 1 {
+        if inserted == 1 {
             values.push(DbValue::Integer(1));
             return Ok(Ok(values));
         }
-        let existing = self.select_row(&handle, table, key)?.ok_or_else(|| {
+        let existing = self.select_row(table, key).await?.ok_or_else(|| {
             RuntimeError::Other(format!("table `{}`: an insert conflicted with a row that is gone", table.name))
         })?;
         Ok(Err(existing))
@@ -106,65 +150,65 @@ impl Runtime {
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
     /// or `Err` with the row stored now (`None` if it was deleted).
     async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
-        let handle = self.table_handle(table)?;
         let revision = revision_of(table, &row)?;
         let (columns, mut values) = split_revision(table, row)?;
         let key = key_value(table, &values)?;
+        let mark = |i: usize| table.engine.mark(i + 1, table.kinds[i], &values[i]);
         let assignments = columns
             .iter()
             .enumerate()
             .filter(|(_, c)| *c != table.key)
-            .map(|(i, c)| format!("{} = ?{}", quote(c), i + 1))
+            .map(|(i, c)| format!("{} = {}", quote(c), mark(i)))
             .collect::<Vec<_>>()
             .join(", ");
-        let key_mark = columns.iter().position(|c| *c == table.key).map(|i| i + 1).unwrap_or(1);
+        let key_mark = mark(key_index(table)?);
+        let revision_mark = table.engine.count_mark(values.len() + 1);
         let revision_column = quote(corvid_ast::TableDecl::REVISION_FIELD);
         let set = if assignments.is_empty() { String::new() } else { format!("{assignments}, ") };
         let sql = format!(
-            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {} = ?{key_mark} AND {revision_column} = ?{}",
+            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {} = {key_mark} AND {revision_column} = {revision_mark}",
             quote(table.name),
             quote(table.key),
-            values.len() + 1
         );
         let mut params = values.clone();
         params.push(DbValue::Integer(revision));
-        let updated = self.db_registry().execute_queued(&handle, &sql, &params).await.map_err(|e| named(table, e))?;
-        if updated.rows_affected == 1 {
+        let updated = self.table_execute(table, &sql, &params).await?;
+        if updated == 1 {
             values.push(DbValue::Integer(revision + 1));
             return Ok(Ok(values));
         }
-        Ok(Err(self.select_row(&handle, table, key)?))
+        Ok(Err(self.select_row(table, key).await?))
     }
 
     /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Err` with
     /// the row stored now (`None` if it is already gone).
     async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
-        let handle = self.table_handle(table)?;
         let revision = revision_of(table, &row)?;
         let key = key_value(table, &row)?;
         let sql = format!(
-            "DELETE FROM {} WHERE {} = ?1 AND {} = ?2",
+            "DELETE FROM {} WHERE {} = {} AND {} = {}",
             quote(table.name),
             quote(table.key),
-            quote(corvid_ast::TableDecl::REVISION_FIELD)
+            table.engine.mark(1, table.kinds[key_index(table)?], &key),
+            quote(corvid_ast::TableDecl::REVISION_FIELD),
+            table.engine.count_mark(2),
         );
-        let deleted = self
-            .db_registry()
-            .execute_queued(&handle, &sql, &[key.clone(), DbValue::Integer(revision)])
-            .await
-            .map_err(|e| named(table, e))?;
-        if deleted.rows_affected == 1 {
+        let deleted = self.table_execute(table, &sql, &[key.clone(), DbValue::Integer(revision)]).await?;
+        if deleted == 1 {
             return Ok(Ok(row));
         }
-        Ok(Err(self.select_row(&handle, table, key)?))
+        Ok(Err(self.select_row(table, key).await?))
     }
 
-    fn select_row(&self, handle: &DbHandleInner, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
-        let names = table.columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
-        let sql = format!("SELECT {names} FROM {} WHERE {} = ?1", quote(table.name), quote(table.key));
-        let rows = self.db_registry().query(handle.handle_id, &sql, &[key]).map_err(|e| named(table, e))?;
-        let Some(cells) = rows.rows.into_iter().next() else { return Ok(None) };
-        Ok(Some(ordered_row(table, cells)))
+    async fn select_row(&self, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} = {}",
+            table.engine.select_list(table),
+            quote(table.name),
+            quote(table.key),
+            table.engine.mark(1, table.kinds[key_index(table)?], &key),
+        );
+        Ok(self.table_select(table, &sql, &[key]).await?.into_iter().next())
     }
 }
 
@@ -198,13 +242,16 @@ fn revision_of(table: &TableRef<'_>, row: &Row) -> Result<i64, RuntimeError> {
     }
 }
 
-fn key_value(table: &TableRef<'_>, row: &[DbValue]) -> Result<DbValue, RuntimeError> {
-    let index = table
+fn key_index(table: &TableRef<'_>) -> Result<usize, RuntimeError> {
+    table
         .columns
         .iter()
         .position(|c| c == table.key)
-        .ok_or_else(|| RuntimeError::Other(format!("table `{}` has no key column `{}`", table.name, table.key)))?;
-    row.get(index)
+        .ok_or_else(|| RuntimeError::Other(format!("table `{}` has no key column `{}`", table.name, table.key)))
+}
+
+fn key_value(table: &TableRef<'_>, row: &[DbValue]) -> Result<DbValue, RuntimeError> {
+    row.get(key_index(table)?)
         .cloned()
         .ok_or_else(|| RuntimeError::Other(format!("table `{}`: a row has no key value", table.name)))
 }

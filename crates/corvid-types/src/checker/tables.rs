@@ -10,12 +10,14 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
 use crate::table_ops::{table_method_target, QueryCondition, TableOp};
 use crate::types::Type;
-use corvid_ast::{DatabaseDecl, Decl, Expr, Ident, Span, TableDecl, TypeRef, Visibility};
+use corvid_ast::{DatabaseDecl, DatabaseLocation, Decl, Expr, Ident, Span, TableDecl, TypeRef, Visibility};
 
 /// The engines the runtime runs today.
-const ENGINES: &[&str] = &["sqlite"];
+const ENGINES: &[&str] = &["sqlite", "postgres"];
 /// Engines on the roadmap, refused with a pointer to their slice.
-const PLANNED_ENGINES: &[&str] = &["postgres", "mysql"];
+const PLANNED_ENGINES: &[&str] = &["mysql"];
+/// How a networked engine's connection is encrypted.
+const TLS_MODES: &[&str] = &["required", "disabled"];
 
 impl<'a> Checker<'a> {
     pub(super) fn check_table(&mut self, table: &TableDecl) {
@@ -139,6 +141,7 @@ impl<'a> Checker<'a> {
                 span,
             ));
         }
+        self.check_database_connection(database);
         if database.tables.is_empty() {
             self.errors.push(TypeError::new(
                 TypeErrorKind::DatabaseSettingRequired {
@@ -156,6 +159,55 @@ impl<'a> Checker<'a> {
                     table.span,
                 ));
             }
+        }
+    }
+
+    /// A networked engine's connection string comes from the
+    /// environment and its encryption is stated; a file has neither.
+    fn check_database_connection(&mut self, database: &DatabaseDecl) {
+        let name = database.name.name.clone();
+        let invalid = |setting: &str, message: &str, span| {
+            TypeError::new(
+                TypeErrorKind::DatabaseSettingInvalid {
+                    database: name.clone(),
+                    setting: setting.into(),
+                    message: message.into(),
+                },
+                span,
+            )
+        };
+        match database.engine.as_ref().map(|e| e.name.as_str()) {
+            Some("postgres") => {
+                if matches!(database.location, Some(DatabaseLocation::Path(_))) {
+                    self.errors.push(invalid(
+                        "location",
+                        "is written in source, but a Postgres connection string usually holds a password; read it from the environment with `env(\"NAME\")`",
+                        database.span,
+                    ));
+                }
+                match &database.tls {
+                    None => self.errors.push(TypeError::new(
+                        TypeErrorKind::DatabaseSettingRequired {
+                            database: name.clone(),
+                            setting: "tls".into(),
+                            allowed: "`required` or `disabled`".into(),
+                        },
+                        database.span,
+                    )),
+                    Some(tls) if TLS_MODES.contains(&tls.name.as_str()) => {}
+                    Some(tls) => self.errors.push(invalid(
+                        "tls",
+                        &format!("is `{}`; it is `required` or `disabled`", tls.name),
+                        tls.span,
+                    )),
+                }
+            }
+            Some("sqlite") => {
+                if let Some(tls) = &database.tls {
+                    self.errors.push(invalid("tls", "is set, but a SQLite database is a file and has no connection to encrypt", tls.span));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -454,8 +506,8 @@ agent seen(shelf: Shelf) -> Int:
     fn a_table_must_live_in_exactly_one_running_database() {
         let outside = messages("table Shelf:\n    key shelf: Int\n");
         assert!(outside.iter().any(|m| m.contains("not listed in any `database` block")), "{outside:#?}");
-        let planned = messages("database library:\n    engine: postgres\n    location: \"x\"\n    tables: Shelf\n\ntable Shelf:\n    key shelf: Int\n");
-        assert!(planned.iter().any(|m| m.contains("names engine `postgres`")), "{planned:#?}");
+        let planned = messages("database library:\n    engine: mysql\n    location: \"x\"\n    tables: Shelf\n\ntable Shelf:\n    key shelf: Int\n");
+        assert!(planned.iter().any(|m| m.contains("names engine `mysql`")), "{planned:#?}");
     }
 
     #[test]
@@ -464,6 +516,21 @@ agent seen(shelf: Shelf) -> Int:
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
+    }
+
+    #[test]
+    fn a_postgres_connection_is_read_from_the_environment_and_its_tls_stated() {
+        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n{settings}\n    tables: T\n\ntable T:\n    key id: Int\n"));
+        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: required").is_empty());
+        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: disabled").is_empty());
+        let literal = block("    location: \"postgres://user:secret@db/app\"\n    tls: required");
+        assert!(literal.iter().any(|m| m.contains("read it from the environment")), "{literal:#?}");
+        let silent = block("    location: env(\"DATABASE_URL\")");
+        assert!(silent.iter().any(|m| m.contains("does not say `tls`")), "{silent:#?}");
+        let unknown = block("    location: env(\"DATABASE_URL\")\n    tls: maybe");
+        assert!(unknown.iter().any(|m| m.contains("`required` or `disabled`")), "{unknown:#?}");
+        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tls: required\n    tables: T\n\ntable T:\n    key id: Int\n");
+        assert!(file.iter().any(|m| m.contains("no connection to encrypt")), "{file:#?}");
     }
 
     #[test]

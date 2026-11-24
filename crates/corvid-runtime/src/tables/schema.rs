@@ -2,6 +2,7 @@
 //! type maps to, the SQL type each kind declares, and the
 //! `CREATE TABLE` statement for a declared table.
 
+use super::TableEngine;
 use corvid_types::Type;
 
 /// How a field's values are stored.
@@ -95,15 +96,26 @@ pub struct TableSchema {
     pub renamed: Vec<(String, String)>,
     /// Stored columns declared `retired`.
     pub retired: Vec<String>,
+    /// The engine its database runs on.
+    pub engine: TableEngine,
 }
 
-/// The `CREATE TABLE` statement for a declared table.
+/// The `CREATE TABLE` statement for a declared table, on SQLite.
 pub fn create_table_sql(table: &TableSchema) -> String {
-    create_table_named(table, &table.name)
+    create_table_sql_on(table, TableEngine::Sqlite)
+}
+
+/// The `CREATE TABLE` statement for a declared table on `engine`.
+pub fn create_table_sql_on(table: &TableSchema, engine: TableEngine) -> String {
+    create_table_named_on(table, &table.name, engine)
 }
 
 /// [`create_table_sql`] under another name, for rebuilding a table.
 pub(super) fn create_table_named(table: &TableSchema, name: &str) -> String {
+    create_table_named_on(table, name, TableEngine::Sqlite)
+}
+
+fn create_table_named_on(table: &TableSchema, name: &str, engine: TableEngine) -> String {
     let columns = table
         .columns
         .iter()
@@ -111,7 +123,7 @@ pub(super) fn create_table_named(table: &TableSchema, name: &str) -> String {
             let (kind, nullable) = column_kind(ty);
             let key = if *name == table.key { " PRIMARY KEY" } else { "" };
             let null = if nullable { "" } else { " NOT NULL" };
-            format!("    {} {}{key}{null}", quote(name), kind.sql_type())
+            format!("    {} {}{key}{null}", quote(name), engine.column_type(kind))
         })
         .collect::<Vec<_>>()
         .join(",\n");

@@ -653,7 +653,7 @@ fn db_value_to_sql_value(value: &DbValue) -> rusqlite::types::Value {
 }
 
 #[derive(Debug)]
-enum PostgresParam {
+pub(crate) enum PostgresParam {
     Null(Option<String>),
     Integer(i64),
     Float(f64),
@@ -683,7 +683,7 @@ impl postgres::types::ToSql for PostgresParam {
     postgres::types::to_sql_checked!();
 }
 
-fn db_value_to_postgres_param(value: &DbValue) -> PostgresParam {
+pub(crate) fn db_value_to_postgres_param(value: &DbValue) -> PostgresParam {
     match value {
         DbValue::Null => PostgresParam::Null(None),
         DbValue::Integer(value) => PostgresParam::Integer(*value),
@@ -693,7 +693,7 @@ fn db_value_to_postgres_param(value: &DbValue) -> PostgresParam {
     }
 }
 
-fn postgres_cell_value(row: &postgres::Row, name: &str) -> DbValue {
+pub(crate) fn postgres_cell_value(row: &postgres::Row, name: &str) -> DbValue {
     if let Ok(value) = row.try_get::<_, Option<String>>(name) {
         return value.map(DbValue::Text).unwrap_or(DbValue::Null);
     }

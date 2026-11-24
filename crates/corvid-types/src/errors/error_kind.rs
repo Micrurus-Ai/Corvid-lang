@@ -421,6 +421,8 @@ pub enum TypeErrorKind {
     TableInTwoDatabases { table: String, first: String, second: String },
     /// B09 — a `database` block omits a setting that has no default.
     DatabaseSettingRequired { database: String, setting: String, allowed: String },
+    /// B09 P4 — a database setting whose value this engine does not allow.
+    DatabaseSettingInvalid { database: String, setting: String, message: String },
     /// B09 — an engine the runtime cannot run yet, or does not know.
     DatabaseEngineUnavailable { database: String, engine: String, available: String },
     /// B09 — a `database` block lists a name that is not a table.
@@ -894,6 +896,9 @@ impl TypeErrorKind {
             Self::DatabaseSettingRequired { database, setting, allowed } => {
                 format!("database `{database}` does not say `{setting}`; it must be one of {allowed}")
             }
+            Self::DatabaseSettingInvalid { database, setting, message } => {
+                format!("database `{database}`: `{setting}` {message}")
+            }
             Self::DatabaseEngineUnavailable { database, engine, available } => {
                 format!("database `{database}` names engine `{engine}`; the engines that run today are {available}")
             }
@@ -1309,6 +1314,9 @@ impl TypeErrorKind {
             Self::TableInTwoDatabases { .. } => Some("list each table in exactly one `database` block".into()),
             Self::DatabaseSettingRequired { .. } => Some(
                 "where data lives is a decision the source states: write the setting in the `database` block".into(),
+            ),
+            Self::DatabaseSettingInvalid { .. } => Some(
+                "a Postgres connection string usually holds a password, so it comes from `env(\"NAME\")`, and its encryption is stated with `tls: required` or `tls: disabled`; a SQLite database is a file and has no connection to encrypt".into(),
             ),
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),

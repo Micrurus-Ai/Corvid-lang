@@ -157,7 +157,9 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] P1b. Table operations are recorded in the trace as `table:<Table>.<op>` calls, and a replay serves reads and write outcomes from it without opening the database.
 - [x] P2. Typed queries (`where`, `order_by`, `descending`, `take`, `all`), refused at compile time when a condition cannot run in the database. A chain runs as one parameterized `SELECT`, ordered by key when nothing else decides, and is recorded and replayed as `table:<Table>.query`.
 - [x] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`). New `Option` fields add a column; exact type changes rebuild the table inside the migration's transaction; undeclared drops, new required fields, lossy type changes and key changes are refused with what to do instead. The planner runs each plan on the migrated schema before writing it.
-- [ ] P4. Postgres, with a query suite every engine runs.
+- [x] P4a. Tables on Postgres: `engine: postgres` with the connection string from `env(...)` and a required `tls: required | disabled` declaration; every operation and query runs through an engine dialect on an async connection, with TLS verified against the web roots. The table and query suites run unchanged on SQLite and, when `CORVID_TEST_POSTGRES_URL` is set, on Postgres.
+- [ ] P4b. `corvid migrate plan` for Postgres, planning against a scratch database the developer names.
+- [ ] Connection pooling for Postgres tables, with B19's concurrency work (P4a holds one connection per database).
 - [ ] P5. MySQL.
 - [ ] P6. Native target.
 - [ ] P7. Port `examples/reading_list` from hand-written SQL to tables.
