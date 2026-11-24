@@ -125,7 +125,8 @@ def check_stream_cleanup(cli, installed, env, channel, http_only):
                     page.get_by_role("button", name="Start").click()
                     expect(page.get_by_role("status")).to_have_text("Streaming")
                     check_locked()
-                    page.get_by_role("link", name="Leave").click()
+                    # Activate the native link without waiting for the streaming layout to settle.
+                    page.get_by_role("link", name="Leave").press("Enter")
                     expect(page.get_by_text("Left stream")).to_be_visible()
                     wait_for_writer(db)
                     browser.close()

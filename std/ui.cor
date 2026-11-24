@@ -313,6 +313,39 @@ public fn page(title: String, content: List<View>) -> String:
 public fn page_in_language(language: String, title: String, content: List<View>) -> String:
     return document_page(" lang=\"" + escaped(language) + "\"", title, "", main_landmark(content))
 
+# Full-document navigation uses the browser's history, scroll and link handling.
+public fn navigation_page(language: String, title: String, description: String, content: List<View>) -> String:
+    metadata = "<meta name=\"description\" content=\"" + escaped(description) + "\">"
+    restore_focus = """<script>
+addEventListener('focusin', event => {
+    const element = event.target;
+    let focus = null;
+    if (element.id) focus = {id: element.id};
+    else if (element instanceof HTMLAnchorElement) focus = {href: element.href};
+    history.replaceState({...history.state, corvidFocus: focus}, '');
+});
+addEventListener('pageshow', event => {
+    const navigation = performance.getEntriesByType('navigation')[0];
+    if (!event.persisted && navigation?.type !== 'back_forward') return;
+    const focus = history.state?.corvidFocus;
+    if (!focus) return;
+    let element;
+    if (focus.id) {
+        element = document.getElementById(focus.id);
+    } else if (focus.href) {
+        const links = Array.from(document.links).filter(link => link.href === focus.href);
+        if (links.length === 1) element = links[0];
+    }
+    element?.focus({preventScroll: true});
+});
+</script>"""
+    return document_page(" lang=\"" + escaped(language) + "\"", title, metadata + restore_focus, main_landmark(content))
+
+# Supply a trusted application URL for a moved document.
+public fn redirect_page(language: String, title: String, destination: String) -> String:
+    refresh = "<meta http-equiv=\"refresh\" content=\"0;url=" + escaped(destination) + "\">"
+    return document_page(" lang=\"" + escaped(language) + "\"", title, refresh, main_landmark([link(title, destination)]))
+
 public fn page_with_landmarks(language: String, title: String, header: List<View>, content: List<View>, footer: List<View>) -> String:
     body = "<header>" + children(header) + "</header>" + main_landmark(content) + "<footer>" + children(footer) + "</footer>"
     return document_page(" lang=\"" + escaped(language) + "\"", title, "", body)
