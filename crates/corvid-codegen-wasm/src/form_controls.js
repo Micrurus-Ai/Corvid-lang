@@ -347,6 +347,8 @@ function bindLocalSelection(region) {
     if (!properties[field].enum?.includes(variant)) throw Error("Invalid choice condition for " + field);
     return {node, field, expected: variant};
   });
+  const projectionModel = typeof registerProjectionModel === "function"
+    ? registerProjectionModel(region, properties) : null;
   let state;
   function select(values) {
     if (!values || Array.isArray(values) || typeof values !== "object" ||
@@ -369,6 +371,7 @@ function bindLocalSelection(region) {
       next[name] = value;
     }
     state = Object.freeze(next);
+    projectionModel?.update(state);
     for (const {node, field, expected} of conditions) node.hidden = state[field] !== expected;
     for (const control of controls) {
       const value = state[boundName(control)];

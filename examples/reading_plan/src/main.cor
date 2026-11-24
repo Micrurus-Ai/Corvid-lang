@@ -1,0 +1,29 @@
+import "std:ui" as ui
+
+type ReadingPlan:
+    pages: Int where between(0, 12)
+    even_only: Bool
+    newest_first: Bool
+
+fn plan_editor(initial: ReadingPlan) -> ui.View:
+    browser state plan = initial
+    controls = ui.fieldset("Plan settings", [
+        ui.field("Pages", bind plan.pages),
+        ui.checkbox("Review even pages only", bind plan.even_only),
+        ui.checkbox("Newest first", bind plan.newest_first)
+    ])
+    summary = ui.fieldset("Reading time", [
+        ui.text("Minutes"), ui.derived_value("reading_minutes", [bind plan.pages]),
+        ui.text("Sessions"), ui.derived_value("review_sessions", [bind plan.pages]),
+        ui.conditional_view("needs_break", [bind plan.pages, bind plan.even_only], [ui.text("Schedule a break")])
+    ])
+    fields = [bind plan.pages, bind plan.even_only, bind plan.newest_first]
+    notes = ui.projected_rows("Page notes", "visible_pages", "page_number", fields, [
+        ui.row_key(), ui.text_field("Note", "note", "")
+    ])
+    return ui.local_selection(plan, controls, ui.stack([summary, notes]))
+
+server reading_plan:
+    route GET "/" -> html:
+        initial = ReadingPlan(3, false, false)
+        return ui.interactive_page("Reading plans", [plan_editor(initial), plan_editor(initial)])
