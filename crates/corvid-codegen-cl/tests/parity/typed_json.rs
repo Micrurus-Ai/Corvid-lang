@@ -175,6 +175,54 @@ agent main() -> Int:
 }
 
 #[test]
+fn a_decoded_record_encodes_to_the_same_text_on_both_tiers() {
+    let text = assert_parity_text(&format!(
+        r#"
+agent main() -> String:
+    return match Order.from_json("{ORDER_JSON}"):
+        Ok(order) -> order.to_json()
+        Err(problem) -> problem.message
+"#
+    ));
+    assert_eq!(
+        text,
+        r#"{"gift":true,"id":7,"lines":[{"quantity":2,"sku":"a"},{"quantity":3,"sku":"café"}],"note":null,"rating":4,"tags":{"x":1,"y":2},"weight":2.5}"#
+    );
+}
+
+#[test]
+fn scalars_lists_sums_options_and_results_encode_alike() {
+    let text = assert_parity_text(
+        r#"
+agent shipped() -> Shipment:
+    return Shipped("post", 3)
+
+agent maybe(flag: Bool) -> Option<Int>:
+    if flag:
+        return Some(7)
+    return None
+
+agent outcome(flag: Bool) -> Outcome:
+    if flag:
+        return Ok(40)
+    return Err("late")
+
+agent main() -> String:
+    numbers = [1, 2, 3]
+    count = 7
+    quoted = "a\"b"
+    flag = true
+    weight = 2.5
+    return count.to_json() + " " + quoted.to_json() + " " + flag.to_json() + " " + weight.to_json() + " " + numbers.to_json() + " " + shipped().to_json() + " " + maybe(true).to_json() + " " + maybe(false).to_json() + " " + outcome(true).to_json() + " " + outcome(false).to_json()
+"#,
+    );
+    assert_eq!(
+        text,
+        r#"7 "a\"b" true 2.5 [1,2,3] {"fields":["post",3],"tag":"variant","type":"Shipment","variant":"Shipped"} 7 null {"ok":40,"tag":"ok"} {"err":"late","tag":"err"}"#
+    );
+}
+
+#[test]
 fn lists_and_results_decode_at_the_top_level() {
     assert_parity(
         &format!(

@@ -4,6 +4,28 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - `value.to_json()` compiles to native code
+
+Native programs now encode with the shared type-directed encoder: the
+runtime reads native values through `ValueReader`, using the plan the
+compiler already embeds for decoding, whose shape table also says which
+options are boxed. Parity tests compare the encoded text of records,
+scalars, lists, sum types, options and results on both tiers.
+
+Decisions:
+
+- **One plan per type serves both directions.** A program that only
+  encodes declares no `JsonError`, so the plan asks for the error
+  record's typeinfo only when the program has one.
+- **`Grounded` stays on the interpreter.** Native code represents a
+  `Grounded<T>` as its `T` and keeps no sources, so it cannot produce
+  the `{"value", "sources"}` envelope; the tier picker sends such
+  programs to the interpreter rather than drop the sources.
+- **`to_json` on a `JsonError` stays on the interpreter too.** The
+  driver checks programs before `JsonError` becomes a native record and
+  the code generator after; excluding the record from the native JSON
+  predicate keeps the two answers the same.
+
 ## 2026-11-24 - `to_json` follows the type
 
 The public JSON encoder moved into `corvid-public-json` beside the

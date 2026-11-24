@@ -1,19 +1,24 @@
-//! `T.from_json(text)` and `T.from_json_strict(text)` in native code.
+//! `T.from_json(text)`, `T.from_json_strict(text)` and `value.to_json()`
+//! in native code.
 //!
-//! The decoding itself is the shared public JSON decoder, run by the
-//! runtime's `corvid_json_decode_typed`. This module embeds, once per
-//! target type, the decode plan the runtime follows (the target, the
-//! declarations it reaches, and which typeinfo each allocated shape
-//! uses), then allocates the `Result<T, JsonError>` wrapper and lets
-//! the runtime fill its payload.
+//! Both directions are the shared public JSON mapping, run by the
+//! runtime's `corvid_json_decode_typed` and `corvid_json_encode_typed`.
+//! This module embeds, once per type, the plan the runtime follows (the
+//! type, the declarations it reaches, and which typeinfo each shape
+//! uses, which also tells the encoder which options are boxed). A
+//! decode allocates the `Result<T, JsonError>` wrapper and lets the
+//! runtime fill its payload; an encode passes the value and receives
+//! the text.
 
 use super::*;
 use corvid_public_json::{builder_shapes, reachable_types, DecodePlan, Shape};
 use std::collections::{BTreeMap, HashSet};
 
-/// Whether native code can decode JSON into `target`: every shape the
-/// decoder builds for it has a native representation.
-pub fn native_json_decode_target(target: &Type, types: &[corvid_ir::IrType]) -> bool {
+/// Whether native code can decode JSON into `target` and encode it:
+/// every shape the mapping builds or reads for it has a native
+/// representation. `Grounded` is excluded because native code keeps no
+/// provenance to encode, and `JsonValue` has no native form.
+pub fn native_public_json_type(target: &Type, types: &[corvid_ir::IrType]) -> bool {
     let by_id: HashMap<DefId, &corvid_ir::IrType> = types.iter().map(|ty| (ty.id, ty)).collect();
     decodable(target, &by_id, &mut HashSet::new())
 }
@@ -27,6 +32,10 @@ fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut H
         Type::Result(ok, err) => {
             is_native_result_type(ty) && decodable(ok, types, seen) && decodable(err, types, seen)
         }
+        // The driver checks programs before `JsonError` becomes a record
+        // and this backend after, so the record is excluded here too:
+        // both see it as a type with no native JSON mapping.
+        Type::Struct(id) if *id == corvid_types::JSON_ERROR_TYPE_ID => false,
         Type::Struct(id) | Type::ImportedStruct(corvid_types::types::ImportedStructType { def_id: id, .. }) => {
             let Some(decl) = types.get(id) else { return false };
             if !seen.insert(*id) {
@@ -58,7 +67,7 @@ pub(super) fn lower_json_decode(
         ));
     };
     let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
-    if !native_json_decode_target(target, &types) {
+    if !native_public_json_type(target, &types) {
         return Err(CodegenError::not_supported(
             format!(
                 "decoding JSON into `{}` - a type in it has no native form; use the interpreter tier (`corvid run --tier interp`)",
@@ -67,7 +76,7 @@ pub(super) fn lower_json_decode(
             expr.span,
         ));
     }
-    let (plan, plan_len, table) = decode_plan(module, runtime, target, expr.span)?;
+    let (plan, plan_len, table) = json_plan(module, runtime, target, expr.span)?;
 
     let empty = builder.ins().iconst(I64, 0);
     let result = emit_result_wrapper_value(builder, module, runtime, &expr.ty, empty, target, RESULT_TAG_OK, expr.span)?;
@@ -85,8 +94,43 @@ pub(super) fn lower_json_decode(
     Ok(result)
 }
 
+/// Lower `value.to_json()`; `value` is the receiver, lowered as a slot.
+pub(super) fn lower_json_encode(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    receiver_ty: &Type,
+    value: ClValue,
+    span: Span,
+) -> Result<ClValue, CodegenError> {
+    let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
+    if !native_public_json_type(receiver_ty, &types) {
+        return Err(CodegenError::not_supported(
+            format!(
+                "encoding `{}` as JSON - a type in it has no native form; use the interpreter tier (`corvid run --tier interp`)",
+                receiver_ty.display_name()
+            ),
+            span,
+        ));
+    }
+    let slot = match builder.func.dfg.value_type(value) {
+        I8 => builder.ins().uextend(I64, value),
+        F64 => builder.ins().bitcast(I64, MemFlags::new(), value),
+        _ => value,
+    };
+    let (plan, plan_len, table) = json_plan(module, runtime, receiver_ty, span)?;
+    let plan = module.declare_data_in_func(plan, builder.func);
+    let plan = builder.ins().symbol_value(I64, plan);
+    let plan_len = builder.ins().iconst(I64, plan_len);
+    let table = module.declare_data_in_func(table, builder.func);
+    let table = builder.ins().symbol_value(I64, table);
+    let encode = module.declare_func_in_func(runtime.json_encode_typed, builder.func);
+    let call = builder.ins().call(encode, &[slot, plan, plan_len, table]);
+    Ok(builder.inst_results(call)[0])
+}
+
 /// The embedded plan for `target`: its data, length and typeinfo table.
-fn decode_plan(
+fn json_plan(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
     target: &Type,
@@ -99,8 +143,12 @@ fn decode_plan(
     let mut table = Vec::new();
     let mut shapes = BTreeMap::new();
     let mut owning_maps = Vec::new();
-    let error_record = Shape::Record(corvid_types::JSON_ERROR_TYPE_ID);
-    for shape in builder_shapes(target, &types_by_id).into_iter().chain(std::iter::once(error_record)) {
+    // A decode failure allocates a `JsonError` record. Every program that
+    // decodes mentions `JsonError` in its `Result`, so the record is
+    // declared; a program that only encodes needs none.
+    let error_record = Some(Shape::Record(corvid_types::JSON_ERROR_TYPE_ID))
+        .filter(|_| runtime.struct_typeinfos.contains_key(&corvid_types::JSON_ERROR_TYPE_ID));
+    for shape in builder_shapes(target, &types_by_id).into_iter().chain(error_record) {
         let typeinfo = match &shape {
             // A nullable-pointer option has no allocation of its own.
             Shape::Type(option @ Type::Option(_)) if !option_uses_wrapper(option) => continue,

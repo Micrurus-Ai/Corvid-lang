@@ -31,7 +31,7 @@ pub mod result_match;
 
 mod assignment;
 pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
-pub use lowering::native_json_decode_target;
+pub use lowering::native_public_json_type;
 mod json_error_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
