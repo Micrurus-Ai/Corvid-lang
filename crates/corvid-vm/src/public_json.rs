@@ -45,9 +45,7 @@ impl JsonErrorValue for JsonDecodeError {
     }
 }
 
-/// The type id carried by runtime `JsonError` records. `JsonError` is
-/// compiler-known, so it has no declaration id; this one is reserved.
-pub const JSON_ERROR_TYPE_ID: DefId = DefId(u32::MAX);
+pub use corvid_types::JSON_ERROR_TYPE_ID;
 
 /// Decode `json` into a value of type `expected` using the public mapping.
 pub fn decode_public_json(

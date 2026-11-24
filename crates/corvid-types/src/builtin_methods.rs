@@ -309,6 +309,10 @@ pub fn json_error_fields() -> [(&'static str, Type); 4] {
     ]
 }
 
+/// The type id runtime `JsonError` records carry. `JsonError` is
+/// compiler-known, so it has no declaration id; this one is reserved.
+pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX);
+
 /// Look up `T.name(...)` where the receiver is the type `target`
 /// itself rather than a value. Only the JSON decoders are type
 /// methods; whether `target` has a JSON form is checked by the caller,
