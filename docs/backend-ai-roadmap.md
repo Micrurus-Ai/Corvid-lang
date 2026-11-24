@@ -145,12 +145,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] `zone` is a reserved keyword used only after a schedule's cron expression, so a parameter or method cannot be named `zone` and `ZonedTime` reads its zone with `time_zone()`. Make it contextual; a grammar change, so agree it with frontend development.
 - [x] Currency formatting: `amount.format_currency("EUR", "de-DE")` with `Currency` and `Locale` literals checked against Unicode CLDR through ICU4X, `parse_currency` and `parse_locale` for run-time text, and `minor_digits` for declared rounding. Formatting never rounds: an amount with more digits than the currency shows traps. [Formatting money](reference/decimal.md#formatting-money)
 - [ ] Move `icu_experimental` (pinned `=0.7.0`) to ICU4X's stable currency formatter when one ships.
-- [ ] JSON, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs for all five types.
+- [x] JSON for all seven types as their exact text, through one `corvid_public_json::text_scalar` module that the decoder, the encoder, tool and prompt values, prompt schemas, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs all read. A JSON number for a `Decimal` is refused. Clients hold the text as a string, because platform types lose nanoseconds or scale. [JSON mapping](reference/stdlib/json.md)
 - [ ] Native Decimal, with parity tests.
 - [ ] Native Duration, Instant, TimeZone and ZonedTime, with parity tests.
 - [ ] Integer literals beyond `Int`'s range in a `Decimal` slot. Lex integer literals as digits, as float literals now are; until then a larger whole number is written with a point.
 - [ ] A value of type `Int` in a `Float` slot is not converted at run time, so `x: Float = 3` then `x.to_string()` traps with a type mismatch on the interpreter. Found during B06; `Decimal` avoids it by accepting only literals in `Decimal` slots. Insert the conversion at slot sites, as `grounded_coercion_sites` does for grounding, then let `Int` values widen into `Decimal` slots too.
-- [ ] Decimal, Instant, Duration and ZonedTime as B09 table columns. Coordinate with the main line after the JSON slice.
+- [ ] The B06 types as B09 table columns, owned by the main line: the storage mapping decides `where` and `order_by` semantics (exact decimal ordering, nanosecond precision against Postgres microseconds). Reuse the canonical encodings in `corvid-decimal`, `corvid-time` and `corvid-currency`.
 - [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
 - [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
 

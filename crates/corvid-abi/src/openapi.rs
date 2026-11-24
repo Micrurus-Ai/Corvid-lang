@@ -313,6 +313,10 @@ fn scalar_schema(name: &str) -> Option<Value> {
         "Int" => json!({ "type": "integer" }),
         "Float" => json!({ "type": "number" }),
         "String" | "TraceId" => json!({ "type": "string" }),
+        // B06 — the shared schema for each exact-text type.
+        name if corvid_public_json::text_scalar::is_name(name) => {
+            return corvid_public_json::text_scalar::json_schema_by_name(name)
+        }
         "Bool" => json!({ "type": "boolean" }),
         "Nothing" => json!({ "type": "null" }),
         // The compiler-known `JsonError` record has no declaration to

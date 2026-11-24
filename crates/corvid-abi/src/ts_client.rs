@@ -336,6 +336,9 @@ fn ts_type(name: &str) -> String {
     match name {
         "Int" | "Float" => return "number".to_string(),
         "String" | "TraceId" => return "string".to_string(),
+        // B06 — exact canonical text; JavaScript has no exact decimal
+        // or nanosecond type, so a number or `Date` would lose data.
+        name if corvid_public_json::text_scalar::is_name(name) => return "string".to_string(),
         "Bool" => return "boolean".to_string(),
         "Nothing" => return "null".to_string(),
         // The compiler-known `JsonError` record, written out inline.

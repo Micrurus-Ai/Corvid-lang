@@ -12,6 +12,7 @@ corvid-types = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-guarantees = { workspace = true }
 corvid-prompt-format = { workspace = true }
+corvid-public-json = { workspace = true }
 serde ={ workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = "0.10"

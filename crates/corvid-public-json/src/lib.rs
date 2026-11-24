@@ -20,6 +20,7 @@
 //! | sum type               | `{"tag": "variant", "type": …, "variant": …, "fields": [...]}` |
 //! | `Grounded<T>`          | `{"value": T, "sources": [...]}` (encode only)    |
 //! | `JsonValue`            | the JSON itself                                   |
+//! | `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`, `Locale` | a string in the type's exact canonical text; see [`text_scalar`] |
 //!
 //! Decoding never fabricates provenance: a `Grounded<T>` target is
 //! rejected, because JSON text cannot prove where a value came from.
@@ -33,6 +34,7 @@ mod decode;
 mod encode;
 mod error;
 pub mod plan;
+pub mod text_scalar;
 
 pub use decode::{decode, decode_text, ValueBuilder};
 pub use encode::{encode, encode_text, ValueReader};

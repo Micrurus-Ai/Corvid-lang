@@ -150,6 +150,9 @@ fn kotlin_type(ty: &TypeName) -> String {
         ("Int", 0) => "Long".into(),
         ("Float", 0) => "Double".into(),
         ("String" | "TraceId", 0) => "String".into(),
+        // B06 — exact canonical text, the one mapping every SDK can hold
+        // without losing digits, scale or nanoseconds.
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "String".into(),
         ("Bool", 0) => "Boolean".into(),
         ("Nothing", 0) => "Unit".into(),
         ("JsonValue", 0) => "JsonElement".into(),
@@ -170,6 +173,7 @@ fn serializer(ty: &TypeName) -> String {
         ("Int", 0) => "Long.serializer()".into(),
         ("Float", 0) => "Double.serializer()".into(),
         ("String" | "TraceId", 0) => "String.serializer()".into(),
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "String.serializer()".into(),
         ("Bool", 0) => "Boolean.serializer()".into(),
         ("Nothing", 0) => "CorvidNothingSerializer".into(),
         ("JsonValue", 0) => "JsonElement.serializer()".into(),

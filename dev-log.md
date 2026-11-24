@@ -4,6 +4,28 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - JSON and contract forms for the B06 types (B06, fifth slice)
+
+All seven B06 types now cross every JSON boundary as their exact
+canonical text: `"19.90"`, `"PT1H30M"`, RFC 3339 and RFC 9557 times,
+IANA zones, ISO 4217 codes and BCP 47 tags. A new
+`corvid_public_json::text_scalar` module holds the list, the parsers,
+the text forms and the JSON Schemas, and every consumer reads it: the
+public decoder and encoder, tool and prompt values on the interpreter
+(whose per-type code from slices 2 to 4 is gone), prompt schemas,
+OpenAPI, the TypeScript client and the three SDKs. A JSON number for a
+`Decimal` is refused with the reason, in Corvid and in the generated
+Python. Routes, stores and `to_json` accept the types; native code
+still refuses them at compile time.
+
+The proposal had the SDKs use platform types. Checking each one
+showed Python's `datetime` and `timedelta` and Swift's `Date` drop
+nanoseconds, and Swift's `Decimal` drops trailing zeros, so every
+client keeps the exact text as a string, as TypeScript must anyway.
+Table columns stay refused: the main line owns their storage mapping
+because it decides query comparison, and it reuses the canonical
+encodings this slice names.
+
 ## 2026-11-24 - Currency formatting (B06, fourth slice)
 
 `amount.format_currency("EUR", "de-DE")` writes money from Unicode

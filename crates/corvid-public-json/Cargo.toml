@@ -10,4 +10,7 @@ corvid-ast = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
+corvid-currency = { workspace = true }
+corvid-time = { workspace = true }
+corvid-decimal = { workspace = true }
 serde_json = { workspace = true }

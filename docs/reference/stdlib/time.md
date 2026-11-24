@@ -96,12 +96,13 @@ traps if a result leaves the range.
 | `duration.whole_hours()`, `whole_minutes()`, `whole_seconds()`, `whole_milliseconds()`, `whole_microseconds()`, `whole_nanoseconds()` | `Int`, truncated toward zero |
 | `duration.abs()` | the length without its sign |
 
-A tool or prompt can take and return `Instant` and `Duration`. They
-cross as RFC 3339 and ISO 8601 text, and a prompt's schema tells the
-model which format to use. Routes, stores, tables, connectors and
-`to_json` refuse them until B06's JSON slice publishes the same text
-forms in the application contract. Native builds refuse them until
-their native slice.
+Every JSON boundary carries `Instant` and `Duration`, and the zone
+types below, as their exact text: tools, prompts, routes, stores,
+`to_json` and `from_json`. OpenAPI publishes `format: date-time` and
+`format: duration`, a prompt's schema tells the model which format to
+use, and the TypeScript client and the SDKs hold the text as a string.
+Table columns of these types wait for B09 to map their storage.
+Native builds refuse them until their native slice.
 
 A duration literal, `30 seconds`, is proposed and waits for agreement
 with frontend development. Until it lands, durations come from

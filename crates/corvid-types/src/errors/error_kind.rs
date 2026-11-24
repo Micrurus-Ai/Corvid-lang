@@ -640,7 +640,7 @@ impl TypeErrorKind {
                 format!("this operator does not combine `{left}` and `{right}`")
             }
             Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
-                "a `{type_name}` cannot appear in {boundary} yet: its JSON form arrives with B06's JSON slice"
+                "a `{type_name}` cannot be {boundary} yet: its storage mapping, which decides how queries compare it, arrives with B09"
             ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
@@ -1098,15 +1098,9 @@ impl TypeErrorKind {
             Self::UnknownCurrencyOrLocale { .. } => Some(
                 "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
             ),
-            Self::PendingJsonFormAtBoundary { type_name, .. } => Some(match type_name.as_str() {
-                "Decimal" => "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
-                "Duration" => "carry it as a String with `span.to_string()` and read it back with `parse_duration()`".into(),
-                "TimeZone" => "carry it as a String with `zone.to_string()` and read it back with `parse_time_zone()`".into(),
-                "Currency" => "carry it as a String with `currency.to_string()` and read it back with `parse_currency()`".into(),
-                "Locale" => "carry it as a String with `locale.to_string()` and read it back with `parse_locale()`".into(),
-                "ZonedTime" => "carry it as a String with `at.to_string()` and read it back with `parse_zoned_time()`".into(),
-                _ => "carry it as a String with `at.to_string()` and read it back with `parse_instant()`".into(),
-            }),
+            Self::PendingJsonFormAtBoundary { .. } => Some(
+                "store its exact text with `to_string()` in a `String` column and read it back with the matching `parse_` method".into(),
+            ),
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),

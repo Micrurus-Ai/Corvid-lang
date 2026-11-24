@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Decimals, times, zones, currencies and locales cross JSON as their exact text: a route returning an `Invoice` with `total: Decimal` sends `"19.90"`, and OpenAPI, the TypeScript client and the SDKs all treat it as a string. Send decimals to a Corvid route as strings; a JSON number is refused so no digit is lost. Table columns of these types are not available yet. [JSON mapping](docs/reference/stdlib/json.md)
+
 Format money with `total.format_currency("EUR", "de-DE")`: the currency and locale are checked against CLDR when the program compiles, and there is no default locale. Formatting never rounds, so round first with `total.round_half_even(euro.minor_digits())`; an amount with too many digits traps. Codes and tags from users go through `parse_currency()` and `parse_locale()`. [Formatting money](docs/reference/decimal.md#formatting-money)
 
 A replay warns, instead of failing, when the trace was recorded with a different time zone database: the warning names each zone-dependent operation and zone whose result could differ, and traces that never use a zone replay silently. Traces record the database version from schema v3 on. [Replay](docs/internals/effect-spec/14-replay.md)

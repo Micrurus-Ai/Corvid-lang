@@ -165,6 +165,9 @@ fn swift_type(ty: &TypeName) -> String {
         ("Int", 0) => "Int".into(),
         ("Float", 0) => "Double".into(),
         ("String" | "TraceId", 0) => "String".into(),
+        // B06 — exact canonical text, the one mapping every SDK can hold
+        // without losing digits, scale or nanoseconds.
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "String".into(),
         ("Bool", 0) => "Bool".into(),
         ("Nothing", 0) => "CorvidNothing".into(),
         ("JsonValue", 0) => "CorvidJSONValue".into(),

@@ -86,6 +86,7 @@ impl ValueBuilder for Recording {
     fn record(&mut self, record: &IrType, _: Vec<()>) { self.0.push(Shape::Record(record.id)) }
     fn variant(&mut self, sum: &IrType, index: usize, _: Vec<()>) { self.0.push(Shape::Variant(sum.id, index as u32)) }
     fn json(&mut self, _: &J) {}
+    fn text_scalar(&mut self, _: crate::text_scalar::TextScalar) {}
 }
 
 #[test]
