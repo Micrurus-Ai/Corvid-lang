@@ -82,6 +82,28 @@ Rounding to more places pads with zeros, so `2.5` rounded with `round_half_even(
 
 All of these are pure. They run in `@deterministic` code and `fn`s, and replay never needs to record them.
 
+## Formatting money
+
+`amount.format_currency(currency, locale)` writes an amount the way a locale writes money, from Unicode CLDR data compiled into Corvid:
+
+```corvid
+agent receipt(total: Decimal) -> String:
+    return total.format_currency("EUR", "de-DE")
+```
+
+For `1234.5` this returns `1.234,50 €`. The same amount is `$1,234.50` with `"USD", "en-US"` and `1'234,50 CHF` with `"CHF", "fr-CH"`.
+
+- **The currency and the locale are checked.** A string where a `Currency` is meant is an ISO 4217 code, and one where a `Locale` is meant is a BCP 47 tag. The compiler checks both, so `"EURO"` or a language CLDR has no data for is a compile error. Values chosen at run time, such as a customer's settings, go through `text.parse_currency()` and `text.parse_locale()`, which return a `Result`.
+- **There is no default locale.** The author names it, so output never depends on the machine it runs on.
+- **Formatting never rounds.** An amount with fewer digits than the currency shows is padded (`1234.5` USD shows `.50`). One with more traps: `1.005` in USD asks you to round first. `currency.minor_digits()` gives the right number of places: `total.round_half_even(euro.minor_digits())`.
+
+| Method | Result |
+| --- | --- |
+| `amount.format_currency(currency, locale)` | the formatted `String` |
+| `currency.minor_digits()` | 2 for USD, 0 for JPY, 3 for KWD |
+| `currency.to_string()`, `locale.to_string()` | the code and the canonical tag |
+| `text.parse_currency()`, `text.parse_locale()` | a `Result` for run-time text |
+
 ## Why it works this way
 
 - **Literals take their type from where they are used.** `price * 1.08` reads the way people write prices. A separate spelling such as `Decimal("1.08")` or `1.08d` would be a second way to write a number, and the compiler already knows a decimal is meant.

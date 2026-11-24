@@ -1281,6 +1281,10 @@ pub enum IrLiteral {
     Decimal(corvid_decimal::Decimal),
     /// B06 — a zone literal (`"Europe/Berlin"` where a `TimeZone` is meant).
     TimeZone(corvid_time::TimeZone),
+    /// B06 — a currency literal (`"EUR"` where a `Currency` is meant).
+    Currency(corvid_currency::Currency),
+    /// B06 — a locale literal (`"de-DE"` where a `Locale` is meant).
+    Locale(corvid_currency::Locale),
     String(String),
     Bool(bool),
     Nothing,

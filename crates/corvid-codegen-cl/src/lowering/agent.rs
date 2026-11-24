@@ -467,7 +467,7 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands",
             span,
         )),
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime => Err(CodegenError::not_supported(
+        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Err(CodegenError::not_supported(
             format!("`{}` - the time types run on the interpreter tier until B06's native time slice lands", ty.display_name()),
             span,
         )),

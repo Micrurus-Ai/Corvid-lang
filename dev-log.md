@@ -4,6 +4,35 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Currency formatting (B06, fourth slice)
+
+`amount.format_currency("EUR", "de-DE")` writes money from Unicode
+CLDR data through ICU4X, in a new `corvid-currency` crate. Two small
+types, `Currency` and `Locale`, take string literals by their slot and
+check them at compile time, so the draft's second method
+(`format_currency_checked`) went: run-time text goes through
+`parse_currency` and `parse_locale`. A locale is accepted when its
+language has CLDR data (checked with CLDR's likely subtags), so a tag
+never silently formats with the root locale.
+
+The measurement the proposal asked for decided the library. A probe
+formatting in every locale, with the currency-name and likely-subtags
+data the checks need, is 1.7 MB in a release build, and ICU4X covers
+all of CLDR. The probe also showed that CLDR formatters round to the
+currency's minor unit (`1.005` USD printed `$1.01`, `1234.5` JPY
+`￥1,235`). Formatting therefore checks the amount's scale against the
+minor unit from the same CLDR data and traps beyond it, asking for a
+declared rounding; `currency.minor_digits()` supplies the places. The
+draft's `$1.005` is not a form CLDR writes, so the trap is the honest
+version of "formatting never rounds".
+
+ICU4X's currency formatter is in `icu_experimental`, which is not yet
+stable, so it is pinned to `=0.7.0` and used from one crate; the
+existing ICU 2.2 crates (through `idna`) moved to 2.4 with it. In
+debug builds ICU prints a line to stderr when a locale has no symbol
+for a currency and falls back to its code (`fr-CH` and CHF); release
+builds are silent.
+
 ## 2026-11-24 - The tz database version in traces (B06, 3b)
 
 Zone-dependent results are pure functions of the IANA database

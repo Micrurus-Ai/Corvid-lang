@@ -458,6 +458,10 @@ pub(super) fn lower_expr(
             Ok(builder.ins().iconst(I8, if *b { 1 } else { 0 }))
         }
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
+        IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => Err(CodegenError::not_supported(
+            "`Currency` and `Locale` - currency formatting runs on the interpreter tier until B06's native Decimal slice lands",
+            expr.span,
+        )),
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => Err(CodegenError::not_supported(
             "`TimeZone` - the time types run on the interpreter tier until B06's native time slice lands",
             expr.span,

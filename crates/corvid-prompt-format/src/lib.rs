@@ -242,6 +242,8 @@ fn schema_for_inner(
         Type::Instant => json!({ "type": "string", "format": "date-time" }),
         Type::Duration => json!({ "type": "string", "format": "duration" }),
         Type::TimeZone => json!({ "type": "string", "description": "an IANA time zone name, such as Europe/Berlin" }),
+        Type::Currency => json!({ "type": "string", "description": "an ISO 4217 currency code, such as EUR" }),
+        Type::Locale => json!({ "type": "string", "description": "a BCP 47 locale tag, such as de-DE" }),
         Type::ZonedTime => json!({
             "type": "string",
             "description": "RFC 9557 zoned time: local time, offset and IANA zone, such as 2026-03-29T03:30:00+02:00[Europe/Berlin]",

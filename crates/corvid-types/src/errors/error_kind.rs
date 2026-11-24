@@ -90,6 +90,10 @@ pub enum TypeErrorKind {
     /// B06 — a string literal in a `TimeZone` slot that names no IANA zone.
     UnknownTimeZone { name: String, suggestion: Option<String> },
 
+    /// B06 — a string literal in a `Currency` or `Locale` slot that CLDR
+    /// does not know.
+    UnknownCurrencyOrLocale { problem: String },
+
     /// B06 — an operator that does not apply to the time types involved.
     TimeOperatorMismatch { left: String, right: String, hint: String },
 
@@ -628,6 +632,7 @@ impl TypeErrorKind {
                 format!("a `Decimal` rounds to between 0 and 28 places, not {places}")
             }
             Self::DecimalDivisionByZero => "this `Decimal` division is by zero".into(),
+            Self::UnknownCurrencyOrLocale { problem } => problem.clone(),
             Self::UnknownTimeZone { name, .. } => {
                 format!("`{name}` is not a time zone in the IANA database")
             }
@@ -1090,10 +1095,15 @@ impl TypeErrorKind {
                 "use an IANA zone name such as `Europe/Berlin` or `America/New_York`; for a name chosen at run time, use `parse_time_zone()`".into(),
             ),
             Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::UnknownCurrencyOrLocale { .. } => Some(
+                "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
+            ),
             Self::PendingJsonFormAtBoundary { type_name, .. } => Some(match type_name.as_str() {
                 "Decimal" => "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
                 "Duration" => "carry it as a String with `span.to_string()` and read it back with `parse_duration()`".into(),
                 "TimeZone" => "carry it as a String with `zone.to_string()` and read it back with `parse_time_zone()`".into(),
+                "Currency" => "carry it as a String with `currency.to_string()` and read it back with `parse_currency()`".into(),
+                "Locale" => "carry it as a String with `locale.to_string()` and read it back with `parse_locale()`".into(),
                 "ZonedTime" => "carry it as a String with `at.to_string()` and read it back with `parse_zoned_time()`".into(),
                 _ => "carry it as a String with `at.to_string()` and read it back with `parse_instant()`".into(),
             }),

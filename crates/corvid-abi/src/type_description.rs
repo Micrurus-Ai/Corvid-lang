@@ -159,6 +159,12 @@ pub fn emit_type_description(
         Type::ZonedTime => TypeDescription::Struct {
             name: "ZonedTime".to_string(),
         },
+        Type::Currency => TypeDescription::Struct {
+            name: "Currency".to_string(),
+        },
+        Type::Locale => TypeDescription::Struct {
+            name: "Locale".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI
