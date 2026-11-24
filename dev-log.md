@@ -4,6 +4,39 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Native Decimal (B06, sixth slice)
+
+Programs that use `Decimal` now compile to native code. Native code
+keeps every value in one 8-byte slot, so a native decimal is a pointer
+to a reference-counted String holding its exact canonical text, the
+same text as its JSON form. That choice reuses string reference
+counting, list and record slots, option and result payloads and
+printing unchanged. Every operator and method is one call into a new
+`corvid-runtime` entry point that parses with `corvid-decimal`,
+computes and writes canonical text back, so the tiers share every rule
+and every message. One table in the code generator,
+`decimal_methods.rs`, names each operation's symbol and shape, and the
+imports, the lowering, the tier picker and native match arms read it.
+
+Equality had to stay numeric inside containers: records, lists and
+options holding decimals compare through a new `Decimal` layout in the
+structural comparison, so `Price("tea", 1.0)` equals
+`Price("tea", 1.00)`. Native maps take only `String` keys, so no
+native hash is needed. `to_json` and `from_json` carry the text, and a
+JSON number is refused with the interpreter's reason. A trap prints the
+`corvid-decimal` message the interpreter's arithmetic error carries.
+
+Still on the interpreter: `format_currency` (it needs native `Currency`
+and `Locale`, slice 7), tools and prompts whose signature holds a
+`Decimal` (a native bridge would see text with nothing checking it),
+compound assignment on a decimal, as on any reference-counted value,
+and decimals in native maps. The tier picker routes each of these to
+the interpreter and the code generator refuses them by name. Parsing on
+every operation is a cost; the roadmap records measuring it before
+choosing a compact heap value. Across the tiers, the browser, the
+backend and an assistant all see the same `"19.90"`, because the native
+form is the JSON form.
+
 ## 2026-11-24 - JSON and contract forms for the B06 types (B06, fifth slice)
 
 All seven B06 types now cross every JSON boundary as their exact

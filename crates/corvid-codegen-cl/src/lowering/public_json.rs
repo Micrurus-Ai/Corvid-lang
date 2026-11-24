@@ -25,7 +25,9 @@ pub fn native_public_json_type(target: &Type, types: &[corvid_ir::IrType]) -> bo
 
 fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut HashSet<DefId>) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::String | Type::Bool => true,
+        // B06 — a `Decimal` travels as its canonical text; the time and
+        // currency types have no native form until their slice.
+        Type::Int | Type::Float | Type::String | Type::Bool | Type::Decimal => true,
         Type::Tainted(inner) | Type::List(inner) => decodable(inner, types, seen),
         Type::Option(inner) => is_native_option_type(ty) && decodable(inner, types, seen),
         Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, types, seen),

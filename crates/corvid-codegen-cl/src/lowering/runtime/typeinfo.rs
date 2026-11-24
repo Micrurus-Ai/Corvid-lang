@@ -273,7 +273,8 @@ pub fn typeinfo_data_for_refcounted_payload(
 ) -> Option<cranelift_module::DataId> {
     match ty {
         Type::Map(_, _) if crate::native_string_map(ty) => Some(runtime.map_typeinfo),
-        Type::String => Some(runtime.string_typeinfo),
+        // B06 — a native `Decimal` is a String holding its canonical text.
+        Type::String | Type::Decimal => Some(runtime.string_typeinfo),
         Type::Function { .. } if crate::native_callback_type(ty) => Some(runtime.callback_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),

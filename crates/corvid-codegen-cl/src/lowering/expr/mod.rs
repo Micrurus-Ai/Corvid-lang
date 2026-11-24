@@ -3,6 +3,7 @@ use super::*;
 mod callback;
 mod binop;
 mod constructors;
+mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
@@ -265,6 +266,12 @@ pub(super) fn lower_expr(
             }
             Ok(output)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_decimal_method(*kind) => {
+            let method = crate::decimal_methods::native_decimal_method(*kind).expect("checked by the guard");
+            decimal::lower_decimal_method(
+                builder, expr, method, receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
         IrExprKind::BuiltinMethod { kind, receiver, .. }
             if crate::native_text_method(*kind) && !crate::text_methods::native_regex_method(*kind) => {
             // B03 encoders and decoders: one runtime call into
@@ -459,17 +466,18 @@ pub(super) fn lower_expr(
         }
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
         IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => Err(CodegenError::not_supported(
-            "`Currency` and `Locale` - currency formatting runs on the interpreter tier until B06's native Decimal slice lands",
+            "`Currency` and `Locale` - currency formatting runs on the interpreter tier until B06's native time and currency slice lands",
             expr.span,
         )),
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => Err(CodegenError::not_supported(
             "`TimeZone` - the time types run on the interpreter tier until B06's native time slice lands",
             expr.span,
         )),
-        IrExprKind::Literal(IrLiteral::Decimal(_)) => Err(CodegenError::not_supported(
-            "`Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands",
-            expr.span,
-        )),
+        // B06 — a native `Decimal` is its canonical text, the digits the
+        // literal was written with (`2.50`).
+        IrExprKind::Literal(IrLiteral::Decimal(d)) => {
+            lower_string_literal(builder, module, runtime, &d.to_string(), expr.span)
+        }
         IrExprKind::Literal(IrLiteral::String(s)) => {
             lower_string_literal(builder, module, runtime, s, expr.span)
         }
@@ -532,6 +540,11 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // B06 — `@wrapping` does not apply to decimals; both forms are checked.
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty) => decimal::lower_decimal_binop(
+                builder, *op, left, right, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            ),
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
                 builder, *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime, expr.span,
@@ -597,6 +610,11 @@ pub(super) fn lower_expr(
             let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             lower_binop_wrapping(builder, *op, l, r, expr.span)
+        }
+        IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } if operand.ty == Type::Decimal => {
+            decimal::lower_decimal_unop(
+                builder, *op, operand, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
         }
         IrExprKind::UnOp { op, operand } => {
             let v = lower_expr(builder, operand, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
@@ -764,6 +782,14 @@ pub(super) fn lower_expr(
                             tool.params.len(),
                             args.len()
                         ),
+                        expr.span,
+                    ));
+                }
+                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
+                if tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
+                    .any(|ty| crate::decimal_boundary::holds_decimal(ty, &types)) {
+                    return Err(CodegenError::not_supported(
+                        format!("tool `{callee_name}`: {}", crate::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT),
                         expr.span,
                     ));
                 }
@@ -1150,6 +1176,16 @@ pub(super) fn lower_expr(
                 }
             }
             IrCallKind::Prompt { def_id, .. } => {
+                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
+                if let Some(prompt) = runtime.ir_prompts.get(def_id) {
+                    if prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
+                        .any(|ty| crate::decimal_boundary::holds_decimal(ty, &types)) {
+                        return Err(CodegenError::not_supported(
+                            format!("prompt `{callee_name}`: {}", crate::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT),
+                            expr.span,
+                        ));
+                    }
+                }
                 lower_prompt_call(
                     builder,
                     module,

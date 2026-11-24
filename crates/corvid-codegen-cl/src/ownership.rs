@@ -590,7 +590,8 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
         Type::Function { .. } => crate::native_callback_type(ty),
-        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
+        // B06 — a native `Decimal` is a String holding its canonical text.
+        Type::String | Type::Decimal | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }
         Type::Option(inner) => {
@@ -619,7 +620,7 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
 pub(crate) fn is_strong_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
-        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
+        Type::String | Type::Decimal | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
         // Weak is never a strong edge — it carries a weak slot.
         Type::Weak(_, _) => false,
         // Option<strong> is maybe-strong; callers requiring

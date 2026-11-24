@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Programs that use `Decimal` compile to native code and give the same digits and the same error messages as the interpreter, because both call `corvid-decimal`. A native decimal is held as its exact text, so `1.0 == 1.00` still holds inside records and lists. `format_currency`, `+=` on a decimal, and tools or prompts that take or return a `Decimal` still run on the interpreter; `corvid run` picks it for them. [Exact decimals](docs/reference/decimal.md)
+
 Decimals, times, zones, currencies and locales cross JSON as their exact text: a route returning an `Invoice` with `total: Decimal` sends `"19.90"`, and OpenAPI, the TypeScript client and the SDKs all treat it as a string. Send decimals to a Corvid route as strings; a JSON number is refused so no digit is lost. Table columns of these types are not available yet. [JSON mapping](docs/reference/stdlib/json.md)
 
 Format money with `total.format_currency("EUR", "de-DE")`: the currency and locale are checked against CLDR when the program compiles, and there is no default locale. Formatting never rounds, so round first with `total.round_half_even(euro.minor_digits())`; an amount with too many digits traps. Codes and tags from users go through `parse_currency()` and `parse_locale()`. [Formatting money](docs/reference/decimal.md#formatting-money)

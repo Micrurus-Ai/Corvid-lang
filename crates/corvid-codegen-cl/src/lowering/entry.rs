@@ -387,7 +387,9 @@ pub(super) fn emit_entry_main(
                     Type::Int => Some(runtime.trace_run_completed_int),
                     Type::Bool => Some(runtime.trace_run_completed_bool),
                     Type::Float => Some(runtime.trace_run_completed_float),
-                    Type::String => Some(runtime.trace_run_completed_string),
+                    // B06 — a `Decimal` is traced as its exact text, the
+                    // JSON string the interpreter records.
+                    Type::String | Type::Decimal => Some(runtime.trace_run_completed_string),
                     Type::Grounded(inner) => match &**inner {
                         Type::Int => Some(runtime.trace_run_completed_int),
                         Type::Bool => Some(runtime.trace_run_completed_bool),
@@ -490,9 +492,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        // B06 — a returned `Decimal` prints its exact text, as the
+        // interpreter prints it.
+        Type::Decimal if role == "return" => Ok(()),
+        // Neither tier reads a `Decimal` from the command line.
         Type::Decimal => Err(CodegenError::not_supported(
             format!(
-                "entry agent {role} of type `Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands; use the interpreter tier (`corvid run --tier interp`)."
+                "entry agent {role} of type `Decimal` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and call `parse_decimal()` on it"
             ),
             span,
         )),
@@ -539,7 +545,8 @@ fn emit_entry_result_print(
             let r = module.declare_func_in_func(runtime.print_f64, builder.func);
             builder.ins().call(r, &[result_val]);
         }
-        Type::String => {
+        // B06 — a native `Decimal` is its canonical text.
+        Type::String | Type::Decimal => {
             builder.declare_value_needs_stack_map(result_val);
             let r = module.declare_func_in_func(runtime.print_string, builder.func);
             builder.ins().call(r, &[result_val]);

@@ -130,6 +130,24 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
         text_methods.push((kind, id));
     }
+    // B06 `Decimal`: one import per operation, shaped by its table entry.
+    let mut decimal_operations = HashMap::new();
+    for operation in crate::decimal_methods::DecimalOperation::all() {
+        use crate::decimal_methods::DecimalSlot;
+        let width = |slot: DecimalSlot| match slot {
+            DecimalSlot::Word => I64,
+            DecimalSlot::Float => F64,
+        };
+        let (params, returns) = operation.signature();
+        let mut sig = module.make_signature();
+        sig.params.extend(params.iter().map(|slot| AbiParam::new(width(*slot))));
+        sig.returns.push(AbiParam::new(width(returns)));
+        let symbol = operation.symbol();
+        let id = module
+            .declare_function(&symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
+        decimal_operations.insert(operation, id);
+    }
     // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
     let mut json_decode_sig = module.make_signature();
     for _ in 0..6 {
@@ -1264,6 +1282,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_split,
         string_parse_int: string_parse_int_id,
         text_methods,
+        decimal_operations,
         json_decode_typed: json_decode_typed_id,
         json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,

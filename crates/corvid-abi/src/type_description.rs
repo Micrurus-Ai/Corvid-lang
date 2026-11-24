@@ -139,10 +139,10 @@ pub fn emit_type_description(
         Type::RegexMatch => TypeDescription::Struct {
             name: "RegexMatch".to_string(),
         },
-        // B06 — `Decimal` is interpreter-tier until its native slice and
-        // has no JSON form until its JSON slice, which decides its
-        // contract form. Named opaque, like `RegexMatch`, so signed
-        // manifests stay total.
+        // B06 — `Decimal` has no C ABI form: native code holds it as
+        // its exact text internally, and extern-c boundaries refuse it.
+        // Named opaque, like `RegexMatch`, so signed manifests stay
+        // total.
         Type::Decimal => TypeDescription::Struct {
             name: "Decimal".to_string(),
         },

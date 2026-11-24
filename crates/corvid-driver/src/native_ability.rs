@@ -62,6 +62,11 @@ pub enum NotNativeReason {
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
     BuiltinMethodNotNative,
+    /// B06 — a tool or prompt whose signature holds a `Decimal`; see
+    /// `corvid_codegen_cl::decimal_boundary`.
+    DecimalAtBoundary {
+        name: String,
+    },
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -100,6 +105,11 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
+            Self::DecimalAtBoundary { name } => write!(
+                f,
+                "program calls `{name}`: {}",
+                corvid_codegen_cl::decimal_boundary::DECIMAL_BOUNDARY_REQUIREMENT
+            ),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
             Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
@@ -114,6 +124,8 @@ impl std::fmt::Display for NotNativeReason {
 fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
         Type::String
+        // B06 — a native `Decimal` is a String holding its canonical text.
+        | Type::Decimal
         | Type::Struct(_)
         | Type::ImportedStruct(_)
         // Native code represents JsonError as a record of strings.
@@ -157,10 +169,11 @@ fn is_native_value_type(ty: &Type) -> bool {
         // B03 — regular expressions run on the interpreter until the
         // native regex slice.
         Type::RegexMatch => false,
-        // B06 — exact decimals run on the interpreter until the native
-        // Decimal slice.
-        Type::Decimal => false,
-        // B06 — the time types likewise, until their native slice.
+        // B06 — a native `Decimal` is a String holding its canonical
+        // text; every operation calls the runtime's `corvid-decimal`.
+        Type::Decimal => true,
+        // B06 — the time and currency types run on the interpreter
+        // until their native slice.
         Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
@@ -301,6 +314,16 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
 }
 
+/// Whether a tool or prompt call passes or returns a `Decimal`, which
+/// native tool and prompt bridges have no form for.
+fn holds_decimal_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> bool {
+    let types = |id| context.types.iter().find(|ty| ty.id == id).cloned();
+    let IrExprKind::Call { args, .. } = &call.kind else { return false };
+    std::iter::once(&call.ty)
+        .chain(args.iter().map(|arg| &arg.ty))
+        .any(|ty| corvid_codegen_cl::decimal_boundary::holds_decimal(ty, &types))
+}
+
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
         scan_expr(receiver, current_return_ty, context)?;
@@ -366,6 +389,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) || corvid_codegen_cl::native_numeric_conversion(*kind)
                 || corvid_codegen_cl::native_string_method(*kind)
                 || corvid_codegen_cl::native_text_method(*kind)
+                || corvid_codegen_cl::is_native_decimal_method(*kind)
                 || matches!(kind, corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr) => {
             scan_expr(receiver, current_return_ty, context)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
@@ -414,6 +438,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 | IrCallKind::Fixture { .. }
                 | IrCallKind::StructConstructor { .. }
                 | IrCallKind::Unknown => {}
+            }
+            if matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. }) && holds_decimal_at_boundary(expr, context) {
+                return Err(NotNativeReason::DecimalAtBoundary { name: callee_name.clone() });
             }
             if matches!(kind, IrCallKind::Fixture { .. }) {
                 return Err(NotNativeReason::TestFixtureNotNative {
@@ -563,6 +590,46 @@ agent main() -> Int:
 "#).expect("valid program using a tool and list sorting");
         assert!(matches!(native_ability(&ir), Err(NotNativeReason::ToolCall { .. })));
         assert!(matches!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BuiltinMethodNotNative)));
+    }
+
+    #[test]
+    fn decimal_programs_are_native_except_at_tool_prompt_and_currency_boundaries() {
+        let ir = crate::compile_to_ir(r#"
+type Line:
+    price: Decimal
+    quantity: Int
+
+agent main() -> String:
+    line = Line(4.50, 2)
+    total = line.price * line.quantity
+    share = (total / 3).round_half_even(2)
+    if total == 9:
+        return share.to_string()
+    return total.to_string()
+"#).expect("valid decimal program");
+        assert!(native_ability(&ir).is_ok(), "{:?}", native_ability(&ir));
+
+        let ir = crate::compile_to_ir(r#"
+tool quote(sku: String) -> Decimal
+agent main() -> String:
+    return quote("a").to_string()
+"#).expect("valid program with a Decimal tool");
+        assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::DecimalAtBoundary { name: "quote".into() }));
+
+        let ir = crate::compile_to_ir(r#"
+agent main() -> String:
+    total: Decimal = 12.5
+    return total.format_currency("EUR", "de-DE")
+"#).expect("valid currency program");
+        assert!(matches!(native_ability(&ir), Err(NotNativeReason::BuiltinMethodNotNative)));
+
+        let ir = crate::compile_to_ir(r#"
+agent main() -> Decimal:
+    total: Decimal = 0
+    total += 0.10
+    return total
+"#).expect("valid compound decimal assignment");
+        assert!(matches!(native_ability(&ir), Err(NotNativeReason::PlaceAssignmentNotNative)));
     }
 
     #[test]

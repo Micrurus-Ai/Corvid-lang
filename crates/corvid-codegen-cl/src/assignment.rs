@@ -77,6 +77,7 @@ pub fn native_list_append(receiver: &corvid_types::Type, item: &corvid_types::Ty
                 | Type::Float
                 | Type::Bool
                 | Type::String
+                | Type::Decimal
                 | Type::Struct(_)
                 | Type::List(_)
                 | Type::Result(_, _)

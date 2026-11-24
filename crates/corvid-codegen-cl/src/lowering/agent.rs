@@ -463,10 +463,8 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
             span,
         )),
-        Type::Decimal => Err(CodegenError::not_supported(
-            "`Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands",
-            span,
-        )),
+        // B06 — a native `Decimal` is a String holding its canonical text.
+        Type::Decimal => Ok(I64),
         Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Err(CodegenError::not_supported(
             format!("`{}` - the time types run on the interpreter tier until B06's native time slice lands", ty.display_name()),
             span,

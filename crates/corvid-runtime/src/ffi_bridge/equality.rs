@@ -50,6 +50,12 @@ pub unsafe extern "C" fn corvid_structural_eq(layout: *const u32, left: u64, rig
                 }
                 continue;
             }
+            if kind == Layout::Decimal as u32 {
+                if a != b && !super::decimal::slots_equal(a, b) {
+                    return 0;
+                }
+                continue;
+            }
             if !visited.insert((node, a, b)) {
                 continue;
             }

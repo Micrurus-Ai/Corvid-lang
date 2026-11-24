@@ -155,7 +155,9 @@ Every method above is pure and deterministic, so replay never records them, and 
 
 ### Native code
 
-Both tiers call `corvid-decimal` and `corvid-time`. The native representation (`Decimal` as a 128-bit value, `Duration` and `Instant` as 64-bit integers, `TimeZone` as an index into the bundled database, and `ZonedTime` as a pair) is decided in each type's native slice, with parity tests that compare results on both tiers. Until then, programs that use these types run on the interpreter, and native builds refuse them with a message naming the slice, as they refused regular expressions before B03's native slices.
+Both tiers call `corvid-decimal` and `corvid-time`. The native representation (`Duration` and `Instant` as 64-bit integers, `TimeZone` as an index into the bundled database, and `ZonedTime` as a pair) is decided in each type's native slice, with parity tests that compare results on both tiers. Until then, programs that use these types run on the interpreter, and native builds refuse them with a message naming the slice, as they refused regular expressions before B03's native slices.
+
+Slice 6 decided `Decimal`. Native code keeps every value in one 8-byte slot, so a 128-bit value would need a heap object anyway. A native `Decimal` is therefore a Corvid String holding its exact canonical text, the text of its JSON form, which reuses string reference counting, list and record storage and printing. Every operator and method is one call into a runtime entry point that parses with `corvid-decimal`, computes, and returns canonical text, so both tiers share each rule and message. Structural equality compares decimals by value. Parsing on every operation costs time; the roadmap records measuring it and moving to a compact heap value if it dominates.
 
 ### Not an invention
 
