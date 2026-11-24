@@ -1,0 +1,12 @@
+[package]
+name = "corvid-time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Exact time for Corvid's Duration and Instant types: checked arithmetic, ISO 8601 and RFC 3339 text. The checker, the interpreter and the native runtime all call this one implementation."
+
+[dependencies]
+# RFC 3339 parsing and formatting, the same library the runtime's
+# clock and queue scheduler already use.
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+serde = { workspace = true }

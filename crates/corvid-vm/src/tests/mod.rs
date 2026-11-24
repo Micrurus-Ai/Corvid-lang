@@ -19,6 +19,7 @@ mod dispatch;
 mod parallel;
 mod regex;
 mod decimal;
+mod time;
 mod test_runner;
 mod text;
 

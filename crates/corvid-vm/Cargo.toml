@@ -13,6 +13,7 @@ corvid-types = { workspace = true }
 corvid-public-json = { workspace = true }
 corvid-text = { workspace = true }
 corvid-decimal = { workspace = true }
+corvid-time = { workspace = true }
 corvid-runtime = { workspace = true }
 corvid-trace-schema = { workspace = true }
 corvid-prompt-format = { workspace = true }

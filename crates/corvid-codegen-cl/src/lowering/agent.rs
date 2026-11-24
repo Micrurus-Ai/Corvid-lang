@@ -467,6 +467,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands",
             span,
         )),
+        Type::Duration | Type::Instant => Err(CodegenError::not_supported(
+            format!("`{}` - durations and instants run on the interpreter tier until B06's native time slice lands", ty.display_name()),
+            span,
+        )),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

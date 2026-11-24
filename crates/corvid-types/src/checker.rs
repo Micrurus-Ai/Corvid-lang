@@ -356,7 +356,7 @@ fn typecheck_with_everything(
     }
 
     c.record_signature_types(file);
-    c.check_decimal_boundaries(file);
+    c.check_json_boundaries(file);
 
     Checked {
         types: c.types,
@@ -389,6 +389,9 @@ struct Checker<'a> {
     /// receiver of a `round_<mode>` call, the one place such a division
     /// is accepted. See `checker/decimal.rs`.
     rounded_division: Option<Span>,
+    /// B06 — set while checking a tool or prompt signature, where
+    /// durations and instants cross as their standard text.
+    time_text_boundary: bool,
     /// Every root-file type reference resolved so far, by span. See
     /// [`Checked::type_refs`].
     type_refs: HashMap<Span, Type>,
@@ -733,6 +736,7 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             rounded_division: None,
+            time_text_boundary: false,
             type_refs: HashMap::new(),
             tools_by_id: tools,
             file,
@@ -905,6 +909,7 @@ mod decl;
 mod decl_eval;
 mod decl_extern_c;
 mod decimal;
+mod time;
 mod form;
 mod decl_grounded_pure;
 mod decl_replayability;
@@ -916,6 +921,7 @@ mod match_check;
 mod expr;
 mod import_call;
 mod json_methods;
+mod json_boundaries;
 mod regex_methods;
 mod signature_types;
 mod tables;

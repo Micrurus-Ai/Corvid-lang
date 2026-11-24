@@ -236,6 +236,11 @@ fn schema_for_inner(
         // the checker refuses it at prompt boundaries until then.
         // Permissive, like `RegexMatch`.
         Type::Decimal => json!({}),
+        // B06 — a model reads and writes time as its standard text, the
+        // form `corvid_time` parses: RFC 3339 for an instant, ISO 8601
+        // for a duration.
+        Type::Instant => json!({ "type": "string", "format": "date-time" }),
+        Type::Duration => json!({ "type": "string", "format": "duration" }),
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so

@@ -21,6 +21,8 @@ impl fmt::Display for Value {
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(x) => write!(f, "{x}"),
             Value::Decimal(d) => write!(f, "{d}"),
+            Value::Duration(d) => write!(f, "{d}"),
+            Value::Instant(i) => write!(f, "{i}"),
             Value::String(s) => write!(f, "\"{}\"", escape_display(s)),
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Nothing => write!(f, "nothing"),

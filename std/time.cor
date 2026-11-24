@@ -41,6 +41,11 @@ public effect time_wall:
 public effect time_monotonic:
     reversible: true
 
+# B06 — wall-clock now as an exact `Instant`, to the nanosecond the
+# clock gives. Nondeterministic; replay substitutes the recorded
+# instant. Instants subtract to a `Duration` and move by one.
+public tool time_now() -> Instant uses time_wall
+
 # Wall-clock now, UTC. Nondeterministic; replay substitutes the
 # recorded instant.
 public tool time_now_utc() -> TimeInstant uses time_wall

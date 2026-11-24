@@ -103,6 +103,9 @@ fn eval_arithmetic(
     span: Span,
     wrapping: bool,
 ) -> Result<Value, InterpError> {
+    if super::time::is_time_operand(&l) || super::time::is_time_operand(&r) {
+        return super::time::eval_time_arithmetic(op, &l, &r, span);
+    }
     match (l, r) {
         // B06 — `Int` widens to `Decimal` exactly; `@wrapping` does not
         // apply, so decimal arithmetic is always checked.
@@ -204,6 +207,9 @@ fn eval_ordering(op: BinaryOp, l: Value, r: Value, span: Span) -> Result<Value, 
             _ => unreachable!("non-ordering op routed here"),
         }
     };
+    if super::time::is_time_operand(&l) || super::time::is_time_operand(&r) {
+        return super::time::eval_time_ordering(op, &l, &r, span);
+    }
     match (l, r) {
         (l @ Value::Decimal(_), r @ (Value::Decimal(_) | Value::Int(_)))
         | (l @ Value::Int(_), r @ Value::Decimal(_)) => super::decimal::eval_decimal_ordering(op, &l, &r, span),
@@ -246,6 +252,7 @@ pub(super) fn eval_unop(
             Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| overflow(span)),
             Value::Float(f) => Ok(Value::Float(-f)),
             Value::Decimal(d) => Ok(Value::Decimal(d.negate())),
+            Value::Duration(d) => Ok(Value::Duration(d.negate())),
             other => Err(InterpError::new(
                 InterpErrorKind::TypeMismatch {
                     expected: "Int or Float".into(),
@@ -788,6 +795,7 @@ pub(super) fn eval_builtin_method(
         )),
 
         _ if kind.is_decimal() => super::decimal::eval_decimal_method(kind, &recv, &args, span),
+        _ if kind.is_time() => super::time::eval_time_method(kind, &recv, span),
         _ if kind.is_text_encoder() || kind.is_text_decoder() => {
             let s = want_string(&recv, span)?;
             super::text_methods::eval_text_method(kind, &s, span)
