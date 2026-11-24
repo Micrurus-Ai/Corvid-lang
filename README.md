@@ -6,6 +6,31 @@ Corvid is a general-purpose programming language. A small app takes a few lines,
 
 > Corvid is pre-1.0 and under active development. This page shows only what runs today and says plainly what is still being built. The [platform plan](docs/proposals/corvid-platform-plan.md) describes what comes next.
 
+## Why one language for the interface, backend and AI
+
+Today one feature is split across a database, a backend in one language, a frontend in another and an AI layer added on top, each with its own types, validation and permissions, kept in step by hand. Corvid puts them in one program that one compiler understands:
+
+- **One definition, everywhere.** A type or a table is declared once and used by the database, the backend, the interface and the AI. Rename a field and the compiler points at every place that uses it, instead of a user finding the break in production.
+- **The API keeps itself in sync.** The backend publishes a typed contract, and the TypeScript client and the Swift, Kotlin and Python SDKs are generated from it, so a client cannot drift from the server.
+- **People and AI use the same actions.** A button and an assistant can run the same handler. There is no second API to build and secure for the agent, and the author chooses what an assistant may call.
+- **No glue code.** No hand-written client, no duplicated validation, and migrations planned from the table declarations.
+
+Next, an action is declared once, with its input, permission, validation and conflict rule, and the compiler derives the button, the endpoint and the assistant tool from it. After that, assistants see the current screen's typed state instead of screenshots, and one timeline follows a request across the interface, backend, agent and model steps.
+
+## The problems every team adding AI runs into
+
+| The problem | What Corvid does |
+| --- | --- |
+| **Model output is untyped text.** A parser breaks the day the model phrases things differently. | A prompt returns a declared type. When a reply does not match, Corvid sends the model the exact error and asks again. |
+| **A bad answer cannot be reproduced.** The same input gives a different result, so it cannot be debugged. | Model calls, tool calls and approvals are recorded, and `corvid replay` runs a trace again with the same results, without calling the model. |
+| **The bill is the first sign of the cost.** | Declare a budget, and code that could exceed it does not compile. |
+| **An agent can call anything.** One injected instruction in a page can make it act on your data. | An irreversible tool needs an `approve` step, and text marked untrusted cannot reach it. Both are checked before the program runs. |
+| **A grounded answer looks like an invented one.** | Values from retrieval carry their sources as `Grounded<T>`, and the compiler refuses to present an unsourced value as grounded. |
+| **Testing AI features is guesswork.** | Tests, evaluations, fixtures and mocks are part of the language, and a recorded run can become a test. |
+| **One AI feature touches four codebases.** | Declare a table once and get typed rows, typed queries and planned migrations, on SQLite or Postgres. |
+
+The sections below show each of these running.
+
 ## The application and the AI see each other
 
 One compiler sees every screen, action, type, permission, effect and cost in the application. So Corvid can give an AI the application itself, instead of screenshots or a hand-written API, and show people everything the AI does.
@@ -108,7 +133,7 @@ HTTP routes, the published OpenAPI schema and the generated TypeScript client al
 - **Web applications** with server-rendered views, forms and browser controls. [Browser views](docs/book/19-browser-views.md)
 - **HTTP services** with typed routes, JSON, uploads, sessions, roles, OAuth and OpenAPI. [Backend guide](docs/guides/backend.md)
 - **Agents** with typed tools, approvals, budgets, step limits, evaluations and replay. [Prompts](docs/book/11-prompts.md)
-- **Data work** with SQLite and Postgres, HTTP, files and JSON. [Talking to the outside world](docs/book/18-talking-to-the-outside-world.md)
+- **Data work** with typed tables on SQLite and Postgres (typed rows and queries, revision-checked writes, atomic blocks and migrations planned from the declarations), HTTP, files and JSON. [Tables](docs/reference/tables.md) · [Talking to the outside world](docs/book/18-talking-to-the-outside-world.md)
 - **Background work** with durable jobs, schedules, retries and restart recovery.
 
 What is missing compared with Python and TypeScript is listed honestly in the [backend and AI audit](docs/backend-ai-roadmap.md#audit-of-the-current-implementation).
