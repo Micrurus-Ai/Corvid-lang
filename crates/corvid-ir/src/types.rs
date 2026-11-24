@@ -1187,6 +1187,8 @@ pub struct IrDatabase {
     pub name: String,
     pub engine: String,
     pub location: corvid_ast::DatabaseLocation,
+    /// The `tls:` setting, for a networked engine.
+    pub tls: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

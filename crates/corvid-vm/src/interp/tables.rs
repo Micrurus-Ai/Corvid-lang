@@ -13,7 +13,7 @@ use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
 use corvid_runtime::db::DbValue;
-use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableFilter, TableQuery, TableRef};
+use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableEngine, TableFilter, TableQuery, TableRef};
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
 
@@ -30,12 +30,8 @@ impl<'ir> Interpreter<'ir> {
             .types_by_id
             .get(&table.def_id)
             .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
-        let target = TableRef {
-            name: &table.name,
-            key: &table.key,
-            columns: &table.columns,
-            location: &table.database.location,
-        };
+        let kinds = column_kinds(record);
+        let target = table_target(table, &kinds).map_err(fail)?;
         let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
         Ok(match op {
             TableOp::Get => {
@@ -103,12 +99,8 @@ impl<'ir> Interpreter<'ir> {
             None => None,
         };
         let query = TableQuery { filter, order: order.map(str::to_string), descending, take };
-        let target = TableRef {
-            name: &table.name,
-            key: &table.key,
-            columns: &table.columns,
-            location: &table.database.location,
-        };
+        let kinds = column_kinds(record);
+        let target = table_target(table, &kinds).map_err(fail)?;
         let rows = self
             .runtime
             .table_query(&target, &query)
@@ -253,4 +245,23 @@ impl<'ir> Interpreter<'ir> {
 
 fn next_operand(operands: &mut std::vec::IntoIter<Value>) -> Result<Value, String> {
     operands.next().ok_or_else(|| "a query condition is missing a value".to_string())
+}
+
+/// How each of a table's columns is stored, in declaration order.
+fn column_kinds(record: &IrType) -> Vec<ColumnKind> {
+    record.fields.iter().map(|field| column_kind(&field.ty).0).collect()
+}
+
+/// The table as the runtime sees it, on the engine its database names.
+fn table_target<'t>(table: &'t IrTable, kinds: &'t [ColumnKind]) -> Result<TableRef<'t>, String> {
+    let engine = TableEngine::from_declaration(&table.database.engine, table.database.tls.as_deref())
+        .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
+    Ok(TableRef {
+        name: &table.name,
+        key: &table.key,
+        columns: &table.columns,
+        kinds,
+        location: &table.database.location,
+        engine,
+    })
 }

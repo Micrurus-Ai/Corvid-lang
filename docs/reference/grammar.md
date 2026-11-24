@@ -135,6 +135,7 @@ table_retired     ::= 'retired' IDENT (',' IDENT)* NEWLINE
 database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
 database_setting  ::= 'engine' ':' IDENT NEWLINE
                     | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
+                    | 'tls' ':' IDENT NEWLINE                       # `required` or `disabled`; Postgres only
                     | 'tables' ':' IDENT (',' IDENT)* NEWLINE
 ```
 

@@ -7,10 +7,11 @@
 //!
 //! Results are always in a defined order: by the `order_by` column, then
 //! by key, so equal sort values keep a stable order; without `order_by`,
-//! by key alone. Equality uses `IS`, so `s.due == None` finds the rows
+//! by key alone. Equality matches missing values (`IS` on SQLite,
+//! `IS NOT DISTINCT FROM` on Postgres), so `s.due == None` finds the rows
 //! with no value, and a condition is never left undecided by `NULL`.
 
-use super::{call_name, json_row, named, ordered_row, quote, row_json, value_json, Row, TableRef};
+use super::{call_name, json_row, quote, row_json, value_json, ColumnKind, Row, TableRef};
 use crate::db::DbValue;
 use crate::errors::RuntimeError;
 use crate::Runtime;
@@ -44,11 +45,10 @@ pub struct TableQuery {
 /// The `SELECT` statement for `query` and its parameters.
 pub fn query_sql(table: &TableRef<'_>, query: &TableQuery) -> Result<(String, Vec<DbValue>), RuntimeError> {
     let mut params = Vec::new();
-    let names = table.columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
-    let mut sql = format!("SELECT {names} FROM {}", quote(table.name));
+    let mut sql = format!("SELECT {} FROM {}", table.engine.select_list(table), quote(table.name));
     if let Some(filter) = &query.filter {
         sql.push_str(" WHERE ");
-        sql.push_str(&filter_sql(filter, &mut params));
+        sql.push_str(&filter_sql(table, filter, &mut params));
     }
     let key = quote(table.key);
     match &query.order {
@@ -67,42 +67,53 @@ pub fn query_sql(table: &TableRef<'_>, query: &TableQuery) -> Result<(String, Ve
             )));
         }
         params.push(DbValue::Integer(count));
-        sql.push_str(&format!(" LIMIT ?{}", params.len()));
+        sql.push_str(&format!(" LIMIT {}", table.engine.count_mark(params.len())));
     }
     Ok((sql, params))
 }
 
-fn filter_sql(filter: &TableFilter, params: &mut Vec<DbValue>) -> String {
+fn filter_sql(table: &TableRef<'_>, filter: &TableFilter, params: &mut Vec<DbValue>) -> String {
+    let engine = table.engine;
+    // A value's parameter, typed as the column it is compared with.
+    let mut bind = |column: &str, value: &DbValue| {
+        params.push(value.clone());
+        let kind = table
+            .columns
+            .iter()
+            .position(|c| c == column)
+            .map(|i| table.kinds[i])
+            .unwrap_or(ColumnKind::Text);
+        engine.mark(params.len(), kind, value)
+    };
     match filter {
-        TableFilter::Const(true) => "1".into(),
-        TableFilter::Const(false) => "0".into(),
-        TableFilter::Column(column) => format!("{} <> 0", quote(column)),
-        TableFilter::And(left, right) => format!("({} AND {})", filter_sql(left, params), filter_sql(right, params)),
-        TableFilter::Or(left, right) => format!("({} OR {})", filter_sql(left, params), filter_sql(right, params)),
-        TableFilter::Not(inner) => format!("(NOT {})", filter_sql(inner, params)),
+        TableFilter::Const(value) => engine.literal_bool(*value).into(),
+        TableFilter::Column(column) => engine.bool_column(&quote(column)),
+        TableFilter::And(left, right) => {
+            format!("({} AND {})", filter_sql(table, left, params), filter_sql(table, right, params))
+        }
+        TableFilter::Or(left, right) => {
+            format!("({} OR {})", filter_sql(table, left, params), filter_sql(table, right, params))
+        }
+        TableFilter::Not(inner) => format!("(NOT {})", filter_sql(table, inner, params)),
         TableFilter::Compare { column, op, value } => {
-            params.push(value.clone());
-            let mark = format!("?{}", params.len());
-            let op = match op {
-                QueryCompare::Eq => "IS",
-                QueryCompare::NotEq => "IS NOT",
-                QueryCompare::Lt => "<",
-                QueryCompare::LtEq => "<=",
-                QueryCompare::Gt => ">",
-                QueryCompare::GtEq => ">=",
-            };
-            format!("{} {op} {mark}", quote(column))
+            let mark = bind(column, value);
+            let column = quote(column);
+            match op {
+                QueryCompare::Eq => engine.same(&column, &mark),
+                QueryCompare::NotEq => engine.different(&column, &mark),
+                QueryCompare::Lt => format!("{column} < {mark}"),
+                QueryCompare::LtEq => format!("{column} <= {mark}"),
+                QueryCompare::Gt => format!("{column} > {mark}"),
+                QueryCompare::GtEq => format!("{column} >= {mark}"),
+            }
         }
         TableFilter::Text { column, test, value } => {
-            params.push(value.clone());
-            let mark = format!("?{}", params.len());
+            let mark = bind(column, value);
             let column = quote(column);
             match test {
-                QueryTextTest::Contains => format!("instr({column}, {mark}) > 0"),
-                QueryTextTest::StartsWith => format!("substr({column}, 1, length({mark})) = {mark}"),
-                QueryTextTest::EndsWith => {
-                    format!("(length({mark}) = 0 OR substr({column}, -length({mark})) = {mark})")
-                }
+                QueryTextTest::Contains => engine.contains(&column, &mark),
+                QueryTextTest::StartsWith => engine.starts_with(&column, &mark),
+                QueryTextTest::EndsWith => engine.ends_with(&column, &mark),
             }
         }
     }
@@ -116,9 +127,8 @@ impl Runtime {
         let args = vec![J::String(sql.clone()), J::Array(params.iter().map(value_json).collect())];
         let outcome = self
             .recorded_table_call(&call_name(table, "query"), args, || async {
-                let handle = self.table_handle(table)?;
-                let rows = self.db_registry().query(handle.handle_id, &sql, &params).map_err(|e| named(table, e))?;
-                Ok(J::Array(rows.rows.into_iter().map(|cells| row_json(&ordered_row(table, cells))).collect()))
+                let rows = self.table_select(table, &sql, &params).await?;
+                Ok(J::Array(rows.iter().map(row_json).collect()))
             })
             .await?;
         outcome
@@ -139,10 +149,16 @@ mod tests {
         (vec!["id".into(), "title".into(), "count".into(), "revision".into()], DatabaseLocation::Path(":memory:".into()))
     }
 
+    const KINDS: &[ColumnKind] = &[ColumnKind::Integer, ColumnKind::Text, ColumnKind::Integer, ColumnKind::Integer];
+
+    fn table<'a>(columns: &'a [String], location: &'a DatabaseLocation, engine: super::super::TableEngine) -> TableRef<'a> {
+        TableRef { name: "Shelf", key: "id", columns, kinds: KINDS, location, engine }
+    }
+
     #[test]
     fn a_filter_binds_every_value_as_a_parameter() {
         let (columns, location) = shelf();
-        let table = TableRef { name: "Shelf", key: "id", columns: &columns, location: &location };
+        let table = table(&columns, &location, super::super::TableEngine::Sqlite);
         let query = TableQuery {
             filter: Some(TableFilter::And(
                 Box::new(TableFilter::Compare { column: "count".into(), op: QueryCompare::Gt, value: DbValue::Integer(2) }),
@@ -167,7 +183,7 @@ mod tests {
     #[test]
     fn equality_uses_is_so_none_matches_missing_values() {
         let (columns, location) = shelf();
-        let table = TableRef { name: "Shelf", key: "id", columns: &columns, location: &location };
+        let table = table(&columns, &location, super::super::TableEngine::Sqlite);
         let query = TableQuery {
             filter: Some(TableFilter::Compare { column: "title".into(), op: QueryCompare::Eq, value: DbValue::Null }),
             ..TableQuery::default()
@@ -179,7 +195,7 @@ mod tests {
     #[test]
     fn a_negative_take_is_refused() {
         let (columns, location) = shelf();
-        let table = TableRef { name: "Shelf", key: "id", columns: &columns, location: &location };
+        let table = table(&columns, &location, super::super::TableEngine::Sqlite);
         let query = TableQuery { take: Some(-1), ..TableQuery::default() };
         let error = query_sql(&table, &query).unwrap_err().to_string();
         assert!(error.contains("take(-1)"), "{error}");

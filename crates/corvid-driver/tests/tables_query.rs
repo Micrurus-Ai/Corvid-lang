@@ -1,5 +1,5 @@
-//! B09 P2 — typed queries run end to end on SQLite through the
-//! interpreter: `where` conditions, `order_by`, `descending` and `take`
+//! B09 P2 and P4 — typed queries run end to end through the interpreter
+//! on SQLite and, when `CORVID_TEST_POSTGRES_URL` is set, on Postgres: `where` conditions, `order_by`, `descending` and `take`
 //! become one parameterized `SELECT`, and a recorded run replays its
 //! queries without the database.
 
@@ -7,16 +7,15 @@ use corvid_driver::{compile_to_ir, run_ir_with_runtime};
 use corvid_runtime::Runtime;
 use corvid_vm::Value;
 
-const SCHEMA: &str = "CREATE TABLE \"Book\" (\"id\" INTEGER PRIMARY KEY NOT NULL, \"title\" TEXT NOT NULL, \
-\"year\" INTEGER NOT NULL, \"rating\" REAL NOT NULL, \"done\" INTEGER NOT NULL, \"due\" TEXT, \
-\"revision\" INTEGER NOT NULL)";
+#[path = "support/table_engines.rs"]
+mod table_engines;
+use table_engines::TestDatabase;
 
-fn program(path: &str) -> String {
+fn program(settings: &str) -> String {
     format!(
         r#"
 database library:
-    engine: sqlite
-    location: "{path}"
+{settings}
     tables: Book
 
 table Book:
@@ -68,57 +67,57 @@ fn args() -> Vec<Value> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queries_filter_order_and_limit_in_the_database() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("library.sqlite").to_string_lossy().replace('\\', "/");
-    let runtime = Runtime::builder().build();
-    let setup = runtime.db_registry().open(&path).expect("open database");
-    runtime.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
-
-    let ir = compile_to_ir(&program(&path)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
-    let out = run_ir_with_runtime(&ir, Some("main"), args(), &runtime).await.expect("program runs");
-    let Value::String(text) = out else { panic!("expected text, got {out:?}") };
-    assert_eq!(text.as_ref(), EXPECTED);
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let runtime = Runtime::builder().build();
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let out = run_ir_with_runtime(&ir, Some("main"), args(), &runtime).await.expect("program runs");
+        let Value::String(text) = out else { panic!("expected text, got {out:?}") };
+        assert_eq!(text.as_ref(), EXPECTED, "on {}", database.label());
+        database.finish().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_run_replays_its_queries_without_the_database() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("library.sqlite");
-    let location = path.to_string_lossy().replace('\\', "/");
-    let ir = compile_to_ir(&program(&location)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
 
-    let trace_dir = tempfile::tempdir().expect("trace dir");
-    let record = Runtime::builder().trace_to(trace_dir.path()).build();
-    let setup = record.db_registry().open(&location).expect("open database");
-    record.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
-    let recorded = run_ir_with_runtime(&ir, Some("main"), args(), &record).await.expect("recorded run");
-    let trace = record.tracer().path().to_path_buf();
-    drop(record);
-    let raw = std::fs::read_to_string(&trace).expect("trace readable");
-    assert!(raw.contains("table:Book.query"), "queries are recorded");
-    assert!(raw.contains("LIMIT ?"), "the recorded SQL binds its values");
+        let trace_dir = tempfile::tempdir().expect("trace dir");
+        let record = Runtime::builder().trace_to(trace_dir.path()).build();
+        let recorded = run_ir_with_runtime(&ir, Some("main"), args(), &record).await.expect("recorded run");
+        let trace = record.tracer().path().to_path_buf();
+        drop(record);
+        let raw = std::fs::read_to_string(&trace).expect("trace readable");
+        assert!(raw.contains("table:Book.query"), "queries are recorded on {}", database.label());
+        assert!(raw.contains("LIMIT ?") || raw.contains("LIMIT $"), "the recorded SQL binds its values");
 
-    std::fs::remove_file(&path).expect("remove the database");
-    let replay = Runtime::builder().replay_from(&trace).build();
-    let replayed = run_ir_with_runtime(&ir, Some("main"), args(), &replay).await.expect("replay from the trace");
-    assert_eq!(replayed, recorded);
-    assert!(!path.exists(), "a replay never opens the database");
+        database.remove().await;
+        let replay = Runtime::builder().replay_from(&trace).build();
+        let replayed = run_ir_with_runtime(&ir, Some("main"), args(), &replay).await.expect("replay from the trace");
+        assert_eq!(replayed, recorded, "on {}", database.label());
+        assert!(database.is_gone().await, "a replay never opens the database on {}", database.label());
+        database.finish().await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_negative_take_stops_the_run_with_its_reason() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("library.sqlite").to_string_lossy().replace('\\', "/");
-    let src = format!(
-        "{}\nagent first(n: Int) -> String:\n    return titles(Book.all().take(n))\n",
-        program(&path)
-    );
-    let runtime = Runtime::builder().build();
-    let setup = runtime.db_registry().open(&path).expect("open database");
-    runtime.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
-    let ir = compile_to_ir(&src).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
-    let error = run_ir_with_runtime(&ir, Some("first"), vec![Value::Int(-1)], &runtime)
-        .await
-        .expect_err("a negative take fails");
-    assert!(error.to_string().contains("take(-1)"), "{error}");
+    for database in TestDatabase::every_engine().await {
+        let source = format!(
+            "{}\nagent first(n: Int) -> String:\n    return titles(Book.all().take(n))\n",
+            program(&database.settings())
+        );
+        database.create_tables(&source).await;
+        let runtime = Runtime::builder().build();
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let error = run_ir_with_runtime(&ir, Some("first"), vec![Value::Int(-1)], &runtime)
+            .await
+            .expect_err("a negative take fails");
+        assert!(error.to_string().contains("take(-1)"), "on {}: {error}", database.label());
+        database.finish().await;
+    }
 }
