@@ -2,6 +2,8 @@ use super::*;
 use corvid_resolve::{resolve, ResolveErrorKind};
 use corvid_syntax::{lex, parse_file};
 
+mod text_methods;
+
 fn check(src: &str) -> Checked {
     let tokens = lex(src).expect("lex failed");
     let (file, perr) = parse_file(&tokens);

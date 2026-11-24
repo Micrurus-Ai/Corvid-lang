@@ -22,6 +22,33 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 text and encoding: encoders, decoders and UUID parsing
+
+[The proposal](docs/proposals/b03-text-and-encoding.md) settles the
+surface for all of B03, and this slice ships the first part on the
+interpreter: eight encoding methods and `parse_uuid`, all builtin
+`String` methods.
+
+Decisions:
+
+- **Methods, not tools.** The operations are pure, so they belong next
+  to `replace` and `parse_int`: no import, allowed in `@deterministic`
+  code, nothing to trace or substitute in replay. UUID generation is not
+  pure and will be a tool.
+- **One crate for every rule.** `corvid-text` holds the codecs and the
+  UUID parser. The interpreter calls it now and the native runtime will
+  call the same functions, so the tiers cannot drift. It depends on no
+  Corvid crate, because the checker needs it for regex patterns next.
+- **Decoders return `Result`.** Malformed input and decoded bytes that
+  are not UTF-8 are `Err` values naming the first problem and its
+  position in characters. Padding is the only optional part of base64.
+- **A UUID is a canonical `String`.** `parse_uuid` normalizes every
+  common spelling, so equality is string equality, and no new type
+  needs a JSON, database and SDK mapping.
+- **No byte encoders yet.** A `List<Int>` can hold values outside a
+  byte, so encoding one would need a trap or a fallible encoder. B04
+  decides the byte representation and adds them.
+
 ## 2026-11-24 - Table operations replay from the trace (B09 P1b)
 
 A table operation is now recorded like a tool call, `table:Shelf.save`

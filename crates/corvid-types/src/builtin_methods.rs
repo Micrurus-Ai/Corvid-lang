@@ -295,6 +295,63 @@ pub enum BuiltinMethodKind {
     /// non-finite Float, which has no JSON form. A receiver that
     /// contains `Tainted` data returns `Tainted<String>`.
     JsonEncode,
+
+    // ----- text encoding and UUIDs (B03) --------------------------
+    //
+    // Pure String methods over the text's UTF-8 bytes, implemented
+    // once in `corvid-text` for both tiers. Encoders never fail;
+    // decoders return `Result<String, String>` naming the first
+    // problem and its character position, and also fail when the
+    // decoded bytes are not UTF-8. Decoders accept base64 with or
+    // without padding and nothing else that is non-canonical.
+    /// `String.encode_base64() -> String` — RFC 4648 standard
+    /// alphabet, padded.
+    StringEncodeBase64,
+    /// `String.decode_base64() -> Result<String, String>`.
+    StringDecodeBase64,
+    /// `String.encode_base64_url() -> String` — RFC 4648 URL-safe
+    /// alphabet, unpadded.
+    StringEncodeBase64Url,
+    /// `String.decode_base64_url() -> Result<String, String>`.
+    StringDecodeBase64Url,
+    /// `String.encode_hex() -> String` — lowercase.
+    StringEncodeHex,
+    /// `String.decode_hex() -> Result<String, String>` — either case.
+    StringDecodeHex,
+    /// `String.encode_url_component() -> String` — percent-encodes
+    /// every byte outside the RFC 3986 unreserved set.
+    StringEncodeUrlComponent,
+    /// `String.decode_url_component() -> Result<String, String>` —
+    /// `+` stays `+`.
+    StringDecodeUrlComponent,
+    /// `String.parse_uuid() -> Result<String, String>` — the canonical
+    /// lowercase hyphenated form of any common UUID spelling.
+    StringParseUuid,
+}
+
+impl BuiltinMethodKind {
+    /// The B03 text methods that take no arguments and return
+    /// `Result<String, String>`: every decoder and `parse_uuid`.
+    pub fn is_text_decoder(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringDecodeBase64
+                | StringDecodeBase64Url
+                | StringDecodeHex
+                | StringDecodeUrlComponent
+                | StringParseUuid
+        )
+    }
+
+    /// The B03 text encoders: no arguments, `String` result.
+    pub fn is_text_encoder(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringEncodeBase64 | StringEncodeBase64Url | StringEncodeHex | StringEncodeUrlComponent
+        )
+    }
 }
 
 /// The fields of the compiler-known `JsonError` record, in display
@@ -338,6 +395,11 @@ pub struct BuiltinMethodSig {
     pub kind: BuiltinMethodKind,
     pub params: Vec<Type>,
     pub ret: Type,
+}
+
+/// `Result<String, String>`, the result of every text decoder.
+fn text_result() -> Type {
+    Type::Result(Box::new(Type::String), Box::new(Type::String))
 }
 
 /// Look up `receiver.name(...)` in the builtin-method table.
@@ -387,6 +449,19 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![],
             Type::Result(Box::new(Type::Float), Box::new(Type::String)),
         ),
+        (Type::String, "encode_base64") => sig(StringEncodeBase64, vec![], Type::String),
+        (Type::String, "encode_base64_url") => sig(StringEncodeBase64Url, vec![], Type::String),
+        (Type::String, "encode_hex") => sig(StringEncodeHex, vec![], Type::String),
+        (Type::String, "encode_url_component") => {
+            sig(StringEncodeUrlComponent, vec![], Type::String)
+        }
+        (Type::String, "decode_base64") => sig(StringDecodeBase64, vec![], text_result()),
+        (Type::String, "decode_base64_url") => sig(StringDecodeBase64Url, vec![], text_result()),
+        (Type::String, "decode_hex") => sig(StringDecodeHex, vec![], text_result()),
+        (Type::String, "decode_url_component") => {
+            sig(StringDecodeUrlComponent, vec![], text_result())
+        }
+        (Type::String, "parse_uuid") => sig(StringParseUuid, vec![], text_result()),
         (Type::List(_), "length") => sig(ListLength, vec![], Type::Int),
         (Type::List(elem), "append") => sig(ListAppend, vec![(**elem).clone()], Type::Nothing),
         (Type::List(elem), "contains") => sig(ListContains, vec![(**elem).clone()], Type::Bool),

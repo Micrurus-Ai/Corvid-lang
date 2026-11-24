@@ -1,0 +1,9 @@
+[package]
+name = "corvid-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Text and encoding rules for Corvid: base64, hex and URL-component codecs and UUID parsing and formatting. The checker, the interpreter and the native runtime all call this one implementation."
+
+[dependencies]
+base64 = "0.22"

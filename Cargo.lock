@@ -1114,6 +1114,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-text"
+version = "0.0.1"
+dependencies = [
+ "base64",
+]
+
+[[package]]
 name = "corvid-tour-catalog"
 version = "0.0.1"
 dependencies = [
@@ -1153,6 +1160,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-text",
  "corvid-trace-schema",
  "corvid-types",
  "futures",

@@ -18,6 +18,17 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.substring(start: Int, end: Int) -> String`
 - `String.parse_int() -> Result<Int, String>`
 - `String.parse_float() -> Result<Float, String>`
+- `String.encode_base64() -> String`
+- `String.decode_base64() -> Result<String, String>`
+- `String.encode_base64_url() -> String`
+- `String.decode_base64_url() -> Result<String, String>`
+- `String.encode_hex() -> String`
+- `String.decode_hex() -> Result<String, String>`
+- `String.encode_url_component() -> String`
+- `String.decode_url_component() -> Result<String, String>`
+- `String.parse_uuid() -> Result<String, String>`
+
+The encoders and decoders work on the text's UTF-8 bytes. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
 
