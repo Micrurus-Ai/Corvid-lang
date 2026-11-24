@@ -12,6 +12,13 @@ pub enum NativeTextShape {
     Encoder,
     /// `(text, payload) -> tag`, filling a `Result<String, String>`.
     Decoder,
+    /// `(text, pattern) -> Bool`.
+    RegexSearch,
+    /// `(text, pattern, replacement) -> String`.
+    RegexReplace,
+    /// `(text, pattern, list) -> List<String>`, filling a fresh list
+    /// as `corvid_string_split` does.
+    RegexSplit,
 }
 
 /// The runtime symbol and call shape of a text method, or `None` when
@@ -29,12 +36,27 @@ pub fn native_text_symbol(kind: BuiltinMethodKind) -> Option<(&'static str, Nati
         StringDecodeHex => ("corvid_string_decode_hex", Decoder),
         StringDecodeUrlComponent => ("corvid_string_decode_url_component", Decoder),
         StringParseUuid => ("corvid_string_parse_uuid", Decoder),
+        StringContainsRegex => ("corvid_string_contains_regex", RegexSearch),
+        StringReplaceRegex => ("corvid_string_replace_regex", RegexReplace),
+        StringReplaceRegexVerbatim => ("corvid_string_replace_regex_verbatim", RegexReplace),
+        StringSplitRegex => ("corvid_string_split_regex", RegexSplit),
+        // `find_regex` and `find_all_regex` build `RegexMatch` records,
+        // which native code cannot allocate yet.
         _ => return None,
     })
 }
 
+/// Whether this method is a regex method with a native form; these
+/// take their arguments through the ordinary string-method lowering.
+pub fn native_regex_method(kind: BuiltinMethodKind) -> bool {
+    matches!(
+        native_text_symbol(kind),
+        Some((_, NativeTextShape::RegexSearch | NativeTextShape::RegexReplace | NativeTextShape::RegexSplit))
+    )
+}
+
 /// Every text method with a native form, for declaring the imports.
-pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 9] = {
+pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 13] = {
     use BuiltinMethodKind::*;
     [
         StringEncodeBase64,
@@ -46,6 +68,10 @@ pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 9] = {
         StringDecodeHex,
         StringDecodeUrlComponent,
         StringParseUuid,
+        StringContainsRegex,
+        StringReplaceRegex,
+        StringReplaceRegexVerbatim,
+        StringSplitRegex,
     ]
 };
 
@@ -59,14 +85,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_encoder_and_decoder_has_a_native_symbol() {
+    fn every_listed_method_has_a_native_symbol_of_its_shape() {
         for kind in NATIVE_TEXT_METHODS {
             let (symbol, shape) = native_text_symbol(kind).expect("listed kinds have symbols");
             assert!(symbol.starts_with("corvid_string_"));
             assert_eq!(shape == NativeTextShape::Decoder, kind.is_text_decoder(), "{kind:?}");
             assert_eq!(shape == NativeTextShape::Encoder, kind.is_text_encoder(), "{kind:?}");
+            assert_eq!(native_regex_method(kind), kind.is_regex(), "{kind:?}");
         }
-        let listed = NATIVE_TEXT_METHODS.len();
-        assert_eq!(listed, 9, "a new text method needs a native symbol and a runtime entry point");
+        assert!(!native_text_method(BuiltinMethodKind::StringFindRegex));
+        assert!(!native_text_method(BuiltinMethodKind::StringFindAllRegex));
     }
 }

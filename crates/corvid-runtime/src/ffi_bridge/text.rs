@@ -54,3 +54,76 @@ text_decoder!(corvid_string_decode_base64_url, corvid_text::decode_base64_url);
 text_decoder!(corvid_string_decode_hex, corvid_text::decode_hex);
 text_decoder!(corvid_string_decode_url_component, corvid_text::decode_url_component);
 text_decoder!(corvid_string_parse_uuid, corvid_text::parse_uuid);
+
+/// The checker validated every pattern with the same parser, so an
+/// `Err` here is a compiler bug, not bad input: stop loudly.
+fn checked<T>(result: Result<T, String>) -> T {
+    result.unwrap_or_else(|message| {
+        eprintln!("corvid: {message}");
+        std::process::abort()
+    })
+}
+
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_contains_regex(value: CorvidString, pattern: CorvidString) -> u8 {
+    let (text, pattern) = unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern)) };
+    checked(corvid_text::regex::contains(text, pattern)) as u8
+}
+
+/// `replace_regex` with a literal template the checker validated.
+///
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_replace_regex(
+    value: CorvidString,
+    pattern: CorvidString,
+    template: CorvidString,
+) -> CorvidString {
+    let (text, pattern, template) =
+        unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern), borrow_corvid_string(&template)) };
+    string_from_rust(checked(corvid_text::regex::replace(text, pattern, template)))
+}
+
+/// `replace_regex` with a replacement computed at run time, inserted
+/// as written.
+///
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_replace_regex_verbatim(
+    value: CorvidString,
+    pattern: CorvidString,
+    replacement: CorvidString,
+) -> CorvidString {
+    let (text, pattern, replacement) =
+        unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern), borrow_corvid_string(&replacement)) };
+    string_from_rust(checked(corvid_text::regex::replace_verbatim(text, pattern, replacement)))
+}
+
+/// `split_regex`, appending each piece to the fresh native list of
+/// strings the caller allocated, as `corvid_string_split` does.
+///
+/// # Safety
+/// The inputs must remain live. `list` must be a fresh native list of
+/// strings, which is returned.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_split_regex(
+    value: CorvidString,
+    pattern: CorvidString,
+    list: *mut std::ffi::c_void,
+) -> *mut std::ffi::c_void {
+    extern "C" {
+        fn corvid_list_append(list: *mut std::ffi::c_void, slot: i64);
+    }
+    let (text, pattern) = unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern)) };
+    for piece in checked(corvid_text::regex::split(text, pattern)) {
+        let descriptor = string_from_rust(piece);
+        // SAFETY: the list owns the appended String's reference.
+        let raw: *const u8 = unsafe { std::mem::transmute(descriptor) };
+        unsafe { corvid_list_append(list, raw as isize as i64) };
+    }
+    list
+}

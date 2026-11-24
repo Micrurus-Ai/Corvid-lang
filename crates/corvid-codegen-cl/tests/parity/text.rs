@@ -85,6 +85,51 @@ agent main() -> String:
 }
 
 #[test]
+fn contains_regex_agrees_on_both_tiers() {
+    let out = assert_parity_text(
+        r#"
+agent flag(seen: Bool) -> String:
+    if seen:
+        return "y"
+    return "n"
+
+agent main() -> String:
+    return flag("order 42".contains_regex("[0-9]+")) + flag("none".contains_regex("[0-9]+")) + flag("naïve".contains_regex("^\\w{5}$")) + flag("STRASSE".contains_regex("(?i)^strasse$"))
+"#,
+    );
+    assert_eq!(out, "ynyy");
+}
+
+#[test]
+fn replace_regex_expands_literal_templates_and_inserts_run_time_text_verbatim() {
+    let out = assert_parity_text(
+        r#"
+agent mask(text: String, replacement: String) -> String:
+    return text.replace_regex("\\d+", replacement)
+
+agent main() -> String:
+    swapped = "ada@example and bob@corvid".replace_regex("(?<user>\\w+)@(\\w+)", "${2}:$user $$")
+    return swapped + "|" + mask("pin 1234, code 99", "$1 ${x}") + "|" + "café au lait".replace_regex("\\s+", "_")
+"#,
+    );
+    assert_eq!(out, "example:ada $ and corvid:bob $|pin $1 ${x}, code $1 ${x}|café_au_lait");
+}
+
+#[test]
+fn split_regex_agrees_on_both_tiers() {
+    let out = assert_parity_text(
+        r#"
+agent main() -> String:
+    parts = "a, b,,ç".split_regex(",\\s*")
+    if parts.length() == 4:
+        return parts[0] + "|" + parts[1] + "|" + parts[2] + "|" + parts[3]
+    return "wrong count"
+"#,
+    );
+    assert_eq!(out, "a|b||ç");
+}
+
+#[test]
 fn a_decoder_result_propagates_with_question_mark() {
     let out = assert_parity_text(&format!(
         r#"{SHOW}

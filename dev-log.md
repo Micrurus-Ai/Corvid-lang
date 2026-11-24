@@ -22,6 +22,24 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 native regular expressions, first part
+
+`contains_regex`, `replace_regex` (both the template and the verbatim
+kind) and `split_regex` compile to native code. They join the text
+method table and take their arguments through the ordinary string
+method lowering, so the pattern literal, the replacement and the split
+list are handled as `contains`, `replace` and `split` handle theirs. The
+runtime entry points call `corvid-text`; a pattern error there would be
+a compiler bug, so it aborts with the message instead of returning a
+value. Parity tests cover Unicode classes, case folding, named and
+numbered references, verbatim replacement and empty split pieces.
+
+`find_regex` and `find_all_regex` stay on the interpreter: native code
+would have to allocate `RegexMatch` records holding a
+`List<Option<String>>`, and the runtime must not decide native layouts
+itself. The roadmap records the plan, following the `JsonError` record
+and the JSON decode plan.
+
 ## 2026-11-24 - B03 encoding and UUID parsing compile to native code
 
 The eight encoding methods and `parse_uuid` now compile. Each is one

@@ -118,9 +118,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let mut text_methods = Vec::new();
     for kind in crate::text_methods::NATIVE_TEXT_METHODS {
         let Some((symbol, shape)) = crate::text_methods::native_text_symbol(kind) else { continue };
+        use crate::text_methods::NativeTextShape;
         let sig = match shape {
-            crate::text_methods::NativeTextShape::Encoder => &char_len_sig,
-            crate::text_methods::NativeTextShape::Decoder => &char_at_sig,
+            NativeTextShape::Encoder => &char_len_sig,
+            NativeTextShape::Decoder => &char_at_sig,
+            NativeTextShape::RegexSearch => &search_sig,
+            NativeTextShape::RegexReplace | NativeTextShape::RegexSplit => &substring_sig,
         };
         let id = module
             .declare_function(symbol, Linkage::Import, sig)

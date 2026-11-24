@@ -127,7 +127,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] `JsonError` cannot be written in a signature: the resolver does not register it, though the checker knows the name. Register it as `RegexMatch` is. Found during B03; belongs to B01.
 - [x] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted. [Generating UUIDs](reference/text-and-encoding.md#generating-uuids)
 - [x] Native encoding and UUID parsing, with parity tests. Native code calls the `corvid-text` functions the interpreter calls, and a decoder fills a native `Result<String, String>`.
-- [ ] Native regular expressions, with parity tests.
+- [x] Native `contains_regex`, `replace_regex` and `split_regex`, with parity tests, through the `corvid-text` functions the interpreter calls.
+- [ ] Native `find_regex` and `find_all_regex`. Native code must allocate `RegexMatch` records with a `List<Option<String>>` field; represent `RegexMatch` as an ordinary native record before ownership analysis, as `JsonError` is, and let the compiler pass the layout to the runtime, as the JSON decode plan does. Until then these programs run on the interpreter.
 - [ ] Patterns built at run time, through a validated pattern value. Deferred until a backend example needs one.
 - [ ] Named-group lookup on `RegexMatch` checked against the pattern's group names.
 - [ ] Raw string literals for patterns. Agree the lexical rule with frontend development first.
