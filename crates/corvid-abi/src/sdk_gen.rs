@@ -14,6 +14,8 @@
 use crate::app_contract::ApplicationContract;
 use crate::ts_client::GeneratedFile;
 
+mod type_name;
+
 mod swift;
 use swift::emit_swift;
 
