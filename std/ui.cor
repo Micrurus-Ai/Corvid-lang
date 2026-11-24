@@ -14,6 +14,12 @@ fn children(views: List<View>) -> String:
 public fn fragment(content: List<View>) -> View:
     return View(children(content))
 
+public fn portal(target_id: String, content: List<View>) -> View:
+    return View("<corvid-portal data-target-id=\"" + escaped(target_id) + "\"><div>" + children(content) + "</div></corvid-portal>")
+
+public fn portal_target(target_id: String) -> View:
+    return View("<div id=\"" + escaped(target_id) + "\" data-corvid-portal-target></div>")
+
 public fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View:
     recovered = match result:
         Ok(content) -> content

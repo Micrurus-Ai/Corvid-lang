@@ -81,6 +81,12 @@ fn weekend_packing() -> View:
     return packing_list(ui.h2("Weekend packing"), items)
 ```
 
+### Place a component's controls in another region
+
+In the [packing actions example](../../examples/packing_actions/src/main.cor), each item creates its own checkbox with `ui.portal("packing-actions", [packed])`. The layout places `ui.portal_target("packing-actions")` in the actions section. On an interactive page, mounting each item moves its controls to that destination. Removing one item removes its checkbox from the actions section. Reattaching the item moves the same checkbox back, preserving its checked state.
+
+Give the destination a unique HTML ID and render it in the same document or shadow root before the portal mounts. Without scripting or a matching destination, the controls appear with the item.
+
 ### Pass context across a layout
 
 In the trail guide, the route supplies `GuideContext("/guide")` to the page. The page passes that record to the packing panel, which passes it to the note editor and the suggestions form. Both forms read `context.preview_path` for their GET action. To render the guide for a different destination, supply another record at the page call. The context belongs to that render and follows ordinary typed function arguments.

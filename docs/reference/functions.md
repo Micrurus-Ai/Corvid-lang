@@ -391,6 +391,8 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 
 - `fn text(value: String) -> View`
 - `fn fragment(content: List<View>) -> View` groups siblings into one view for a component slot. It concatenates each child's existing markup in order. Nested fragments add no element or spacing. An empty fragment renders an empty string.
+- `fn portal(target_id: String, content: List<View>) -> View` renders children together at the call site. On an interactive page, mounting the portal moves their container to the matching portal target in the same document or shadow root. Children stay inline if the target is absent or inside the portal. Unmounting returns the container to its owner. Reconnecting the owner looks up the target again.
+- `fn portal_target(target_id: String) -> View` renders a block destination with the supplied HTML ID. Give it a unique, nonempty ID. Multiple portals can append their content here in mount order.
 - `fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View` returns the child view on success. On error it calls `render_error` with the message and returns that view in the child's place. Use `ui.text` inside the callback to escape error text.
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.

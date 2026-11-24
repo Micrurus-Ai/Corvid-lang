@@ -1,4 +1,28 @@
 // This module is loaded by interactive pages, including pages with no Wasm exports.
+if (!customElements.get("corvid-portal")) {
+  customElements.define("corvid-portal", class extends HTMLElement {
+    #content;
+
+    connectedCallback() {
+      // Let the caller finish inserting its children and the destination.
+      queueMicrotask(() => {
+        if (!this.isConnected || this.#content) return;
+        const target = this.getRootNode().getElementById(this.dataset.targetId);
+        const content = this.firstElementChild;
+        if (!target?.hasAttribute("data-corvid-portal-target") || !content || this.contains(target)) return;
+        this.#content = content;
+        target.append(content);
+      });
+    }
+
+    disconnectedCallback() {
+      if (!this.#content) return;
+      this.append(this.#content);
+      this.#content = undefined;
+    }
+  });
+}
+
 for (const select of document.querySelectorAll("select[data-corvid-submit-change]")) {
   select.addEventListener("change", () => select.form.requestSubmit());
 }
