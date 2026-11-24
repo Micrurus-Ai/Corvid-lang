@@ -54,6 +54,7 @@ corvid-syntax = { workspace = true }
 corvid-types = { workspace = true }
 corvid-public-json = { workspace = true }
 corvid-text = { workspace = true }
+corvid-time = { workspace = true }
 # `inventory` collects `ToolMetadata` entries from every `#[tool]`
 # macro invocation across linked user tool crates. Read once by
 # `corvid_runtime_init` to build the effect-policy table.

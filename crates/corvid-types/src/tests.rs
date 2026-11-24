@@ -4,6 +4,7 @@ use corvid_syntax::{lex, parse_file};
 
 mod regex_methods;
 mod decimal;
+mod time;
 mod text_methods;
 
 fn check(src: &str) -> Checked {

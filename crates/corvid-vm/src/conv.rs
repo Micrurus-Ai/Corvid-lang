@@ -30,6 +30,10 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         // The checker refuses `Decimal` at JSON boundaries until the
         // JSON slice; this keeps traces of decimal values exact.
         Value::Decimal(d) => serde_json::Value::String(d.to_string()),
+        // B06 — time crosses tools, prompts and traces as its standard
+        // text, the form `corvid_time` parses back.
+        Value::Duration(d) => serde_json::Value::String(d.to_string()),
+        Value::Instant(i) => serde_json::Value::String(i.to_string()),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -184,6 +188,13 @@ pub fn json_to_value(
 ) -> Result<Value, ConvError> {
     use serde_json::Value as J;
     match (expected, json) {
+        // B06 — a tool result or a model reply carries time as text.
+        (Type::Duration, J::String(text)) => corvid_time::Duration::parse(&text)
+            .map(Value::Duration)
+            .map_err(|error| ConvError::TypeMismatch { expected: "Duration".into(), got: format!("`{text}`: {error}") }),
+        (Type::Instant, J::String(text)) => corvid_time::Instant::parse(&text)
+            .map(Value::Instant)
+            .map_err(|error| ConvError::TypeMismatch { expected: "Instant".into(), got: format!("`{text}`: {error}") }),
         (Type::Int, J::Number(n)) => n
             .as_i64()
             .map(Value::Int)
@@ -496,6 +507,8 @@ fn type_label(t: &Type) -> String {
         Type::JsonError => "JsonError".into(),
         Type::RegexMatch => "RegexMatch".into(),
         Type::Decimal => "Decimal".into(),
+        Type::Duration => "Duration".into(),
+        Type::Instant => "Instant".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

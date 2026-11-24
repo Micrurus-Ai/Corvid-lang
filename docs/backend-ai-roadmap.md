@@ -138,7 +138,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/b06-decimal-and-time.md)
 
 - [x] Decimal on the interpreter: the `corvid-decimal` crate and the `Decimal` type. Number literals are decimals where a decimal is meant (`price: Decimal = 19.99`, `price * 1.08`) and keep their digits. `parse_decimal`, conversions to and from `Int` and `Float`, exact `+ - * %` and comparisons with `Int`, a compile error for mixing with `Float`, division written with its rounding (`(total / 3).round_half_even(2)`), the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`. `Decimal` is refused at tool, prompt, connector, route, store and table boundaries until the JSON slice. [Exact decimals](reference/decimal.md)
-- [ ] Duration and Instant on the interpreter: the `corvid-time` crate, the unit constructors on `Int` with a compile error for `days()`, duration and instant arithmetic, ISO 8601 and RFC 3339 parsing and formatting, and `time_now` in `std/time`.
+- [x] Duration and Instant on the interpreter: the `corvid-time` crate, exact duration and instant arithmetic to the nanosecond over years 1 to 9999, a compile error for a unit-less number, `whole_<unit>` readings, ISO 8601 and RFC 3339 parsing and formatting, `Instant.from_epoch_milliseconds`, and the traced `time_now` tool. Tools and prompts carry both types as their standard text. [Durations and instants](reference/stdlib/time.md#durations-and-instants)
+- [ ] The duration literal (`30 seconds`, `attempts * 30 seconds`) with a compile error for days, weeks, months and years. Shared grammar: agree it with frontend development first. Proposed to Codex 2026-11-24.
 - [ ] Time zones on the interpreter: `TimeZone` checked at compile time against the bundled database, `ZonedTime`, `in_zone`, `parse_zoned_time` with errors for gaps and folds, `add_days`, `add_months` and `add_years`, the Berlin daylight-saving acceptance test, the queue scheduler moved onto `corvid-time`, and the database version recorded in traces.
 - [ ] Currency formatting: `format_currency` and `format_currency_checked` with CLDR data, an explicit locale and no rounding.
 - [ ] JSON, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs for all five types.
@@ -163,6 +164,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 **Test infrastructure**
 
+- [ ] `cargo test -p corvid-cli --test serve_smoke` fails one test per run under parallel load, a different one each time, with an HTTP 404 (seen on macOS and Windows). The suite passes with `--test-threads=1`. Test servers race on startup or ports; wait for each server's readiness and give each its own port.
+- [ ] The native tests compile `examples/shared_library_catalog/host_c/{host,approver_host,capsule_host}` in place, and `.gitignore` does not cover the binaries, so `git add -A` picks them up. Build them into the target directory or ignore them.
 - [x] Integration tests that link Corvid programs find Cargo's build output wherever it is. The `corvid-test-paths` crate resolves the target directory from `CARGO_TARGET_DIR`, then from the `CACHEDIR.TAG` marker above the running test binary (which covers `build.target-dir`), then `<workspace>/target`. It replaces 15 copies of a `<workspace>/target/release` path, and `build_integration` no longer builds the whole workspace a second time into `<workspace>/target`.
 
 B01 to B06 are the foundation. Interoperability (B02, B07, B08) and built-in capability (B03 to B06, B09 onward) advance together, so a developer always has a typed path to a capability before Corvid gains a built-in version of it.

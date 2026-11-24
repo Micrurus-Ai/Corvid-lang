@@ -19,6 +19,8 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.parse_int() -> Result<Int, String>`
 - `String.parse_float() -> Result<Float, String>`
 - `String.parse_decimal() -> Result<Decimal, String>`
+- `String.parse_duration() -> Result<Duration, String>`
+- `String.parse_instant() -> Result<Instant, String>`
 - `String.encode_base64() -> String`
 - `String.decode_base64() -> Result<String, String>`
 - `String.encode_base64_url() -> String`
@@ -76,6 +78,25 @@ The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must b
 - `Decimal.to_int_truncated() -> Int`
 
 A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19.99`, `price * 1.08`. `/` on decimals is written with its rounding, `(total / 3).round_half_even(2)`. Mixing `Decimal` and `Float` is a compile error. See [Exact decimals](decimal.md).
+
+## Duration
+
+- `Duration.whole_hours() -> Int`
+- `Duration.whole_minutes() -> Int`
+- `Duration.whole_seconds() -> Int`
+- `Duration.whole_milliseconds() -> Int`
+- `Duration.whole_microseconds() -> Int`
+- `Duration.whole_nanoseconds() -> Int`
+- `Duration.abs() -> Duration`
+- `Duration.to_string() -> String`
+
+## Instant
+
+- `Instant.from_epoch_milliseconds(n: Int) -> Instant`
+- `Instant.epoch_milliseconds() -> Int`
+- `Instant.to_string() -> String`
+
+Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` reads the clock. See [Durations and instants](stdlib/time.md#durations-and-instants).
 
 ## Bool
 

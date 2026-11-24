@@ -39,6 +39,10 @@ pub enum Value {
     /// B06 — an exact decimal. Equality and hashing are numeric
     /// (`1.0 == 1.00`); the scale is kept for display.
     Decimal(corvid_decimal::Decimal),
+    /// B06 — an exact length of elapsed time.
+    Duration(corvid_time::Duration),
+    /// B06 — an exact point on the UTC timeline.
+    Instant(corvid_time::Instant),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -225,6 +229,8 @@ impl Clone for Value {
             Value::Int(n) => Value::Int(*n),
             Value::Float(x) => Value::Float(*x),
             Value::Decimal(d) => Value::Decimal(*d),
+            Value::Duration(d) => Value::Duration(*d),
+            Value::Instant(i) => Value::Instant(*i),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -266,6 +272,8 @@ impl Value {
             Value::Int(_) => "Int".into(),
             Value::Float(_) => "Float".into(),
             Value::Decimal(_) => "Decimal".into(),
+            Value::Duration(_) => "Duration".into(),
+            Value::Instant(_) => "Instant".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -334,6 +342,8 @@ impl PartialEq for Value {
             (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
             (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
             (Value::Decimal(a), Value::Decimal(b)) => a == b,
+            (Value::Duration(a), Value::Duration(b)) => a == b,
+            (Value::Instant(a), Value::Instant(b)) => a == b,
             (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
             (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,

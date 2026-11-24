@@ -805,6 +805,8 @@ impl<'a> Checker<'a> {
             Some(Binding::BuiltIn(BuiltIn::Int)) => Type::Int,
             Some(Binding::BuiltIn(BuiltIn::Float)) => Type::Float,
             Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
+            Some(Binding::BuiltIn(BuiltIn::Duration)) => Type::Duration,
+            Some(Binding::BuiltIn(BuiltIn::Instant)) => Type::Instant,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,
@@ -944,6 +946,10 @@ impl<'a> Checker<'a> {
         }
         // `Shelf.save(row)`: an operation of a stored table (B09).
         if let Some(ty) = self.check_table_method_call(target, method_name, args, span) {
+            return ty;
+        }
+        // `Instant.from_epoch_milliseconds(n)`: a compiler-known type name.
+        if let Some(ty) = self.check_builtin_type_method_call(target, method_name, args, span) {
             return ty;
         }
         // `Order.from_json(text)`: the receiver is a type, not a value.

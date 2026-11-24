@@ -146,6 +146,13 @@ pub fn emit_type_description(
         Type::Decimal => TypeDescription::Struct {
             name: "Decimal".to_string(),
         },
+        // B06 — the same for durations and instants until their JSON slice.
+        Type::Duration => TypeDescription::Struct {
+            name: "Duration".to_string(),
+        },
+        Type::Instant => TypeDescription::Struct {
+            name: "Instant".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

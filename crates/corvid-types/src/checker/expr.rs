@@ -268,6 +268,8 @@ impl<'a> Checker<'a> {
                 BuiltIn::Int
                 | BuiltIn::Float
                 | BuiltIn::Decimal
+                | BuiltIn::Duration
+                | BuiltIn::Instant
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

@@ -25,6 +25,10 @@ pub enum Type {
     /// it with `Float` is a compile error; `Int` mixes in arithmetic
     /// because the conversion is exact.
     Decimal,
+    /// B06 — an exact length of elapsed time (`corvid_time::Duration`).
+    Duration,
+    /// B06 — an exact point on the UTC timeline (`corvid_time::Instant`).
+    Instant,
     String,
     Bool,
     Nothing,
@@ -215,6 +219,8 @@ impl Type {
             "Int" => Type::Int,
             "Float" => Type::Float,
             "Decimal" => Type::Decimal,
+            "Duration" => Type::Duration,
+            "Instant" => Type::Instant,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -236,6 +242,8 @@ impl Type {
             Type::Int => "Int".into(),
             Type::Float => "Float".into(),
             Type::Decimal => "Decimal".into(),
+            Type::Duration => "Duration".into(),
+            Type::Instant => "Instant".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),

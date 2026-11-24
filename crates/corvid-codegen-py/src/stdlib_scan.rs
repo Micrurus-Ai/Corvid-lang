@@ -74,6 +74,7 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "random_float",
     "random_int",
     // std/time
+    "time_now",
     "time_now_utc",
     "time_monotonic_ms",
     "time_parse_iso",

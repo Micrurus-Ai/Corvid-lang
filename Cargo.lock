@@ -1032,6 +1032,7 @@ dependencies = [
  "corvid-syntax",
  "corvid-test-paths",
  "corvid-text",
+ "corvid-time",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -1136,6 +1137,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-time"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "serde",
+]
+
+[[package]]
 name = "corvid-tour-catalog"
 version = "0.0.1"
 dependencies = [
@@ -1160,6 +1169,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-syntax",
  "corvid-text",
+ "corvid-time",
  "serde",
  "toml 0.8.23",
 ]
@@ -1179,6 +1189,7 @@ dependencies = [
  "corvid-runtime",
  "corvid-syntax",
  "corvid-text",
+ "corvid-time",
  "corvid-trace-schema",
  "corvid-types",
  "futures",

@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Use `time_now()` from `std:time` for the clock: it returns an exact `Instant`, and `time_now() - started` is a `Duration`. Instants move by durations and subtract to them; adding a bare number is a compile error because a number has no unit. Read a duration with `whole_seconds()` or another `whole_` unit, and text with `parse_instant()` (RFC 3339) and `parse_duration()` (ISO 8601). A prompt typed `-> Instant` tells the model the format. [Durations and instants](docs/reference/stdlib/time.md#durations-and-instants)
+
 Use `Decimal` for money. A number literal becomes an exact decimal where a decimal is meant, so `subtotal: Decimal = 0`, `line.price * line.quantity` and `subtotal * 0.0825` need no conversions, and `0.1 + 0.2` is exactly `0.3`. Division is written with its rounding, `(subtotal / 3).round_half_even(2)`. Mixing `Decimal` with `Float` is a compile error that names `to_decimal()` and `to_float()`. Decimals run on the interpreter and cannot yet cross a tool, prompt or route boundary; send `amount.to_string()` and read it back with `parse_decimal()`. [Exact decimals](docs/reference/decimal.md)
 
 Use `ui.link` for a route a keyboard user should reach with Tab. Its native anchor now explicitly participates in the page's normal tab order. The installed Notes workspace and packaged storefront passed in Chrome, Firefox and WebKit on Windows. [Browser trial](docs/book/19-browser-views.md#check-the-storefront-across-browsers-and-devices)
