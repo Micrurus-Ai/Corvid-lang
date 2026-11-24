@@ -34,6 +34,8 @@ mod native_cache;
 mod render;
 pub mod spec_check;
 pub mod spec_site;
+mod table_schema;
+pub use table_schema::table_schemas;
 
 pub use add_dimension::{
     add_dimension as install_dimension, add_dimension_with_registry as install_dimension_with_registry,

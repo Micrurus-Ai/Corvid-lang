@@ -188,10 +188,10 @@ pub(crate) fn cmd_migrate_down(
     Ok(0)
 }
 
-struct MigrationFile {
-    name: String,
+pub(crate) struct MigrationFile {
+    pub(crate) name: String,
     sha256: String,
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 }
 
 struct MigrationDrift {
@@ -211,7 +211,7 @@ struct AppliedMigration {
     applied_at: u64,
 }
 
-fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
+pub(crate) fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -301,7 +301,7 @@ fn detect_migration_drift(
     drift
 }
 
-fn migration_version(name: &str) -> String {
+pub(crate) fn migration_version(name: &str) -> String {
     name.split_once('_')
         .map(|(version, _)| version)
         .or_else(|| name.split_once('.').map(|(version, _)| version))

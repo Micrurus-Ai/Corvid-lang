@@ -16,8 +16,84 @@ use crate::db::{DbHandleInner, DbValue};
 use crate::errors::RuntimeError;
 use crate::Runtime;
 use corvid_ast::DatabaseLocation;
+use corvid_types::Type;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+/// How a field's values are stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnKind {
+    Integer,
+    Real,
+    Text,
+    /// A `Bool`, stored as 0 or 1.
+    Boolean,
+    /// Any other type, stored as its public JSON text.
+    Json,
+}
+
+impl ColumnKind {
+    pub fn sql_type(self) -> &'static str {
+        match self {
+            Self::Integer | Self::Boolean => "INTEGER",
+            Self::Real => "REAL",
+            Self::Text | Self::Json => "TEXT",
+        }
+    }
+}
+
+/// How a field of type `ty` is stored, and whether the column admits
+/// `NULL`. The interpreter and the migration planner both decide
+/// columns here. `Option<T>` is a nullable column of `T`'s kind, except
+/// when `T` is itself an `Option`: `Some(None)` and `None` would both be
+/// `NULL`, so a nested option is stored as JSON.
+pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
+    match ty {
+        Type::Tainted(inner) => column_kind(inner),
+        Type::Option(inner) => match untainted(inner) {
+            Type::Option(_) => (ColumnKind::Json, true),
+            inner => (column_kind(inner).0, true),
+        },
+        Type::Int => (ColumnKind::Integer, false),
+        Type::Float => (ColumnKind::Real, false),
+        Type::String => (ColumnKind::Text, false),
+        Type::Bool => (ColumnKind::Boolean, false),
+        _ => (ColumnKind::Json, false),
+    }
+}
+
+/// `ty` without `Tainted` wrappers; taint is tracked statically.
+pub fn untainted(mut ty: &Type) -> &Type {
+    while let Type::Tainted(inner) = ty {
+        ty = inner;
+    }
+    ty
+}
+
+/// A table's declared shape: its name, key and typed columns, with
+/// `revision` last.
+#[derive(Debug, Clone)]
+pub struct TableSchema {
+    pub name: String,
+    pub key: String,
+    pub columns: Vec<(String, Type)>,
+}
+
+/// The `CREATE TABLE` statement for a declared table.
+pub fn create_table_sql(table: &TableSchema) -> String {
+    let columns = table
+        .columns
+        .iter()
+        .map(|(name, ty)| {
+            let (kind, nullable) = column_kind(ty);
+            let key = if *name == table.key { " PRIMARY KEY" } else { "" };
+            let null = if nullable { "" } else { " NOT NULL" };
+            format!("    {} {}{key}{null}", quote(name), kind.sql_type())
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    format!("CREATE TABLE {} (\n{columns}\n);\n", quote(&table.name))
+}
 
 /// One table as an operation sees it.
 #[derive(Debug, Clone, Copy)]

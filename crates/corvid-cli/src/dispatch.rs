@@ -45,6 +45,7 @@ use crate::format::{
     approval_summary_value, approvals_inspect_summary, approvals_queue_summary, audit_event_value,
 };
 use crate::migrate_cmd::{cmd_migrate, cmd_migrate_down};
+use crate::migrate_plan_cmd::cmd_migrate_plan;
 use crate::package_cmd::{
     cmd_add_package, cmd_package_metadata, cmd_package_publish, cmd_package_verify_lock,
     cmd_package_verify_registry, cmd_remove_package, cmd_update_package,
@@ -561,6 +562,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             UpgradeCommand::Assist { path, json } => upgrade_cmd::run_assist(&path, json),
         },
         Some(Command::Migrate { command }) => match command {
+            MigrateCommand::Plan { source, dir, dry_run } => cmd_migrate_plan(&source, &dir, dry_run),
             MigrateCommand::Status {
                 dir,
                 state,

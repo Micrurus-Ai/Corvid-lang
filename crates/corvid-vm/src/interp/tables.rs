@@ -13,7 +13,7 @@ use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrType};
 use corvid_runtime::db::DbValue;
-use corvid_runtime::tables::{Row, TableRef};
+use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableRef};
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
 
@@ -107,45 +107,54 @@ impl<'ir> Interpreter<'ir> {
         Ok(Value::Struct(StructValue::new(record.id, record.name.clone(), fields)))
     }
 
+    /// A field value as its column value, stored as `column_kind` says.
     fn to_column(&self, value: &Value, ty: &Type) -> Result<DbValue, String> {
-        Ok(match (ty, value) {
-            (Type::Tainted(inner), _) => return self.to_column(value, inner),
-            (Type::Option(_), Value::OptionNone | Value::Nothing) => DbValue::Null,
-            (Type::Option(inner), Value::OptionSome(payload)) => return self.to_column(&payload.get(), inner),
-            (Type::Option(inner), other) => return self.to_column(other, inner),
-            (Type::Int, Value::Int(n)) => DbValue::Integer(*n),
-            (Type::Float, Value::Float(f)) => DbValue::Float(*f),
-            (Type::Float, Value::Int(n)) => DbValue::Float(*n as f64),
-            (Type::String, Value::String(s)) => DbValue::Text(s.to_string()),
-            (Type::Bool, Value::Bool(b)) => DbValue::Bool(*b),
-            (Type::Int | Type::Float | Type::String | Type::Bool, other) => {
-                return Err(format!("{} where the column holds {}", other.type_name(), ty.display_name()))
-            }
-            // Records, lists, maps and sums are stored as public JSON.
-            _ => DbValue::Text(encode_public_json_text(value, ty, &self.types_by_id)?),
+        let ty = untainted(ty);
+        let (kind, nullable) = column_kind(ty);
+        if kind == ColumnKind::Json {
+            return Ok(DbValue::Text(encode_public_json_text(value, ty, &self.types_by_id)?));
+        }
+        let (value, ty) = match (nullable, ty, value) {
+            (true, _, Value::OptionNone | Value::Nothing) => return Ok(DbValue::Null),
+            (true, Type::Option(inner), Value::OptionSome(payload)) => (payload.get(), untainted(inner)),
+            (true, Type::Option(inner), other) => (other.clone(), untainted(inner)),
+            (_, ty, other) => (other.clone(), ty),
+        };
+        Ok(match (kind, value) {
+            (ColumnKind::Integer, Value::Int(n)) => DbValue::Integer(n),
+            (ColumnKind::Real, Value::Float(f)) => DbValue::Float(f),
+            (ColumnKind::Real, Value::Int(n)) => DbValue::Float(n as f64),
+            (ColumnKind::Text, Value::String(s)) => DbValue::Text(s.to_string()),
+            (ColumnKind::Boolean, Value::Bool(b)) => DbValue::Bool(b),
+            (_, other) => return Err(format!("{} where the column holds {}", other.type_name(), ty.display_name())),
         })
     }
 
+    /// A column value as the field value `column_kind` stored.
     fn from_column(&self, column: DbValue, ty: &Type) -> Result<Value, String> {
-        Ok(match (ty, column) {
-            (Type::Tainted(inner), column) => return self.from_column(column, inner),
-            (Type::Option(_), DbValue::Null) => Value::OptionNone,
-            (Type::Option(inner), column) => Value::OptionSome(BoxedValue::new(self.from_column(column, inner)?)),
-            (Type::Int, DbValue::Integer(n)) => Value::Int(n),
-            (Type::Float, DbValue::Float(f)) => Value::Float(f),
-            (Type::Float, DbValue::Integer(n)) => Value::Float(n as f64),
-            (Type::String, DbValue::Text(s)) => Value::String(Arc::from(s.as_str())),
-            (Type::Bool, DbValue::Bool(b)) => Value::Bool(b),
+        let ty = untainted(ty);
+        let (kind, nullable) = column_kind(ty);
+        if nullable && column == DbValue::Null {
+            return Ok(Value::OptionNone);
+        }
+        if kind == ColumnKind::Json {
+            let DbValue::Text(json) = column else {
+                return Err(format!("the database holds {column:?} where JSON text for {} belongs", ty.display_name()));
+            };
+            return decode_public_json_text(&json, ty, &self.types_by_id, UnknownFields::Ignore).map_err(|e| e.message());
+        }
+        let scalar = match (kind, column) {
+            (ColumnKind::Integer, DbValue::Integer(n)) => Value::Int(n),
+            (ColumnKind::Real, DbValue::Float(f)) => Value::Float(f),
+            (ColumnKind::Real, DbValue::Integer(n)) => Value::Float(n as f64),
+            (ColumnKind::Text, DbValue::Text(s)) => Value::String(Arc::from(s.as_str())),
+            (ColumnKind::Boolean, DbValue::Bool(b)) => Value::Bool(b),
             // SQLite stores a Bool as an integer.
-            (Type::Bool, DbValue::Integer(n)) => Value::Bool(n != 0),
-            (Type::Int | Type::Float | Type::String | Type::Bool, column) => {
+            (ColumnKind::Boolean, DbValue::Integer(n)) => Value::Bool(n != 0),
+            (_, column) => {
                 return Err(format!("the database holds {column:?} where the declaration says {}", ty.display_name()))
             }
-            (_, DbValue::Text(json)) => decode_public_json_text(&json, ty, &self.types_by_id, UnknownFields::Ignore)
-                .map_err(|e| e.message())?,
-            (_, column) => {
-                return Err(format!("the database holds {column:?} where JSON text for {} belongs", ty.display_name()))
-            }
-        })
+        };
+        Ok(if nullable { Value::OptionSome(BoxedValue::new(scalar)) } else { scalar })
     }
 }

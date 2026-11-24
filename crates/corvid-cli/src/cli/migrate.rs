@@ -2,7 +2,7 @@
 //! surface, decomposed in Phase 20j-A1.
 //!
 //! Owns the [`MigrateCommand`] subcommand enum that the
-//! `corvid migrate status|up|down` dispatch arms in main.rs
+//! `corvid migrate plan|status|up|down` dispatch arms in main.rs
 //! consume.
 
 use clap::Subcommand;
@@ -10,6 +10,17 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum MigrateCommand {
+    /// Write the migration that creates the tables a program declares.
+    Plan {
+        /// The Corvid source whose `table` declarations to plan.
+        source: PathBuf,
+        /// Directory containing ordered `.sql` migration files.
+        #[arg(long, value_name = "DIR", default_value = "migrations")]
+        dir: PathBuf,
+        /// Print the planned migration without writing it.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Report applied, pending, and drifted migrations.
     Status {
         /// Directory containing ordered `.sql` migration files.
