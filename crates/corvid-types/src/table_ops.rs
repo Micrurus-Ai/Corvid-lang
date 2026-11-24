@@ -13,7 +13,8 @@ use std::collections::HashMap;
 /// A table operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TableOp {
-    /// `Shelf.get(key) -> Option<Shelf>`
+    /// `Shelf.get(key) -> Option<Shelf>`; a key of several fields takes
+    /// their values in declaration order, `Edit.get(proposal, shelf)`.
     Get,
     /// `Shelf.insert(row) -> Result<Shelf, Shelf>`: `Err` holds the row
     /// already stored under that key.

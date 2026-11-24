@@ -141,7 +141,7 @@ agent shelves_of(user: String) -> List<Shelf>:
     cannot be replayed into in-memory SQLite.
 - [ ] P5. MySQL on the same suite.
 - [ ] P6. Native target.
-- [ ] P7. Port `examples/reading_list` from hand-written SQL to tables, in three parts: atomic writes (P7a, done), keys of two or more columns (P7b), and the port (P7c).
+- [ ] P7. Port `examples/reading_list` from hand-written SQL to tables, in three parts: atomic writes (P7a, done), keys of two or more columns (P7b, done), and the port (P7c).
 
 ## Settled during implementation
 
@@ -243,6 +243,13 @@ database library:
   is one `atomic:` block is exactly the "all or nothing" a form submit or
   an agent's tool call needs, with conflicts returned as typed values the
   form or the agent can show or retry.
+- A key of several columns reuses `key`: each field that is part of it is
+  marked, rather than a separate `key (proposal, shelf)` line. Simpler
+  spellings considered: a key line restates names the fields already give,
+  and a `primary key` block adds a second place to look. `get` takes the
+  values in declaration order, `Edit.get(proposal, shelf)`, so the common
+  one-field case reads exactly as before.
+
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.

@@ -97,7 +97,8 @@ pub fn untainted(mut ty: &Type) -> &Type {
 #[derive(Debug, Clone)]
 pub struct TableSchema {
     pub name: String,
-    pub key: String,
+    /// The key's columns, in declaration order.
+    pub keys: Vec<String>,
     pub columns: Vec<(String, Type)>,
     /// `(field, old name)` for each `renamed from`.
     pub renamed: Vec<(String, String)>,
@@ -128,13 +129,21 @@ fn create_table_named_on(table: &TableSchema, name: &str, engine: TableEngine) -
         .iter()
         .map(|(name, ty)| {
             let (kind, nullable) = column_kind(ty);
-            let key = if *name == table.key { " PRIMARY KEY" } else { "" };
+            // A one-column key is declared on its column; a key of several
+            // columns is a table constraint after the columns.
+            let key = if table.keys.len() == 1 && table.keys[0] == *name { " PRIMARY KEY" } else { "" };
             let null = if nullable { "" } else { " NOT NULL" };
             format!("    {} {}{key}{null}", quote(name), engine.column_type(kind))
         })
         .collect::<Vec<_>>()
         .join(",\n");
-    format!("CREATE TABLE {} (\n{columns}\n);\n", quote(name))
+    let constraint = if table.keys.len() > 1 {
+        let keys = table.keys.iter().map(|key| quote(key)).collect::<Vec<_>>().join(", ");
+        format!(",\n    PRIMARY KEY ({keys})")
+    } else {
+        String::new()
+    };
+    format!("CREATE TABLE {} (\n{columns}{constraint}\n);\n", quote(name))
 }
 
 /// `name` as a quoted SQL identifier.

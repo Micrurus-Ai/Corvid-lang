@@ -22,10 +22,12 @@ impl<'ir> Interpreter<'ir> {
         &mut self,
         op: TableOp,
         table: &IrTable,
-        arg: Value,
+        args: Vec<Value>,
         span: Span,
     ) -> Result<Value, InterpError> {
         let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        // `get` takes the key's values; the other operations take one row.
+        let arg = args.first().cloned().unwrap_or(Value::Nothing);
         let record = *self
             .types_by_id
             .get(&table.def_id)
@@ -35,12 +37,20 @@ impl<'ir> Interpreter<'ir> {
         let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
         Ok(match op {
             TableOp::Get => {
-                let key_field = record
-                    .fields
+                let key = table
+                    .keys
                     .iter()
-                    .find(|f| f.name == table.key)
-                    .ok_or_else(|| fail(format!("table `{}` has no key field `{}`", table.name, table.key)))?;
-                let key = self.to_column(&arg, &key_field.ty).map_err(fail)?;
+                    .zip(&args)
+                    .map(|(key, value)| {
+                        let field = record
+                            .fields
+                            .iter()
+                            .find(|f| f.name == *key)
+                            .ok_or_else(|| format!("table `{}` has no key field `{key}`", table.name))?;
+                        self.to_column(value, &field.ty)
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+                    .map_err(fail)?;
                 match self.runtime.table_get(&target, key).await.map_err(runtime_error)? {
                     Some(row) => Value::OptionSome(BoxedValue::new(self.row_value(record, row).map_err(fail)?)),
                     None => Value::OptionNone,
@@ -312,7 +322,7 @@ fn table_target<'t>(
         .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
     Ok(TableRef {
         name: &table.name,
-        key: &table.key,
+        keys: &table.keys,
         columns: &table.columns,
         kinds,
         location: &table.database.location,

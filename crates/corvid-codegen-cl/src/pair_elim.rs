@@ -248,7 +248,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             count_local_mentions_expr(items, local_id)
                 + count_local_mentions_expr(next_cursor, local_id)
         }
-        IrExprKind::TableOp { arg, .. } => count_local_mentions_expr(arg, local_id),
+        IrExprKind::TableOp { args, .. } => args.iter().map(|arg| count_local_mentions_expr(arg, local_id)).sum(),
         IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().map(|e| count_local_mentions_expr(e, local_id)).sum(),
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)

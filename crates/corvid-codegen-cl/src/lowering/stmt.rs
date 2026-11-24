@@ -974,7 +974,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_mentions_local(items, target) || expr_mentions_local(next_cursor, target)
         }
-        IrExprKind::TableOp { arg, .. } => expr_mentions_local(arg, target),
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
         IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_mentions_local(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)

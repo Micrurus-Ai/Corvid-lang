@@ -223,7 +223,11 @@ fn scan_expr(expr: &IrExpr, hits: &mut Vec<StdlibToolCall>) {
             scan_expr(items, hits);
             scan_expr(next_cursor, hits);
         }
-        IrExprKind::TableOp { arg, .. } => scan_expr(arg, hits),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                scan_expr(arg, hits);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 scan_expr(e, hits);

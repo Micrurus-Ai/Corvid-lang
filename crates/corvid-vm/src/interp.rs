@@ -1212,12 +1212,15 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Struct(page)))
             },
 
-            IrExprKind::TableOp { op, table, arg } => {
-                let arg_v = match self.eval_expr(arg).await?.into_value() {
-                    Ok(v) => v,
-                    Err(v) => return Ok(ExprFlow::Propagate(v)),
-                };
-                self.eval_table_op(*op, table, arg_v, expr.span).await.map(ExprFlow::Value)
+            IrExprKind::TableOp { op, table, args } => {
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args {
+                    match self.eval_expr(arg).await?.into_value() {
+                        Ok(v) => values.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    }
+                }
+                self.eval_table_op(*op, table, values, expr.span).await.map(ExprFlow::Value)
             },
 
             IrExprKind::TableQuery { table, filter, order, descending, take } => {

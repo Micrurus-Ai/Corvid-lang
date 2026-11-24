@@ -1100,12 +1100,13 @@ pub enum IrExprKind {
     },
 
     /// `Shelf.get(key)`, `Shelf.insert(row)`, `Shelf.save(row)` or
-    /// `Shelf.delete(row)` (B09). `arg` is the key for `get` and the
-    /// row otherwise; the call's type is the operation's result.
+    /// `Shelf.delete(row)` (B09). `args` are the key's values for `get`,
+    /// one per key field in declaration order, and the one row otherwise;
+    /// the call's type is the operation's result.
     TableOp {
         op: corvid_types::TableOp,
         table: IrTable,
-        arg: Box<IrExpr>,
+        args: Vec<IrExpr>,
     },
 
     /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
@@ -1185,7 +1186,9 @@ impl IrTableFilter {
 pub struct IrTable {
     pub def_id: DefId,
     pub name: String,
-    pub key: String,
+    /// The key's columns, in declaration order: one, or several that
+    /// identify a row together.
+    pub keys: Vec<String>,
     /// Column names in declaration order, with `revision` last.
     pub columns: Vec<String>,
     pub database: IrDatabase,

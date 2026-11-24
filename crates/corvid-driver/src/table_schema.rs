@@ -66,7 +66,7 @@ pub fn table_schemas(source: &str) -> Result<Vec<TableSchema>, Vec<Diagnostic>> 
             )?;
             Some(TableSchema {
                 name: record.name.clone(),
-                key: table.key.as_ref()?.name.clone(),
+                keys: table.keys.iter().map(|key| key.name.clone()).collect(),
                 columns: record.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                 renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
                 retired: table.retired.iter().map(|name| name.name.clone()).collect(),

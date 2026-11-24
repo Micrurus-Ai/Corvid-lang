@@ -412,7 +412,11 @@ fn visit_expr_types(
             visit_expr_types(items, seen, order, visit);
             visit_expr_types(next_cursor, seen, order, visit);
         }
-        IrExprKind::TableOp { arg, .. } => visit_expr_types(arg, seen, order, visit),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                visit_expr_types(arg, seen, order, visit);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 visit_expr_types(e, seen, order, visit);

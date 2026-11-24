@@ -227,7 +227,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_mentions_local(items, local_id) || expr_mentions_local(next_cursor, local_id)
         }
-        IrExprKind::TableOp { arg, .. } => expr_mentions_local(arg, local_id),
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, local_id)),
         IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_mentions_local(e, local_id)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_mentions_local(scrutinee, local_id)

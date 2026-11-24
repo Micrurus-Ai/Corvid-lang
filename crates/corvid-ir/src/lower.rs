@@ -2282,11 +2282,10 @@ impl<'a> Lowerer<'a> {
     /// same `table_call_target` the checker uses.
     fn try_table_call(&self, callee: &Expr, args: &[Expr]) -> Option<IrExprKind> {
         let (table, op) = corvid_types::table_call_target(callee, self.file, self.symbols, self.bindings)?;
-        let arg = args.first()?;
         Some(IrExprKind::TableOp {
             op,
             table: self.ir_table(table)?,
-            arg: Box::new(self.lower_expr(arg)),
+            args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
         })
     }
 
@@ -2344,7 +2343,7 @@ impl<'a> Lowerer<'a> {
         Some(crate::types::IrTable {
             def_id,
             name: table.name().name.clone(),
-            key: table.key.as_ref()?.name.clone(),
+            keys: table.keys.iter().map(|key| key.name.clone()).collect(),
             columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
             database: ir_database(database)?,
         })

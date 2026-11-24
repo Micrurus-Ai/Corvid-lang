@@ -35,21 +35,23 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-        match &table.key {
-            None => self.errors.push(TypeError::new(TypeErrorKind::TableKeyRequired { table: name.clone() }, span)),
-            Some(key) => {
-                let declared = table.declared_fields().iter().find(|f| f.name.name == key.name);
-                let type_name = declared.and_then(|f| match &f.ty {
-                    TypeRef::Named { name, .. } => Some(name.name.as_str()),
-                    _ => None,
-                });
-                if !matches!(type_name, Some("Int" | "String")) {
-                    let found = declared.map(|f| type_ref_text(&f.ty)).unwrap_or_default();
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::TableKeyType { table: name.clone(), key: key.name.clone(), found },
-                        key.span,
-                    ));
-                }
+        if table.keys.is_empty() {
+            self.errors.push(TypeError::new(TypeErrorKind::TableKeyRequired { table: name.clone() }, span));
+        }
+        // Each field of the key is a plain `Int` or `String`, whether the
+        // key is one field or several.
+        for key in &table.keys {
+            let declared = table.declared_fields().iter().find(|f| f.name.name == key.name);
+            let type_name = declared.and_then(|f| match &f.ty {
+                TypeRef::Named { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            });
+            if !matches!(type_name, Some("Int" | "String")) {
+                let found = declared.map(|f| type_ref_text(&f.ty)).unwrap_or_default();
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TableKeyType { table: name.clone(), key: key.name.clone(), found },
+                    key.span,
+                ));
             }
         }
         self.check_field_refinements(&table.record);
@@ -353,26 +355,34 @@ impl<'a> Checker<'a> {
         let (table, op) = table_method_target(receiver, &method.name, self.file, self.symbols, self.bindings)?;
         let row_id = self.symbols.lookup_def(&table.name().name)?;
         let row = Type::Struct(row_id);
-        let (param, ret) = match op {
+        // `get` takes the key's values in declaration order; the other
+        // operations take one row.
+        let (params, ret) = match op {
             TableOp::Get => {
-                let key_ty = table
-                    .key
-                    .as_ref()
-                    .and_then(|key| table.declared_fields().iter().find(|f| f.name.name == key.name))
-                    .map(|field| self.type_ref_to_type(&field.ty))
-                    .unwrap_or(Type::Unknown);
-                (key_ty, Type::Option(Box::new(row.clone())))
+                let key_types = table
+                    .keys
+                    .iter()
+                    .map(|key| {
+                        table
+                            .declared_fields()
+                            .iter()
+                            .find(|f| f.name.name == key.name)
+                            .map(|field| self.type_ref_to_type(&field.ty))
+                            .unwrap_or(Type::Unknown)
+                    })
+                    .collect::<Vec<_>>();
+                (key_types, Type::Option(Box::new(row.clone())))
             }
-            TableOp::Insert => (row.clone(), Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
+            TableOp::Insert => (vec![row.clone()], Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
             TableOp::Save | TableOp::Delete => (
-                row.clone(),
+                vec![row.clone()],
                 Type::Result(Box::new(row.clone()), Box::new(Type::Option(Box::new(row.clone())))),
             ),
         };
         let label = format!("{}.{}", table.name().name, op.name());
-        if args.len() != 1 {
+        if args.len() != params.len() {
             self.errors.push(TypeError::new(
-                TypeErrorKind::ArityMismatch { callee: label, expected: 1, got: args.len() },
+                TypeErrorKind::ArityMismatch { callee: label, expected: params.len(), got: args.len() },
                 span,
             ));
             for arg in args {
@@ -380,16 +390,18 @@ impl<'a> Checker<'a> {
             }
             return Some(ret);
         }
-        let got = self.check_expr_as(&args[0], Some(&param));
-        if !got.is_assignable_to(&param) {
-            self.errors.push(TypeError::new(
-                TypeErrorKind::TypeMismatch {
-                    expected: param.display_name(),
-                    got: got.display_name(),
-                    context: format!("argument to `{label}`"),
-                },
-                args[0].span(),
-            ));
+        for (arg, param) in args.iter().zip(&params) {
+            let got = self.check_expr_as(arg, Some(param));
+            if !got.is_assignable_to(param) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: param.display_name(),
+                        got: got.display_name(),
+                        context: format!("argument to `{label}`"),
+                    },
+                    arg.span(),
+                ));
+            }
         }
         Some(ret)
     }
@@ -666,6 +678,19 @@ agent seen(shelf: Shelf) -> Int:
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
+    }
+
+    #[test]
+    fn a_key_of_several_fields_is_read_with_one_value_each() {
+        let table = "database d:\n    engine: sqlite\n    location: \"x\"\n    tables: Edit\n\ntable Edit:\n    key proposal: String\n    key shelf: Int\n    title: String\n";
+        let ok = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p, 1)\n"));
+        assert!(ok.is_empty(), "{ok:#?}");
+        let one = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p)\n"));
+        assert!(one.iter().any(|m| m.contains("Edit.get")), "{one:#?}");
+        let swapped = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(1, p)\n"));
+        assert!(swapped.iter().any(|m| m.contains("argument to `Edit.get`")), "{swapped:#?}");
+        let bad = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    key score: Float\n");
+        assert!(bad.iter().any(|m| m.contains("the key `score`")), "{bad:#?}");
     }
 
     #[test]

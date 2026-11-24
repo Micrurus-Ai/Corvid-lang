@@ -363,6 +363,21 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - Tables keyed by several columns (B09 P7b)
+
+A table may mark several fields `key`; together they identify a row,
+in declaration order. `Edit.get(proposal, shelf)` takes one value per
+key field and the checker types each against its field; every key field
+is `Int` or `String`. Writes match the whole key in their compare-and-set,
+queries order by the key's columns (after any `order_by` column), and the
+table is created with `PRIMARY KEY (a, b)`; a single key keeps its
+column-level `PRIMARY KEY`, so existing migrations still match. The
+planner already compared key membership per column, so changing which
+columns form the key is refused as before. The reading list's
+`proposal_items` and `extraction_items` tables, keyed by two columns,
+can now be declared as tables. The work touched every IR walker of
+`TableOp`, whose single `arg` became `args`.
+
 ## 2026-11-24 - One definition of which types run natively
 
 `native_ability.rs` kept its own copies of four code-generator type

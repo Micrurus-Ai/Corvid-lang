@@ -42,7 +42,9 @@ use schema::{create_table_named, quote};
 #[derive(Debug, Clone, Copy)]
 pub struct TableRef<'a> {
     pub name: &'a str,
-    pub key: &'a str,
+    /// The key's columns, in declaration order: one, or several that
+    /// identify a row together.
+    pub keys: &'a [String],
     /// Column names in declaration order, with `revision` last.
     pub columns: &'a [String],
     /// How each column is stored, in [`Self::columns`] order.
@@ -131,8 +133,8 @@ impl Runtime {
         rows.map_err(|e| named(table, e))
     }
 
-    /// `Shelf.get(key)`.
-    async fn table_get_live(&self, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
+    /// `Shelf.get(key)`, with one value per key column.
+    async fn table_get_live(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {
         self.select_row(table, key).await
     }
 
@@ -153,7 +155,7 @@ impl Runtime {
             quote(corvid_ast::TableDecl::REVISION_FIELD)
         );
         let inserted = self.table_execute(table, &sql, &values).await?;
-        let key = key_value(table, &values)?;
+        let key = key_values(table, &values)?;
         if inserted == 1 {
             values.push(DbValue::Integer(1));
             return Ok(Ok(values));
@@ -169,23 +171,26 @@ impl Runtime {
     async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
         let revision = revision_of(table, &row)?;
         let (columns, mut values) = split_revision(table, row)?;
-        let key = key_value(table, &values)?;
+        let key = key_values(table, &values)?;
         let mark = |i: usize| table.engine.mark(i + 1, table.kinds[i], &values[i]);
         let assignments = columns
             .iter()
             .enumerate()
-            .filter(|(_, c)| *c != table.key)
+            .filter(|(_, c)| !table.keys.contains(c))
             .map(|(i, c)| format!("{} = {}", quote(c), mark(i)))
             .collect::<Vec<_>>()
             .join(", ");
-        let key_mark = mark(key_index(table)?);
+        let matches_key = key_indices(table)?
+            .into_iter()
+            .map(|i| format!("{} = {}", quote(&table.columns[i]), mark(i)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
         let revision_mark = table.engine.count_mark(values.len() + 1);
         let revision_column = quote(corvid_ast::TableDecl::REVISION_FIELD);
         let set = if assignments.is_empty() { String::new() } else { format!("{assignments}, ") };
         let sql = format!(
-            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {} = {key_mark} AND {revision_column} = {revision_mark}",
+            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {matches_key} AND {revision_column} = {revision_mark}",
             quote(table.name),
-            quote(table.key),
         );
         let mut params = values.clone();
         params.push(DbValue::Integer(revision));
@@ -201,31 +206,31 @@ impl Runtime {
     /// the row stored now (`None` if it is already gone).
     async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
         let revision = revision_of(table, &row)?;
-        let key = key_value(table, &row)?;
+        let key = key_values(table, &row)?;
         let sql = format!(
-            "DELETE FROM {} WHERE {} = {} AND {} = {}",
+            "DELETE FROM {} WHERE {} AND {} = {}",
             quote(table.name),
-            quote(table.key),
-            table.engine.mark(1, table.kinds[key_index(table)?], &key),
+            key_condition(table, &key, 1)?,
             quote(corvid_ast::TableDecl::REVISION_FIELD),
-            table.engine.count_mark(2),
+            table.engine.count_mark(key.len() + 1),
         );
-        let deleted = self.table_execute(table, &sql, &[key.clone(), DbValue::Integer(revision)]).await?;
+        let mut params = key.clone();
+        params.push(DbValue::Integer(revision));
+        let deleted = self.table_execute(table, &sql, &params).await?;
         if deleted == 1 {
             return Ok(Ok(row));
         }
         Ok(Err(self.select_row(table, key).await?))
     }
 
-    async fn select_row(&self, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
+    async fn select_row(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {
         let sql = format!(
-            "SELECT {} FROM {} WHERE {} = {}",
+            "SELECT {} FROM {} WHERE {}",
             table.engine.select_list(table),
             quote(table.name),
-            quote(table.key),
-            table.engine.mark(1, table.kinds[key_index(table)?], &key),
+            key_condition(table, &key, 1)?,
         );
-        Ok(self.table_select(table, &sql, &[key]).await?.into_iter().next())
+        Ok(self.table_select(table, &sql, &key).await?.into_iter().next())
     }
 }
 
@@ -259,18 +264,51 @@ fn revision_of(table: &TableRef<'_>, row: &Row) -> Result<i64, RuntimeError> {
     }
 }
 
-fn key_index(table: &TableRef<'_>) -> Result<usize, RuntimeError> {
+/// Where each key column sits in [`TableRef::columns`], in key order.
+fn key_indices(table: &TableRef<'_>) -> Result<Vec<usize>, RuntimeError> {
     table
-        .columns
+        .keys
         .iter()
-        .position(|c| c == table.key)
-        .ok_or_else(|| RuntimeError::Other(format!("table `{}` has no key column `{}`", table.name, table.key)))
+        .map(|key| {
+            table
+                .columns
+                .iter()
+                .position(|c| c == key)
+                .ok_or_else(|| RuntimeError::Other(format!("table `{}` has no key column `{key}`", table.name)))
+        })
+        .collect()
 }
 
-fn key_value(table: &TableRef<'_>, row: &[DbValue]) -> Result<DbValue, RuntimeError> {
-    row.get(key_index(table)?)
-        .cloned()
-        .ok_or_else(|| RuntimeError::Other(format!("table `{}`: a row has no key value", table.name)))
+/// A row's key values, in key order.
+fn key_values(table: &TableRef<'_>, row: &[DbValue]) -> Result<Vec<DbValue>, RuntimeError> {
+    key_indices(table)?
+        .into_iter()
+        .map(|i| {
+            row.get(i)
+                .cloned()
+                .ok_or_else(|| RuntimeError::Other(format!("table `{}`: a row has no key value", table.name)))
+        })
+        .collect()
+}
+
+/// `k1 = $first AND k2 = $first+1 ...`, matching a row by its key.
+fn key_condition(table: &TableRef<'_>, key: &[DbValue], first: usize) -> Result<String, RuntimeError> {
+    let indices = key_indices(table)?;
+    if key.len() != indices.len() {
+        return Err(RuntimeError::Other(format!(
+            "table `{}`: a key has {} values for {} key columns",
+            table.name,
+            key.len(),
+            indices.len()
+        )));
+    }
+    Ok(indices
+        .iter()
+        .zip(key)
+        .enumerate()
+        .map(|(n, (i, value))| format!("{} = {}", quote(&table.columns[*i]), table.engine.mark(first + n, table.kinds[*i], value)))
+        .collect::<Vec<_>>()
+        .join(" AND "))
 }
 
 /// A failure ending a database's transaction, with the database named.

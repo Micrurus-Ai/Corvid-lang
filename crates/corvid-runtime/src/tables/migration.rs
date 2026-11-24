@@ -95,7 +95,7 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
     let mut altered: Vec<Alteration<'_>> = Vec::new();
     for (name, ty, source) in &columns {
         let (kind, nullable) = column_kind(ty);
-        let is_key = *name == table.key;
+        let is_key = table.keys.iter().any(|key| key == name);
         match source {
             Source::New => {
                 if is_key {
@@ -277,7 +277,7 @@ mod tests {
     fn table(columns: Vec<(&str, Type)>, renamed: &[(&str, &str)], retired: &[&str]) -> TableSchema {
         TableSchema {
             name: "Shelf".into(),
-            key: "id".into(),
+            keys: vec!["id".into()],
             columns: columns.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
             renamed: renamed.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
             retired: retired.iter().map(|s| s.to_string()).collect(),
@@ -346,6 +346,18 @@ mod tests {
         );
         let refusals = plan_table_change(&lossy, &stored()).unwrap_err();
         assert!(refusals.iter().any(|r| r.contains("`name` changes from `String` to `Int`")), "{refusals:#?}");
+    }
+
+    #[test]
+    fn changing_which_columns_form_the_key_is_refused() {
+        let mut widened = table(
+            vec![("id", Type::Int), ("name", Type::String), ("count", Type::Int), ("revision", Type::Int)],
+            &[],
+            &["legacy"],
+        );
+        widened.keys = vec!["id".into(), "name".into()];
+        let refusals = plan_table_change(&widened, &stored()).unwrap_err();
+        assert!(refusals.iter().any(|r| r.contains("`name` is declared the key but is not")), "{refusals:#?}");
     }
 
     #[test]

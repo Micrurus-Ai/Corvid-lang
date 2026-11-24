@@ -670,7 +670,11 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
             collect_called_agents_from_expr(items, stack);
             collect_called_agents_from_expr(next_cursor, stack);
         }
-        IrExprKind::TableOp { arg, .. } => collect_called_agents_from_expr(arg, stack),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                collect_called_agents_from_expr(arg, stack);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 collect_called_agents_from_expr(e, stack);
@@ -830,7 +834,11 @@ fn walk_ir_expr_for_prompt(
             walk_ir_expr_for_prompt(items, prompt_map, found);
             walk_ir_expr_for_prompt(next_cursor, prompt_map, found);
         }
-        IrExprKind::TableOp { arg, .. } => walk_ir_expr_for_prompt(arg, prompt_map, found),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                walk_ir_expr_for_prompt(arg, prompt_map, found);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 walk_ir_expr_for_prompt(e, prompt_map, found);

@@ -20,10 +20,25 @@ table Shelf:
 
 ## Declaring a table
 
-A table declares fields with the same grammar as a `type`. One field is
-marked `key`; it identifies a row and must be `Int` or `String`. A table
+A table declares fields with the same grammar as a `type`. The field
+marked `key` identifies a row and must be `Int` or `String`. A table
 without a key is a compile error, because rows could not be saved with a
 revision check.
+
+When no single field identifies a row, mark several; together they are
+the key, in the order declared:
+
+```corvid
+table Edit:
+    key proposal: String
+    key shelf: Int
+    title: String
+```
+
+`Edit.get("p1", 2)` takes one value per key field, in that order. Rows
+may share a `proposal` or a `shelf` but not both, inserting a repeated
+pair is a conflict, and queries come back in key order: by `proposal`,
+then `shelf`. The table is created with `PRIMARY KEY (proposal, shelf)`.
 
 Every row also carries `revision: Int`, its last field, which the
 database advances on each write. A table cannot declare a field named

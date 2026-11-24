@@ -219,7 +219,7 @@ mod tests {
         use corvid_types::Type;
         TableSchema {
             name: "Shelf".into(),
-            key: "shelf".into(),
+            keys: vec!["shelf".into()],
             columns: vec![
                 ("shelf".into(), Type::Int),
                 ("title".into(), Type::String),

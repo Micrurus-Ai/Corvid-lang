@@ -1266,13 +1266,14 @@ impl StoreKind {
 /// The table is also the record type `Shelf`: `record` holds the
 /// declared fields followed by the database-maintained `revision:
 /// Int`, so every record mechanism applies to rows unchanged. `key`
-/// marks the primary key; a table without one is a checker error,
-/// because rows could not be saved with a revision check.
+/// marks a field of the primary key: one field, or several whose values
+/// identify a row together (B09 P7b). A table without one is a checker
+/// error, because rows could not be saved with a revision check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableDecl {
     pub record: TypeDecl,
-    /// The field marked `key`, if any.
-    pub key: Option<Ident>,
+    /// The fields marked `key`, in declaration order.
+    pub keys: Vec<Ident>,
     /// `title: String renamed from name`: columns whose stored name
     /// was different. The migration planner renames the stored column
     /// instead of dropping it and adding a new one (B09 P3).
