@@ -10,6 +10,9 @@ shape, or invariant. Read top-to-bottom rarely.
 - [Lexer rules](lexer-rules.md) — line continuation, brackets,
   triple-quoted strings.
 - [Core semantics](core-semantics.md) — registry-derived spec.
+- [Functions](functions.md) — every builtin method and stdlib call.
+- [Text and encoding](text-and-encoding.md) — base64, hex and URL
+  encoding, and UUIDs.
 
 ## CLI
 

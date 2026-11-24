@@ -28,6 +28,8 @@ mod stream_ops;
 mod tables;
 #[path = "interp/test_runner.rs"]
 mod test_runner;
+#[path = "interp/text_methods.rs"]
+mod text_methods;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 

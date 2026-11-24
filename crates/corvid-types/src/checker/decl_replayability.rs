@@ -278,6 +278,18 @@ impl<'a> Checker<'a> {
                 // `fn`s (45r) are statically effect-free — always
                 // callable from `@deterministic` bodies.
                 DeclKind::Fn => None,
+                // A tool or prompt brought in with `import ... use`,
+                // such as `random_int` or `uuid_v4` from the stdlib,
+                // is as nondeterministic as a local one.
+                DeclKind::ImportedUse => match self
+                    .module_resolution
+                    .and_then(|modules| modules.lookup_imported_use(&name))
+                    .map(|target| target.export.kind)
+                {
+                    Some(DeclKind::Tool) => Some("tool"),
+                    Some(DeclKind::Prompt) => Some("prompt"),
+                    _ => None,
+                },
                 _ => None,
             };
             if let Some(kind) = call_kind {

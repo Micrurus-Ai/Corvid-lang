@@ -288,7 +288,9 @@ impl<'a> Checker<'a> {
                 // names; naming one in value position is a TypeAsValue
                 // error like the other type constructors.
                 | BuiltIn::Upload
-                | BuiltIn::Page => {
+                | BuiltIn::Page
+                // B03 — a `RegexMatch` comes only from the regex methods.
+                | BuiltIn::RegexMatch => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -479,13 +481,18 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Partial(inner) => self.check_partial_field(inner, field, span),
-            Type::JsonError => {
-                match crate::builtin_methods::json_error_fields().into_iter().find(|(name, _)| *name == field.name) {
+            Type::JsonError | Type::RegexMatch => {
+                let fields: Vec<(&str, Type)> = if matches!(target_ty, Type::JsonError) {
+                    crate::builtin_methods::json_error_fields().into()
+                } else {
+                    crate::builtin_methods::regex_match_fields().into()
+                };
+                match fields.into_iter().find(|(name, _)| *name == field.name) {
                     Some((_, ty)) => ty,
                     None => {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::UnknownField {
-                                struct_name: "JsonError".into(),
+                                struct_name: target_ty.display_name(),
                                 field: field.name.clone(),
                             },
                             span,

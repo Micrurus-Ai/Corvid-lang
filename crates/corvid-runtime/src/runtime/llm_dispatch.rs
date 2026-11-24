@@ -105,6 +105,8 @@ impl Runtime {
             dispatch_stdlib_time_tool(name, &args)
         } else if is_stdlib_random_tool(name) {
             dispatch_stdlib_random_tool(name, &args)
+        } else if let Some(result) = super::uuid::dispatch(name, &args) {
+            result
         } else if is_stdlib_rag_tool(name) {
             self.dispatch_stdlib_rag_tool(name, &args).await
         } else if name == "mcp_call" {

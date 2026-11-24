@@ -44,6 +44,7 @@ mod connector_dispatch;
 mod io;
 mod path;
 mod protocol_dispatch;
+mod uuid;
 mod jobs;
 mod llm_dispatch;
 mod model_catalog;

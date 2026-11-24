@@ -175,6 +175,13 @@ pub enum Type {
     /// and `message`. At runtime it is an ordinary record value.
     JsonError,
 
+    /// Compiler-known `RegexMatch` — one match of a regular
+    /// expression (B03). A read-only record whose fields are listed by
+    /// [`crate::builtin_methods::regex_match_fields`]: `text`, `start`
+    /// and `end` in characters, and `groups`. At runtime it is an
+    /// ordinary record value.
+    RegexMatch,
+
     /// Synthetic struct-like value for backend route path captures.
     RouteParams(Vec<(String, Type)>),
 
@@ -213,6 +220,7 @@ impl Type {
             "JsonValue" => Type::JsonValue,
             "JsonBuilder" => Type::JsonBuilder,
             "JsonError" => Type::JsonError,
+            "RegexMatch" => Type::RegexMatch,
             _ => return None,
         })
     }
@@ -264,6 +272,7 @@ impl Type {
             Type::JsonValue => "JsonValue".into(),
             Type::JsonBuilder => "JsonBuilder".into(),
             Type::JsonError => "JsonError".into(),
+            Type::RegexMatch => "RegexMatch".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

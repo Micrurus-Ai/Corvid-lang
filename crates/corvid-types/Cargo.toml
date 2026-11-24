@@ -9,6 +9,7 @@ description = "Type system and effect checker for the Corvid language."
 corvid-ast = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-guarantees = { workspace = true }
+corvid-text = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 

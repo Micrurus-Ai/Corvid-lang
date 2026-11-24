@@ -197,6 +197,10 @@ impl<'a> Checker<'a> {
                     "decode the error's fields into a record you declare",
                 )),
             },
+            Type::RegexMatch => Err(NoForm::new(
+                "a `RegexMatch` describes a position in one text and has no JSON form",
+                "copy the fields you need into a record you declare",
+            )),
             Type::Page(inner) => match direction {
                 Direction::Encode => self.json_form(inner, direction, seen),
                 Direction::Decode => Err(NoForm::new(

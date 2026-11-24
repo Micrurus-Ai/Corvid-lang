@@ -1054,6 +1054,11 @@ impl<'a> Checker<'a> {
             if sig.kind == BuiltinMethodKind::JsonEncode {
                 sig.ret = self.to_json_result(&recv_ty, span);
             }
+            // Regular expressions (B03): the pattern must be a literal
+            // the regex parser accepts.
+            if sig.kind.is_regex() {
+                self.check_regex_arguments(sig.kind, &method_name.name, args);
+            }
             return sig.ret;
         }
 

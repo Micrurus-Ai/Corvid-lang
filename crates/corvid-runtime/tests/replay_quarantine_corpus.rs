@@ -690,3 +690,31 @@ async fn replay_substitutes_recorded_time_and_random() {
         "replay must return the RECORDED draw, not fresh entropy; got {draw}"
     );
 }
+
+/// B03 — std/uuid generation is a tool, so Substitute-mode replay
+/// returns the RECORDED UUIDs. Fresh generation could never produce
+/// these fixed values.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_substitutes_recorded_uuids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace.jsonl");
+    let lines = [
+        r#"{"kind":"schema_header","version":2,"writer":"corvid-vm","ts_ms":0,"run_id":"r"}"#,
+        r#"{"kind":"seed_read","ts_ms":1,"run_id":"r","purpose":"rollout_default_seed","value":12345}"#,
+        r#"{"kind":"tool_call","ts_ms":3,"run_id":"r","tool":"uuid_v4","args":[]}"#,
+        r#"{"kind":"tool_result","ts_ms":4,"run_id":"r","tool":"uuid_v4","result":"00000000-0000-4000-8000-000000000001"}"#,
+        r#"{"kind":"tool_call","ts_ms":5,"run_id":"r","tool":"uuid_v7","args":[]}"#,
+        r#"{"kind":"tool_result","ts_ms":6,"run_id":"r","tool":"uuid_v7","result":"017f22e2-79b0-7cc3-98c4-dc0c0c07398f"}"#,
+    ];
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let runtime = build_substitute_replay_runtime(&path);
+    assert!(runtime.is_replay_mode());
+
+    for (tool, recorded) in [
+        ("uuid_v4", "00000000-0000-4000-8000-000000000001"),
+        ("uuid_v7", "017f22e2-79b0-7cc3-98c4-dc0c0c07398f"),
+    ] {
+        let replayed = runtime.call_tool(tool, vec![]).await.expect("replayed UUID must substitute");
+        assert_eq!(replayed.as_str(), Some(recorded), "replay must return the RECORDED {tool} result");
+    }
+}

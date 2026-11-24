@@ -38,6 +38,8 @@ pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_RE
 pub mod scope_reduce;
 pub mod staticlib_discovery;
 pub mod target;
+pub mod text_methods;
+pub use text_methods::native_text_method;
 
 pub use errors::{CodegenError, CodegenErrorKind};
 pub use target::BuildTarget;

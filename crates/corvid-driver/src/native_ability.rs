@@ -154,6 +154,9 @@ fn is_native_value_type(ty: &Type) -> bool {
         Type::JsonValue | Type::JsonBuilder => false,
         // Native code represents JsonError as a record of strings.
         Type::JsonError => true,
+        // B03 — regular expressions run on the interpreter until the
+        // native regex slice.
+        Type::RegexMatch => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.
@@ -357,6 +360,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) || corvid_codegen_cl::native_numeric_conversion(*kind)
                 || corvid_codegen_cl::native_string_method(*kind)
+                || corvid_codegen_cl::native_text_method(*kind)
                 || matches!(kind, corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr) => {
             scan_expr(receiver, current_return_ty, context)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))

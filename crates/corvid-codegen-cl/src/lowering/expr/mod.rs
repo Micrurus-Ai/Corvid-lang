@@ -265,7 +265,42 @@ pub(super) fn lower_expr(
             }
             Ok(output)
         }
-        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_method(*kind) => {
+        IrExprKind::BuiltinMethod { kind, receiver, .. }
+            if crate::native_text_method(*kind) && !crate::text_methods::native_regex_method(*kind) => {
+            // B03 encoders and decoders: one runtime call into
+            // `corvid-text`. A decoder fills a `Result<String, String>`
+            // the way `parse_int` fills its Result.
+            let (text, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let method = runtime
+                .text_methods
+                .iter()
+                .find(|(declared, _)| declared == kind)
+                .map(|(_, id)| *id)
+                .ok_or_else(|| CodegenError::cranelift(format!("text method {kind:?} was not declared"), expr.span))?;
+            let func = module.declare_func_in_func(method, builder.func);
+            let value = if kind.is_text_decoder() {
+                let placeholder = builder.ins().iconst(I64, 0);
+                let result = emit_result_wrapper_value(
+                    builder, module, runtime, &expr.ty, placeholder, &Type::String, RESULT_TAG_OK, expr.span,
+                )?;
+                let slot = builder.ins().iadd_imm(result, i64::from(RESULT_PAYLOAD_OFFSET));
+                let call = builder.ins().call(func, &[text, slot]);
+                let tag = builder.inst_results(call)[0];
+                builder.ins().store(MemFlags::trusted(), tag, result, RESULT_TAG_OFFSET);
+                result
+            } else {
+                let call = builder.ins().call(func, &[text]);
+                builder.inst_results(call)[0]
+            };
+            if !borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(value)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if crate::native_string_method(*kind) || crate::text_methods::native_regex_method(*kind) => {
             use corvid_types::BuiltinMethodKind::*;
             let outer_temporaries = runtime.return_temporaries.borrow().len();
             let (text, borrowed) = lower_container_maybe_borrowed(
@@ -284,11 +319,18 @@ pub(super) fn lower_expr(
                 }
                 operands.push(value);
             }
-            if *kind == StringSplit {
+            let splits = matches!(kind, StringSplit | StringSplitRegex);
+            if splits {
                 let capacity = builder.ins().iconst(I64, 0);
                 operands.push(allocate_slots(builder, module, runtime, &Type::String, capacity, expr.span)?);
             }
+            // B03 regex methods share this argument handling; their
+            // runtime entry points come from the text-method table.
+            let regex_method = runtime.text_methods.iter().find(|(declared, _)| declared == kind).map(|(_, id)| *id);
             let method = match kind {
+                _ if crate::text_methods::native_regex_method(*kind) => regex_method.ok_or_else(|| {
+                    CodegenError::cranelift(format!("regex method {kind:?} was not declared"), expr.span)
+                })?,
                 StringLength => runtime.string_char_len,
                 StringSubstring => runtime.string_substring,
                 StringToUpper => runtime.string_to_upper,
@@ -307,7 +349,7 @@ pub(super) fn lower_expr(
             for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
                 emit_release(builder, module, runtime, value);
             }
-            if *kind == StringSplit {
+            if splits {
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(2));
             }
             Ok(result)

@@ -120,6 +120,35 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Swift, Kotlin and Python SDK models read and write the public JSON mapping: sum types in the wire shape, `Result`, maps with non-String keys as pairs, `null` for absent values, `JsonError` and the `Page` envelope. Kotlin `Int` fields are `Long`, as Corvid's `Int` is 64-bit. Tests run the generated Python and compile and run the generated Kotlin and Swift.
 - [ ] The Application Contract names field types as written in source, so a field typed with an alias (`orders: Orders`) names `Orders`, which no SDK declares. Name types from the checker's resolved types instead, as IR lowering does. The TypeScript client and the frontend read the contract, so agree the change with frontend development first.
 
+**B03 text and encoding** (in progress). [Proposal](proposals/b03-text-and-encoding.md)
+
+- [x] Encoding and UUID parsing on the interpreter: base64 (standard and URL-safe), hex and URL-component encoders and decoders, and `parse_uuid`, all pure String methods backed by one `corvid-text` crate. Decoders return `Result` values and never trap. [Text and encoding](reference/text-and-encoding.md)
+- [x] Regular expressions on the interpreter: `contains_regex`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex`, with the pattern and a literal replacement checked at compile time, and the `RegexMatch` record with character positions and capture groups. [Regular expressions](reference/text-and-encoding.md#regular-expressions)
+- [ ] `JsonError` cannot be written in a signature: the resolver does not register it, though the checker knows the name. Register it as `RegexMatch` is. Found during B03; belongs to B01.
+- [x] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted. [Generating UUIDs](reference/text-and-encoding.md#generating-uuids)
+- [x] Native encoding and UUID parsing, with parity tests. Native code calls the `corvid-text` functions the interpreter calls, and a decoder fills a native `Result<String, String>`.
+- [x] Native `contains_regex`, `replace_regex` and `split_regex`, with parity tests, through the `corvid-text` functions the interpreter calls.
+- [ ] Native `find_regex` and `find_all_regex`. Native code must allocate `RegexMatch` records with a `List<Option<String>>` field; represent `RegexMatch` as an ordinary native record before ownership analysis, as `JsonError` is, and let the compiler pass the layout to the runtime, as the JSON decode plan does. Until then these programs run on the interpreter.
+- [ ] Patterns built at run time, through a validated pattern value. Deferred until a backend example needs one.
+- [ ] Named-group lookup on `RegexMatch` checked against the pattern's group names.
+- [ ] Raw string literals for patterns. Agree the lexical rule with frontend development first.
+- [ ] Byte-list encoders and decoders, with B04's byte representation.
+- [ ] Native UUID generation, with native dispatch of the other stdlib tools.
+
+**B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/b06-decimal-and-time.md)
+
+- [ ] Decimal on the interpreter: the `corvid-decimal` crate, the `Decimal` type, `Decimal("…")` checked at compile time, `parse_decimal`, conversions to and from `Int` and `Float`, `+ - * %` and comparisons with `Int` widening, a compile error for mixing with `Float`, `/` refused in favour of the six `divide_<mode>` methods, the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`.
+- [ ] Duration and Instant on the interpreter: the `corvid-time` crate, the unit constructors on `Int` with a compile error for `days()`, duration and instant arithmetic, ISO 8601 and RFC 3339 parsing and formatting, and `time_now` in `std/time`.
+- [ ] Time zones on the interpreter: `TimeZone` checked at compile time against the bundled database, `ZonedTime`, `in_zone`, `parse_zoned_time` with errors for gaps and folds, `add_days`, `add_months` and `add_years`, the Berlin daylight-saving acceptance test, the queue scheduler moved onto `corvid-time`, and the database version recorded in traces.
+- [ ] Currency formatting: `format_currency` and `format_currency_checked` with CLDR data, an explicit locale and no rounding.
+- [ ] JSON, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs for all five types.
+- [ ] Native Decimal, with parity tests.
+- [ ] Native Duration, Instant, TimeZone and ZonedTime, with parity tests.
+- [ ] A decimal literal suffix (`19.99d`). Agree the lexical rule with frontend development first.
+- [ ] Decimal, Instant, Duration and ZonedTime as B09 table columns. Coordinate with the main line after the JSON slice.
+- [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
+- [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
+
 **B09 typed persistence** (in progress). [Proposal](proposals/b09-typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.

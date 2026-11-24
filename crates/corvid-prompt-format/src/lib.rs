@@ -228,6 +228,10 @@ fn schema_for_inner(
         // permissive schema and let the typechecker enforce.
         Type::JsonBuilder => json!({}),
         Type::JsonError => json_error_schema(),
+        // B03 — a `RegexMatch` points into one text the program
+        // matched; a model has no such text to point into, so it is
+        // not a prompt return type. Permissive, like `DbHandle`.
+        Type::RegexMatch => json!({}),
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so
