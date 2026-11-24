@@ -1128,12 +1128,12 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "currency formatting is interpreter-only until B06's native time and currency slice",
+                "`Currency` and `Locale` have no WebAssembly form yet; they run on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "`TimeZone` is interpreter-only until B06's native time slice",
+                "`TimeZone` has no WebAssembly form yet; it runs on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::Decimal(_)) => {

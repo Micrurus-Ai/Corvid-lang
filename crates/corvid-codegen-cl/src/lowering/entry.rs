@@ -389,9 +389,10 @@ pub(super) fn emit_entry_main(
                     Type::Int => Some(runtime.trace_run_completed_int),
                     Type::Bool => Some(runtime.trace_run_completed_bool),
                     Type::Float => Some(runtime.trace_run_completed_float),
-                    // B06 — a `Decimal` is traced as its exact text, the
-                    // JSON string the interpreter records.
-                    Type::String | Type::Decimal => Some(runtime.trace_run_completed_string),
+                    // B06 — a `Decimal`, time, currency or locale value is
+                    // traced as its canonical text, the JSON string the
+                    // interpreter records.
+                    Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Some(runtime.trace_run_completed_string),
                     Type::Grounded(inner) => match &**inner {
                         Type::Int => Some(runtime.trace_run_completed_int),
                         Type::Bool => Some(runtime.trace_run_completed_bool),
@@ -494,23 +495,29 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
-        // B06 — a returned `Decimal` prints its exact text, as the
-        // interpreter prints it.
-        Type::Decimal if role == "return" => Ok(()),
-        // Neither tier reads a `Decimal` from the command line.
-        Type::Decimal => Err(CodegenError::not_supported(
-            format!(
-                "entry agent {role} of type `Decimal` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and call `parse_decimal()` on it"
-            ),
-            span,
-        )),
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Err(CodegenError::not_supported(
-            format!(
-                "entry agent {role} of type `{}` - the time types run on the interpreter tier until B06's native time slice lands; use the interpreter tier (`corvid run --tier interp`).",
-                ty.display_name()
-            ),
-            span,
-        )),
+        // B06 — a returned `Decimal`, time, currency or locale value
+        // prints its canonical text, as the interpreter prints it.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale
+            if role == "return" => Ok(()),
+        // Neither tier reads these types from the command line.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
+            let parser = match ty {
+                Type::Decimal => "parse_decimal",
+                Type::Duration => "parse_duration",
+                Type::Instant => "parse_instant",
+                Type::TimeZone => "parse_time_zone",
+                Type::ZonedTime => "parse_zoned_time",
+                Type::Currency => "parse_currency",
+                _ => "parse_locale",
+            };
+            Err(CodegenError::not_supported(
+                format!(
+                    "entry agent {role} of type `{}` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and call `{parser}()` on it",
+                    ty.display_name()
+                ),
+                span,
+            ))
+        }
         Type::Upload(_) | Type::Page(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - uploads and pagination are HTTP-boundary types served by `corvid serve`, not the native command-line boundary; the application contract describes the surface. Use the interpreter/serve tier.",
@@ -547,8 +554,9 @@ fn emit_entry_result_print(
             let r = module.declare_func_in_func(runtime.print_f64, builder.func);
             builder.ins().call(r, &[result_val]);
         }
-        // B06 — a native `Decimal` is its canonical text.
-        Type::String | Type::Decimal => {
+        // B06 — a native `Decimal`, time, currency or locale value is
+        // its canonical text.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
             builder.declare_value_needs_stack_map(result_val);
             let r = module.declare_func_in_func(runtime.print_string, builder.func);
             builder.ins().call(r, &[result_val]);

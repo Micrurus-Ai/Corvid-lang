@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Durations, instants, time zones, zoned times, currencies, locales and `format_currency` compile to native code and give the interpreter's results and messages, because both call `corvid-time` and `corvid-currency`. Instants compare by time, not text, and a native replay warns about a different tz database just as the interpreter does. Tools and prompts that take or return these types, including `time_now()`, still run on the interpreter. [Durations and instants](docs/reference/stdlib/time.md#durations-and-instants)
+
 Programs that use `Decimal` compile to native code and give the same digits and the same error messages as the interpreter, because both call `corvid-decimal`. A native decimal is held as its exact text, so `1.0 == 1.00` still holds inside records and lists. `format_currency`, `+=` on a decimal, and tools or prompts that take or return a `Decimal` still run on the interpreter; `corvid run` picks it for them. [Exact decimals](docs/reference/decimal.md)
 
 Decimals, times, zones, currencies and locales cross JSON as their exact text: a route returning an `Invoice` with `total: Decimal` sends `"19.90"`, and OpenAPI, the TypeScript client and the SDKs all treat it as a string. Send decimals to a Corvid route as strings; a JSON number is refused so no digit is lost. Table columns of these types are not available yet. [JSON mapping](docs/reference/stdlib/json.md)

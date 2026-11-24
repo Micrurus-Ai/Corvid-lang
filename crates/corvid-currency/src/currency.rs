@@ -35,6 +35,13 @@ impl Currency {
         named.map(|_| Currency { code: currency, letters }).map_err(|_| unknown())
     }
 
+    /// Corvid's `text.parse_currency()`: trims whitespace and on
+    /// failure says what an ISO 4217 code looks like. Both tiers call
+    /// this, so they return the same `Err`.
+    pub fn parse_user_text(text: &str) -> Result<Currency, String> {
+        Currency::parse(text.trim()).map_err(|error| error.to_string())
+    }
+
     pub fn code(&self) -> &str {
         std::str::from_utf8(&self.letters).expect("validated ASCII letters")
     }
@@ -63,6 +70,12 @@ impl fmt::Display for Currency {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_text_is_trimmed_and_its_error_names_the_code() {
+        assert_eq!(Currency::parse_user_text(" EUR ").unwrap().code(), "EUR");
+        assert_eq!(Currency::parse_user_text("EURO").unwrap_err(), "`EURO` is not an ISO 4217 currency code, such as USD or EUR");
+    }
 
     #[test]
     fn known_codes_parse_with_their_minor_digits() {

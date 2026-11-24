@@ -523,8 +523,15 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
     match ty {
         Type::Function { .. } => crate::native_callback_type(ty),
         Type::String
-        // B06 — a native `Decimal` is a String holding its canonical text.
+        // B06 — a native `Decimal`, time, currency or locale value is a
+        // String holding its canonical text.
         | Type::Decimal
+        | Type::Duration
+        | Type::Instant
+        | Type::TimeZone
+        | Type::ZonedTime
+        | Type::Currency
+        | Type::Locale
         | Type::Struct(_)
         | Type::ImportedStruct(_)
         | Type::List(_)
@@ -573,10 +580,10 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // B03 — regular expressions are interpreter-tier until the
         // native regex slice.
         Type::RegexMatch => false,
-        // B06 — a native `Decimal` is a String holding its canonical
-        // text; every operation calls the runtime's `corvid-decimal`.
-        Type::Decimal => true,
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => false,
+        // B06 — a native `Decimal`, time, currency or locale value is a
+        // String holding its canonical text; every operation calls the
+        // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the

@@ -107,8 +107,8 @@ interpreter accepts, fails with the same `path`, `expected`, `found`
 and `message`, and encodes to the same text. A type the native target
 cannot hold runs on the interpreter: a map whose keys are not
 `String`, a `JsonValue`, a `Grounded` value, whose sources native
-code does not keep, or a time, zone, currency or locale value until
-B06's native time slice. A `Decimal` compiles.
+code does not keep. `Decimal` and the time, zone, currency and locale
+types compile, each carried as its canonical text.
 
 ## Public JSON mapping
 

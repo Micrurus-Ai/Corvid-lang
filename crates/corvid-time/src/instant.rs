@@ -74,6 +74,13 @@ impl Instant {
         )
     }
 
+    /// Corvid's `text.parse_instant()`: trims whitespace and on
+    /// failure names the refused text and the problem. Both tiers call
+    /// this, so they return the same `Err`.
+    pub fn parse_user_text(text: &str) -> Result<Instant, String> {
+        Instant::parse(text.trim()).map_err(|error| format!("`{text}` is not an instant: {error}"))
+    }
+
     pub(crate) fn from_chrono(at: DateTime<Utc>) -> Result<Instant, TimeError> {
         Instant::from_nanoseconds(i128::from(at.timestamp()) * NANOS_PER_SECOND + i128::from(at.timestamp_subsec_nanos()))
     }
@@ -103,6 +110,12 @@ impl fmt::Display for Instant {
 mod tests {
     use super::*;
     use crate::unit::TimeUnit;
+
+    #[test]
+    fn user_text_is_trimmed_and_its_error_names_the_text() {
+        assert_eq!(Instant::parse_user_text(" 2026-07-11T08:30:00Z ").unwrap().to_string(), "2026-07-11T08:30:00Z");
+        assert!(Instant::parse_user_text("July").unwrap_err().starts_with("`July` is not an instant: expected an RFC 3339 instant"));
+    }
 
     fn at(text: &str) -> Instant {
         Instant::parse(text).unwrap()

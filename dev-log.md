@@ -4,6 +4,48 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Native time and currency types (B06, seventh slice)
+
+Programs that use `Duration`, `Instant`, `TimeZone`, `ZonedTime`,
+`Currency` and `Locale`, and `format_currency`, now compile to native
+code. Each is held the way slice 6 holds a `Decimal`: a reference-counted
+String containing the value's canonical text, the same text as its JSON
+form. Every operator and method is one call into a new `corvid-runtime`
+entry point (`ffi_bridge/time.rs` and `ffi_bridge/currency.rs`) that
+parses with `corvid-time` or `corvid-currency`, computes and writes the
+result back, so the tiers share every rule and message. Two tables,
+`time_methods.rs` and `currency_methods.rs`, name the symbols, and one
+lowering file turns operators and methods into those calls, evaluating
+operands in source order even when the call takes them swapped
+(`n * duration`). The parse errors the interpreter wrote inline moved
+into `parse_user_text` functions in the shared crates, which both tiers
+call.
+
+Order and equality go through the runtime by value. RFC 3339 text with
+a fraction sorts before the same second without one, so comparing text
+would put `08:30:00.500Z` before `08:30:00Z`; a parity test checks it.
+The structural comparison gains one layout per type, so records, lists
+and options holding them compare by value.
+
+Holding the text as the value found a real bug: RFC 9557 text did not
+read back for times before standard time, whose local mean time offsets
+have seconds and are written rounded to the minute, nor for local times
+in year 10000 east of UTC. `ZonedTime::parse` now accepts both, checked
+over every zone from year 1 to 9999, which also fixes `from_json` on the
+interpreter.
+
+For replay, native code reports each zone-dependent operation to the
+runtime at the same points the interpreter's `zone_rules_use` does, so
+a native replay of a trace recorded with another tz database warns once
+per operation and zone, as the interpreter does; a new
+`replay_native` test shows it. A binary whose program needs no runtime
+never starts one, so it records and replays nothing and has nothing to
+warn about. Tools and prompts holding any of these types stay on the
+interpreter, as for `Decimal`, which keeps `time_now()` there. Two
+papercuts found on the way are on the roadmap: a zone literal compared
+with `==` is not typed by its operand, and `Int.to_string()` is not
+native.
+
 ## 2026-11-24 - Native Decimal (B06, sixth slice)
 
 Programs that use `Decimal` now compile to native code. Native code
