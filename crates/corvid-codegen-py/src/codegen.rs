@@ -694,6 +694,9 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // `Bytes` values come only from builtin methods, which the
         // Python backend refuses before a hint is needed.
         T::Bytes => "object".into(),
+        // A `Secret` comes only from `secret(name)`, a stdlib executing
+        // tool the Python backend refuses before a hint is needed.
+        T::Secret => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

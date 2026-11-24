@@ -11,8 +11,6 @@
 use std::fmt;
 use std::sync::Arc;
 
-use subtle::ConstantTimeEq;
-
 /// An immutable byte string. Cloning shares the bytes.
 #[derive(Clone)]
 pub struct Bytes(Arc<[u8]>);
@@ -88,7 +86,7 @@ impl Bytes {
 
     /// Constant-time equality, the meaning of `==` on `Bytes`.
     pub fn constant_time_eq(&self, other: &Bytes) -> bool {
-        bool::from(self.0.as_ref().ct_eq(other.0.as_ref()))
+        crate::constant_time_eq(&self.0, &other.0)
     }
 }
 

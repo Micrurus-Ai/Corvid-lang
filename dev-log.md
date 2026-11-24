@@ -4,6 +4,79 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Secret values that never reach a trace, a prompt or a log (B04, second slice)
+
+Corvid has a `Secret` type: text such as a webhook signing key, a
+password or an API token that a program can use but never reveal.
+`secret(name)` in `std/secrets` reads one from the environment and is
+an `Err` when the variable is missing. Two secrets compare with `==` in
+constant time, through the comparison `Bytes` uses, now a
+`corvid_crypto::constant_time_eq` function both types call. A secret
+can be passed to a tool, alone or inside a record. `Debug` and
+`Display` write `<secret>`, so a printed result, the REPL or a panic
+never shows the text.
+
+Everything else is a compile error with a hint, in a new
+`checker/secrets.rs`: no method (so no `to_string` or `to_json`), no
+ordering, no `+`, no mixing with `String`, no JSON form (the
+`to_json` walk in `json_methods.rs` catches a record holding one), and
+no secret in a route's inputs or response, a store field, a table
+column, a prompt parameter or result, a connector operation, `ask`,
+`choose`, or `main`'s signature. The table-column hint names the two
+ways forward the main line asked for: store a hash with
+`hash_password(...)` (slice 4) for values that are only checked, or
+wait for an encrypted column (B09) for values used again. `column_kind`
+in the main line's `tables/schema.rs` gains one explicit `Secret` arm.
+
+The redaction sits where trace payloads are built. The interpreter's
+`value_to_json`, which every trace event, approval, step event, replay
+comparison and rendered prompt is built from, writes `<redacted>` for a
+secret. A second function, `tool_argument_json`, writes the text, and
+the interpreter calls it in one place: when a tool's declared parameter
+types hold a `Secret`, for the arguments the implementation receives.
+The runtime's new `secret_arguments` module keeps the two forms apart,
+so the `ToolCall` event, replay and approvals see only the recorded
+form. A tool that echoes a secret it was given is scrubbed in the record
+only. The program receives the tool's real result or error unchanged,
+because silently rewriting program data is a hidden behavior and, for a
+short secret, would corrupt unrelated text. The recorded `ToolResult`
+and the step debugger's view have every occurrence of the text replaced
+by `<redacted>`. The recorded result is marked inside its payload with
+`__corvid_secret_scrubbed__`, as tool errors already are, so the trace
+schema needs no new version. Replay substitutes the recorded, scrubbed
+form and prints a warning naming the tool, kept for
+`Runtime::replay_secret_scrub_warnings()` the way the tz-database
+warning is kept. When the scrubbed value changes the outcome, replay
+also reports the divergence at the first event that stops matching, so
+it never differs from the recording silently. Once a tool hands the text back,
+the program holds an ordinary `String`, recorded wherever the program
+sends it. Replay compares the recorded forms,
+which hold `<redacted>` at the same positions on both sides, so a
+recorded call matches whatever secret the replay re-reads, and a
+rotated key still replays. Replay now steps past a secret read's
+recorded call and result, which also fixes `secret_read` inside a
+longer recorded run: before, the next tool call met the secret's
+recorded event and diverged.
+
+JSON cannot mint a `Secret`, so a user tool, a model or a request body
+cannot produce one; `secret(name)` is decoded on its own path. The
+checker records every type reference that holds a secret, and the
+application contract leaves those fields and agents out. Native code
+refuses any program that mentions `Secret`, naming the native
+cryptography slice. `corvid run` refuses a file whose only agent
+returns a secret. A user `type Secret` now names the builtin, so the
+contract-closure tour and a `serve` test use `Classified`.
+
+`Secret` is an invention, so it ships with `corvid tour --topic
+secrets`, a README row, a catalog entry and a proof-matrix row.
+Syntax: `secret(name)` beat `read_secret(name)` and
+`Secret.from_env(name)`, because the module already says secrets and
+the name should not tie the call to the environment; `==` beat
+`a.matches(b)`, because there is one equality and it is the safe one.
+Shared enums gain `Type::Secret`, `BuiltIn::Secret` and
+`Value::Secret`, with every exhaustive arm, and `Checked` gains
+`secret_type_refs`.
+
 ## 2026-11-24 - Byte strings and SHA-2 hashing (B04, first slice)
 
 Corvid has a `Bytes` type: an immutable byte string for digests, MAC

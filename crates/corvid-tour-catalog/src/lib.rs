@@ -506,11 +506,11 @@ agent assistant(url: String) -> Result<String, String>:
         name: "replay-safe-secrets",
         title: "Replay-Safe Secret Access",
         category: "Executing I/O",
-        pitch: "secret_read is secret access with the trace problem actually solved: the program receives the real value, but the recorded ToolResult carries a redacted copy (traces NEVER persist secret values — a RuntimeChecked guarantee), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is Ok with present: false — absence is a modeled state, not a crash. The residual channel is stated, not hidden: forwarding a secret into another tool's arguments records it there; the structural SecretHandle taint is the tracked deepening.",
+        pitch: "secret_read is secret access with the trace problem actually solved: the program receives the real value, but the recorded ToolResult carries a redacted copy (traces NEVER persist secret values — a RuntimeChecked guarantee), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is Ok with present: false — absence is a modeled state, not a crash. secret_read hands the program a plain String, so forwarding it into another tool's arguments records it there; `secret(name)` closes that channel by returning a `Secret` instead (see `corvid tour --topic secrets`).",
         spec: "docs/reference/stdlib/secrets.md",
         roadmap: "Slice 48a executing-secrets-and-cache",
         test: "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment",
-        non_scope: "Env-backed reads only; the opaque SecretHandle taint (a value that never serializes, accepted by consuming surfaces) is post-v1.0.",
+        non_scope: "Env-backed reads only. The text comes back as a String, so the program is responsible for where it goes; use `secret(name)` and the `Secret` type when it must never reach a trace, a prompt or a log.",
         source: r#"import "./std/secrets" use secret_read, SecretReadEnvelope
 
 agent api_key() -> Result<String, String>:
@@ -518,6 +518,34 @@ agent api_key() -> Result<String, String>:
     if not key.present:
         return Err("set ANTHROPIC_API_KEY")
     return Ok(key.value)
+"#,
+    },
+    TourTopic {
+        name: "secrets",
+        title: "Secrets That Never Reach a Trace, a Prompt or a Log",
+        category: "Safety at compile time",
+        pitch: "A webhook signing key, a password or an API token is a `Secret`: the program can use it but never reveal it. `secret(name)` from std/secrets reads one from the environment. Two secrets compare with `==`, in constant time, so checking a supplied token cannot leak it byte by byte; a secret can be handed to the tool that needs it, alone or inside a record. Everything else is a compile error that says why: no `to_string`, no `+`, no mixing with text, no JSON form, no route body or response, no store field or table column, no prompt parameter or result (no secret can reach a model), no `ask`/`choose`, and `main` may not return one. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the ToolCall event, approvals, step events, replay and the exports built from the trace. A tool that echoes the secret back is scrubbed to `<redacted>` in the trace, not in what the program receives, and replaying that result warns. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays without the trace ever holding the text. The application contract leaves every secret field out, so no client or SDK has a field to read.",
+        spec: "docs/reference/cryptography.md#secrets",
+        roadmap: "B04 cryptography, slice 2",
+        test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
+        non_scope: "Interpreter tier only; native code refuses `Secret` until the native cryptography slice. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. Hashing a password (`hash_password`) and HMAC keyed by a `Secret` arrive in later B04 slices; an encrypted table column is tracked in B09.",
+        source: r#"import "./std/secrets" use secret
+
+type Delivery:
+    body: String
+    signature: String
+
+tool sign_webhook(key: Secret, body: String) -> String
+tool post_delivery(delivery: Delivery) -> Bool
+
+agent deliver(body: String) -> Result<Bool, String>:
+    key = secret("WEBHOOK_KEY")?
+    signature = sign_webhook(key, body)
+    return Ok(post_delivery(Delivery(body, signature)))
+
+agent token_matches(supplied: Secret) -> Result<Bool, String>:
+    expected = secret("API_TOKEN")?
+    return Ok(supplied == expected)
 "#,
     },
     TourTopic {
@@ -770,7 +798,7 @@ tool echo_stream(m: String) -> Stream<String>
         first_login: open
         tenant: fixed("public")
 
-type Secret:
+type Classified:
     value: String
 
 server secure_api:
@@ -778,8 +806,8 @@ server secure_api:
     # caller's session to a verified `actor` and enforces the policy
     # before the handler runs — an unauthenticated request is a 401,
     # never the classified body.
-    route GET "/secret" -> json Secret requires authenticated:
-        return Secret("classified")
+    route GET "/secret" -> json Classified requires authenticated:
+        return Classified("classified")
 "#,
     },
     TourTopic {

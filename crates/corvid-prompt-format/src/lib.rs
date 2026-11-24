@@ -232,6 +232,10 @@ fn schema_for_inner(
         // matched; a model has no such text to point into, so it is
         // not a prompt return type. Permissive, like `DbHandle`.
         Type::RegexMatch => json!({}),
+        // A model never produces or receives a secret: the checker
+        // refuses a `Secret` in a prompt's parameters and return type.
+        // Should one reach a schema anyway, nothing validates against it.
+        Type::Secret => json!({ "not": {} }),
         // B06 — a model reads and writes these as their exact text, with
         // the schema every public projection shares, so an amount never
         // passes through a float on its way to or from a model.

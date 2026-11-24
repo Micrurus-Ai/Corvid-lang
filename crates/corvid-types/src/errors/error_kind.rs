@@ -101,6 +101,24 @@ pub enum TypeErrorKind {
     /// `Bytes` compared with another type.
     BytesOperatorMismatch { left: String, right: String, hint: String },
 
+    /// An operator other than `==` and `!=` between two secrets, or a
+    /// `Secret` combined with another type.
+    SecretOperatorMismatch { left: String, right: String, hint: String },
+
+    /// A method called on a `Secret`, which has none.
+    SecretMethod { method: String },
+
+    /// A `Secret` at a place its text would leave the program: a route,
+    /// a store, a prompt, a connector operation or `main`. `at` is empty
+    /// or names the record field that holds it.
+    SecretAtBoundary { boundary: String, at: String, hint: String },
+
+    /// A table column that holds a `Secret`.
+    SecretTableColumn { column: String, at: String },
+
+    /// `ask` answering with, or `choose` offering, a `Secret`.
+    SecretShownToPerson { builtin: String, at: String },
+
     /// B06 — a `Decimal`, `Duration` or `Instant` in a type that leaves
     /// the program as JSON before B06's JSON slice gives it a form.
     PendingJsonFormAtBoundary { type_name: String, boundary: String },
@@ -648,6 +666,22 @@ impl TypeErrorKind {
             Self::BytesOperatorMismatch { left, right, .. } => {
                 format!("this operator does not combine `{left}` and `{right}`")
             }
+            Self::SecretOperatorMismatch { left, right, .. } => {
+                format!("this operator does not combine `{left}` and `{right}`")
+            }
+            Self::SecretMethod { method } => {
+                format!("a `Secret` has no method `{method}`: its text can never be read back or turned into other text")
+            }
+            Self::SecretAtBoundary { boundary, at, .. } => {
+                format!("{boundary} cannot hold a `Secret`{at}: a secret's text never leaves the program")
+            }
+            Self::SecretTableColumn { column, at } => {
+                format!("table column `{column}` cannot hold a `Secret`{at}: a stored secret could be read back and shown")
+            }
+            Self::SecretShownToPerson { builtin, at } => match builtin.as_str() {
+                "ask" => format!("`ask` cannot answer with a `Secret`{at}: a person's answer is recorded in the trace"),
+                _ => format!("`{builtin}` cannot offer a `Secret`{at}: its options are shown to a person"),
+            },
             Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
                 "a `{type_name}` cannot be {boundary} yet: its storage mapping, which decides how queries compare it, arrives with B09"
             ),
@@ -1106,6 +1140,17 @@ impl TypeErrorKind {
             ),
             Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::BytesOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::SecretOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::SecretMethod { .. } => Some(
+                "compare two secrets with `==`, or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
+            ),
+            Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
+            Self::SecretTableColumn { .. } => Some(
+                "never store a secret's text. To check a value later, store its hash with `hash_password(...)`, which arrives in a later cryptography slice; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
+            ),
+            Self::SecretShownToPerson { .. } => Some(
+                "read secrets from the environment with `secret(name)` from std/secrets; never ask a person to type one or show them one".into(),
+            ),
             Self::UnknownCurrencyOrLocale { .. } => Some(
                 "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
             ),

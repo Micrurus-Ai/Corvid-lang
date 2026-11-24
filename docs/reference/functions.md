@@ -149,6 +149,10 @@ Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` re
 
 `==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
 
+## Secret
+
+A `Secret` has no methods. `==` and `!=` between two secrets are constant-time; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one. See [Cryptography: secrets](cryptography.md#secrets).
+
 ## Bool
 
 - `Bool.to_string() -> String`
@@ -481,6 +485,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 
 ### [std/secrets](../../std/secrets.cor)
 
+- `tool secret(name: String) -> Result<Secret, String> uses secrets_read`
 - `tool secret_read(name: String) -> Result<SecretReadEnvelope, String> uses secrets_read`
 - `agent secret_present(name: String, value: String) -> SecretReadEnvelope`
 - `agent secret_missing(name: String) -> SecretReadEnvelope`

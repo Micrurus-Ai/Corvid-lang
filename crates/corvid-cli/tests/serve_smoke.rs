@@ -1685,12 +1685,12 @@ fn serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start() 
         first_login: open
         tenant: fixed("public")
 
-type Secret:
+type Classified:
     value: String
 
 server secure_api:
-    route GET "/secret" -> json Secret requires authenticated:
-        return Secret("classified")
+    route GET "/secret" -> json Classified requires authenticated:
+        return Classified("classified")
 "#;
     std::fs::write(&src_path, source).unwrap();
 

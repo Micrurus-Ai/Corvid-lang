@@ -75,6 +75,8 @@ pub enum NotNativeReason {
     /// A program that mentions `Bytes` anywhere: a declared field, a
     /// signature or an expression.
     BytesNotNative,
+    /// A program that mentions `Secret` anywhere, in the same places.
+    SecretNotNative,
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -119,6 +121,9 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::BytesNotNative => f.write_str(
                 "program uses `Bytes` - byte strings and hashing run on the interpreter until the native cryptography slice lands; the auto-dispatcher runs the interpreter tier",
+            ),
+            Self::SecretNotNative => f.write_str(
+                "program uses `Secret` - secret values run on the interpreter, which keeps their text out of traces, until the native cryptography slice lands; the auto-dispatcher runs the interpreter tier",
             ),
             Self::TextScalarAtBoundary { name, type_name } => write!(
                 f,
@@ -171,8 +176,11 @@ struct ScanContext<'a> {
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
     let context = ScanContext { types: &ir.types, has_tools_lib };
-    if mentions_bytes_in_declarations(ir) {
+    if declared_types(ir).any(mentions_bytes) {
         return Err(NotNativeReason::BytesNotNative);
+    }
+    if declared_types(ir).any(Type::mentions_secret) {
+        return Err(NotNativeReason::SecretNotNative);
     }
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
         return Err(NotNativeReason::PythonImport { module: module.clone() });
@@ -277,7 +285,7 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
 }
 
 /// Whether `ty` is or contains `Bytes`, apart from record fields,
-/// which [`mentions_bytes_in_declarations`] covers.
+/// which [`declared_types`] covers.
 fn mentions_bytes(ty: &Type) -> bool {
     match ty {
         Type::Bytes => true,
@@ -298,8 +306,8 @@ fn mentions_bytes(ty: &Type) -> bool {
     }
 }
 
-/// Whether a declared type, tool, prompt or agent signature holds `Bytes`.
-fn mentions_bytes_in_declarations(ir: &IrFile) -> bool {
+/// Every type a declared record field, tool, prompt or agent signature names.
+fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
     let fields = ir.types.iter().flat_map(|decl| {
         decl.fields.iter().chain(decl.variants.iter().flat_map(|variant| &variant.fields)).map(|field| &field.ty)
     });
@@ -307,12 +315,15 @@ fn mentions_bytes_in_declarations(ir: &IrFile) -> bool {
     let prompts =
         ir.prompts.iter().flat_map(|prompt| prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty)));
     let agents = ir.agents.iter().flat_map(|agent| agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)));
-    fields.chain(tools).chain(prompts).chain(agents).any(mentions_bytes)
+    fields.chain(tools).chain(prompts).chain(agents)
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
     if mentions_bytes(&expr.ty) {
         return Err(NotNativeReason::BytesNotNative);
+    }
+    if expr.ty.mentions_secret() {
+        return Err(NotNativeReason::SecretNotNative);
     }
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
         scan_expr(receiver, current_return_ty, context)?;
@@ -646,6 +657,20 @@ agent main() -> Decimal:
             assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BytesNotNative), "{src}");
         }
         assert!(NotNativeReason::BytesNotNative.to_string().contains("native cryptography slice"));
+    }
+
+    #[test]
+    fn secret_programs_run_on_the_interpreter() {
+        for src in [
+            "effect secrets_read:\n    reversible: true\n\ntool secret(name: String) -> Result<Secret, String> uses secrets_read\n\nagent main() -> Bool:\n    return match secret(\"KEY\"):\n        Ok(key) -> true\n        Err(problem) -> false\n",
+            "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
+            "type Credentials:\n    user: String\n    password: Secret\n\nagent main() -> Int:\n    return 1\n",
+            "tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n",
+        ] {
+            let ir = crate::compile_to_ir(src).expect("valid secret program");
+            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
+        }
+        assert!(NotNativeReason::SecretNotNative.to_string().contains("native cryptography slice"));
     }
 
     #[test]

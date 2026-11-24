@@ -22,8 +22,41 @@ use std::sync::Arc;
 /// Convert a `Value` to a `serde_json::Value`. Lossless for primitives;
 /// structs become JSON objects (the type name is dropped — the receiving
 /// tool doesn't need it).
+///
+/// A `Secret` becomes the redaction marker `<redacted>`, wherever it
+/// sits: a tool argument, a record field, a list element. Every trace
+/// record, approval, step event, replay key and rendered prompt is
+/// built from this form, so none of them can hold a secret's text.
+/// Only [`tool_argument_json`] writes the text, for the tool
+/// implementation itself.
 pub fn value_to_json(v: &Value) -> serde_json::Value {
+    to_json(v, SecretForm::Redacted)
+}
+
+/// The JSON handed to a tool implementation: [`value_to_json`], except
+/// that a `Secret` is its text, because the tool needs it. The
+/// interpreter calls this in one place, when it dispatches a tool whose
+/// declared parameters hold a `Secret`; the trace of that call is built
+/// from [`value_to_json`].
+pub fn tool_argument_json(v: &Value) -> serde_json::Value {
+    to_json(v, SecretForm::Revealed)
+}
+
+/// How [`to_json`] writes a `Secret`.
+#[derive(Clone, Copy)]
+enum SecretForm {
+    /// The redaction marker, for every record of the value.
+    Redacted,
+    /// The text, for a tool implementation.
+    Revealed,
+}
+
+fn to_json(v: &Value, secrets: SecretForm) -> serde_json::Value {
     match v {
+        Value::Secret(secret) => serde_json::Value::String(match secrets {
+            SecretForm::Redacted => corvid_runtime::REDACTED_SECRET.to_string(),
+            SecretForm::Revealed => secret.expose_text().to_string(),
+        }),
         Value::Int(n) => serde_json::Value::from(*n),
         Value::Float(f) => serde_json::Value::from(*f),
         // B06 — exact text, never a JSON number, which would round; the
@@ -45,19 +78,19 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
             let mut obj = serde_json::Map::new();
             s.with_fields(|fields| {
                 for (k, v) in fields {
-                    obj.insert(k.clone(), value_to_json(v));
+                    obj.insert(k.clone(), to_json(v, secrets));
                 }
             });
             serde_json::Value::Object(obj)
         }
         Value::List(items) => {
-            serde_json::Value::Array(items.iter_cloned().iter().map(value_to_json).collect())
+            serde_json::Value::Array(items.iter_cloned().iter().map(|item| to_json(item, secrets)).collect())
         }
         Value::Enum(e) => serde_json::json!({
             "tag": "variant",
             "type": e.type_name(),
             "variant": e.variant_name(),
-            "fields": e.fields_cloned().iter().map(value_to_json).collect::<Vec<_>>(),
+            "fields": e.fields_cloned().iter().map(|item| to_json(item, secrets)).collect::<Vec<_>>(),
         }),
         Value::Map(m) => {
             let entries = m.entries_cloned();
@@ -65,7 +98,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                 let mut obj = serde_json::Map::new();
                 for (k, v) in &entries {
                     if let Value::String(s) = k {
-                        obj.insert(s.to_string(), value_to_json(v));
+                        obj.insert(s.to_string(), to_json(v, secrets));
                     }
                 }
                 serde_json::Value::Object(obj)
@@ -76,22 +109,22 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                     entries
                         .iter()
                         .map(|(k, v)| {
-                            serde_json::Value::Array(vec![value_to_json(k), value_to_json(v)])
+                            serde_json::Value::Array(vec![to_json(k, secrets), to_json(v, secrets)])
                         })
                         .collect(),
                 )
             }
         }
         Value::Weak(w) => match w.upgrade() {
-            Some(value) => serde_json::json!({ "tag": "weak", "value": value_to_json(&value) }),
+            Some(value) => serde_json::json!({ "tag": "weak", "value": to_json(&value, secrets) }),
             None => serde_json::json!({ "tag": "weak", "value": serde_json::Value::Null }),
         },
-        Value::ResultOk(v) => serde_json::json!({ "tag": "ok", "ok": value_to_json(&v.get()) }),
-        Value::ResultErr(v) => serde_json::json!({ "tag": "err", "err": value_to_json(&v.get()) }),
-        Value::OptionSome(v) => serde_json::json!({ "tag": "some", "value": value_to_json(&v.get()) }),
+        Value::ResultOk(v) => serde_json::json!({ "tag": "ok", "ok": to_json(&v.get(), secrets) }),
+        Value::ResultErr(v) => serde_json::json!({ "tag": "err", "err": to_json(&v.get(), secrets) }),
+        Value::OptionSome(v) => serde_json::json!({ "tag": "some", "value": to_json(&v.get(), secrets) }),
         Value::OptionNone => serde_json::json!({ "tag": "none" }),
         Value::Grounded(g) => {
-            let inner = value_to_json(&g.inner.get());
+            let inner = to_json(&g.inner.get(), secrets);
             let sources: Vec<serde_json::Value> = g.provenance.entries.iter().map(|e| {
                 serde_json::json!({
                     "kind": e.kind.label(),
@@ -107,7 +140,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                 for (name, field) in partial_fields {
                     let value = match field {
                         PartialFieldValue::Complete(value) => {
-                            serde_json::json!({ "tag": "complete", "value": value_to_json(value) })
+                            serde_json::json!({ "tag": "complete", "value": to_json(value, secrets) })
                         }
                         PartialFieldValue::Streaming => serde_json::json!({ "tag": "streaming" }),
                     };
@@ -119,10 +152,10 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::ResumeToken(token) => serde_json::json!({
             "tag": "resume_token",
             "prompt": token.prompt_name,
-            "args": token.args.iter().map(value_to_json).collect::<Vec<_>>(),
+            "args": token.args.iter().map(|item| to_json(item, secrets)).collect::<Vec<_>>(),
             "delivered": token.delivered.iter().map(|chunk| {
                 serde_json::json!({
-                    "value": value_to_json(&chunk.value),
+                    "value": to_json(&chunk.value, secrets),
                     "cost": chunk.cost,
                     "confidence": chunk.confidence,
                     "tokens": chunk.tokens,
@@ -413,6 +446,15 @@ pub fn json_to_value(
         // rather than a documentation claim. The only path to a
         // valid `Value::DbHandle` is the typed-Value dispatch
         // surface in `Runtime::call_tool` for `db_open` (33S3b).
+        // A `Secret` has no JSON form: a tool result, a model reply, a
+        // request body or a resumed job cannot mint one, so a secret's
+        // text never arrives through a channel the trace records. The
+        // only path to a `Value::Secret` is `secret(name)`, decoded by
+        // [`secret_read_result_to_value`].
+        (Type::Secret, _got) => Err(ConvError::TypeMismatch {
+            expected: "Secret (only produced by `secret(name)` from std/secrets)".into(),
+            got: "JSON payload - a secret cannot be read from JSON".into(),
+        }),
         (Type::DbHandle, _got) => Err(ConvError::TypeMismatch {
             expected: "DbHandle (only producible by the runtime's db_open dispatch path)".into(),
             got: "JSON payload — opaque handles cannot be reconstructed from JSON".into(),
@@ -438,6 +480,32 @@ pub fn json_to_value(
             expected: type_label(expected),
             got: json_kind(&got).into(),
         }),
+    }
+}
+
+/// The `Result<Secret, String>` of `secret(name)`, from the runtime's
+/// `{"tag": "ok", "ok": text}` or `{"tag": "err", "err": message}`.
+/// The interpreter calls this only for the runtime's own secret tool,
+/// whose recorded result carries `<redacted>` in place of the text.
+pub fn secret_read_result_to_value(json: serde_json::Value) -> Result<Value, ConvError> {
+    let mismatch = || ConvError::TypeMismatch {
+        expected: "Result<Secret, String>".into(),
+        got: "a result that is not `secret(name)`'s".into(),
+    };
+    match json.get("tag").and_then(|tag| tag.as_str()) {
+        Some("ok") => match json.get("ok") {
+            Some(serde_json::Value::String(text)) => {
+                Ok(Value::ResultOk(BoxedValue::new(Value::Secret(corvid_crypto::Secret::new(text.as_str())))))
+            }
+            _ => Err(mismatch()),
+        },
+        Some("err") => match json.get("err") {
+            Some(serde_json::Value::String(message)) => {
+                Ok(Value::ResultErr(BoxedValue::new(Value::String(Arc::from(message.as_str())))))
+            }
+            _ => Err(mismatch()),
+        },
+        _ => Err(mismatch()),
     }
 }
 
@@ -518,6 +586,7 @@ fn type_label(t: &Type) -> String {
         Type::Currency => "Currency".into(),
         Type::Locale => "Locale".into(),
         Type::Bytes => "Bytes".into(),
+        Type::Secret => "Secret".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

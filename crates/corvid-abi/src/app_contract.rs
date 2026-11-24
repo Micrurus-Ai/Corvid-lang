@@ -439,7 +439,7 @@ pub fn emit_application_contract(
         .iter()
         .filter_map(|decl| match decl {
             Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
-                Some(contract_type(t))
+                Some(contract_type(t, checked))
             }
             _ => None,
         })
@@ -465,7 +465,13 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Agent(a) if a.visibility.is_callable_from_outside_file() => Some(
+            // A public agent whose signature holds a `Secret` is
+            // server-only: no client could supply or receive one.
+            Decl::Agent(a)
+                if a.visibility.is_callable_from_outside_file()
+                    && !signature_holds_secret(&a.params, &a.return_ty, checked) =>
+            {
+                Some(
                 contract_callable(
                     &a.name.name,
                     &a.params,
@@ -473,7 +479,8 @@ pub fn emit_application_contract(
                     &a.effect_row,
                     registry,
                 ),
-            ),
+                )
+            }
             _ => None,
         })
         .collect();
@@ -723,18 +730,34 @@ fn mandatory_auth_safeguards() -> Vec<String> {
     .collect()
 }
 
-fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
+/// A public type's contract entry. A field that holds a `Secret` never
+/// leaves the server, so the contract, and every client and SDK
+/// generated from it, has no such field.
+fn contract_type(t: &corvid_ast::TypeDecl, checked: &Checked) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
-        fields: t.fields.iter().map(contract_field).collect(),
-        variants: t.variants.iter().map(contract_variant).collect(),
+        fields: public_fields(&t.fields, checked),
+        variants: t.variants.iter().map(|v| contract_variant(v, checked)).collect(),
     }
 }
 
-fn contract_variant(v: &corvid_ast::SumVariant) -> ContractVariant {
+fn public_fields(fields: &[corvid_ast::Field], checked: &Checked) -> Vec<ContractField> {
+    fields
+        .iter()
+        .filter(|field| !checked.secret_type_refs.contains(&field.ty.span()))
+        .map(contract_field)
+        .collect()
+}
+
+/// Whether a signature holds a `Secret`, as the checker found it.
+fn signature_holds_secret(params: &[corvid_ast::Param], return_ty: &TypeRef, checked: &Checked) -> bool {
+    params.iter().map(|param| &param.ty).chain(std::iter::once(return_ty)).any(|ty| checked.secret_type_refs.contains(&ty.span()))
+}
+
+fn contract_variant(v: &corvid_ast::SumVariant, checked: &Checked) -> ContractVariant {
     ContractVariant {
         name: v.name.name.clone(),
-        fields: v.fields.iter().map(contract_field).collect(),
+        fields: public_fields(&v.fields, checked),
         status: v.status,
         ui: ui_hints_map(&v.ui),
     }
@@ -1154,6 +1177,39 @@ public agent support(question: String) -> Answer uses ask:
         assert!(!agent.capabilities.streaming);
         assert_eq!(agent.capabilities.latency_class.as_deref(), Some("fast"));
         assert_eq!(agent.capabilities.max_cost_usd, Some(0.05));
+    }
+
+    #[test]
+    fn a_secret_never_appears_in_the_contract() {
+        let contract = contract_for(
+            "\
+public type Credentials:
+    user: String
+    password: Secret
+
+public type Account:
+    name: String
+    credentials: Credentials
+
+tool check(credentials: Credentials) -> Bool
+
+public agent log_in(credentials: Credentials) -> Bool:
+    return check(credentials)
+
+public agent greet(name: String) -> String:
+    return name
+",
+        );
+        let credentials = contract.types.iter().find(|t| t.name == "Credentials").unwrap();
+        let names: Vec<&str> = credentials.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["user"], "the secret field is server-only");
+        let account = contract.types.iter().find(|t| t.name == "Account").unwrap();
+        let names: Vec<&str> = account.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["name"], "a field holding a record with a secret is server-only too");
+        let agents: Vec<&str> = contract.agents.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(agents, ["greet"], "an agent taking a secret is server-only");
+        let json = serde_json::to_string(&contract).unwrap();
+        assert!(!json.contains("Secret") && !json.contains("password"), "{json}");
     }
 
     #[test]

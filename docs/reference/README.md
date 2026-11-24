@@ -16,7 +16,7 @@ shape, or invariant. Read top-to-bottom rarely.
 - [Exact decimals](decimal.md) — the `Decimal` type for money and
   other exact quantities.
 - [Cryptography](cryptography.md) — the `Bytes` type, its encodings
-  and SHA-2 hashing.
+  and SHA-2 hashing, and the `Secret` type.
 
 ## CLI
 

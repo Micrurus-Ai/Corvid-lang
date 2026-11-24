@@ -76,6 +76,10 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         // The same deferred decision for `Bytes`, which may want a BLOB
         // column; the checker refuses `Bytes` table columns until then.
         Type::Bytes => (ColumnKind::Json, false),
+        // A `Secret` is never stored: the checker refuses a `Secret`
+        // column (hash it, or wait for an encrypted column). Named here
+        // so no default arm decides its storage.
+        Type::Secret => (ColumnKind::Json, false),
         _ => (ColumnKind::Json, false),
     }
 }

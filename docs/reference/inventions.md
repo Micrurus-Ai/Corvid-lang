@@ -239,7 +239,16 @@ hits a live LLM for record-vs-live comparison; the default is the closed one.
 - **Tests**: `crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs` (value-to-program, trace-redaction, missing-is-modeled) + `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment`
 - **Spec**: `docs/reference/stdlib/secrets.md`
 - **What it is**: `secret_read` with the trace problem solved instead of ignored — the program gets the real value, the recorded ToolResult carries a redacted copy (`secrets.trace_never_carries_value`, RuntimeChecked), and replay re-reads the live environment instead of substituting, so rotated credentials diverge honestly.
-- **Non-scope**: the residual forwarding channel (a secret passed into another tool's args is recorded by that tool's events) — the structural `SecretHandle` taint is the tracked post-v1.0 deepening.
+- **Non-scope**: `secret_read` returns a `String`, so a program that forwards it records it in that tool's events; the `Secret` type below closes that channel.
+
+### Secrets That Never Reach a Trace, a Prompt or a Log
+
+- **Status**: shipped on the interpreter (B04 slice 2, 2026-11-24)
+- **Run it**: `corvid tour --topic secrets`
+- **Tests**: `crates/corvid-types/src/tests/secrets.rs` (every refusal with its message: operators, methods, JSON, routes, stores, table columns, prompts, connectors, `ask`/`choose`, `main`; the recorded secret positions) + `crates/corvid-vm/src/tests/secrets.rs` (constant-time comparison, a tool receives the text while the trace holds `<redacted>`, an echoed secret is scrubbed in the trace only, `<secret>` display, JSON cannot mint a secret) + `crates/corvid-driver/tests/secret_values.rs` (`secret("WEBHOOK_KEY")` through std/secrets, a trace file with `<redacted>` and no trace of the text, replay with a rotated key; an echoed secret's replay warns) + `crates/corvid-runtime/src/secret_arguments.rs` tests + `crates/corvid-abi/src/app_contract.rs::a_secret_never_appears_in_the_contract`
+- **Spec**: `docs/reference/cryptography.md#secrets`
+- **What it is**: a `Secret` type the program can compare (constant-time `==`) and pass to tools but never reveal. The compiler refuses every way its text could leave the program, and every record of a tool call that takes one holds `<redacted>`, built from the declared parameter types at the one place trace payloads are built. Replay matches the redacted argument against the secret it re-reads from the environment.
+- **Non-scope**: native code (until the native cryptography slice); secret sources other than the environment; what a tool implementation does with the text it receives; password hashing, HMAC keyed by a secret, and encrypted table columns (later B04 slices and B09).
 
 ### Provenance-Keyed Cache
 

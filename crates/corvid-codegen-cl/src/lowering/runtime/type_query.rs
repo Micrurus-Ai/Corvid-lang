@@ -103,6 +103,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::Currency => "Currency".into(),
         Type::Locale => "Locale".into(),
         Type::Bytes => "Bytes".into(),
+        Type::Secret => "Secret".into(),
         // Slice 51f — `Upload<Format>` / `Page<Item>` are
         // HTTP-boundary types; stable mangled names keep typeinfo
         // lookups from crashing, but any emission that USES them bails
@@ -618,6 +619,10 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // `Bytes` has no native form until the native cryptography
         // slice, whose equality must stay constant-time.
         Type::Bytes => false,
+        // `Secret` has no native form until the native cryptography
+        // slice, which must keep `==` constant-time and the text out
+        // of native traces.
+        Type::Secret => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the

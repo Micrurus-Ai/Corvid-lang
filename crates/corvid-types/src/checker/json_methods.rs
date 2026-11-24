@@ -253,6 +253,13 @@ impl<'a> Checker<'a> {
                     Ok(false)
                 }
             }
+            // A secret's text never leaves the program, so it has no
+            // JSON form in either direction, and a record holding one has
+            // none either.
+            Type::Secret => Err(NoForm::new(
+                "a `Secret` has no JSON form, because its text must never leave the program",
+                "keep the secret out of the encoded value and pass it straight to the tool that needs it",
+            )),
             Type::RegexMatch => Err(NoForm::new(
                 "a `RegexMatch` describes a position in one text and has no JSON form",
                 "copy the fields you need into a record you declare",
@@ -366,7 +373,7 @@ impl<'a> Checker<'a> {
 }
 
 /// The declaration of type `def_id` in an imported `module`.
-fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
+pub(super) fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
     module.file.decls.iter().find_map(|decl| match decl {
         corvid_ast::Decl::Type(t) if module.resolved.symbols.lookup_def(&t.name.name) == Some(def_id) => Some(t),
         _ => None,

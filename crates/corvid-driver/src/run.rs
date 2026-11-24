@@ -41,6 +41,10 @@ pub enum RunError {
     UnknownAgent { name: String, available: Vec<String> },
     /// The caller asked for default args but the agent expects parameters.
     NeedsArgs { agent: String, expected: usize },
+    /// The agent picked as the program's entry point returns a
+    /// `Secret`, which the runner would print. The checker refuses this
+    /// for `main`; this covers a file whose only agent is the entry.
+    EntryReturnsSecret { agent: String },
     /// The interpreter aborted.
     Interp(InterpError),
 }
@@ -64,6 +68,10 @@ impl fmt::Display for RunError {
             Self::NeedsArgs { agent, expected } => write!(
                 f,
                 "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
+            ),
+            Self::EntryReturnsSecret { agent } => write!(
+                f,
+                "agent `{agent}` is the program's entry point and returns a `Secret`, which would be printed; return what the secret proves, such as a `Bool`, or call the agent from another agent"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }

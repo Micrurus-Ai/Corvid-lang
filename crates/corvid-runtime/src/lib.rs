@@ -112,6 +112,7 @@ pub mod replay_dispatch;
 pub mod review_queue;
 pub mod runtime;
 pub mod tables;
+pub mod secret_arguments;
 pub mod secrets;
 pub mod string;
 pub mod store;
@@ -293,6 +294,7 @@ pub use review_queue::{
     ReviewStatus,
 };
 pub use runtime::{Runtime, RuntimeBuilder};
+pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, REDACTED_SECRET};
 pub use secrets::{SecretAuditMetadata, SecretRead, SecretRuntime};
 #[cfg(feature = "python")]
 pub use python_ffi::{PythonRuntime, PythonSandboxProfile};

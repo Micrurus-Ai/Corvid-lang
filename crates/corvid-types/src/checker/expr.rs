@@ -286,6 +286,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Currency
                 | BuiltIn::Locale
                 | BuiltIn::Bytes
+                | BuiltIn::Secret
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

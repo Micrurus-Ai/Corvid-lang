@@ -38,6 +38,8 @@ mod time;
 mod currency;
 #[path = "interp/crypto.rs"]
 mod crypto;
+#[path = "interp/secret_tools.rs"]
+mod secret_tools;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 
@@ -1792,6 +1794,9 @@ impl<'ir> Interpreter<'ir> {
                 }
 
                 let start = std::time::Instant::now();
+                // Kept to scrub a secret the tool echoes out of the step
+                // event below; the program's value is never scrubbed.
+                let mut echo_scrub: Option<corvid_runtime::RevealedToolArguments> = None;
                 let result_value = if let Some((connector, op)) =
                     self.connector_ops_by_id.get(def_id).copied()
                 {
@@ -1853,9 +1858,20 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                     .await?
+                } else if corvid_runtime::runtime::is_stdlib_secret_value_tool(callee_name) {
+                    secret_tools::dispatch_secret_value_tool(self.runtime, callee_name, json_args, span).await?
                 } else {
+                    // A `Secret` argument reaches the implementation as its
+                    // text; every record of the call holds `json_args`.
+                    let revealed =
+                        secret_tools::revealed_arguments(tool, &json_args, &arg_values, &self.types_by_id);
+                    echo_scrub = revealed.clone();
                     let outcome = if let Some((module, member)) = &tool.python {
-                        self.runtime.call_imported_python(module, member, &tool.effect_names, json_args).await
+                        self.runtime
+                            .call_imported_python(module, member, &tool.effect_names, json_args, revealed)
+                            .await
+                    } else if let Some(revealed) = revealed {
+                        self.runtime.call_tool_revealing_secrets(callee_name, json_args, revealed).await
                     } else {
                         self.runtime.call_tool(callee_name, json_args).await
                     }
@@ -1888,6 +1904,10 @@ impl<'ir> Interpreter<'ir> {
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
                 let result = value_to_json(&result_value);
+                let result = match &echo_scrub {
+                    Some(revealed) => revealed.scrub_json(result),
+                    None => result,
+                };
 
                 if self.should_yield_boundary() {
                     let action = self

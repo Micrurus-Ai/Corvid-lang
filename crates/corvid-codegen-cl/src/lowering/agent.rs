@@ -470,6 +470,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Bytes` - byte strings run on the interpreter tier until the native cryptography slice lands",
             span,
         )),
+        Type::Secret => Err(CodegenError::not_supported(
+            "`Secret` - secret values run on the interpreter tier until the native cryptography slice lands, which must keep their text out of native traces",
+            span,
+        )),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

@@ -163,13 +163,16 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B04 cryptography** (in progress, macOS session). [Proposal](proposals/cryptography.md)
 
 - [x] `Bytes` and hashing on the interpreter: the `corvid-crypto` crate, `Bytes` with constant-time `==` (inside records and lists too), no ordering and no `+`, `utf8()` and `to_utf8()`, hex and base64 conversions through B03's codecs, and SHA-256, SHA-384 and SHA-512. In JSON a `Bytes` value is unpadded base64url text, published with `contentEncoding: base64url`. Native code refuses `Bytes` and names the native slice. [Cryptography](reference/cryptography.md)
-- [ ] `Secret` on the interpreter: an opaque type that cannot be printed, converted, encoded, stored or sent to a prompt; `secret(name)` in `std/secrets`; `Secret` tool arguments redacted in traces; the invention contract.
+- [x] `Secret` on the interpreter: a type that displays as `<secret>`, compares in constant time, and cannot be converted, mixed with text, encoded as JSON, sent through a route, stored, or passed to or returned from a prompt, `ask`, `choose`, a connector operation or `main`; `secret(name)` in `std/secrets`; a tool taking a `Secret` receives the text while every record of the call holds `<redacted>`, and replay matches the redacted argument; the application contract leaves secret fields out; the invention contract (`corvid tour --topic secrets`). [Secrets](reference/cryptography.md#secrets)
 - [ ] HMAC-SHA256 and HMAC-SHA512 with a `Secret` or `Bytes` key, and the acceptance test: a recorded payment-provider webhook verifies, and a tampered body is rejected.
 - [ ] `random_token` returning a `Secret`, `hash_password` with a declared Argon2id cost (`owasp_2023()`), `verify_password`, and the API-key store moved onto `corvid-crypto`.
 - [ ] Ed25519 verification.
 - [ ] Native code for all of the above, with parity tests.
 - [ ] Ed25519 signing and key storage; raw request bodies for live webhooks (with B16); encryption. Deferred until a design or an example needs them.
 - [ ] `Upload.bytes()` returns `List<Int>`, which predates `Bytes`. Return `Bytes` instead, with every caller and the contract updated; a behavior change for existing programs, so decide it with the main line.
+- [ ] A form field bound to a `Secret` as a password input that is masked, never echoed and never prefilled, with password-manager hints: the contract leaves secret fields out today; the frontend binding needs a contract marker agreed with the frontend roadmap.
+- [ ] A `Secret` table column, for a value the program must use again: it needs an encrypted column (B09). Until then the checker refuses it and points at `hash_password(...)` for values that are only checked.
+- [ ] Zero a secret's memory when the last reference drops: `corvid_crypto::Secret` holds its text in an `Arc<str>`, freed but not wiped.
 - [ ] `Bytes` as a B09 table column, owned by the main line with the B06 types: it is JSON-stored today and the checker refuses the column. A BLOB or `bytea` column is the likely mapping.
 
 **B09 typed persistence** (in progress). [Proposal](proposals/typed-persistence.md) · [Reference](reference/tables.md)

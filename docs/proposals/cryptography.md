@@ -95,6 +95,17 @@ Slice 1 (`Bytes` and hashing on the interpreter) differs from the design above i
 - **Native code.** Any program that mentions `Bytes`, in a declared field, a signature or an expression, runs on the interpreter until the native slice, which must keep `==` constant-time rather than reuse native string equality. Native code's list of text-held scalars leaves `Bytes` out for the same reason.
 - **`Upload.bytes()`** still returns `List<Int>`; moving it to `Bytes` changes existing programs and is a roadmap item.
 
+Slice 2 (`Secret` on the interpreter) differs from the design above in these details:
+
+- **Display and the trace use different markers.** A displayed secret (a printed result, the REPL, a Rust panic) shows `<secret>`; a recorded one, in a tool argument or a result, is `<redacted>`, the marker the trace redaction already used. `secret` records `<redacted>` whole, where `secret_read` keeps the last two characters.
+- **Redaction happens where trace payloads are built.** The interpreter's `value_to_json`, from which every trace event, approval, step event, replay comparison and rendered prompt is built, writes `<redacted>` for a secret. A separate `tool_argument_json` writes the text and is called only when a tool's declared parameters hold a `Secret`, for the implementation's arguments. The runtime keeps the two forms apart (`corvid_runtime::secret_arguments`), so the `ToolCall` event, replay and approvals see only the recorded form.
+- **Replay compares the redacted form.** A recorded call matches a replayed one because both hold `<redacted>` at the secret's position, so a redacted position matches any secret and a rotated key still replays. Replay re-reads secrets and now steps past their recorded calls, which also fixes `secret_read` inside a longer recorded run.
+- **A tool that echoes a secret is scrubbed in the record only.** Every occurrence of a secret's text in a tool's result or error message becomes `<redacted>` in the recorded `ToolResult` (marked `__corvid_secret_scrubbed__` inside the payload, with no schema change) and in the step debugger's view. The program receives the real result unchanged. Replay substitutes the scrubbed form and warns, naming the tool.
+- **More refusals than the design named.** Besides printing, conversion, JSON, tables and prompts, the checker refuses a secret in a route, a store, a connector operation (whose credential is its `auth`), `ask` and `choose`, and `main`'s signature, each with its own hint. A function a model can call through a prompt parameter may not take one either. `corvid run` refuses a file whose only agent returns a secret.
+- **The contract leaves secrets out rather than marking them.** A public type's secret field and a public agent whose signature holds a secret are not in the application contract, so the client and SDKs have no such field. The masked password input the design describes needs a contract marker agreed with the frontend roadmap; it is a roadmap item.
+- **Only `secret` produces one.** JSON cannot mint a `Secret`, so a user tool, a model, a request body or a resumed job cannot return one; `secret(name)` is decoded on its own path. A table column holding a secret names both ways forward: `hash_password(...)` (slice 4) for values that are only checked, and an encrypted column (B09) for values that must be used again.
+- **`Secret` as a user type name.** A declared `type Secret` now names the builtin; the two programs in the repository that declared one (a tour and a `serve` test) use `Classified`.
+
 ## Syntax alternatives considered
 
 Recorded under the syntax simplicity rule.
@@ -104,6 +115,8 @@ Recorded under the syntax simplicity rule.
 - **Password cost.** A default cost is the hidden policy the project rule forbids; a cost argument named `owasp_2023()` reads as the policy it is.
 - **Reading encoded bytes (slice 1).** `text.decode_hex_bytes()` would sit next to `text.decode_hex()` and differ by a suffix that is easy to miss; `Bytes.from_hex(text)` names the type it produces, reads like `Instant.from_epoch_milliseconds(n)`, and keeps the `String` methods about text.
 - **Text to bytes (slice 1).** `text.to_bytes()` hides the encoding and `Bytes.from_utf8(text)` is longer for the most common call; `text.utf8()` is short and says which encoding. The reverse is `to_utf8()`, a `Result` because not every byte string is text.
+- **Reading a secret (slice 2).** `secret(name)` beside `secret_read(name)` rather than `read_secret(name)` or `Secret.from_env(name)`: the module is already named for secrets, `secret` reads as the thing it returns, and keeping the environment out of the name leaves room for other sources behind the same call.
+- **Comparing secrets (slice 2).** `==`, as for `Bytes`, rather than `a.matches(b)`: there is one equality, and it is the safe one.
 - **Length (slice 1).** `length()`, as on `String`, `List` and `Map`, rather than `size()` or `len()`: one name for every collection.
 
 ## Slices

@@ -49,6 +49,8 @@ pub enum BuiltIn {
     Locale,
     /// `Bytes`, an immutable byte string with constant-time equality.
     Bytes,
+    /// `Secret`, sensitive text that never reaches a trace, a prompt or a log.
+    Secret,
     String,
     Bool,
     Nothing,
@@ -199,6 +201,7 @@ impl SymbolTable {
         self.builtins.insert("Currency".into(), BuiltIn::Currency);
         self.builtins.insert("Locale".into(), BuiltIn::Locale);
         self.builtins.insert("Bytes".into(), BuiltIn::Bytes);
+        self.builtins.insert("Secret".into(), BuiltIn::Secret);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

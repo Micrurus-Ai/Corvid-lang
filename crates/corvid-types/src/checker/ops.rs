@@ -75,11 +75,16 @@ impl<'a> Checker<'a> {
         let lt = lt.ungrounded().untainted().clone();
         let rt = rt.ungrounded().untainted().clone();
 
-        let b06 = match self.check_decimal_binop(op, l, r, &lt, &rt, span) {
-            Some(decimal) => Some(decimal),
-            None => match self.check_bytes_binop(op, l, r, &lt, &rt) {
-                Some(bytes) => Some(bytes),
-                None => self.check_time_binop(op, l, r, &lt, &rt),
+        // A `Secret` operand is checked first, so its message wins over
+        // any other type's.
+        let b06 = match self.check_secret_binop(op, l, r, &lt, &rt) {
+            Some(secret) => Some(secret),
+            None => match self.check_decimal_binop(op, l, r, &lt, &rt, span) {
+                Some(decimal) => Some(decimal),
+                None => match self.check_bytes_binop(op, l, r, &lt, &rt) {
+                    Some(bytes) => Some(bytes),
+                    None => self.check_time_binop(op, l, r, &lt, &rt),
+                },
             },
         };
         let result = if let Some(b06) = b06 {

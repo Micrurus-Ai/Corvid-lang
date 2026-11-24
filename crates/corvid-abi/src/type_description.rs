@@ -170,6 +170,13 @@ pub fn emit_type_description(
         Type::Bytes => TypeDescription::Struct {
             name: "Bytes".to_string(),
         },
+        // The ABI descriptor names a `Secret` parameter's type so a
+        // host sees the declaration; no value of it ever crosses the
+        // boundary (native code refuses `Secret` until the native
+        // cryptography slice, and it has no JSON form).
+        Type::Secret => TypeDescription::Struct {
+            name: "Secret".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

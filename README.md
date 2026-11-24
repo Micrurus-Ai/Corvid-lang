@@ -159,6 +159,7 @@ Each entry has a runnable tour, a specification and tests. The [full catalog](do
 | Safety At Compile Time | [Provenance Propagation + `@grounded_pure`](./docs/reference/invention-catalog.md#provenance-propagation--grounded_pure) | `corvid tour --topic provenance-propagation` |
 | Safety At Compile Time | [Compile-Time Budgets](./docs/reference/invention-catalog.md#compile-time-budgets) | `corvid tour --topic cost-budgets` |
 | Safety At Compile Time | [Confidence Gates](./docs/reference/invention-catalog.md#confidence-gates) | `corvid tour --topic confidence-gates` |
+| Safety At Compile Time | [Secrets That Never Reach a Trace, a Prompt or a Log](./docs/reference/invention-catalog.md#secrets-that-never-reach-a-trace-a-prompt-or-a-log) | `corvid tour --topic secrets` |
 | AI-Native Ergonomics | [AI-Native Keywords](./docs/reference/invention-catalog.md#ai-native-keywords) | `corvid tour --topic language-keywords` |
 | AI-Native Ergonomics | [Trace-Aware Evals](./docs/reference/invention-catalog.md#trace-aware-evals) | `corvid tour --topic eval-traces` |
 | AI-Native Ergonomics | [Replay And Receipts](./docs/reference/invention-catalog.md#replay-and-receipts) | `corvid tour --topic replay-receipts` |
