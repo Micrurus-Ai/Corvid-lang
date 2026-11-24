@@ -174,6 +174,23 @@ test image_dimensions_preserve_zero_and_omit_negative_values:
     assert ui.image_with_dimensions("/map", "", -1, 0).html == "<img src=\"/map\" alt=\"\" height=\"0\">"
     assert ui.image_with_dimensions("/map", "", 0, -1).html == "<img src=\"/map\" alt=\"\" width=\"0\">"
 
+test svg_graphic_names_the_image_and_preserves_transformed_path_order:
+    marker = ui.svg_path("M0 0 L4 2 L0 4 Z", "translate(8 0)")
+    shaft = ui.svg_path("M0 1 H8 V3 H0 Z", "")
+    diagram = ui.svg_graphic("East & uphill", "0 0 12 4", [shaft, marker])
+    assert marker.html == "<path d=\"M0 0 L4 2 L0 4 Z\" transform=\"translate(8 0)\"></path>"
+    assert shaft.html == "<path d=\"M0 1 H8 V3 H0 Z\"></path>"
+    assert diagram.html == "<svg role=\"img\" aria-label=\"East &amp; uphill\" viewBox=\"0 0 12 4\" width=\"100%\">" + shaft.html + marker.html + "</svg>"
+    assert ui.svg_path("<&\"", "\"<&").html == "<path d=\"&lt;&amp;&quot;\" transform=\"&quot;&lt;&amp;\"></path>"
+    assert ui.svg_graphic("\"<", "\"&", []).html == "<svg role=\"img\" aria-label=\"&quot;&lt;\" viewBox=\"&quot;&amp;\" width=\"100%\"></svg>"
+
+test responsive_image_preserves_candidates_and_escapes_attributes:
+    candidates = "/map.png?v=2&day=1 320w, /map-wide.png 800w"
+    map_image = ui.responsive_image("/map.png", "River & trail", candidates, "(width < 40em) 100vw, 40em")
+    assert map_image.html == "<img src=\"/map.png\" alt=\"River &amp; trail\" srcset=\"/map.png?v=2&amp;day=1 320w, /map-wide.png 800w\" sizes=\"(width &lt; 40em) 100vw, 40em\">"
+    assert ui.responsive_image("/map", "", "/map\" 2x", "").html == "<img src=\"/map\" alt=\"\" srcset=\"/map&quot; 2x\">"
+    assert ui.responsive_image("/map", "", "", "100vw").html == ui.image("/map", "").html
+
 test renders_image_attributes:
     map_image = ui.image("/map?day=1&trail=\"east\"", "Bridge <closed> & \"East\"")
     assert map_image.html == "<img src=\"/map?day=1&amp;trail=&quot;east&quot;\" alt=\"Bridge &lt;closed&gt; &amp; &quot;East&quot;\">"
@@ -249,7 +266,7 @@ test agent_query_uses_the_same_form:
     };
     let good = run("test");
     assert!(
-        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("40 passed"),
+        good.status.success() && String::from_utf8_lossy(&good.stdout).contains("42 passed"),
         "{good:?}"
     );
     let slot_call = r#"packing_list(ui.h2("Weekend"), items)"#;

@@ -9,12 +9,14 @@
 //! refuses tools declared for the retired `decode_<Type>_from_json`
 //! convention, which these methods replace.
 
+use super::types::imported_struct_type;
 use super::Checker;
 use crate::builtin_methods::{type_method, BuiltinMethodSig};
 use crate::errors::{TypeError, TypeErrorKind};
+use crate::type_receiver::{type_receiver, TypeReceiver};
 use crate::types::Type;
 use corvid_ast::{Expr, Field, Ident, Span, TypeDecl};
-use corvid_resolve::{Binding, DeclKind, DefId};
+use corvid_resolve::{DefId, ResolvedModule};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,14 +49,33 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Option<Type> {
-        let Expr::Ident { name, .. } = target else { return None };
-        let Some(Binding::Decl(def_id)) = self.bindings.get(&name.span).cloned() else {
-            return None;
+        let receiver = type_receiver(target, self.bindings, self.symbols, self.module_resolution)?;
+        // Only a type method makes the receiver a type name; otherwise
+        // ordinary dispatch reports the misuse.
+        type_method(&Type::Unknown, &method.name)?;
+        let type_name = receiver_display_name(target);
+        let target_ty = match receiver {
+            TypeReceiver::Local(def_id) => self.expand_possible_alias(def_id, target.span()),
+            TypeReceiver::Imported { module, def_id } => match imported_type_decl(module, def_id) {
+                Some(decl) if decl.alias.is_some() => {
+                    for arg in args {
+                        let _ = self.check_expr(arg);
+                    }
+                    let local = decl.name.name.clone();
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::NoJsonForm {
+                            method: method.name.clone(),
+                            ty: type_name,
+                            reason: "it is an alias declared in another module, and aliases from other modules are not expanded yet".into(),
+                            hint: format!("declare `type {local} = ...` with the same target in this module and call `{local}.{}`", method.name),
+                        },
+                        span,
+                    ));
+                    return Some(Type::Unknown);
+                }
+                _ => imported_struct_type(module, def_id, &type_name_of(module, def_id)),
+            },
         };
-        if self.symbols.get(def_id).kind != DeclKind::Type {
-            return None;
-        }
-        let target_ty = self.expand_possible_alias(def_id, name.span);
         let BuiltinMethodSig { params, ret, .. } = type_method(&target_ty, &method.name)?;
 
         if args.len() != params.len() {
@@ -86,7 +107,7 @@ impl<'a> Checker<'a> {
             self.errors.push(TypeError::new(
                 TypeErrorKind::NoJsonForm {
                     method: method.name.clone(),
-                    ty: name.name.clone(),
+                    ty: type_name,
                     reason: no_form.reason,
                     hint: no_form.hint,
                 },
@@ -163,7 +184,7 @@ impl<'a> Checker<'a> {
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
     /// reports whether any part of it is `Tainted`. `seen` stops
     /// recursion through self-referential records.
-    fn json_form(&mut self, ty: &Type, direction: Direction, seen: &mut Vec<DefId>) -> Result<bool, NoForm> {
+    fn json_form(&mut self, ty: &Type, direction: Direction, seen: &mut Vec<(String, DefId)>) -> Result<bool, NoForm> {
         match ty {
             Type::Int
             | Type::Float
@@ -201,23 +222,23 @@ impl<'a> Checker<'a> {
                 )),
             },
             Type::Struct(id) => {
-                if seen.contains(id) {
+                let key = (String::new(), *id);
+                if seen.contains(&key) {
                     return Ok(false);
                 }
-                seen.push(*id);
                 let Some(decl) = self.types_by_id.get(id).copied() else {
                     return Ok(false);
                 };
+                seen.push(key);
                 let result = self.declared_json_form(decl, direction, seen, None);
                 seen.pop();
                 result
             }
             Type::ImportedStruct(imported) => {
-                if direction == Direction::Decode {
-                    return Err(NoForm::new(
-                        format!("`{}` is declared in another module, and decoding imported types is not supported yet", imported.name),
-                        "declare the record in this module",
-                    ));
+                // Ids are per module, so the module path is part of the key.
+                let key = (imported.module_path.clone(), imported.def_id);
+                if seen.contains(&key) {
+                    return Ok(false);
                 }
                 let Some(module) = self
                     .module_resolution
@@ -225,17 +246,13 @@ impl<'a> Checker<'a> {
                 else {
                     return Ok(false);
                 };
-                let Some(decl) = module.file.decls.iter().find_map(|decl| match decl {
-                    corvid_ast::Decl::Type(t)
-                        if module.resolved.symbols.lookup_def(&t.name.name) == Some(imported.def_id) =>
-                    {
-                        Some(t)
-                    }
-                    _ => None,
-                }) else {
+                let Some(decl) = imported_type_decl(module, imported.def_id) else {
                     return Ok(false);
                 };
-                self.declared_json_form(decl, direction, seen, Some(module))
+                seen.push(key);
+                let result = self.declared_json_form(decl, direction, seen, Some(module));
+                seen.pop();
+                result
             }
             Type::Function { .. } => Err(NoForm::new("a function has no JSON form", "encode the data the function works on")),
             Type::Stream(_) => Err(NoForm::new(
@@ -272,7 +289,7 @@ impl<'a> Checker<'a> {
         &mut self,
         decl: &TypeDecl,
         direction: Direction,
-        seen: &mut Vec<DefId>,
+        seen: &mut Vec<(String, DefId)>,
         module: Option<&corvid_resolve::ResolvedModule>,
     ) -> Result<bool, NoForm> {
         let fields: Vec<&Field> = decl
@@ -303,6 +320,32 @@ impl<'a> Checker<'a> {
         Ok(tainted)
     }
 
+}
+
+/// The declaration of type `def_id` in an imported `module`.
+fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
+    module.file.decls.iter().find_map(|decl| match decl {
+        corvid_ast::Decl::Type(t) if module.resolved.symbols.lookup_def(&t.name.name) == Some(def_id) => Some(t),
+        _ => None,
+    })
+}
+
+/// The declared name of type `def_id` in an imported `module`.
+fn type_name_of(module: &ResolvedModule, def_id: DefId) -> String {
+    module.resolved.symbols.get(def_id).name.clone()
+}
+
+/// The receiver as the program wrote it, for diagnostics: `Order`,
+/// `Customer` or `m.Customer`.
+fn receiver_display_name(target: &Expr) -> String {
+    match target {
+        Expr::Ident { name, .. } => name.name.clone(),
+        Expr::FieldAccess { target, field, .. } => format!("{}.{}", receiver_display_name(target), field.name),
+        _ => "<expression>".into(),
+    }
+}
+
+impl<'a> Checker<'a> {
     /// A type name for JSON diagnostics that names records by their
     /// declaration rather than `struct`.
     fn json_type_name(&self, ty: &Type) -> String {

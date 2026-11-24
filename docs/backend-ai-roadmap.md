@@ -5,7 +5,7 @@
 1. **Built into Corvid.** The language and standard library cover what nearly every service and agent needs: typed data, HTTP, persistence, text, cryptography, money, real-time connections, model calls, tools and durable work. Built-in capabilities compose with effects, approval, provenance, replay and budgets.
 2. **Typed interoperability.** Any Python package or npm package can be called from Corvid with checked types, on every production target, so the long tail of the Python and TypeScript ecosystems (machine learning, data science, vendor SDKs) is available on day one.
 
-The defining capability stays at the center: a person and an AI agent use the same application through the same typed actions. Backend and AI grammar is owned here. Browser views and client behavior follow the [browser frontend queue](frontend-roadmap.md#ordered-tasks).
+The defining capability stays at the center: a person and an AI agent use the same application through the same typed actions. The organizing principle, from the [platform plan](proposals/corvid-platform-plan.md), is that the application and the AI can always see each other, within what the author declares. Backend and AI grammar is owned here. Browser views and client behavior follow the [browser frontend queue](frontend-roadmap.md#ordered-tasks).
 
 ## Backend and AI implementation queue
 
@@ -17,7 +17,7 @@ First-pass audit on November 23, 2026, from the standard library, the references
 | --- | --- | --- | --- |
 | HTTP services | FastAPI, Django, Express, NestJS | Typed routes with path, query, form and JSON input, OpenAPI, uploads, server-sent events, sessions and permissions. | No WebSockets, middleware contract, GraphQL or gRPC. |
 | Identity and access | Django auth, Auth.js, Passport | OAuth providers, sessions, roles, tenants, JWT contracts and API keys. | No password hashing or local credential accounts. |
-| Data interchange | pydantic, zod, json, csv, PyYAML | `std:json` parses and reads fields one at a time. `T.from_json(text)` decodes into a declared type with errors that name the field, and `value.to_json()` encodes, through the same mapping as HTTP routes and OpenAPI. | Field renaming, decoding imported types and the native target are not done yet. No YAML, TOML, XML or CSV. [JSON module](../std/json.cor) |
+| Data interchange | pydantic, zod, json, csv, PyYAML | `std:json` parses and reads fields one at a time. `T.from_json(text)` decodes into a declared type with errors that name the field, and `value.to_json()` encodes, through the same mapping as HTTP routes and OpenAPI. | Field renaming and the native target are not done yet. No YAML, TOML, XML or CSV. [JSON module](../std/json.cor) |
 | Outbound HTTP | requests, httpx, fetch, axios | `http_get` and `http_post_json` with retry and timeout envelopes. | No PUT, PATCH or DELETE, custom headers, auth schemes, streaming bodies or multipart. [HTTP module](../std/http.cor) |
 | Persistence | SQLAlchemy, Django ORM, Prisma, Drizzle | SQLite and Postgres through parameterized SQL, migrations, transactions and audit records. | Queries are strings and rows are read with `json_get_*`, so schema changes are not compile errors. No MySQL, Redis or typed query results. [Database module](../std/db.cor) |
 | Text and encoding | re, base64, uuid, urllib | String methods with Unicode semantics. | No regular expressions, base64, hex, URL encoding or UUID generation. |
@@ -58,6 +58,31 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 | B18 | GraphQL and gRPC | B01, B05 | Serve and call a GraphQL schema and a gRPC service from typed Corvid declarations. Schema changes report affected callers. |
 | B19 | Performance under concurrent work | B09 | Measure action-to-visible-result latency and sustained writes with concurrent agents. Clear the recorded backlog at 160 saves/s without losing a confirmed edit, and compare equivalent FastAPI and Express services on the same workloads. [Sustained editing baseline](guides/performance.md#sustained-editing-and-backlog) |
 | B20 | Parity acceptance | B07, B08, B11, B13, B16, B17 | Port a representative FastAPI service, a LangGraph agent and an Express with Vercel AI SDK service to Corvid. Each port passes the original's tests, and each remaining Python or npm dependency runs through typed interoperability. Record lines of code, change time and failure diagnostics against the originals. |
+| B21 | First run without an API key | none | `corvid new` model calls run from recorded responses offline, with a one-line switch to a live model; `corvid model pull` adds an optional local model. A clean machine reaches a running AI step with no account. |
+| B22 | Compiler questions for coding AIs | none | Over MCP, a coding assistant asks who calls an action, what an input change affects across UI, backend and agents, a route's effects and costs, and what a recorded run did, answered by the same checker and contract the build uses. |
+| B23 | First-hour friction audit | none | Install, create, run and reach the AI step on clean Windows, macOS and Linux machines; file each stumble as a task. Repeat after B21 and B24. |
+| B24 | Flagship task-board demo | B10, B11, frontend F-P1 | A person drags a card, an assistant moves another through the same typed action and permission, and changing the action's input lists affected UI, backend and agent code. Ships as `corvid new board` and runs with B21. |
+| B25 | Screen state for assistants | B10, frontend F-P2 | An assistant receives the typed, declared state of the person's current screen and acts on it. |
+| B26 | Outside agent access | B11 | A deployed app offers declared actions to outside assistants over MCP; omitting the exposure declaration is a compile error. |
+| B27 | Visible agent activity | B11, frontend F-P3 | Each action records person or agent, reason, provenance, cost and reversibility; reversible actions offer undo without custom code. |
+| B28 | One timeline with rewind | main-queue A10, frontend F-P4 | One trace across UI, backend, agent and model steps; rewind to a step, change a prompt or code, continue from recorded earlier steps. |
+| B29 | Live shared state with declared scope | B14, frontend F08 | Shared state declares scope and read/write permission, changes go through typed actions, and omitting the scope is a compile error. |
+| B30 | Only the fields that are used | B09, B10 | The compiler narrows payloads, and queries Corvid issues, to the fields a page or agent uses; reductions are measured and published. |
+| B31 | Checked generation | B12 | `with repair` covers model-generated SQL and code, run in a sandbox and checked against the app's types and rules. |
+| B32 | Production traces on a laptop | main-queue A10 | A production failure exports as a redacted trace that replays locally with external writes disabled. |
+| B33 | Personal data as a checked type | none | Personal data cannot reach logs, traces or a model except through a declared redaction step, checked at compile time. |
+| B34 | Tensors with checked shapes | B02, B07 | Shapes, including symbolic dimensions, are checked at compile time; tensors run through typed PyTorch interoperability. |
+| B35 | Automatic differentiation | B34 | `grad` over tensor functions, verified against numerical gradients. |
+| B36 | MLIR code generation | B34 | Tensor code compiles through MLIR for CPU, then CUDA, Metal and ROCm, matching the interoperability results. |
+| B37 | Declared placement of model work | B36, B11 | The program declares where inference may run and the fallback order; the runtime never picks an undeclared placement. |
+| B38 | Structured concurrency at scale | none | Lightweight tasks with structured cancellation serve 100,000 concurrent connections in a published benchmark against equivalent Go and Node.js services. |
+| B39 | Ownership-based memory on every target | none | The native backend's ownership analysis applies on every target, with published reference-count and pause measurements. |
+| B40 | Type inference design | none | A design discussion settles the inference scheme by what it infers and the clarity of its errors. |
+| B41 | C and C++ headers | B02 | Import a C header with checked types into native builds; C++ follows. |
+| B42 | Converting an existing application | B20 | `corvid absorb` converts a FastAPI or Next.js app with assistant help, reported complete only when the original's tests pass. |
+| B43 | One-command deployment | none | `corvid ship` deploys to an existing provider, asks who may reach the app, and never publishes without confirmation. |
+
+**Order of work, amended 2026-11-23.** B21 to B43 come from the [platform plan](proposals/corvid-platform-plan.md), which gives the reasons and the frontend proposals they pair with. Work proceeds: the rest of B01 that does not wait on frontend agreement, with the B23 audit; B21; B22; B09, B10 and B11, moved ahead of B02 to B08 because the flagship demo and the plan's second track depend on them; B24; then the remaining tasks by dependency.
 
 ### Task progress
 
@@ -65,7 +90,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 - [x] One public JSON mapping for HTTP. Route bodies, JSON replies, stream chunks and approval results follow the published schema, and invalid bodies return a 400 naming `path`, `expected` and `found`. Single-file services publish schemas for their private route types, nullable fields use the OpenAPI 3.1 form, and the TypeScript client matches the wire shape. The live-contract tests send every accepted shape and validate each reply against the served schema. [JSON bodies and replies](guides/backend.md#json-bodies-and-replies)
 - [x] `T.from_json(text)`, `T.from_json_strict(text)` and `value.to_json()` through the same mapping, returning a `JsonError` record with `path`, `expected`, `found` and `message`. Aliases name list and map targets. The checker refuses types without a JSON form, `from_json` refuses `Grounded` data, and `to_json` on `Tainted` data stays tainted. [Typed decoding and encoding](reference/stdlib/json.md#typed-decoding-and-encoding)
-- [ ] Decode types imported from another module with `from_json`.
+- [x] Decode public types from another module, written `Customer.from_json` after `use Customer` or `m.Customer.from_json` after `as m`. The checker and the IR lowerer share one function that decides which type a receiver names.
+- [ ] Expand type aliases declared in another module in every type position: checker, IR lowerer and ABI emitter. Today `m.Customers` for `type Customers = List<Customer>` is treated as a record, so `from_json` refuses it and suggests a local alias.
 - [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first. [Proposal](proposals/b01-json-field-keys.md)
 - [x] Retire the `decode_<Type>_from_json` tool convention in favour of `T.from_json`. Declaring such a tool is a compile error naming the replacement, and the book, tour and reference now use `from_json`. [Retired convention](reference/stdlib/json.md#retired-the-decode_type_from_json-tool-convention)
 - [ ] Native target support.
@@ -81,3 +107,4 @@ Backend and AI semantics are owned here. Changes to shared types, actions or par
 - **B08 with F09.** One package resolution, lock format and type import path for npm packages on the server and in the browser.
 - **B14 with F08.** One typed message and subscription contract for real-time updates.
 - **B01 with all client data.** Browser code decodes the same records with the same errors.
+- **B24, B25, B27 and B28 with the platform plan's proposals F-P1 to F-P4.** The flagship demo, screen state for assistants, agent activity and the timeline inspector each need both halves. [Platform plan](proposals/corvid-platform-plan.md#proposals-for-frontend-development)

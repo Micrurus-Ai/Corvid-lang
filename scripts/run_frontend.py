@@ -87,7 +87,7 @@ def worker(tree, state, task, title, check, previous):
     revision = git(tree, "rev-parse", "HEAD")
     receipt = state / f"verification-{revision}.txt"
     host_result = receipt.read_text(encoding="utf-8") if receipt.is_file() else "None."
-    prompt = f"""Implement one tested increment of {task}, {title}, from {ROADMAP}.
+    prompt = f"""Implement the remaining acceptance criteria for {task}, {title}, from {ROADMAP}.
 Acceptance for the whole task: {check}
 Inspect the repository and relevant examples before editing. Work only on frontend
 capabilities. Coordinate shared compiler changes by keeping them frontend-specific.
@@ -100,6 +100,10 @@ files and commands/results. Return complete only if all acceptance criteria
 pass on this revision. Return continue for a tested increment with work left.
 Return blocked or awaiting_feedback for a concrete dependency. Never invent
 browser, device, assistant, accessibility, performance, or human feedback results.
+Group related changes and browser assertions into one pass when feasible.
+For Edge checks, add or reuse scripts/verify_<name>.py with --cli and --channel.
+If Playwright is denied, finish independent implementation and local checks before
+reporting the pending scripts together. The supervisor runs them on hosted Windows.
 First identify the remaining acceptance criteria. If the implementation already
 covers them and only an external check remains, do not add optional features.
 Use a matching host result for the checks it actually ran. If verification is
@@ -165,49 +169,57 @@ def finish(tree, branch):
 
 
 def verify_blocked_browser(tree, state, task, report):
-    suites = [name for name in ("trail_conditions", "trail_guide", "browser_stream")
-              if f"verify_{name}.py" in report["verification"]]
-    if not suites:
-        return False
     revision = git(tree, "rev-parse", "HEAD")
     receipt = state / f"verification-{revision}.txt"
     previous = receipt.read_text(encoding="utf-8") if receipt.exists() else ""
-    results = []
-    for suite in suites:
-        title = f"Browser check for {suite} at {revision}"
-        if title in previous:
+    suites = []
+    for name in sorted(set(re.findall(r"\bscripts[/\\]verify_([a-z][a-z0-9_]*)\.py\b", report["verification"]))):
+        title = f"Browser check for {name} at {revision}"
+        path = tree / "scripts" / f"verify_{name}.py"
+        if title in previous or not path.is_file():
             continue
-        workflow = "frontend-browser-check.yml"
-        def gh(*args):
-            return subprocess.check_output(["gh", *args], cwd=tree, text=True).strip()
+        source = path.read_text(encoding="utf-8")
+        if name == "browser_stream" or all(flag in source for flag in ('"--cli"', '"--channel"')):
+            suites.append(name)
+    if not suites:
+        return False
+    suite = ",".join(suites)
+    title = f"Browser check for {suite} at {revision}"
+    workflow = "frontend-browser-check.yml"
+    def gh(*args):
+        return subprocess.check_output(["gh", *args], cwd=tree, text=True).strip()
 
-        def find_run():
-            runs = json.loads(gh("run", "list", "--workflow", workflow, "--branch", "main",
-                                 "--limit", "100", "--json", "displayTitle,databaseId"))
-            return next((r["databaseId"] for r in runs if r["displayTitle"] == title), None)
+    def find_run():
+        runs = json.loads(gh("run", "list", "--workflow", workflow, "--branch", "main",
+                             "--limit", "100", "--json", "displayTitle,databaseId"))
+        return next((r["databaseId"] for r in runs if r["displayTitle"] == title), None)
 
-        run = find_run()
-        if run is None:
-            gh("workflow", "run", workflow, "--ref", "main",
-               "-f", f"revision={revision}", "-f", f"suite={suite}")
-            for _ in range(12):
-                time.sleep(5)
-                run = find_run()
-                if run is not None:
-                    break
-        if run is None:
-            raise RuntimeError(f"GitHub has not listed the dispatched run: {title}")
-        write(state / "current.json", {"task": task, "head": revision,
-                                       "status": "waiting for browser check", "run": run})
-        while True:
-            result = json.loads(gh("run", "view", str(run), "--json", "status,conclusion,url"))
-            if result["status"] == "completed":
+    run = find_run()
+    if run is None:
+        gh("workflow", "run", workflow, "--ref", "main",
+           "-f", f"revision={revision}", "-f", f"suite={suite}")
+        for _ in range(12):
+            time.sleep(5)
+            run = find_run()
+            if run is not None:
                 break
-            time.sleep(30)
-        results.append(f"{title}: {result['conclusion']}. {result['url']}")
-    if results:
-        receipt.write_text("\n".join(filter(None, [previous, *results])) + "\n", encoding="utf-8")
-    return bool(results)
+    if run is None:
+        raise RuntimeError(f"GitHub has not listed the dispatched run: {title}")
+    write(state / "current.json", {"task": task, "head": revision,
+                                   "status": "waiting for browser check", "run": run})
+    while True:
+        result = json.loads(gh("run", "view", str(run), "--json", "status,conclusion,url"))
+        if result["status"] == "completed":
+            break
+        time.sleep(30)
+    # A failed batch may have stopped before later suites executed.
+    summary = f"{title}: {result['conclusion']}. {result['url']}"
+    if result["conclusion"] == "success":
+        summary = "\n".join(f"Browser check for {name} at {revision}: success. {result['url']}" for name in suites)
+    elif summary in previous:
+        return False
+    receipt.write_text("\n".join(filter(None, [previous, summary])) + "\n", encoding="utf-8")
+    return True
 
 
 def run_task(tree, state, task, title, check):

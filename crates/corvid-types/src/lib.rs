@@ -16,6 +16,7 @@ pub mod effects;
 pub mod errors;
 pub mod law_check;
 pub mod repl;
+pub mod type_receiver;
 pub mod types;
 
 pub use checker::{
@@ -43,6 +44,7 @@ pub use law_check::{
 };
 pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_NAME};
 pub use builtin_methods::{builtin_method, json_error_fields, type_method, BuiltinMethodKind, BuiltinMethodSig};
+pub use type_receiver::{type_receiver, TypeReceiver};
 pub use types::Type;
 
 #[cfg(test)]

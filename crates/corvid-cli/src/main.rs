@@ -37,6 +37,7 @@ mod auth_cmd;
 mod bench_cmd;
 mod beta_cmd;
 mod bind_cmd;
+mod web_assets;
 mod build_cmd;
 mod bundle_cmd;
 mod capsule_cmd;

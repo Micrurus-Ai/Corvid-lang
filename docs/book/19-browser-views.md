@@ -171,7 +171,40 @@ Use `ui.image("/images/trail-map.png", "The trail forks left at the bridge")` to
 
 When you know the image size, pass its width and height in CSS pixels. The trail guide uses `ui.image_with_dimensions(marker_url, "Green circle trail marker", 24, 24)` so the browser can reserve space before the marker loads.
 
+If your layout displays a map at the viewport width up to 640 CSS pixels, pass that expected width in `sizes`. The browser can use it to choose between the image files listed in `srcset`. The `320w` and `640w` descriptors give the files’ actual pixel widths.
+
+```corvid-fragment
+fn trail_map() -> View:
+    candidates = "/images/map-320.png 320w, /images/map-640.png 640w"
+    return ui.responsive_image("/images/map-320.png", "Trail forks left at the bridge", candidates, "(max-width: 640px) 100vw, 640px")
+```
+
 To show a visible caption below an image, use `ui.figure("Follow this marker to the lookout.", [marker])`, where `marker` is the image view. The image's alternative text describes the marker. The caption tells readers where it leads.
+
+### Draw a scalable SVG graphic
+
+This direction marker uses a 12-by-4 coordinate system. The shaft and arrowhead share those coordinates. Translating the arrowhead eight units to the right places it at the end of the shaft.
+
+```corvid-fragment
+fn direction_marker() -> ui.View:
+    shaft = ui.svg_path("M0 1 H8 V3 H0 Z", "")
+    arrowhead = ui.svg_path("M0 0 L4 2 L0 4 Z", "translate(8 0)")
+    return ui.svg_graphic("Trail continues east", "0 0 12 4", [shaft, arrowhead])
+```
+
+`ui.svg_graphic` renders an inline image at the width of its container. Give the whole graphic a name that conveys its meaning. The four numbers in the view box specify its left edge, top edge, width and height. Use `ui.svg_path` for each shape in paint order. Pass an empty transform to use the original coordinates.
+
+The [trail junction example](../../examples/trail_junction/src/main.cor) turns two arrows into a route diagram. Each arrow sits inside a native link and its SVG label names the destination. Both arrows use the same two paths. Rotating the west arrow 180 degrees around the center of its view box points it toward the bridge. The links share the available width as the diagram scales.
+
+Run `corvid serve examples/trail_junction/src/main.cor` and open the displayed address. Click an arrow, or Tab to it and press Enter. The link selects the matching trail heading and the stylesheet underlines it.
+
+### Package a trail map and animate the selected destination
+
+Place the map images and font in the project's top-level `assets/` directory alongside `src/`. The trail junction passes two local PNG URLs and their pixel widths to `ui.responsive_image`. Its `sizes` accounts for the page margins and the 640-pixel map width limit. The heading uses the local Barlow Condensed font through an authored CSS `@font-face` rule. Keep the font license alongside the font.
+
+Selecting a destination moves its heading half a rem. The stylesheet enables the transform transition inside `@media (prefers-reduced-motion: no-preference)`. Selecting another destination during the movement cancels the original CSS transition. With reduced motion, the selected heading takes its final position immediately.
+
+Run `corvid build examples/trail_junction/src/main.cor --target web` to package the sources and local assets in the example's `target/web.tar`. Extract it into an empty directory and run `corvid serve src/main.cor` there. The [Edge check](../../scripts/verify_trail_junction.py) exercises the extracted package at two viewport widths and with both motion preferences.
 
 ### Attach application data to a group
 

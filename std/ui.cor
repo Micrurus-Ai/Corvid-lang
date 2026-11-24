@@ -108,6 +108,16 @@ public fn section(heading_id: String, title: String, content: List<View>) -> Vie
 public fn image(src: String, alt: String) -> View:
     return image_element(src, alt, "")
 
+public fn svg_graphic(label: String, view_box: String, content: List<View>) -> View:
+    attributes = " role=\"img\" aria-label=\"" + escaped(label) + "\""
+    return View("<svg" + attributes + " viewBox=\"" + escaped(view_box) + "\" width=\"100%\">" + children(content) + "</svg>")
+
+public fn svg_path(path_data: String, transform: String) -> View:
+    attributes = " d=\"" + escaped(path_data) + "\""
+    if transform != "":
+        attributes = attributes + " transform=\"" + escaped(transform) + "\""
+    return View("<path" + attributes + "></path>")
+
 public fn image_with_dimensions(src: String, alt: String, width: Int, height: Int) -> View:
     dimensions = ""
     if width >= 0:
@@ -116,8 +126,16 @@ public fn image_with_dimensions(src: String, alt: String, width: Int, height: In
         dimensions = dimensions + " height=\"" + height.to_string() + "\""
     return image_element(src, alt, dimensions)
 
-fn image_element(src: String, alt: String, dimensions: String) -> View:
-    return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\"" + dimensions + ">")
+public fn responsive_image(src: String, alt: String, srcset: String, sizes: String) -> View:
+    if srcset == "":
+        return image(src, alt)
+    attributes = " srcset=\"" + escaped(srcset) + "\""
+    if sizes != "":
+        attributes = attributes + " sizes=\"" + escaped(sizes) + "\""
+    return image_element(src, alt, attributes)
+
+fn image_element(src: String, alt: String, attributes: String) -> View:
+    return View("<img src=\"" + escaped(src) + "\" alt=\"" + escaped(alt) + "\"" + attributes + ">")
 
 public fn figure(caption: String, content: List<View>) -> View:
     return View("<figure>" + children(content) + "<figcaption>" + escaped(caption) + "</figcaption></figure>")

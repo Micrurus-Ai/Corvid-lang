@@ -409,6 +409,17 @@ pub(crate) fn cmd_serve(
         }))
         .route("/openapi.json", on(MethodFilter::GET, serve_openapi));
 
+    if let Some(root) = file.parent().filter(|p| p.ends_with("src")).and_then(|src| src.parent()) {
+        for (name, mime) in crate::web_assets::list(root)? {
+            let route = format!("/assets/{name}");
+            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+                anyhow::bail!("GET {route} is already declared and cannot serve a public asset");
+            }
+            let bytes = Bytes::from(std::fs::read(root.join("assets").join(name))?);
+            app = app.route(&route, browser_asset(bytes, mime, false));
+        }
+    }
+
     // Read the packaged browser assets once so running requests see a consistent build.
     let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
     if has_events {

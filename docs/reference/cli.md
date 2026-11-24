@@ -98,6 +98,12 @@ corvid migrate up [--dry-run]
 corvid migrate down [--dry-run]
 ```
 
+## Web package assets
+
+For a web project with entry point `src/main.cor`, `corvid build src/main.cor --target web` includes the files from the project root's optional `assets/` directory in `target/web.tar`. Running `corvid serve src/main.cor` in the project or extracted archive serves each at `/assets/<filename>` with its media type. These files are public. A declared GET route at the same URL causes a startup error.
+
+Use regular files directly inside `assets/` with lowercase extensions `.png`, `.jpg`, `.jpeg`, `.webp`, `.ttf`, `.woff`, `.woff2`, or `.txt` (for accompanying licenses). Names may contain ASCII letters, digits, hyphens, underscores and dots and must start with a character other than a dot. Linked directories, linked files and subdirectories are rejected.
+
 ## Package management (Phase 25)
 
 ```sh
