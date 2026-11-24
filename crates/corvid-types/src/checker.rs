@@ -389,9 +389,9 @@ struct Checker<'a> {
     /// receiver of a `round_<mode>` call, the one place such a division
     /// is accepted. See `checker/decimal.rs`.
     rounded_division: Option<Span>,
-    /// B06 — set while checking a tool or prompt signature, where
-    /// durations and instants cross as their standard text.
-    time_text_boundary: bool,
+    /// B06 — set while checking a table's columns, where the B06 types
+    /// have no storage mapping until B09 adds one.
+    refuse_b06_columns: bool,
     /// Every root-file type reference resolved so far, by span. See
     /// [`Checked::type_refs`].
     type_refs: HashMap<Span, Type>,
@@ -736,7 +736,7 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             rounded_division: None,
-            time_text_boundary: false,
+            refuse_b06_columns: false,
             type_refs: HashMap::new(),
             tools_by_id: tools,
             file,

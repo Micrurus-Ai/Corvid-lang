@@ -7,6 +7,7 @@ mod decimal;
 mod time;
 mod time_zones;
 mod currency;
+mod b06_json_forms;
 mod text_methods;
 
 fn check(src: &str) -> Checked {

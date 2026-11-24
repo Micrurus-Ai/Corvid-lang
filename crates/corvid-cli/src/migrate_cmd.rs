@@ -47,11 +47,40 @@ pub(crate) fn cmd_migrate(
         .transpose()?;
     let (mut migration_state, _pending_export) = read_history(tx.as_deref(), state)?;
 
-    let drift = detect_migration_drift(&migrations, &migration_state);
+    let Some(pending_count) =
+        report_migrations(action, dir, state, &database.display().to_string(), dry_run, &migrations, &migration_state)
+    else {
+        return Ok(1);
+    };
+    if action == "up" && !dry_run {
+        let tx = tx.expect("writing opens the database");
+        apply_pending_sql_migrations(&tx, &migrations, &mut migration_state)?;
+        commit_history(tx, &migration_state, "up")?;
+        export_history(connection.as_mut().unwrap(), state)?;
+        println!("state_updated: true");
+    } else {
+        println!("state_updated: false");
+    }
+    print_mutation_intent(action, dry_run, pending_count);
+    Ok(0)
+}
+
+/// Print the status every `migrate status` and `migrate up` reports, for
+/// any engine. `None` when drift stops the command (already reported).
+pub(crate) fn report_migrations(
+    action: &str,
+    dir: &Path,
+    state: &Path,
+    database: &str,
+    dry_run: bool,
+    migrations: &[MigrationFile],
+    migration_state: &MigrationState,
+) -> Option<usize> {
+    let drift = detect_migration_drift(migrations, migration_state);
     println!("corvid migrate {action}");
     println!("migrations: {}", dir.display());
     println!("state: {}", state.display());
-    println!("database: {}", database.display());
+    println!("database: {database}");
     println!("dry_run: {dry_run}");
     let applied_count = migrations
         .iter()
@@ -70,7 +99,7 @@ pub(crate) fn cmd_migrate(
         println!("migrations_found: 0");
     } else {
         println!("migrations_found: {}", migrations.len());
-        for migration in &migrations {
+        for migration in migrations {
             let applied = migration_state.migrations.iter().any(|applied| {
                 applied.name == migration.name && applied.sha256 == migration.sha256
             });
@@ -88,17 +117,12 @@ pub(crate) fn cmd_migrate(
     if !drift.is_empty() {
         println!("drift_found: {}", drift.len());
         println!("state_updated: false");
-        return Ok(1);
+        return None;
     }
-    if action == "up" && !dry_run {
-        let tx = tx.expect("writing opens the database");
-        apply_pending_sql_migrations(&tx, &migrations, &mut migration_state)?;
-        commit_history(tx, &migration_state, "up")?;
-        export_history(connection.as_mut().unwrap(), state)?;
-        println!("state_updated: true");
-    } else {
-        println!("state_updated: false");
-    }
+    Some(pending_count)
+}
+
+pub(crate) fn print_mutation_intent(action: &str, dry_run: bool, pending_count: usize) {
     println!(
         "mutation_intent: {}",
         if action == "up" && !dry_run && pending_count > 0 {
@@ -109,7 +133,6 @@ pub(crate) fn cmd_migrate(
             "none"
         }
     );
-    Ok(0)
 }
 
 pub(crate) fn cmd_migrate_down(
@@ -196,9 +219,9 @@ pub(crate) struct MigrationFile {
     pub(crate) path: PathBuf,
 }
 
-struct MigrationDrift {
-    kind: &'static str,
-    message: String,
+pub(crate) struct MigrationDrift {
+    pub(crate) kind: &'static str,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -241,7 +264,7 @@ pub(crate) fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
     Ok(files)
 }
 
-fn detect_migration_drift(
+pub(crate) fn detect_migration_drift(
     migrations: &[MigrationFile],
     state: &MigrationState,
 ) -> Vec<MigrationDrift> {
@@ -346,6 +369,6 @@ pub(crate) fn now_unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-fn rollback_migration_path(down_dir: &Path, applied_name: &str) -> PathBuf {
+pub(crate) fn rollback_migration_path(down_dir: &Path, applied_name: &str) -> PathBuf {
     down_dir.join(format!("{applied_name}.down.sql"))
 }

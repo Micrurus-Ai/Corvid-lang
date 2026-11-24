@@ -629,6 +629,7 @@ dependencies = [
  "corvid-guarantees",
  "corvid-ir",
  "corvid-prompt-format",
+ "corvid-public-json",
  "corvid-resolve",
  "corvid-syntax",
  "corvid-test-paths",
@@ -746,6 +747,7 @@ dependencies = [
  "hmac 0.12.1",
  "libloading",
  "multer",
+ "postgres",
  "rand_core 0.6.4",
  "rayon",
  "reqwest",
@@ -984,6 +986,7 @@ version = "0.0.1"
 dependencies = [
  "corvid-ast",
  "corvid-ir",
+ "corvid-public-json",
  "corvid-resolve",
  "corvid-types",
  "serde_json",
@@ -994,8 +997,11 @@ name = "corvid-public-json"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-currency",
+ "corvid-decimal",
  "corvid-ir",
  "corvid-resolve",
+ "corvid-time",
  "corvid-types",
  "serde_json",
 ]

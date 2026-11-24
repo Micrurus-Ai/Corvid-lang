@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Decimals, times, zones, currencies and locales cross JSON as their exact text: a route returning an `Invoice` with `total: Decimal` sends `"19.90"`, and OpenAPI, the TypeScript client and the SDKs all treat it as a string. Send decimals to a Corvid route as strings; a JSON number is refused so no digit is lost. Table columns of these types are not available yet. [JSON mapping](docs/reference/stdlib/json.md)
+
 Format money with `total.format_currency("EUR", "de-DE")`: the currency and locale are checked against CLDR when the program compiles, and there is no default locale. Formatting never rounds, so round first with `total.round_half_even(euro.minor_digits())`; an amount with too many digits traps. Codes and tags from users go through `parse_currency()` and `parse_locale()`. [Formatting money](docs/reference/decimal.md#formatting-money)
 
 A replay warns, instead of failing, when the trace was recorded with a different time zone database: the warning names each zone-dependent operation and zone whose result could differ, and traces that never use a zone replay silently. Traces record the database version from schema v3 on. [Replay](docs/internals/effect-spec/14-replay.md)
@@ -8171,7 +8173,7 @@ A query reads many rows: `Shelf.where(fn (s) -> s.owner == owner and s.note != N
 
 When a table's declaration changes, `corvid migrate plan` writes the migration that changes the stored table. Declare a rename on the field, `name: String renamed from title`, and a dropped column on its own line, `retired legacy_note`; the planner never treats a missing column as a drop, so an undeclared one is refused by name. A new field must be an `Option` (add it, fill it, then make it required), and a type changes only where every value converts exactly: to or from an `Option`, or `Int` to `Float`. Other changes are refused with the steps to take instead. [Migrations](docs/reference/tables.md#migrations)
 
-Tables also run on Postgres: write `engine: postgres`, read the connection string from the environment with `location: env("DATABASE_URL")`, and state `tls: required` or `tls: disabled`. Both are compile errors to leave out, since a connection string holds a password and an unencrypted connection is a decision. Operations, queries, conflicts and replay behave the same on both engines, so moving a program to Postgres changes only its `database` block. `corvid migrate plan` does not plan Postgres migrations yet. [Postgres](docs/reference/tables.md#postgres)
+Tables also run on Postgres: write `engine: postgres`, read the connection string from the environment with `location: env("DATABASE_URL")`, and state `tls: required` or `tls: disabled`. Both are compile errors to leave out, since a connection string holds a password and an unencrypted connection is a decision. Operations, queries, conflicts and replay behave the same on both engines, so moving a program to Postgres changes only its `database` block. To migrate a Postgres program, plan with `corvid migrate plan src/main.cor --scratch SCRATCH_DATABASE_URL` (an empty database the planner uses and leaves empty) and apply with `corvid migrate up --program src/main.cor`, which connects to the database the program declares. [Postgres](docs/reference/tables.md#postgres)
 
 ### Encoding text and parsing UUIDs
 

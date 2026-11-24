@@ -4,6 +4,28 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - JSON and contract forms for the B06 types (B06, fifth slice)
+
+All seven B06 types now cross every JSON boundary as their exact
+canonical text: `"19.90"`, `"PT1H30M"`, RFC 3339 and RFC 9557 times,
+IANA zones, ISO 4217 codes and BCP 47 tags. A new
+`corvid_public_json::text_scalar` module holds the list, the parsers,
+the text forms and the JSON Schemas, and every consumer reads it: the
+public decoder and encoder, tool and prompt values on the interpreter
+(whose per-type code from slices 2 to 4 is gone), prompt schemas,
+OpenAPI, the TypeScript client and the three SDKs. A JSON number for a
+`Decimal` is refused with the reason, in Corvid and in the generated
+Python. Routes, stores and `to_json` accept the types; native code
+still refuses them at compile time.
+
+The proposal had the SDKs use platform types. Checking each one
+showed Python's `datetime` and `timedelta` and Swift's `Date` drop
+nanoseconds, and Swift's `Decimal` drops trailing zeros, so every
+client keeps the exact text as a string, as TypeScript must anyway.
+Table columns stay refused: the main line owns their storage mapping
+because it decides query comparison, and it reuses the canonical
+encodings this slice names.
+
 ## 2026-11-24 - Currency formatting (B06, fourth slice)
 
 `amount.format_currency("EUR", "de-DE")` writes money from Unicode
@@ -145,6 +167,34 @@ Found on the way: an `Int` value in a `Float` slot is never converted
 at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
+
+## 2026-11-24 - Migrations on Postgres (B09 P4b)
+
+`corvid migrate` now plans and applies Postgres migrations. Postgres
+migrations cannot replay into in-memory SQLite, so `migrate plan
+--scratch ENV_VAR` plans against a scratch database. It refuses one that
+holds any table, so it cannot be pointed at real data by mistake, and it
+applies the migrations inside a transaction it rolls back, so the
+scratch database ends empty (a test checks both). On Postgres the planner
+alters a column in place (`ALTER COLUMN ... TYPE`, `SET NOT NULL`) rather
+than rebuilding the table as SQLite must.
+
+`migrate up | status | down --program <source>` connects to the database
+the program's `database` block declares, with its TLS policy, instead of
+taking a connection string on the command line, where it would land in
+shell history; the one declaration serves the runtime and every command.
+The history lives in the database under an advisory lock, as on SQLite
+it lives under a writer lock. SQLite's authorizer stops a migration from
+ending the runner's transaction; Postgres has none, so migration text is
+scanned first, skipping comments, quotes, dollar-quoted bodies and
+`BEGIN ATOMIC` function bodies, and a `BEGIN`, `COMMIT` or `ROLLBACK` is
+refused before anything runs.
+
+`migrate_cmd.rs` was split first, moving the SQLite history store to its
+own module, and the status report is now shared by both engines rather
+than copied. A program whose tables live in more than one database is
+refused by `corvid migrate` until each database gets its own history,
+now on the roadmap.
 
 ## 2026-11-24 - Tables on Postgres (B09 P4a)
 

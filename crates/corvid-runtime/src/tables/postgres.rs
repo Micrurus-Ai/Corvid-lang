@@ -82,13 +82,15 @@ fn statement_error(error: tokio_postgres::Error) -> RuntimeError {
 }
 
 /// TLS through rustls, verifying the server against the web roots.
+/// `corvid migrate` connects through it too, so a `tls: required`
+/// database is verified the same way by every command.
 #[derive(Clone)]
-struct VerifiedTls {
+pub struct VerifiedTls {
     config: Arc<rustls::ClientConfig>,
 }
 
 impl VerifiedTls {
-    fn new() -> Result<Self, RuntimeError> {
+    pub fn new() -> Result<Self, RuntimeError> {
         let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
         let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
             .with_safe_default_protocol_versions()
@@ -114,7 +116,7 @@ where
     }
 }
 
-struct VerifiedConnect {
+pub struct VerifiedConnect {
     config: Arc<rustls::ClientConfig>,
     name: rustls::pki_types::ServerName<'static>,
 }
@@ -135,7 +137,7 @@ where
     }
 }
 
-struct VerifiedStream<S>(tokio_rustls::client::TlsStream<S>);
+pub struct VerifiedStream<S>(tokio_rustls::client::TlsStream<S>);
 
 impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for VerifiedStream<S> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {

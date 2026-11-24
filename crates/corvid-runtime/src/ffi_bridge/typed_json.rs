@@ -222,6 +222,11 @@ impl ValueBuilder for NativeValues<'_> {
     fn json(&mut self, _json: &J) -> Slot {
         panic!("internal compiler error: a native decode plan targets `JsonValue`, which has no native form")
     }
+    /// B06 — native decode plans have no form for the text-scalar types
+    /// (`corvid_public_json::plan` refuses them), as for `JsonValue`.
+    fn text_scalar(&mut self, value: corvid_public_json::text_scalar::TextScalar) -> Slot {
+        panic!("internal compiler error: a native decode plan targets `{}`, which has no native form until B06's native slices", value.to_text())
+    }
     fn discard(&mut self, value: Slot) {
         if value.owned && value.bits != 0 {
             unsafe { corvid_release(value.bits as *const u8) };
@@ -338,5 +343,8 @@ impl corvid_public_json::ValueReader for NativeValues<'_> {
     }
     fn json(&mut self, _value: &Slot) -> Result<J, String> {
         Err("`JsonValue` has no native form".into())
+    }
+    fn text_scalar(&mut self, ty: &corvid_types::Type, _value: &Slot) -> Result<corvid_public_json::text_scalar::TextScalar, String> {
+        Err(format!("`{}` has no native form until B06's native slices", ty.display_name()))
     }
 }

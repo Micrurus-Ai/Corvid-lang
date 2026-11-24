@@ -142,39 +142,6 @@ fn conversions_and_methods_typecheck() {
 }
 
 #[test]
-fn decimal_cannot_cross_a_json_boundary_before_its_json_slice() {
-    let errors = kinds(
-        "type Quote:
-    amount: Decimal
-
-tool charge(amount: Decimal) -> String
-
-tool quote(item: String) -> Quote
-
-prompt estimate(item: String) -> Decimal:
-    \"Estimate {item}\"
-",
-    );
-    let boundaries: Vec<_> = errors
-        .iter()
-        .filter_map(|kind| match kind {
-            TypeErrorKind::PendingJsonFormAtBoundary { boundary, .. } => Some(boundary.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(boundaries, ["a tool signature", "a tool signature", "a prompt signature"], "got {errors:?}");
-}
-
-#[test]
-fn to_json_on_a_decimal_record_says_why() {
-    let errors = check("type Quote:\n    amount: Decimal\n\nagent main(q: Quote) -> String:\n    return q.to_json()\n").errors;
-    assert!(
-        errors.iter().any(|e| e.kind.hint().is_some_and(|hint| hint.contains("parse_decimal()"))),
-        "got {errors:?}"
-    );
-}
-
-#[test]
 fn decimal_is_a_type_not_a_value() {
     let errors = kinds("agent main() -> Decimal:\n    return Decimal\n");
     assert!(errors.iter().any(|kind| matches!(kind, TypeErrorKind::TypeAsValue { .. })), "got {errors:?}");

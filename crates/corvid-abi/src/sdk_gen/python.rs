@@ -73,6 +73,12 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
         out.push_str(entry);
     }
     out.push_str("}\n\n");
+    // B06 — the types whose JSON is their exact canonical text; the SDK
+    // keeps that text as a `str` (see `corvid_public_json::text_scalar`).
+    out.push_str(&format!(
+        "_TEXT_SCALARS = ({})\n\n",
+        corvid_public_json::text_scalar::NAMES.iter().map(|name| format!("{name:?}, ")).collect::<String>()
+    ));
     out.push_str(CODEC);
     out
 }
@@ -184,6 +190,7 @@ fn annotation(ty: &TypeName) -> String {
         ("Int", 0) => "int".into(),
         ("Float", 0) => "float".into(),
         ("String" | "TraceId", 0) => "str".into(),
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "str".into(),
         ("Bool", 0) => "bool".into(),
         ("Nothing", 0) => "None".into(),
         ("JsonValue", 0) => "Any".into(),
@@ -306,6 +313,10 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
         if isinstance(data, bool) or not isinstance(data, (int, float)):
             raise _fail(path, "Float", data)
         return float(data)
+    if ty in _TEXT_SCALARS:
+        if not isinstance(data, str):
+            raise _fail(path, ty, data)
+        return data
     if ty in ("String", "TraceId"):
         if not isinstance(data, str):
             raise _fail(path, "String", data)
@@ -380,7 +391,7 @@ def _encode(ty: Any, value: Any) -> Any:
         if not math.isfinite(value):
             raise WireError(f"the Float {value} has no JSON form")
         return float(value)
-    if ty in ("Int", "String", "TraceId", "Bool", "Nothing", "JsonValue"):
+    if ty in ("Int", "String", "TraceId", "Bool", "Nothing", "JsonValue") or ty in _TEXT_SCALARS:
         return value
     if ty in _RECORDS:
         _, fields = _RECORDS[ty]

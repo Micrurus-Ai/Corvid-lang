@@ -26,18 +26,17 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Int(n) => serde_json::Value::from(*n),
         Value::Float(f) => serde_json::Value::from(*f),
-        // B06 — exact text, never a JSON number, which would round.
-        // The checker refuses `Decimal` at JSON boundaries until the
-        // JSON slice; this keeps traces of decimal values exact.
-        Value::Decimal(d) => serde_json::Value::String(d.to_string()),
-        // B06 — time crosses tools, prompts and traces as its standard
-        // text, the form `corvid_time` parses back.
-        Value::Duration(d) => serde_json::Value::String(d.to_string()),
-        Value::Instant(i) => serde_json::Value::String(i.to_string()),
-        Value::TimeZone(z) => serde_json::Value::String(z.to_string()),
-        Value::ZonedTime(z) => serde_json::Value::String(z.to_string()),
-        Value::Currency(c) => serde_json::Value::String(c.to_string()),
-        Value::Locale(l) => serde_json::Value::String(l.to_string()),
+        // B06 — exact text, never a JSON number, which would round; the
+        // public mapping's one printer.
+        Value::Decimal(_)
+        | Value::Duration(_)
+        | Value::Instant(_)
+        | Value::TimeZone(_)
+        | Value::ZonedTime(_)
+        | Value::Currency(_)
+        | Value::Locale(_) => serde_json::Value::String(
+            crate::public_json::text_scalar_of_value(v).expect("matched a text scalar").to_text(),
+        ),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -192,25 +191,13 @@ pub fn json_to_value(
 ) -> Result<Value, ConvError> {
     use serde_json::Value as J;
     match (expected, json) {
-        // B06 — a tool result or a model reply carries time as text.
-        (Type::Duration, J::String(text)) => corvid_time::Duration::parse(&text)
-            .map(Value::Duration)
-            .map_err(|error| ConvError::TypeMismatch { expected: "Duration".into(), got: format!("`{text}`: {error}") }),
-        (Type::Instant, J::String(text)) => corvid_time::Instant::parse(&text)
-            .map(Value::Instant)
-            .map_err(|error| ConvError::TypeMismatch { expected: "Instant".into(), got: format!("`{text}`: {error}") }),
-        (Type::Currency, J::String(text)) => corvid_currency::Currency::parse(&text)
-            .map(Value::Currency)
-            .map_err(|error| ConvError::TypeMismatch { expected: "Currency".into(), got: error.to_string() }),
-        (Type::Locale, J::String(text)) => corvid_currency::Locale::parse(&text)
-            .map(|locale| Value::Locale(std::sync::Arc::new(locale)))
-            .map_err(|error| ConvError::TypeMismatch { expected: "Locale".into(), got: error.to_string() }),
-        (Type::TimeZone, J::String(text)) => corvid_time::TimeZone::parse(&text)
-            .map(Value::TimeZone)
-            .map_err(|error| ConvError::TypeMismatch { expected: "TimeZone".into(), got: error.to_string() }),
-        (Type::ZonedTime, J::String(text)) => corvid_time::ZonedTime::parse(&text)
-            .map(Value::ZonedTime)
-            .map_err(|error| ConvError::TypeMismatch { expected: "ZonedTime".into(), got: format!("`{text}`: {error}") }),
+        // B06 — a tool result or a model reply carries these types as
+        // their exact text, read by the public mapping's one parser.
+        (ty, J::String(text)) if corvid_public_json::text_scalar::name(ty).is_some() => {
+            corvid_public_json::text_scalar::parse(ty, &text)
+                .map(crate::public_json::value_of_text_scalar)
+                .map_err(|problem| ConvError::TypeMismatch { expected: ty.display_name(), got: format!("`{text}`: {problem}") })
+        }
         (Type::Int, J::Number(n)) => n
             .as_i64()
             .map(Value::Int)

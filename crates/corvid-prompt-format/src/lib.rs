@@ -232,22 +232,12 @@ fn schema_for_inner(
         // matched; a model has no such text to point into, so it is
         // not a prompt return type. Permissive, like `DbHandle`.
         Type::RegexMatch => json!({}),
-        // B06 — `Decimal` has no JSON form until B06's JSON slice, and
-        // the checker refuses it at prompt boundaries until then.
-        // Permissive, like `RegexMatch`.
-        Type::Decimal => json!({}),
-        // B06 — a model reads and writes time as its standard text, the
-        // form `corvid_time` parses: RFC 3339 for an instant, ISO 8601
-        // for a duration.
-        Type::Instant => json!({ "type": "string", "format": "date-time" }),
-        Type::Duration => json!({ "type": "string", "format": "duration" }),
-        Type::TimeZone => json!({ "type": "string", "description": "an IANA time zone name, such as Europe/Berlin" }),
-        Type::Currency => json!({ "type": "string", "description": "an ISO 4217 currency code, such as EUR" }),
-        Type::Locale => json!({ "type": "string", "description": "a BCP 47 locale tag, such as de-DE" }),
-        Type::ZonedTime => json!({
-            "type": "string",
-            "description": "RFC 9557 zoned time: local time, offset and IANA zone, such as 2026-03-29T03:30:00+02:00[Europe/Berlin]",
-        }),
+        // B06 — a model reads and writes these as their exact text, with
+        // the schema every public projection shares, so an amount never
+        // passes through a float on its way to or from a model.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
+            corvid_public_json::text_scalar::json_schema(ty).expect("a text-scalar type has a schema")
+        }
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so

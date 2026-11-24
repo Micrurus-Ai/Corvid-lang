@@ -34,6 +34,8 @@ pub trait ValueReader {
     /// The inner value and the provenance entries of a `Grounded` value.
     fn grounded(&mut self, grounded: &Type, value: &Self::Value) -> Result<(Self::Value, Vec<J>), String>;
     fn json(&mut self, value: &Self::Value) -> Result<J, String>;
+    /// B06 — a `Decimal`, time or currency value of type `ty`.
+    fn text_scalar(&mut self, ty: &Type, value: &Self::Value) -> Result<crate::text_scalar::TextScalar, String>;
 }
 
 /// Encode `value`, of type `ty`, as public JSON.
@@ -153,6 +155,8 @@ impl<R: ValueReader> Encoder<'_, R> {
                 json!({ "value": self.encode(&payload, inner)?, "sources": sources })
             }
             Type::JsonValue => self.reader.json(value)?,
+            // B06 — exact text, printed by the type's own crate.
+            ty if crate::text_scalar::name(ty).is_some() => J::String(self.reader.text_scalar(ty, value)?.to_text()),
             other => return Err(no_json_form(other)),
         })
     }

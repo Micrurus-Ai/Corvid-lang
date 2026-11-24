@@ -37,6 +37,9 @@ pub trait ValueBuilder {
     fn variant(&mut self, sum: &IrType, index: usize, fields: Vec<Self::Value>) -> Self::Value;
     /// A `JsonValue`: the JSON itself.
     fn json(&mut self, json: &J) -> Self::Value;
+    /// B06 — a `Decimal`, time or currency value, already parsed from
+    /// its canonical text (see [`crate::text_scalar`]).
+    fn text_scalar(&mut self, value: crate::text_scalar::TextScalar) -> Self::Value;
     /// Release a value built for a decode that then failed.
     fn discard(&mut self, value: Self::Value) {
         drop(value);
@@ -100,6 +103,16 @@ impl<B: ValueBuilder> Decoder<'_, B> {
                 J::String(s) => Ok(self.builder.string(s)),
                 other => Err(mismatch(path, "String", other)),
             },
+            // B06 — exact text, parsed by the type's own crate.
+            ty if crate::text_scalar::name(ty).is_some() => {
+                let name = crate::text_scalar::name(ty).expect("checked by the guard");
+                match json {
+                    J::String(text) => crate::text_scalar::parse(ty, text)
+                        .map(|value| self.builder.text_scalar(value))
+                        .map_err(|problem| JsonDecodeError::new(path, name, format!("`{text}`: {problem}"))),
+                    other => Err(JsonDecodeError::new(path, name, crate::text_scalar::needs_a_string(ty, other))),
+                }
+            }
             Type::Bool => match json {
                 J::Bool(b) => Ok(self.builder.bool(*b)),
                 other => Err(mismatch(path, "Bool", other)),
@@ -460,7 +473,7 @@ fn push_key(path: &mut String, key: &str) {
     }
 }
 
-fn json_kind(json: &J) -> &'static str {
+pub(crate) fn json_kind(json: &J) -> &'static str {
     match json {
         J::Null => "null",
         J::Bool(_) => "a boolean",

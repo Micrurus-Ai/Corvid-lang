@@ -32,6 +32,7 @@ pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
 pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
 use postgres::PostgresTables;
+pub use postgres::VerifiedTls;
 use recorded::{call_name, json_row, row_json, value_json};
 use schema::{create_table_named, quote};
 

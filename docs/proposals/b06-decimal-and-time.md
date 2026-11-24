@@ -125,7 +125,7 @@ Amended on 2026-11-24 under the syntax simplicity rule, before slice 3 landed.
 
 ### JSON, contracts and SDKs
 
-The five types get a JSON form through `corvid-public-json`, so HTTP routes, `T.from_json`, prompts and OpenAPI agree:
+The seven types get a JSON form through `corvid-public-json` (`text_scalar`), so HTTP routes, `T.from_json`, tools, prompts and OpenAPI agree; each is a string in the type's canonical text, the one its own crate prints and parses:
 
 | Type | JSON | OpenAPI |
 | --- | --- | --- |
@@ -134,12 +134,16 @@ The five types get a JSON form through `corvid-public-json`, so HTTP routes, `T.
 | `Instant` | An RFC 3339 string in UTC | `type: string`, `format: date-time` |
 | `TimeZone` | An IANA name | `type: string` |
 | `ZonedTime` | An RFC 9557 string | `type: string` |
+| `Currency` | An ISO 4217 code | `type: string`, `pattern: ^[A-Z]{3}$` |
+| `Locale` | A BCP 47 tag | `type: string` |
 
-Decoding a JSON number into a `Decimal` field is a `JsonError` that names the field and asks for a string. Accepting numbers exactly would need the raw number text, and a decoder that went through `f64` would reintroduce the error that `Decimal` exists to remove. The TypeScript client, and the Swift, Kotlin and Python SDKs, map each type to the platform type that preserves its value: a string for `Decimal` in TypeScript, `Decimal` in Python and Swift, `BigDecimal` in Kotlin, and the platform's instant and duration types.
+Decoding a JSON number into a `Decimal` field is a `JsonError` that names the field and asks for a string. Accepting numbers exactly would need the raw number text, and a decoder that went through `f64` would reintroduce the error that `Decimal` exists to remove. **The TypeScript client and the Swift, Kotlin and Python SDKs hold each type as a string with its exact text** (amended when slice 5 landed). The draft mapped them to platform types, but those lose data in two of the four languages: Python's `datetime` and `timedelta` and Swift's `Date` drop nanoseconds, and Swift's `Decimal` drops trailing zeros, so `19.90` would come back as `19.9`. JavaScript has neither an exact decimal nor a nanosecond time. The exact text is the one mapping every client holds without loss, it matches what OpenAPI publishes, and a client converts with its platform parser where it wants arithmetic. A JSON number sent for a `Decimal` is refused in the generated Python too.
+
+**Table columns are not part of the JSON form.** How a column is stored decides how `where` and `order_by` compare it: a decimal stored as text sorts wrong, and Postgres timestamps and intervals hold microseconds, not nanoseconds. That mapping is a B09 item owned by the main line, which reuses the canonical encodings named here (`Decimal::to_string`/`parse` or `coefficient`/`scale`, `Instant::nanoseconds_since_epoch`, `Duration::nanoseconds`, `TimeZone::name`, `ZonedTime::instant` with its zone). Until it lands, a table column of a B06 type is a compile error.
 
 ### Across the tiers
 
-Answered under the project's three-tier rule. Slice 1 ships the language and the interpreter only, so for now every answer below is still to come: a `Decimal` cannot yet leave the program. Each answer says which slice delivers it.
+Answered under the project's three-tier rule. Slice 5 delivered the JSON forms every tier reads; the browser-side bindings below still need the frontend's form work.
 
 - **What the backend knows that the frontend and AI can use.** A `Decimal` carries its exact digits and its scale, so `19.90` is two places and not a binary approximation. A `TimeZone` carries the zone's daylight-saving transitions, and a `ZonedTime` carries the instant, the zone and the offset in force. Each of these is one declaration in source, such as `price: Decimal`.
 - **What the UI gets for free.** From slice 5, the same declaration types the frontend. A `Decimal` field becomes a price input that accepts exactly the digits a `Decimal` holds and reports errors in `parse_decimal`'s words. The browser runs the `corvid-decimal` rules compiled to WebAssembly, not a JavaScript copy, so a total shown in the cart is the total the server charges. A `ZonedTime` or `Instant` field displays in the viewer's zone and handles daylight-saving changes in the browser. Currency display (slice 4) uses the one formatter with an explicit locale. A separate stack needs a decimal library on each side and a convention for sending amounts as strings, and the two drift. Here the compiler checks both sides against one type, and changing a field from `Float` to `Decimal` points at every form, route and prompt that uses it.
@@ -178,7 +182,7 @@ Recorded under the project's syntax simplicity rule.
 3. **Time zones on the interpreter.** `TimeZone`, `ZonedTime`, zone literals checked by their slot, conversion, `parse_local_time` with its errors for gaps and folds, `parse_zoned_time`, calendar arithmetic, the Berlin daylight-saving acceptance test, and the scheduler moved onto `corvid-time`.
 3b. **The tz database version in the trace header**, with replay reporting a mismatch.
 4. **Currency formatting.** `Currency`, `Locale`, `format_currency` and `minor_digits` with CLDR data.
-5. **JSON, contracts and SDKs** for all five types.
+5. **JSON, contracts and SDKs** for all seven types, as exact text; table columns are a B09 item.
 6. **Native Decimal**, with parity tests.
 7. **Native time types**, with parity tests.
 
