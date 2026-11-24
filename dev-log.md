@@ -4,6 +4,44 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Exact decimals on the interpreter (B06, first slice)
+
+`Decimal` is a new primitive type for money and other exact
+quantities. A new crate, `corvid-decimal`, holds every rule: a
+coefficient of up to 38 digits with a scale from 0 to 28, arithmetic
+computed exactly and checked back into range, and rounding in six
+named modes. The checker parses literals with it and the interpreter
+executes with it, so the two cannot disagree on a digit.
+
+The syntax was rechecked under the new simplicity rule before it
+landed, and both first-draft spellings went. Constants are plain
+literals: a number literal is a `Decimal` where its slot is declared
+`Decimal` or its operator's other side is one, so a program writes
+`price: Decimal = 19.99` and `price * 1.08`. The checker already
+passed expected types into every slot, so this was one rule for
+literals and one for operators. The lexer now keeps each float
+literal's source digits, so `2.50` keeps its scale. Division is
+written with its rounding, `(total / 3).round_half_even(2)`: a
+`Decimal` `/` is accepted only as a rounding method's receiver, and IR
+lowering fuses the pair so the quotient is rounded once. The six
+`divide_<mode>` methods of the draft are gone. The proposal records
+the alternatives (`Decimal("19.99")`, a `d` suffix, a default
+precision, a mode argument) and why each lost.
+
+Mixing `Decimal` with `Float` is a compile error whose hint names the
+conversion; `Int` mixes in operators because the conversion is exact.
+Overflow, a product past 28 places and division by a zero value trap;
+nothing rounds silently. `Decimal` has no JSON form yet, so the
+checker refuses it in tool, prompt, connector, route, store and table
+signatures until B06's JSON slice, reusing the `to_json` walk so a
+record with a `Decimal` field is caught too. `column_kind` names
+`Decimal` explicitly as JSON-stored, at the main line's request.
+
+Found on the way: an `Int` value in a `Float` slot is never converted
+at run time, so `x: Float = 3` then `x.to_string()` traps on the
+interpreter. It is on the roadmap; `Decimal` slots accept literals
+only, so they do not inherit it.
+
 ## 2026-11-24 - Migrations from declaration changes (B09 P3)
 
 `corvid migrate plan` now plans changes to stored tables, not just new

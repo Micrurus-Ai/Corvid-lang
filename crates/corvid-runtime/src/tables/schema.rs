@@ -64,6 +64,12 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         Type::Float => (ColumnKind::Real, false),
         Type::String => (ColumnKind::Text, false),
         Type::Bool => (ColumnKind::Boolean, false),
+        // B06 — a decision, not a fallthrough: `Decimal` stays JSON-stored
+        // until B06 and the main line agree its column mapping (the
+        // "Decimal, Instant, Duration and ZonedTime as B09 table columns"
+        // roadmap item, after B06's JSON slice). The checker refuses
+        // `Decimal` table columns until then.
+        Type::Decimal => (ColumnKind::Json, false),
         _ => (ColumnKind::Json, false),
     }
 }

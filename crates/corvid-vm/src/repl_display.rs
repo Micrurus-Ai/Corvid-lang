@@ -23,6 +23,7 @@ fn render_value_inner(
         Value::Closure(c) => format!("<fn/{}>", c.arity()),
         Value::Int(n) => n.to_string(),
         Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_string(),
         Value::String(s) => format!("\"{}\"", escape_display(s)),
         Value::Bool(b) => {
             if *b {

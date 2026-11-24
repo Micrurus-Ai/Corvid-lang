@@ -30,7 +30,17 @@ use corvid_ast::{Backoff, BackpressurePolicy, BinaryOp, Expr, Literal, ToolDecl,
     #[test]
     fn float_literal() {
         match parse("3.14") {
-            Expr::Literal { value: Literal::Float(f), .. } => assert!((f - 3.14).abs() < 1e-9),
+            Expr::Literal { value: Literal::Float { value: f, .. }, .. } => assert!((f - 3.14).abs() < 1e-9),
+            other => panic!("expected float, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn float_literal_keeps_its_source_digits() {
+        // B06 — a literal typed `Decimal` is read from these digits, so
+        // trailing zeros and long fractions survive the `f64`.
+        match parse("2.50") {
+            Expr::Literal { value: Literal::Float { text, .. }, .. } => assert_eq!(text, "2.50"),
             other => panic!("expected float, got {other:?}"),
         }
     }

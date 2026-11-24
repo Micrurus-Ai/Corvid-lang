@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Use `Decimal` for money. A number literal becomes an exact decimal where a decimal is meant, so `subtotal: Decimal = 0`, `line.price * line.quantity` and `subtotal * 0.0825` need no conversions, and `0.1 + 0.2` is exactly `0.3`. Division is written with its rounding, `(subtotal / 3).round_half_even(2)`. Mixing `Decimal` with `Float` is a compile error that names `to_decimal()` and `to_float()`. Decimals run on the interpreter and cannot yet cross a tool, prompt or route boundary; send `amount.to_string()` and read it back with `parse_decimal()`. [Exact decimals](docs/reference/decimal.md)
+
 Use `ui.link` for a route a keyboard user should reach with Tab. Its native anchor now explicitly participates in the page's normal tab order. The installed Notes workspace and packaged storefront passed in Chrome, Firefox and WebKit on Windows. [Browser trial](docs/book/19-browser-views.md#check-the-storefront-across-browsers-and-devices)
 
 Use `corvid check` and `corvid build src/main.cor --target web` directly in the [counter](examples/reading_counter/src/main.cor) or [book suggestion](examples/book_suggestions/src/main.cor) project. The compiler checks the state name at its use and the permitted lookup at its declaration in the ask block. The counter button runs locally. One deadline covers both prompt calls and the lookup.

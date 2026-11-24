@@ -187,7 +187,9 @@ pub enum TokKind {
     // --- literals ---
     Ident(String),
     Int(i64),
-    Float(f64),
+    /// A float literal and its exact source digits (`2.50`). The text
+    /// lets a literal used as a `Decimal` keep every digit and its scale.
+    Float { value: f64, text: String },
     StringLit(String),
 
     // --- structural (produced by indent pass) ---

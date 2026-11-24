@@ -490,6 +490,12 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::Decimal => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands; use the interpreter tier (`corvid run --tier interp`)."
+            ),
+            span,
+        )),
         Type::Upload(_) | Type::Page(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - uploads and pagination are HTTP-boundary types served by `corvid serve`, not the native command-line boundary; the application contract describes the surface. Use the interpreter/serve tier.",

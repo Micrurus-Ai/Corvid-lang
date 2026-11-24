@@ -29,6 +29,10 @@ pub enum BuiltIn {
     // Primitive types.
     Int,
     Float,
+    /// B06 — `Decimal`, the exact base-10 number type. A type name only:
+    /// values come from number literals the checker types as `Decimal`,
+    /// `parse_decimal` and the `to_decimal` conversions.
+    Decimal,
     String,
     Bool,
     Nothing,
@@ -171,6 +175,7 @@ impl SymbolTable {
     fn register_builtins(&mut self) {
         self.builtins.insert("Int".into(), BuiltIn::Int);
         self.builtins.insert("Float".into(), BuiltIn::Float);
+        self.builtins.insert("Decimal".into(), BuiltIn::Decimal);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

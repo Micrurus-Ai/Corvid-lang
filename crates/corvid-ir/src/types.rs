@@ -1275,6 +1275,8 @@ pub enum IrReplayToolArgPattern {
 pub enum IrLiteral {
     Int(i64),
     Float(f64),
+    /// B06 — an exact decimal literal (`19.99` where a `Decimal` is meant).
+    Decimal(corvid_decimal::Decimal),
     String(String),
     Bool(bool),
     Nothing,

@@ -18,7 +18,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_confidence_literal(&mut self) -> Result<f64, ParseError> {
         let span = self.peek_span();
         match self.peek().clone() {
-            TokKind::Float(value) => {
+            TokKind::Float { value, .. } => {
                 self.bump();
                 Ok(value)
             }
@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
     ) -> Result<(f64, Span), ParseError> {
         let span = self.peek_span();
         match self.peek().clone() {
-            TokKind::Float(value) => {
+            TokKind::Float { value, .. } => {
                 self.bump();
                 Ok((value, span))
             }
@@ -106,7 +106,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Dollar, "`$` before cost literal")?;
         let span = self.peek_span();
         match self.peek().clone() {
-            TokKind::Float(value) => {
+            TokKind::Float { value, .. } => {
                 self.bump();
                 Ok(value)
             }

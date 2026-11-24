@@ -804,6 +804,7 @@ impl<'a> Checker<'a> {
         match self.bindings.get(&name.span) {
             Some(Binding::BuiltIn(BuiltIn::Int)) => Type::Int,
             Some(Binding::BuiltIn(BuiltIn::Float)) => Type::Float,
+            Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,
@@ -949,8 +950,9 @@ impl<'a> Checker<'a> {
         if let Some(ty) = self.check_type_method_call(target, method_name, args, span) {
             return ty;
         }
-        // 1. Typecheck the receiver and require a struct type.
-        let recv_ty = self.check_expr(target);
+        // 1. Typecheck the receiver and require a struct type. A
+        // `Decimal` `/` is accepted here when the method rounds it (B06).
+        let recv_ty = self.check_method_receiver(target, method_name);
         if method_name.name == "split_by" {
             return self.check_stream_split_by_method(target, &recv_ty, method_name, args);
         }
@@ -1059,6 +1061,8 @@ impl<'a> Checker<'a> {
             if sig.kind.is_regex() {
                 self.check_regex_arguments(sig.kind, &method_name.name, args);
             }
+            // Exact decimals (B06): a literal `places` is 0 to 28.
+            self.check_decimal_method_arguments(sig.kind, args);
             return sig.ret;
         }
 

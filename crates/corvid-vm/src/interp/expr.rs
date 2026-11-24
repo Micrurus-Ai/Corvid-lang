@@ -10,6 +10,7 @@ pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
     match lit {
         IrLiteral::Int(n) => Value::Int(*n),
         IrLiteral::Float(f) => Value::Float(*f),
+        IrLiteral::Decimal(d) => Value::Decimal(*d),
         IrLiteral::String(s) => Value::String(Arc::from(s.as_str())),
         IrLiteral::Bool(b) => Value::Bool(*b),
         IrLiteral::Nothing => Value::Nothing,
@@ -103,6 +104,10 @@ fn eval_arithmetic(
     wrapping: bool,
 ) -> Result<Value, InterpError> {
     match (l, r) {
+        // B06 — `Int` widens to `Decimal` exactly; `@wrapping` does not
+        // apply, so decimal arithmetic is always checked.
+        (l @ Value::Decimal(_), r @ (Value::Decimal(_) | Value::Int(_)))
+        | (l @ Value::Int(_), r @ Value::Decimal(_)) => super::decimal::eval_decimal_arithmetic(op, &l, &r, span),
         (Value::Int(a), Value::Int(b)) => Ok(Value::Int(int_arith(op, a, b, span, wrapping)?)),
         (Value::Float(a), Value::Float(b)) => Ok(Value::Float(float_arith(op, a, b, span)?)),
         (Value::Int(a), Value::Float(b)) => {
@@ -200,6 +205,8 @@ fn eval_ordering(op: BinaryOp, l: Value, r: Value, span: Span) -> Result<Value, 
         }
     };
     match (l, r) {
+        (l @ Value::Decimal(_), r @ (Value::Decimal(_) | Value::Int(_)))
+        | (l @ Value::Int(_), r @ Value::Decimal(_)) => super::decimal::eval_decimal_ordering(op, &l, &r, span),
         (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(match op {
             Lt => a < b,
             LtEq => a <= b,
@@ -238,6 +245,7 @@ pub(super) fn eval_unop(
             Value::Int(n) if wrapping => Ok(Value::Int(n.wrapping_neg())),
             Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| overflow(span)),
             Value::Float(f) => Ok(Value::Float(-f)),
+            Value::Decimal(d) => Ok(Value::Decimal(d.negate())),
             other => Err(InterpError::new(
                 InterpErrorKind::TypeMismatch {
                     expected: "Int or Float".into(),
@@ -779,6 +787,7 @@ pub(super) fn eval_builtin_method(
             span,
         )),
 
+        _ if kind.is_decimal() => super::decimal::eval_decimal_method(kind, &recv, &args, span),
         _ if kind.is_text_encoder() || kind.is_text_decoder() => {
             let s = want_string(&recv, span)?;
             super::text_methods::eval_text_method(kind, &s, span)

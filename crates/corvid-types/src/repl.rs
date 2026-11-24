@@ -131,6 +131,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
     match ty {
         Type::Int => named_type("Int", span),
         Type::Float => named_type("Float", span),
+        Type::Decimal => named_type("Decimal", span),
         Type::String => named_type("String", span),
         Type::Bool => named_type("Bool", span),
         Type::Nothing => named_type("Nothing", span),

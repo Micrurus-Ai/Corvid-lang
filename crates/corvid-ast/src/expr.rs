@@ -187,7 +187,11 @@ pub enum Backoff {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Int(i64),
-    Float(f64),
+    /// A float literal. `text` is the source digits exactly as written
+    /// (`2.50`, `-19.99` in a pattern): a literal the checker gives the
+    /// type `Decimal` is read from the text, so it keeps every digit
+    /// and its scale, which the `f64` cannot.
+    Float { value: f64, text: String },
     String(String),
     Bool(bool),
     Nothing,
