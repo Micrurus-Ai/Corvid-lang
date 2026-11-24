@@ -43,6 +43,10 @@ pub enum Value {
     Duration(corvid_time::Duration),
     /// B06 — an exact point on the UTC timeline.
     Instant(corvid_time::Instant),
+    /// B06 — an IANA time zone.
+    TimeZone(corvid_time::TimeZone),
+    /// B06 — an instant seen in a time zone.
+    ZonedTime(corvid_time::ZonedTime),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -231,6 +235,8 @@ impl Clone for Value {
             Value::Decimal(d) => Value::Decimal(*d),
             Value::Duration(d) => Value::Duration(*d),
             Value::Instant(i) => Value::Instant(*i),
+            Value::TimeZone(z) => Value::TimeZone(*z),
+            Value::ZonedTime(z) => Value::ZonedTime(*z),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -274,6 +280,8 @@ impl Value {
             Value::Decimal(_) => "Decimal".into(),
             Value::Duration(_) => "Duration".into(),
             Value::Instant(_) => "Instant".into(),
+            Value::TimeZone(_) => "TimeZone".into(),
+            Value::ZonedTime(_) => "ZonedTime".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -344,6 +352,8 @@ impl PartialEq for Value {
             (Value::Decimal(a), Value::Decimal(b)) => a == b,
             (Value::Duration(a), Value::Duration(b)) => a == b,
             (Value::Instant(a), Value::Instant(b)) => a == b,
+            (Value::TimeZone(a), Value::TimeZone(b)) => a == b,
+            (Value::ZonedTime(a), Value::ZonedTime(b)) => a == b,
             (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
             (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,

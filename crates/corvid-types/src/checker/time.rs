@@ -9,6 +9,13 @@
 //! | `instant + duration`, `duration + instant`, `instant - duration` | `Instant` |
 //! | `instant - instant` | `Duration` |
 //! | comparisons between two durations or two instants | `Bool` |
+//! | `zoned + duration`, `duration + zoned`, `zoned - duration` | `ZonedTime` |
+//! | `zoned - zoned` | `Duration` |
+//! | `==` and `!=` between two zoned times or two zones | `Bool` |
+//!
+//! A string literal where a `TimeZone` is meant is a zone, checked
+//! against the bundled IANA database at compile time:
+//! `at.in_zone("Europe/Berlin")`.
 //!
 //! Everything else that involves a time type is a compile error that
 //! says what would make sense. Adding an `Int` to a duration is the
@@ -22,7 +29,7 @@ use crate::types::Type;
 use corvid_ast::{BinaryOp, Expr, Ident, Span};
 
 fn is_time(t: &Type) -> bool {
-    matches!(t, Type::Duration | Type::Instant)
+    matches!(t, Type::Duration | Type::Instant | Type::ZonedTime | Type::TimeZone)
 }
 
 fn is_comparison(op: BinaryOp) -> bool {
@@ -48,13 +55,16 @@ impl<'a> Checker<'a> {
             return None;
         }
         use BinaryOp::*;
-        use Type::{Duration, Instant, Int, Unknown};
+        use Type::{Duration, Instant, Int, TimeZone, Unknown, ZonedTime};
         let result = match (op, lt, rt) {
             (_, Unknown, _) | (_, _, Unknown) => Some(if is_comparison(op) { Type::Bool } else { Unknown }),
             (Add | Sub, Duration, Duration) => Some(Duration),
             (Mul, Duration, Int) | (Mul, Int, Duration) | (Div, Duration, Int) => Some(Duration),
             (Add, Instant, Duration) | (Add, Duration, Instant) | (Sub, Instant, Duration) => Some(Instant),
             (Sub, Instant, Instant) => Some(Duration),
+            (Add, ZonedTime, Duration) | (Add, Duration, ZonedTime) | (Sub, ZonedTime, Duration) => Some(ZonedTime),
+            (Sub, ZonedTime, ZonedTime) => Some(Duration),
+            (Eq | NotEq, ZonedTime, ZonedTime) | (Eq | NotEq, TimeZone, TimeZone) => Some(Type::Bool),
             (Eq | NotEq | Lt | LtEq | Gt | GtEq, Duration, Duration)
             | (Eq | NotEq | Lt | LtEq | Gt | GtEq, Instant, Instant) => Some(Type::Bool),
             _ => None,
@@ -69,6 +79,12 @@ impl<'a> Checker<'a> {
             (Instant, Instant) => "two instants can be subtracted, giving the `Duration` between them, but not added",
             (Duration, Duration) => "divide a duration by an `Int`, or compare two durations",
             (Instant, Int) | (Int, Instant) => "an instant moves by a `Duration`, not by a number",
+            (ZonedTime, ZonedTime) => {
+                "zoned times in different zones can be the same instant, so compare their instants: `a.instant() < b.instant()`"
+            }
+            (ZonedTime, Int) | (Int, ZonedTime) => {
+                "a zoned time moves by a `Duration`, or by calendar days with `add_days(n)`"
+            }
             _ => "durations combine with durations and `Int` factors; instants move by durations",
         };
         self.errors.push(TypeError::new(
@@ -80,6 +96,18 @@ impl<'a> Checker<'a> {
             l.span().merge(r.span()),
         ));
         Some(if is_comparison(op) { Type::Bool } else { Unknown })
+    }
+
+    /// Types a string literal that sits in a `TimeZone` slot, checking
+    /// its name against the IANA database the runtime uses.
+    pub(super) fn check_time_zone_literal(&mut self, name: &str, span: Span) -> Type {
+        if let Err(corvid_time::TimeError::UnknownZone { suggestion, .. }) = corvid_time::TimeZone::parse(name) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::UnknownTimeZone { name: name.to_string(), suggestion: suggestion.map(str::to_string) },
+                span,
+            ));
+        }
+        Type::TimeZone
     }
 
     /// `Instant.from_epoch_milliseconds(n)`: a method of a compiler-known

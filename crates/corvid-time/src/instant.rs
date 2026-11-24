@@ -74,7 +74,16 @@ impl Instant {
         )
     }
 
-    fn to_chrono(self) -> DateTime<Utc> {
+    pub(crate) fn from_chrono(at: DateTime<Utc>) -> Result<Instant, TimeError> {
+        Instant::from_nanoseconds(i128::from(at.timestamp()) * NANOS_PER_SECOND + i128::from(at.timestamp_subsec_nanos()))
+    }
+
+    /// Seen in `zone`.
+    pub fn in_zone(&self, zone: crate::zone::TimeZone) -> crate::zoned::ZonedTime {
+        crate::zoned::ZonedTime::new(*self, zone)
+    }
+
+    pub(crate) fn to_chrono(self) -> DateTime<Utc> {
         let seconds = self.nanoseconds.div_euclid(NANOS_PER_SECOND) as i64;
         let nanos = self.nanoseconds.rem_euclid(NANOS_PER_SECOND) as u32;
         DateTime::from_timestamp(seconds, nanos).expect("the instant range is inside chrono's range")

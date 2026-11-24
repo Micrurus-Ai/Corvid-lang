@@ -26,6 +26,8 @@ fn render_value_inner(
         Value::Decimal(d) => d.to_string(),
         Value::Duration(d) => d.to_string(),
         Value::Instant(i) => i.to_string(),
+        Value::TimeZone(z) => z.to_string(),
+        Value::ZonedTime(z) => z.to_string(),
         Value::String(s) => format!("\"{}\"", escape_display(s)),
         Value::Bool(b) => {
             if *b {

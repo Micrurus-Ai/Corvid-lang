@@ -37,6 +37,11 @@ pub enum BuiltIn {
     Duration,
     /// B06 — `Instant`, an exact point on the UTC timeline.
     Instant,
+    /// B06 — `TimeZone`, an IANA zone; a string literal in a `TimeZone`
+    /// slot is one, checked at compile time.
+    TimeZone,
+    /// B06 — `ZonedTime`, an instant seen in a zone.
+    ZonedTime,
     String,
     Bool,
     Nothing,
@@ -182,6 +187,8 @@ impl SymbolTable {
         self.builtins.insert("Decimal".into(), BuiltIn::Decimal);
         self.builtins.insert("Duration".into(), BuiltIn::Duration);
         self.builtins.insert("Instant".into(), BuiltIn::Instant);
+        self.builtins.insert("TimeZone".into(), BuiltIn::TimeZone);
+        self.builtins.insert("ZonedTime".into(), BuiltIn::ZonedTime);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

@@ -9,4 +9,7 @@ description = "Exact time for Corvid's Duration and Instant types: checked arith
 # RFC 3339 parsing and formatting, the same library the runtime's
 # clock and queue scheduler already use.
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+# The IANA time zone database the queue scheduler already uses, so a
+# program and a schedule agree on every daylight-saving change.
+chrono-tz = "0.10"
 serde = { workspace = true }

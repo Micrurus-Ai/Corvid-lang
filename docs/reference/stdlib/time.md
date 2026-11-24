@@ -112,10 +112,75 @@ subtracting instants or from `parse_duration`.
 Older code that keeps durations as `Int` milliseconds also keeps
 working.
 
+## Time zones
+
+`TimeZone` is an IANA zone and `ZonedTime` is an instant seen in one.
+A string literal where a `TimeZone` is meant is a zone, checked
+against the bundled IANA database when the program compiles, so a
+typo such as `"Europe/Berln"` is a compile error that suggests
+`Europe/Berlin`:
+
+```corvid
+agent opening(at: Instant) -> String:
+    local = at.in_zone("Europe/Berlin")
+    return local.hour().to_string() + ":00 in " + local.time_zone().to_string()
+```
+
+A zone name that arrives at run time, such as from a user's profile,
+goes through `text.parse_time_zone()`, which returns a `Result` whose
+`Err` suggests the closest name. A fixed offset such as `+02:00` is
+not a zone, because it has no daylight-saving rules.
+
+| Call | Result |
+| --- | --- |
+| `instant.in_zone(zone)` | the `ZonedTime`; always succeeds |
+| `zoned.year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `nanosecond()` | the local field as an `Int` |
+| `zoned.weekday()` | 1 for Monday through 7 for Sunday |
+| `zoned.offset_seconds()` | the offset from UTC in force then |
+| `zoned.time_zone()`, `zoned.instant()` | the zone and the instant |
+| `zoned.with_zone(zone)` | the same instant in another zone |
+| `zoned.add_days(n)`, `add_months(n)`, `add_years(n)` | the same local time on another calendar date |
+| `zoned + duration`, `zoned - duration` | a move along the timeline |
+| `zoned - zoned` | the `Duration` between their instants |
+| `zoned.to_string()` | RFC 9557, such as `2026-03-29T09:00:00+02:00[Europe/Berlin]` |
+| `text.parse_zoned_time()` | `Result<ZonedTime, String>` from RFC 9557 |
+| `text.parse_local_time(zone)` | `Result<ZonedTime, String>` from a wall-clock time such as `2026-03-29T09:00` |
+
+**Calendar days are not 24 hours.** In Berlin the clocks move forward
+on 29 March 2026, so:
+
+```corvid
+agent next_morning(saturday: ZonedTime) -> ZonedTime:
+    return saturday.add_days(1)
+```
+
+For `2026-03-28T09:00:00+01:00[Europe/Berlin]` this returns
+`2026-03-29T09:00:00+02:00[Europe/Berlin]`, which is 23 hours later.
+Adding a `Duration` of `PT24H` instead gives 10:00.
+
+`add_months` moves a day past the end of the month back to its last
+day, so one month after 31 January is 28 or 29 February. When a
+calendar move lands on a local time the zone skips, it moves forward
+by the length of the gap, and when it lands on one the zone shows
+twice, it takes the earlier offset. This is the rule RFC 5545
+(iCalendar) and Temporal use.
+
+**Reading a local time never guesses.** `parse_local_time` returns an
+`Err` for a time the zone skips (`2026-03-29T02:30` in Berlin) or
+shows twice (`2026-10-25T02:30`), and the message names both offsets.
+`parse_zoned_time` refuses text whose offset the zone does not use at
+that time.
+
+Zoned times compare with `==` (same instant and same zone). They have
+no `<`, because two zoned times in different zones can be the same
+instant; compare `a.instant() < b.instant()`.
+
+Zone rules come from the IANA database compiled into Corvid
+(`corvid_time::TZDB_VERSION`), the same one the queue scheduler uses,
+so a schedule and a program agree on every daylight-saving change.
+
 ## Non-scope
 
-No timezone database surface yet (UTC only; B06's next slice adds
-time zones). No calendar arithmetic (`add_months`) — epoch
-math plus `time_format_iso` covers the agent-workload cases; a
-calendar surface would ship as a separate slice with explicit
-DST/overflow semantics.
+Plain dates and times without a zone (such as birthdays), and explicit
+earlier or later resolution of skipped and repeated local times, wait
+for an example that needs them.

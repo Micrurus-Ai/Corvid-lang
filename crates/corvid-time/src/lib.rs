@@ -17,9 +17,14 @@ mod duration;
 mod duration_text;
 mod error;
 mod instant;
+mod local_text;
 mod unit;
+mod zone;
+mod zoned;
 
 pub use duration::Duration;
 pub use error::TimeError;
 pub use instant::Instant;
 pub use unit::TimeUnit;
+pub use zone::{TimeZone, TZDB_VERSION};
+pub use zoned::{ZonedField, ZonedTime};
