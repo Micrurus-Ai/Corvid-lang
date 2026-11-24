@@ -213,6 +213,14 @@ public fn modal_dialog(id: String, opener: String, title: String, content: List<
 public fn file_drop_field(label: String, name: String) -> View:
     return View("<label data-corvid-file-drop>" + escaped(label) + "<input type=\"file\" name=\"" + escaped(name) + "\" multiple></label>")
 
+public type TextCallback:
+    export_name: String
+
+# Export a field whose changes are processed by a JavaScript module.
+public fn module_field(control: View, module_path: String, reader: String, handler: TextCallback) -> View:
+    binding = " data-corvid-module-field=\"" + escaped(module_path) + "\" data-reader=\"" + escaped(reader) + "\" data-handler=\"" + escaped(handler.export_name) + "\""
+    return View("<div" + binding + "><div data-corvid-control>" + control.html + "</div><slot name=\"hint\"></slot><output></output><span role=\"alert\"></span></div>")
+
 public fn rich_text_editor(label: String, content: List<View>) -> View:
     return View("<div contenteditable=\"true\" role=\"textbox\" aria-multiline=\"true\" aria-label=\"" + escaped(label) + "\">" + children(content) + "</div>")
 

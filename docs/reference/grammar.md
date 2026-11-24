@@ -634,11 +634,14 @@ The types in `std:ui` are `Point(x: Int, y: Int)` and `Stroke(start: Point, end:
 ### Browser callbacks and lifecycle
 
 ```ebnf
-browser_callback_decl  ::= 'browser' 'callback' IDENT '(' IDENT ':' 'Int' ')' '->' 'Int' ':' INDENT block DEDENT
+browser_callback_decl  ::= 'browser' 'callback' IDENT '(' IDENT ':' callback_type ')' '->' callback_type ':' INDENT block DEDENT
+callback_type          ::= 'Int' | 'String'
 browser_lifecycle_decl ::= 'browser' 'lifecycle' IDENT '(' ')' '->' 'Nothing' uses_clause? ':' INDENT block DEDENT
 ```
 
 Two top-level declarations in `src/events.cor` create typed component bindings.
+
+The parameter and result of a browser callback must have the same type. A string callback has a pure function body. Import its name into the view and call `name()` to obtain a `ui.TextCallback` for `ui.module_field`. [Typed module fields](../book/19-browser-views.md#read-a-compressed-note-with-a-typed-javascript-package)
 
 ```text
 browser callback name(parameter: Int) -> Int:

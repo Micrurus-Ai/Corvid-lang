@@ -1,0 +1,3 @@
+# Keep the imported text as the editable form value.
+browser callback imported_text(text: String) -> String:
+    return text

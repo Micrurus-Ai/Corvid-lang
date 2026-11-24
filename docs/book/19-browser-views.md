@@ -731,6 +731,44 @@ Place `<reading-counter></reading-counter>` wherever the control belongs. Each i
 
 The exporter renders trusted component markup at build time. The generated events module provides `componentElement(html)`, which returns a custom element class and binds Corvid state controls when an instance first connects. This example covers locally managed state and keyboard actions. To run the browser trial with Python Playwright and Chrome, use `python scripts/verify_embedded_counter.py target/debug/corvid.exe`.
 
+### Read a compressed note with a typed JavaScript package
+
+Return a file importer as the root view of an exported component. The module path is relative to the generated `events.js`. Pass the JavaScript export name and a typed Corvid callback.
+
+```corvid
+import "std:ui" as ui
+import "std:ui" use View
+import "./events" use imported_text
+
+agent main() -> String:
+    picker = View("<label>Import a compressed note<input type='file'></label>")
+    field = ui.module_field(picker, "./read_note.js", "readNote", imported_text())
+    return field.html
+```
+
+Define `browser callback imported_text(text: String) -> String` in `src/events.cor`. The example returns the note verbatim. Calling `imported_text()` while building the view supplies a `ui.TextCallback` binding. In the TypeScript reader, import `CorvidFieldReader` from the generated `events.js` declarations. Its first argument is the control's string value, or for a file input, the first `File` or `null` when cleared. Its second argument calls your compiled Corvid handler. Return a string directly or return a promise for it.
+
+The note reader imports `Gunzip` and the `FlateStreamHandler` type from `fflate` 0.8.2. It awaits the file bytes, passes a `Uint8Array` to the decoder and calls the Corvid handler with the decoded UTF-8 text. A damaged archive leaves the previous note in place and shows the reader name, Corvid handler location and underlying error. [TypeScript reader](../../examples/compressed_note/read_note.ts)
+
+Register the default export from `target/wasm/index.js` as `compressed-note`. Pass a hint as light DOM and bind the element to an editable field:
+
+```corvid
+field = ui.text_area("Note", "note", "Draft")
+importer = View("<compressed-note><span slot='hint'>Choose a gzip file.</span></compressed-note>")
+return ui.interactive_page("Import a note", [modules, ui.bind_field(field, importer)])
+```
+
+The host writes the element's string `value` when someone edits the text area. A successful import emits a bubbling, composed `change` event so the host can read the new value. The host's import map resolves `fflate` to the local browser ESM file copied from the locked npm package. Corvid renders the host HTML at build time. The file, package and callback run in the browser. [Complete host](../../examples/compressed_note/src/host.cor)
+
+From the repository root, use Node.js 22 or newer, npm, Python and a built Corvid CLI to prepare and serve the standalone example:
+
+```shell
+python scripts/verify_compressed_note.py --cli target/debug/corvid.exe --build-only
+python -m http.server 8000 --bind 127.0.0.1 --directory examples/compressed_note/target/note-host
+```
+
+Open `http://127.0.0.1:8000/` and choose a gzip-compressed UTF-8 note. To run the same build and exercise the field in Edge, use `python scripts/verify_compressed_note.py --cli target/debug/corvid.exe --channel msedge` with Python Playwright installed.
+
 ## Draw pixel strokes in a worker
 
 From `examples/drawing_editor`, build the stroke module and serve the example on loopback.
