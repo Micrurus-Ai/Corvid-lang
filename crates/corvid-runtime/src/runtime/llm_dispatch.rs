@@ -109,6 +109,14 @@ impl Runtime {
                 replay.step_past_reexecuted_tool_call(name, &args);
             }
             self.dispatch_stdlib_secret_tool(name, &args)
+        } else if super::crypto_tools::is_random_token_tool(name) {
+            // A token is never recorded (its ToolResult below is
+            // `<redacted>`), so replay cannot substitute it: it steps
+            // past the recorded call, draws a fresh token and warns.
+            if let Some(replay) = self.replay_source()? {
+                replay.step_past_redrawn_token(name, &args);
+            }
+            super::crypto_tools::random_token(implementation_args)
         } else if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)
         } else if let Some((module, member, effects)) = python {
@@ -143,6 +151,8 @@ impl Runtime {
             dispatch_stdlib_random_tool(name, implementation_args)
         } else if let Some(result) = super::uuid::dispatch(name, implementation_args) {
             result
+        } else if super::crypto_tools::is_password_hash_tool(name) {
+            super::crypto_tools::hash_password(implementation_args).await
         } else if is_stdlib_rag_tool(name) {
             self.dispatch_stdlib_rag_tool(name, implementation_args).await
         } else if name == "mcp_call" {
@@ -196,6 +206,8 @@ impl Runtime {
             // the program receives the result unchanged.
             let recorded = if is_stdlib_secret_tool(name) {
                 redact_secret_result_for_trace(name, &result)
+            } else if super::crypto_tools::is_random_token_tool(name) {
+                serde_json::json!(crate::REDACTED_SECRET)
             } else if let Some(revealed) = &revealed {
                 revealed.recorded_result(&result)
             } else {
@@ -227,7 +239,7 @@ impl Runtime {
                 message: "expected one String argument (secret name)".to_string(),
             }
         })?;
-        if is_stdlib_secret_value_tool(tool) {
+        if is_secret_value_read(tool) {
             return Ok(match self.secrets.read_env(name_arg) {
                 Ok(crate::SecretRead { value: Some(value), .. }) => stdlib_result_ok(serde_json::json!(value)),
                 Ok(read) => stdlib_result_err(format!("the secret `{}` is not set in the environment", read.name)),
@@ -1899,21 +1911,16 @@ fn dispatch_stdlib_time_tool(
 }
 
 /// Slice 45m — the executing stdlib randomness tools. OS-entropy
-/// draws (rand_core/getrandom); traced + replay-substituted like
+/// draws (`corvid_crypto::fill_random`); traced + replay-substituted like
 /// every tool, so replays reproduce the recorded draws.
 fn dispatch_stdlib_random_tool(
     name: &str,
     args: &[serde_json::Value],
 ) -> Result<serde_json::Value, RuntimeError> {
     fn entropy_u64(tool: &str) -> Result<u64, RuntimeError> {
-        use rand_core::{OsRng, RngCore};
-        let mut rng = OsRng;
         let mut buf = [0u8; 8];
-        rng.try_fill_bytes(&mut buf)
-            .map_err(|e| RuntimeError::ToolFailed {
-                tool: tool.to_string(),
-                message: format!("OS entropy source failed: {e}"),
-            })?;
+        corvid_crypto::fill_random(&mut buf)
+            .map_err(|message| RuntimeError::ToolFailed { tool: tool.to_string(), message })?;
         Ok(u64::from_le_bytes(buf))
     }
     match name {
@@ -1963,14 +1970,21 @@ fn dispatch_stdlib_random_tool(
 
 /// Exact-name gate for the executing secrets surface.
 fn is_stdlib_secret_tool(name: &str) -> bool {
-    name == "secret_read" || is_stdlib_secret_value_tool(name)
+    name == "secret_read" || is_secret_value_read(name)
 }
 
-/// Exact-name gate for `secret(name) -> Result<Secret, String>`, whose
-/// result the interpreter holds as a `Secret`. The interpreter reads
-/// this gate too, so the two cannot name different tools.
-pub fn is_stdlib_secret_value_tool(name: &str) -> bool {
+/// Exact-name gate for `secret(name) -> Result<Secret, String>`, the
+/// environment read whose Ok text the interpreter holds as a `Secret`.
+fn is_secret_value_read(name: &str) -> bool {
     name == "secret"
+}
+
+/// Exact-name gate for the tools whose result the interpreter holds as a
+/// `Secret`: `secret(name) -> Result<Secret, String>` and
+/// `random_token(bytes) -> Secret`. The interpreter reads this gate
+/// too, so the two cannot name different tools.
+pub fn is_stdlib_secret_value_tool(name: &str) -> bool {
+    is_secret_value_read(name) || super::crypto_tools::is_random_token_tool(name)
 }
 
 /// Exact-name gate for the executing cache surface.
@@ -1989,7 +2003,7 @@ fn is_stdlib_cache_tool(name: &str) -> bool {
 /// through unchanged.
 fn redact_secret_result_for_trace(tool: &str, result: &serde_json::Value) -> serde_json::Value {
     let mut recorded = result.clone();
-    if is_stdlib_secret_value_tool(tool) {
+    if is_secret_value_read(tool) {
         if let Some(ok) = recorded.get_mut("ok") {
             *ok = serde_json::json!(crate::REDACTED_SECRET);
         }

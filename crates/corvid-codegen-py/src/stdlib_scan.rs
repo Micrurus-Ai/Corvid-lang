@@ -83,6 +83,9 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     // std/uuid
     "uuid_v4",
     "uuid_v7",
+    // std/crypto
+    "random_token",
+    "hash_password",
 ];
 
 /// One stdlib-executing-tool call found in the IR.

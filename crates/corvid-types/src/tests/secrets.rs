@@ -205,7 +205,8 @@ fn a_table_column_names_the_two_ways_to_keep_a_secret() {
         "table column `api_key` cannot hold a `Secret`: a stored secret could be read back and shown"
     );
     assert!(hint.contains("never store a secret's text"), "{hint}");
-    assert!(hint.contains("`hash_password(...)`"), "{hint}");
+    assert!(hint.contains("`hash_password(value, owasp_2023())` from std/crypto"), "{hint}");
+    assert!(hint.contains("`value.verify_password(hash)`"), "{hint}");
     assert!(hint.contains("encrypted column") && hint.contains("B09"), "{hint}");
 }
 

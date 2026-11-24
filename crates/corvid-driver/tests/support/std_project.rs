@@ -10,6 +10,15 @@ use std::path::Path;
 /// Compiles `source` as `src/main.cor` of a project that vendors the
 /// named `std/` files.
 pub fn compile_with_std(source: &str, std_files: &[&str]) -> corvid_ir::IrFile {
+    try_compile_with_std(source, std_files).expect("the program compiles")
+}
+
+/// Compiles `source` as [`compile_with_std`] does, returning the
+/// diagnostics of a program that does not compile.
+pub fn try_compile_with_std(
+    source: &str,
+    std_files: &[&str],
+) -> Result<corvid_ir::IrFile, Vec<corvid_driver::Diagnostic>> {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(Path::parent).expect("repo root");
     let project = tempfile::tempdir().expect("tempdir");
     let std_dir = project.path().join("src").join("std");
@@ -19,5 +28,5 @@ pub fn compile_with_std(source: &str, std_files: &[&str]) -> corvid_ir::IrFile {
     }
     let main_path = project.path().join("src").join("main.cor");
     std::fs::write(&main_path, source).unwrap();
-    compile_to_ir_with_config_at_path(source, &main_path, None).expect("the program compiles")
+    compile_to_ir_with_config_at_path(source, &main_path, None)
 }

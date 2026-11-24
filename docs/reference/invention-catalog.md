@@ -215,21 +215,30 @@ A `Secret` is sensitive text, such as a webhook signing key, a password or an AP
 
 Every other way the text could leave the program is a compile error that says why: no method returns it (`to_string`, `to_json`), it never mixes with text, it has no JSON form, and no route, store field, table column, prompt, connector operation, `ask`, `choose` or `main` signature may hold it, directly or in a record field. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the trace, approvals, the step debugger, replay and the exports built from the trace. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays although the trace never held the text. The application contract leaves every secret field out, so no client or SDK has one to read.
 
+A key the program issues is a `Secret` from the moment it exists: `random_token(32)` from `std/crypto` records `<redacted>`, the owner receives it through a tool that takes a `Secret`, and the program keeps only `hash_password(key, owasp_2023())`, an Argon2id hash at a declared cost. `presented.verify_password(hash)` checks one in constant time and is pure. Replay has no token to substitute, so it draws a fresh one and warns.
+
 ```corvid
 import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
 
 tool sign_webhook(key: Secret, body: String) -> String
+tool deliver_key(owner: String, key: Secret) -> Bool
 
 agent signature(body: String) -> Result<String, String>:
     key = secret("WEBHOOK_KEY")?
     return Ok(sign_webhook(key, body))
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    delivered = deliver_key(owner, key)
+    return hash_password(key, owasp_2023())
 ```
 
 Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
 Tour: `corvid tour --topic secrets`
-Roadmap: [B04 cryptography, slice 2](../../docs/backend-ai-roadmap.md)
-Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs)
-Non-scope: interpreter tier only until the native cryptography slice; environment-backed secrets only; a tool's own handling of the text it receives is outside the program. Password hashing is a later B04 slice, and an encrypted table column is tracked in B09.
+Roadmap: [B04 cryptography, slices 2 to 4](../../docs/backend-ai-roadmap.md)
+Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs), [tokens and passwords end to end](../../crates/corvid-driver/tests/tokens_and_passwords.rs)
+Non-scope: interpreter tier only until the native cryptography slice; secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
 
 ### AI-Native Ergonomics
 

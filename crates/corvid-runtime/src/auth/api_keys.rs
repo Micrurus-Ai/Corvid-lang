@@ -3,7 +3,9 @@
 //! resolve / revoke for `auth_api_keys`.
 //!
 //! API keys store an Argon2id-encoded hash of the raw secret —
-//! never the secret itself. `hash_api_key_secret` produces the
+//! never the secret itself — at the declared OWASP 2023 cost, through
+//! `corvid_crypto`, the same functions `hash_password` and
+//! `verify_password` run in Corvid source. `hash_api_key_secret` produces the
 //! encoded hash at issuance; `verify_api_key_secret` validates a
 //! presented secret against the stored hash on every resolve.
 //! Argon2id was chosen over the cheaper SHA-based session-token
@@ -18,11 +20,6 @@
 //! validation (revocation / expiry / tenancy / actor-kind)
 //! before issuing a `last_used_ms` write and the audit row.
 
-use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
-};
-use rand_core::OsRng;
 use rusqlite::{params, OptionalExtension};
 
 use crate::errors::RuntimeError;
@@ -51,22 +48,25 @@ use super::{
 #[allow(dead_code)]
 pub const GUARANTEE_ID_API_KEY_AT_REST_HASHED: &str = "auth.api_key_at_rest_hashed";
 
+/// The declared Argon2id cost of a stored API key: the OWASP 2023
+/// minimum, the cost `hash_password(key, owasp_2023())` uses in Corvid
+/// source. Hashes made before this constant existed used
+/// `Argon2::default()`, the same setting; each stored hash records its
+/// own cost, so raising this verifies them all the same.
+pub const API_KEY_HASH_COST: corvid_crypto::PasswordCost = corvid_crypto::PasswordCost::OWASP_2023;
+
+/// Hashes and verifies through `corvid_crypto`, the implementation
+/// behind `hash_password` and `verify_password` in Corvid source.
 pub fn hash_api_key_secret(raw_key: &str) -> Result<String, RuntimeError> {
     validate_non_empty("api key secret", raw_key)?;
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(raw_key.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
+    corvid_crypto::hash_password(raw_key.as_bytes(), API_KEY_HASH_COST)
         .map_err(|err| RuntimeError::Other(format!("failed to hash api key: {err}")))
 }
 
 pub fn verify_api_key_secret(raw_key: &str, encoded_hash: &str) -> Result<bool, RuntimeError> {
     validate_non_empty("api key secret", raw_key)?;
-    let parsed = PasswordHash::new(encoded_hash)
-        .map_err(|err| RuntimeError::Other(format!("invalid stored api key hash: {err}")))?;
-    Ok(Argon2::default()
-        .verify_password(raw_key.as_bytes(), &parsed)
-        .is_ok())
+    corvid_crypto::verify_password(raw_key.as_bytes(), encoded_hash)
+        .map_err(|err| RuntimeError::Other(format!("invalid stored api key hash: {err}")))
 }
 
 pub(super) fn read_api_key_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiKeyRecord> {
@@ -334,6 +334,24 @@ mod tests {
             permission_fingerprint: "sha256:service-scopes".to_string(),
             ..actor(id, tenant_id)
         }
+    }
+
+    #[test]
+    fn a_key_hashed_by_the_earlier_argon2_default_path_still_verifies() {
+        // Before the store moved onto corvid_crypto it hashed with
+        // `Argon2::default()` and a `SaltString::generate` salt; keys
+        // stored that way must keep resolving.
+        use argon2::password_hash::{PasswordHasher, SaltString};
+        let salt = SaltString::generate(&mut rand_core::OsRng);
+        let stored = argon2::Argon2::default()
+            .hash_password(b"ak_live_issued_before_the_move", &salt)
+            .unwrap()
+            .to_string();
+        assert!(verify_api_key_secret("ak_live_issued_before_the_move", &stored).unwrap());
+        assert!(!verify_api_key_secret("ak_live_some_other_key", &stored).unwrap());
+        let fresh = hash_api_key_secret("ak_live_issued_after_the_move").unwrap();
+        assert!(fresh.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{fresh}");
+        assert!(verify_api_key_secret("not a hash", "garbage").unwrap_err().to_string().contains("invalid stored api key hash"));
     }
 
     #[test]

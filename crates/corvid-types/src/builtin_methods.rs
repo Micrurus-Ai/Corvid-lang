@@ -509,8 +509,12 @@ pub enum BuiltinMethodKind {
     BytesHmacSha512,
     /// `Secret.decode_base64_after(prefix: String) -> Result<Secret,
     /// String>` — the key written in base64 after a literal prefix, as
-    /// a new secret; the only method on `Secret`, and it returns one.
+    /// a new secret.
     SecretDecodeBase64After,
+    /// `Secret.verify_password(hash: String) -> Bool` — whether the
+    /// secret is the password the Argon2id PHC string was made from;
+    /// `false` for a malformed hash. Pure, and constant-time.
+    SecretVerifyPassword,
 }
 
 impl BuiltinMethodKind {
@@ -598,7 +602,7 @@ impl BuiltinMethodKind {
         )
     }
 
-    /// The byte-string, hashing, HMAC and secret-key methods.
+    /// The byte-string, hashing, HMAC, secret-key and password methods.
     pub fn is_crypto(self) -> bool {
         use BuiltinMethodKind::*;
         matches!(
@@ -618,6 +622,7 @@ impl BuiltinMethodKind {
                 | BytesHmacSha256
                 | BytesHmacSha512
                 | SecretDecodeBase64After
+                | SecretVerifyPassword
         )
     }
 
@@ -920,6 +925,7 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![Type::String],
             Type::Result(Box::new(Type::Secret), Box::new(Type::String)),
         ),
+        (Type::Secret, "verify_password") => sig(SecretVerifyPassword, vec![Type::String], Type::Bool),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

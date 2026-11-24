@@ -995,7 +995,7 @@ impl<'a> Checker<'a> {
             }
         }
         // A `Secret` has no method that returns its text; the table's
-        // one method on it returns another secret.
+        // methods on it return another secret or a `Bool`.
         if let Some(ty) = self.refuse_secret_method(&recv_ty, method_name, args) {
             return ty;
         }

@@ -105,7 +105,8 @@ pub enum TypeErrorKind {
     /// `Secret` combined with another type.
     SecretOperatorMismatch { left: String, right: String, hint: String },
 
-    /// A method called on a `Secret` other than `decode_base64_after`.
+    /// A method called on a `Secret` other than `decode_base64_after`
+    /// and `verify_password`.
     SecretMethod { method: String },
 
     /// `secret.decode_base64_after(prefix)` with a prefix that is not a
@@ -1155,7 +1156,7 @@ impl TypeErrorKind {
             Self::BytesOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::SecretOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::SecretMethod { .. } => Some(
-                "compare two secrets with `==`, key an HMAC with one (`body.utf8().hmac_sha256(key)`), or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
+                "compare two secrets with `==`, key an HMAC with one (`body.utf8().hmac_sha256(key)`), check one against a stored hash (`password.verify_password(hash)`), or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
             ),
             Self::SecretKeyPrefixNotLiteral => Some(
                 "write the provider's prefix inline, such as `key.decode_base64_after(\"whsec_\")`; a prefix computed at run time could test the secret's text one guess at a time".into(),
@@ -1165,7 +1166,7 @@ impl TypeErrorKind {
             ),
             Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
             Self::SecretTableColumn { .. } => Some(
-                "never store a secret's text. To check a value later, store its hash with `hash_password(...)`, which arrives in a later cryptography slice; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
+                "never store a secret's text. To check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
             ),
             Self::SecretShownToPerson { .. } => Some(
                 "read secrets from the environment with `secret(name)` from std/secrets; never ask a person to type one or show them one".into(),

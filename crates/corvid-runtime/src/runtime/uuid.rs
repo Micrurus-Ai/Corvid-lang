@@ -46,11 +46,7 @@ fn generate(name: &str) -> Result<String, RuntimeError> {
 }
 
 fn fill_random(tool: &str, bytes: &mut [u8]) -> Result<(), RuntimeError> {
-    use rand_core::{OsRng, RngCore};
-    OsRng.try_fill_bytes(bytes).map_err(|error| RuntimeError::ToolFailed {
-        tool: tool.to_owned(),
-        message: format!("OS entropy source failed: {error}"),
-    })
+    corvid_crypto::fill_random(bytes).map_err(|message| RuntimeError::ToolFailed { tool: tool.to_owned(), message })
 }
 
 #[cfg(test)]

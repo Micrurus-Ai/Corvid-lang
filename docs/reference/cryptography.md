@@ -1,8 +1,8 @@
 # Cryptography
 
-`Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes and HMAC are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets).
+`Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes and HMAC are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
 
-Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC and `Secret` run on the interpreter. A program that uses `Bytes` or `Secret` runs on the interpreter until the native cryptography slice, and a native build that refuses one names that slice. Random tokens, password hashing and Ed25519 verification come in later slices. [Proposal](../proposals/cryptography.md)
+Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, `Secret`, random tokens and password hashing run on the interpreter. A program that uses `Bytes` or `Secret` runs on the interpreter until the native cryptography slice, and a native build that refuses one names that slice. Ed25519 verification comes in a later slice. [Proposal](../proposals/cryptography.md)
 
 ```corvid
 agent content_hash(body: String) -> String:
@@ -166,6 +166,7 @@ agent token_matches(supplied: Secret) -> Result<Bool, String>:
 ### What a program can do with a secret
 
 - **Key an HMAC.** `body.utf8().hmac_sha256(key)` keys the HMAC with the secret's bytes; the program sees only the tag (see [HMAC](#hmac)). `key.decode_base64_after("whsec_")` turns a base64 signing secret into the key it encodes, which is again a `Secret`.
+- **Check it against a stored hash.** `password.verify_password(hash)` is a `Bool` (see [Passwords](#passwords)), and `hash_password(password, owasp_2023())` makes the hash to store.
 - **Compare two.** `==` and `!=` between two secrets are constant-time, with the same comparison as `Bytes`: secrets of the same length take the same time whichever characters differ, and secrets of different lengths are unequal at once, which reveals only the lengths. Records and lists holding secrets, and `list.contains(secret)`, compare the same way.
 - **Pass one to a tool.** A tool may take a `Secret` parameter, alone or inside a record, a list or another type argument. The tool's implementation receives the text. Every record of the call holds `<redacted>` in that position (see [Traces and replay](#traces-and-replay)).
 - **Hold one.** A secret can sit in a local, a record field, a list or a `Result`, and travel between agents.
@@ -178,13 +179,13 @@ Each of these is a compile error that names the place and says what to write ins
 
 | Written | Why it is refused |
 | --- | --- |
-| `key.to_string()`, `key.to_json()`, any method on a secret but `decode_base64_after` | No method returns a secret's text; the one method returns another secret |
+| `key.to_string()`, `key.to_json()`, any method on a secret but `decode_base64_after` and `verify_password` | No method returns a secret's text; `decode_base64_after` returns another secret and `verify_password` a `Bool` |
 | `key + "x"`, `"Bearer " + key`, `key == "text"` | A secret and text do not mix: the result would be ordinary text holding the secret |
 | `a < b` and the other orderings, `a + b`, arithmetic | Secrets have no order; an ordered comparison stops at the first differing character |
 | `Credentials.from_json(text)`, `creds.to_json()` with a `Secret` field | A secret has no JSON form, in a record field too |
 | A route path, query, body or response holding a secret | A route's inputs and response are JSON a client sees |
 | A store field holding a secret | A store keeps its fields as JSON |
-| A table column holding a secret | A stored secret could be read back. To check a value later, store its hash with `hash_password(...)`, which arrives in a later cryptography slice; to use the value again it needs an encrypted column, which is not built yet (tracked in B09). Never store the text |
+| A table column holding a secret | A stored secret could be read back. To check a value later, store `hash_password(value, owasp_2023())` in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09). Never store the text |
 | A prompt parameter or result holding a secret, including a function a model can call | No secret may reach a model, and a model cannot produce one |
 | A connector operation's parameter or result holding a secret | A connector's credential is declared once, as its `auth`, and never travels in its operations |
 | `ask(question, Secret)`, `choose(secrets)` | A person's answer is recorded, and `choose` shows its options |
@@ -202,7 +203,7 @@ A tool call whose declared parameters hold a `Secret` is built twice. The *recor
 {"type":"tool_call","tool":"sign_webhook","args":["<redacted>","order.paid"],...}
 ```
 
-`secret(name)` records its result as `<redacted>` too, with no characters kept.
+`secret(name)` and `random_token(bytes)` record their result as `<redacted>` too, with no characters kept.
 
 **A tool that echoes a secret back.** If a tool's result or error message contains the text of a secret it was given, the record is scrubbed and the program's value is not. The program receives the tool's real result or error, unchanged. Only the records of the call are scrubbed: the `ToolResult` trace event and the step debugger's view of the result have every occurrence of the text replaced by `<redacted>`. A scrubbed `ToolResult` is marked inside its payload, as the tool-error record already is, so the trace schema does not change:
 
@@ -229,4 +230,118 @@ The application contract publishes no secret. A public type's field that holds a
 
 ### Not yet
 
-Native code refuses `Secret` until the native cryptography slice. Secrets come only from the environment. A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool. `random_token` and `verify_password` are later B04 slices.
+Native code refuses `Secret` until the native cryptography slice. Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
+
+## Random tokens
+
+`random_token(bytes)` from `std/crypto` draws `bytes` random bytes from the operating system's secure generator and returns them as a `Secret` holding their URL-safe base64 text without padding, so the token travels in a URL, a header or a cookie unchanged:
+
+```corvid
+import "./std/crypto" use random_token
+
+agent new_session_key() -> Secret:
+    return random_token(32)
+```
+
+`random_token(32)` is 43 characters and holds 256 bits. `bytes` must be from 16 to 1024. Fewer than 16 bytes (128 bits) is refused, because a shorter token can be guessed by an attacker with enough attempts, and more than 1024 is refused as a mistake, such as a length in bits or characters written where bytes are meant. Either stops the call with an error that says so.
+
+Because a token is a `Secret`, everything [Secrets](#secrets) says applies: the program can compare it with `==` in constant time, hash it, check it with `verify_password` and pass it to a tool, and it can never be printed, turned into text, stored or sent to a model. Its recorded `ToolResult` is `<redacted>`:
+
+```text
+{"kind":"tool_call","tool":"random_token","args":[32],...}
+{"kind":"tool_result","tool":"random_token","result":"<redacted>",...}
+```
+
+`random_token` is a tool, as `uuid_v4` is, because it draws entropy: a `@deterministic` agent cannot call it.
+
+### Replaying a token
+
+The trace never holds a token, so replay has nothing to substitute. Refusing to replay would make every program that issues a session or an API key unreplayable, so replay draws a fresh token and prints a warning:
+
+```text
+warning: replay drew a fresh token for `random_token`, because the recorded token was never stored in the trace; anything this run computes from the token's value can differ from the recording from here on
+```
+
+The warning is kept for `Runtime::replay_redrawn_token_warnings()`. A token only ever reaches positions every record holds as `<redacted>`, so a later call that takes it, such as `hash_password(key, owasp_2023())` or the tool that delivers it, still matches its recording and is substituted: a replayed issuance returns the recorded hash. Where the fresh token changes what the run computes, such as `key.verify_password(hash)` against a hash recorded from the old token, replay reports the divergence at the first event that no longer matches, here the run's result. It never differs from the recording silently.
+
+### Showing a new key to its owner once
+
+A key the program issues must reach its owner exactly once, and never a trace. Deliver it through a tool that takes a `Secret`: the tool receives the text, every record of the call holds `<redacted>`, and the program keeps only the hash.
+
+```corvid
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+tool email_api_key(owner: String, key: Secret) -> Bool
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    sent = email_api_key(owner, key)
+    return hash_password(key, owasp_2023())
+```
+
+A route cannot return a secret, so a key cannot yet be shown once in an HTTP response, as a "copy your new key" page needs. That needs the response to be written without being recorded, a contract marker so the client shows the value once and never caches it, and the frontend binding; it is a roadmap item.
+
+## Passwords
+
+`hash_password(password, cost)` from `std/crypto` hashes a password, or any secret the program only needs to check later such as an API key, with Argon2id (RFC 9106) under a fresh 16-byte random salt. It returns the hash as a PHC string, which records the algorithm, its version, the cost and the salt:
+
+```text
+$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+```
+
+`password.verify_password(hash)` on a `Secret` says whether the secret is the password the hash was made from. It reads the cost and the salt from the hash, so a hash made at any cost verifies, and compares the computed hash with the stored one in constant time.
+
+### The cost is declared
+
+Argon2id's memory, iterations and lanes trade login latency against the cost of guessing passwords from a stolen database, and there is more than one reasonable setting, so the program states which one it uses. `owasp_2023()` is the OWASP Password Storage Cheat Sheet's 2023 minimum for Argon2id: 19 MiB (19456 KiB) of memory, 2 iterations and 1 lane.
+
+```corvid
+hash = hash_password(password, owasp_2023())
+stronger = hash_password(password, PasswordCost(65536, 3, 1))
+```
+
+`PasswordCost(memory_kib, iterations, lanes)` declares another cost. Any value may be higher than the minimum. A cost weaker than every setting OWASP lists as equal to the minimum (47104 KiB with 1 iteration, 19456 KiB with 2, 12288 KiB with 3, 9216 KiB with 4, 7168 KiB with 5) stops the call with an error that names them:
+
+```text
+tool `hash_password` failed: a password cost of 4096 KiB and 1 iteration is below the OWASP 2023 minimum for Argon2id; use owasp_2023() (19456 KiB, 2 iterations, 1 lane) or a setting OWASP lists as equal: 47104 KiB with 1 iteration, 12288 KiB with 3, 9216 KiB with 4 or 7168 KiB with 5
+```
+
+A cost above 4 GiB of memory is refused too, because a few concurrent logins would exhaust a server. Raising the cost later needs no migration: old hashes record the cost they were made at and keep verifying, and a program can rehash a user's password at the new cost when they next log in.
+
+The runtime's API-key store (`corvid auth keys`) hashes with the same function at the same declared cost, `owasp_2023()`, so the language and the runtime hash one way. Keys it stored before this slice used the same setting and keep verifying.
+
+### What is recorded
+
+`hash_password` is a tool, because it draws the salt. Its password argument is a `Secret`, so every record of the call holds `<redacted>` in its place, and the trace never holds the password. Its result, the hash, is a verifier rather than the password, so it is recorded and replay substitutes it like any tool result:
+
+```text
+{"kind":"tool_call","tool":"hash_password","args":["<redacted>",{"iterations":2,"lanes":1,"memory_kib":19456}],...}
+{"kind":"tool_result","tool":"hash_password","result":"$argon2id$v=19$m=19456,t=2,p=1$...",...}
+```
+
+`verify_password` is a pure method: allowed in `@deterministic` agents, never traced, and the same on every run and in replay. It is `false` for a hash that is malformed, made by another algorithm (argon2i, argon2d, bcrypt) or another Argon2 version, or that claims more than 4 GiB of memory: a hash it cannot read verifies nothing. A program that must tell a corrupted stored hash from a wrong password can check the stored text with `starts_with("$argon2id$")` before verifying.
+
+### Log in
+
+A sign-up stores the hash and a log-in checks a password against it:
+
+```corvid
+import "./std/crypto" use hash_password, owasp_2023
+
+tool save_password_hash(user: String, hash: String) -> Bool
+tool stored_password_hash(user: String) -> Option<String>
+
+agent sign_up(user: String, password: Secret) -> Bool:
+    return save_password_hash(user, hash_password(password, owasp_2023()))
+
+agent log_in(user: String, password: Secret) -> Bool:
+    return match stored_password_hash(user):
+        Some(hash) -> password.verify_password(hash)
+        None -> false
+```
+
+A table can hold the hash in a `String` column, never the password. Both agents take the password as a `Secret`, and today one arrives from `secret(name)` or `random_token`, or from another agent. A route's body cannot hold a secret yet, so a login form cannot send its password field to `log_in` directly; that needs the request body's password field to be a `Secret` the server reads without recording, with the masked form input from the frontend roadmap. Both are roadmap items.
+
+The driver test `crates/corvid-driver/tests/tokens_and_passwords.rs` runs these steps from Corvid source: a password read with `secret(name)` is hashed, the right password verifies and a wrong one does not, the trace holds neither the password nor an issued key, a replayed issuance returns the recorded hash with one re-drawn-token warning, and a replay whose result depends on the token reports the divergence.
+
+`verify_password` runs Argon2id on the interpreter's own thread, tens of milliseconds at the OWASP cost; `hash_password` runs on a blocking worker. Moving verification off the request thread under heavy concurrent load is a roadmap item.

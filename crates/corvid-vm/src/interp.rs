@@ -1862,7 +1862,7 @@ impl<'ir> Interpreter<'ir> {
                     )
                     .await?
                 } else if corvid_runtime::runtime::is_stdlib_secret_value_tool(callee_name) {
-                    secret_tools::dispatch_secret_value_tool(self.runtime, callee_name, json_args, span).await?
+                    secret_tools::dispatch_secret_value_tool(self.runtime, callee_name, json_args, &tool.return_ty, span).await?
                 } else {
                     // A `Secret` argument reaches the implementation as its
                     // text; every record of the call holds `json_args`.

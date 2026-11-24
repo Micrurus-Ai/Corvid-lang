@@ -1,0 +1,56 @@
+# Standard cryptography tools: random tokens and password hashing.
+#
+# Disposition: EXECUTING. Both tools are dispatched by the runtime
+# through corvid-crypto, the implementation the runtime's API-key store
+# uses too. Hashing, HMAC and `verify_password` are pure builtin methods
+# and need no import; see docs/reference/cryptography.md.
+#
+# Both tools draw operating-system entropy, so they are TOOLS, never
+# builtins, for the reason std/random.cor and std/uuid.cor give: tool
+# calls are traced and handled by replay, and the checker refuses them
+# inside `@deterministic` bodies.
+#
+# `random_token(bytes)` returns a `Secret`. Its recorded result is
+# `<redacted>`, so the trace never holds the token, and replay, which
+# has nothing to substitute, draws a fresh one and prints a warning.
+#
+# `hash_password(password, cost)` takes the password as a `Secret`, so
+# every record of the call holds `<redacted>` in its place. It returns
+# the Argon2id hash as a PHC string, which records the cost and the
+# salt; the hash is a verifier, not the password, so it is recorded and
+# replay substitutes it. Check a password against a stored hash with
+# the builtin `password.verify_password(hash)`.
+#
+# The cost is always declared, because Argon2id's memory and iterations
+# trade login latency against the cost of guessing, and Corvid does not
+# choose that silently: write `hash_password(password, owasp_2023())`,
+# or a `PasswordCost` of your own. A cost weaker than the OWASP 2023
+# minimum stops the call with an error naming the settings OWASP lists
+# as equal to it.
+
+public effect crypto_random:
+    reversible: true
+
+# The cost of one Argon2id hash: memory in KiB, iterations (passes over
+# the memory) and lanes (degree of parallelism). Any value may be higher
+# than `owasp_2023()`'s; a weaker one is refused when the hash is made.
+public type PasswordCost:
+    memory_kib: Int
+    iterations: Int
+    lanes: Int
+
+# The OWASP Password Storage Cheat Sheet's 2023 minimum for Argon2id:
+# 19 MiB of memory, 2 iterations, 1 lane.
+public fn owasp_2023() -> PasswordCost:
+    return PasswordCost(19456, 2, 1)
+
+# `bytes` random bytes from the operating system, as a `Secret` holding
+# their URL-safe base64 text without padding: `random_token(32)` is 43
+# characters. `bytes` must be from 16 (128 bits, the floor for a token
+# that cannot be guessed) to 1024; any other value stops the call with
+# an error.
+public tool random_token(bytes: Int) -> Secret uses crypto_random
+
+# The Argon2id hash of `password` at `cost` under a fresh random salt, as
+# a PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`.
+public tool hash_password(password: Secret, cost: PasswordCost) -> String uses crypto_random

@@ -154,8 +154,9 @@ Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` re
 ## Secret
 
 - `Secret.decode_base64_after(prefix: String) -> Result<Secret, String>`
+- `Secret.verify_password(hash: String) -> Bool`
 
-No method returns a secret's text; the one method returns another secret, the key written in base64 after a literal `prefix` such as `"whsec_"`. `==` and `!=` between two secrets are constant-time, and a secret can key `hmac_sha256` and `hmac_sha512`; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one. See [Cryptography: secrets](cryptography.md#secrets).
+No method returns a secret's text. `decode_base64_after` returns another secret, the key written in base64 after a literal `prefix` such as `"whsec_"`. `verify_password` says whether the secret is the password an Argon2id hash in PHC format was made from, using the cost and salt the hash records; it is `false` for a malformed hash, and it is pure. `==` and `!=` between two secrets are constant-time, and a secret can key `hmac_sha256` and `hmac_sha512`; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one and `random_token(bytes)` in `std/crypto` draws one. See [Cryptography: secrets](cryptography.md#secrets).
 
 ## Bool
 
@@ -342,6 +343,15 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `agent cache_key(namespace: String, subject: String, fingerprint: String, effect_key: String, provenance_key: String) -> CacheKeyEnvelope`
 - `agent cache_entry(key: CacheKeyEnvelope, replay_safe: Bool, invalidation_key: String) -> CacheEntryEnvelope`
 - `agent cache_hit(entry: CacheEntryEnvelope) -> Bool`
+
+### [std/crypto](../../std/crypto.cor)
+
+- `type PasswordCost` with `memory_kib: Int`, `iterations: Int`, `lanes: Int`
+- `fn owasp_2023() -> PasswordCost`
+- `tool random_token(bytes: Int) -> Secret uses crypto_random`
+- `tool hash_password(password: Secret, cost: PasswordCost) -> String uses crypto_random`
+
+`random_token` draws 16 to 1024 random bytes from the operating system and returns their unpadded base64url text as a `Secret`; replay draws a fresh one and warns. `hash_password` returns the Argon2id hash as a PHC string and refuses a cost below the OWASP 2023 minimum. Check a password with `Secret.verify_password(hash)`. See [Cryptography: random tokens](cryptography.md#random-tokens) and [Passwords](cryptography.md#passwords).
 
 ### [std/db](../../std/db.cor)
 

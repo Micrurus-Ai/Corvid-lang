@@ -524,12 +524,13 @@ agent api_key() -> Result<String, String>:
         name: "secrets",
         title: "Secrets That Never Reach a Trace, a Prompt or a Log",
         category: "Safety at compile time",
-        pitch: "A webhook signing key, a password or an API token is a `Secret`: the program can use it but never reveal it. `secret(name)` from std/secrets reads one from the environment. Two secrets compare with `==`, in constant time, so checking a supplied token cannot leak it byte by byte; a secret can be handed to the tool that needs it, alone or inside a record. Everything else is a compile error that says why: no `to_string`, no `+`, no mixing with text, no JSON form, no route body or response, no store field or table column, no prompt parameter or result (no secret can reach a model), no `ask`/`choose`, and `main` may not return one. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the ToolCall event, approvals, step events, replay and the exports built from the trace. A tool that echoes the secret back is scrubbed to `<redacted>` in the trace, not in what the program receives, and replaying that result warns. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays without the trace ever holding the text. The application contract leaves every secret field out, so no client or SDK has a field to read.",
+        pitch: "A webhook signing key, a password or an API token is a `Secret`: the program can use it but never reveal it. `secret(name)` from std/secrets reads one from the environment. Two secrets compare with `==`, in constant time, so checking a supplied token cannot leak it byte by byte; a secret can be handed to the tool that needs it, alone or inside a record. Everything else is a compile error that says why: no `to_string`, no `+`, no mixing with text, no JSON form, no route body or response, no store field or table column, no prompt parameter or result (no secret can reach a model), no `ask`/`choose`, and `main` may not return one. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the ToolCall event, approvals, step events, replay and the exports built from the trace. A tool that echoes the secret back is scrubbed to `<redacted>` in the trace, not in what the program receives, and replaying that result warns. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays without the trace ever holding the text. The application contract leaves every secret field out, so no client or SDK has a field to read. `random_token(32)` from std/crypto issues a key that is a `Secret` from birth: the trace records `<redacted>`, the owner receives it once through a tool that takes a `Secret`, and only `hash_password(key, owasp_2023())` is kept; replay draws a fresh token and warns. `password.verify_password(hash)` checks one in constant time and is pure.",
         spec: "docs/reference/cryptography.md#secrets",
-        roadmap: "B04 cryptography, slice 2",
-        test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-vm/src/tests/hmac.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-driver/tests/webhook_verification.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
-        non_scope: "Interpreter tier only; native code refuses `Secret` until the native cryptography slice. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. Hashing a password (`hash_password`) arrives in a later B04 slice; an encrypted table column is tracked in B09.",
+        roadmap: "B04 cryptography, slices 2 to 4",
+        test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-vm/src/tests/hmac.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-driver/tests/webhook_verification.rs + crates/corvid-vm/src/tests/passwords.rs + crates/corvid-driver/tests/tokens_and_passwords.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
+        non_scope: "Interpreter tier only; native code refuses `Secret` until the native cryptography slice. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
         source: r#"import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
 
 type Delivery:
     body: String
@@ -546,6 +547,16 @@ agent deliver(body: String) -> Result<Bool, String>:
 agent token_matches(supplied: Secret) -> Result<Bool, String>:
     expected = secret("API_TOKEN")?
     return Ok(supplied == expected)
+
+tool deliver_key(owner: String, key: Secret) -> Bool
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    delivered = deliver_key(owner, key)
+    return hash_password(key, owasp_2023())
+
+agent key_matches(presented: Secret, stored_hash: String) -> Bool:
+    return presented.verify_password(stored_hash)
 "#,
     },
     TourTopic {

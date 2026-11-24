@@ -5,6 +5,7 @@ mod event_classify;
 mod mutation;
 mod mutation_session;
 mod mutation_validate;
+mod redrawn_tokens;
 mod result_factory;
 mod scrubbed_results;
 mod substitute;
@@ -41,6 +42,7 @@ pub use corvid_runtime_core::replay_divergence::ReplayDivergence;
 pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;
+use redrawn_tokens::ReplayRedrawnTokens;
 use scrubbed_results::ReplayScrubbedResults;
 use zone_rules::ReplayZoneRules;
 
@@ -82,6 +84,9 @@ pub struct ReplaySource {
     /// Warnings for substituted tool results whose record had a
     /// secret's text scrubbed.
     scrubbed_results: ReplayScrubbedResults,
+    /// Warnings for `random_token` calls replay re-drew, because the
+    /// trace never holds a token.
+    redrawn_tokens: ReplayRedrawnTokens,
 }
 
 /// One recorded `parallel` arm's terminal state (slice 52d-3).
@@ -308,6 +313,7 @@ impl ReplaySource {
             parallel_cursor: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             zone_rules: ReplayZoneRules::new(recorded_tzdb),
             scrubbed_results: ReplayScrubbedResults::default(),
+            redrawn_tokens: ReplayRedrawnTokens::default(),
         })
     }
 
@@ -326,6 +332,11 @@ impl ReplaySource {
     /// secret's text scrubbed.
     pub(crate) fn secret_scrub_warnings(&self) -> Vec<String> {
         self.scrubbed_results.warnings()
+    }
+
+    /// The warnings for tokens replay drew afresh.
+    pub(crate) fn redrawn_token_warnings(&self) -> Vec<String> {
+        self.redrawn_tokens.warnings()
     }
 
     /// Hand out the next recorded `parallel` block's arm outcomes, in
@@ -537,6 +548,14 @@ impl ReplaySource {
                 matches!(event, TraceEvent::ToolResult { tool: recorded_tool, .. } if recorded_tool == tool)
             });
         }
+    }
+
+    /// A `random_token` call, which replay draws afresh because its
+    /// recorded result is `<redacted>`: steps past the recorded call
+    /// and result, as for a re-read secret, and warns.
+    pub fn step_past_redrawn_token(&self, tool: &str, args: &[serde_json::Value]) {
+        self.step_past_reexecuted_tool_call(tool, args);
+        self.redrawn_tokens.note(tool);
     }
 
     pub fn replay_tool_call(

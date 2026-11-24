@@ -470,10 +470,11 @@ pub fn json_to_value(
         // A `Secret` has no JSON form: a tool result, a model reply, a
         // request body or a resumed job cannot mint one, so a secret's
         // text never arrives through a channel the trace records. The
-        // only path to a `Value::Secret` is `secret(name)`, decoded by
-        // [`secret_read_result_to_value`].
+        // only paths to a `Value::Secret` are the runtime's own
+        // `secret(name)` and `random_token(bytes)`, decoded by
+        // [`secret_tool_result_to_value`].
         (Type::Secret, _got) => Err(ConvError::TypeMismatch {
-            expected: "Secret (only produced by `secret(name)` from std/secrets)".into(),
+            expected: "Secret (only produced by `secret(name)` from std/secrets and `random_token(bytes)` from std/crypto)".into(),
             got: "JSON payload - a secret cannot be read from JSON".into(),
         }),
         (Type::DbHandle, _got) => Err(ConvError::TypeMismatch {
@@ -504,11 +505,25 @@ pub fn json_to_value(
     }
 }
 
-/// The `Result<Secret, String>` of `secret(name)`, from the runtime's
+/// The result of a runtime tool that produces a `Secret`, by the tool's
+/// declared return type: `random_token(bytes) -> Secret` returns the
+/// text, and `secret(name) -> Result<Secret, String>` returns
 /// `{"tag": "ok", "ok": text}` or `{"tag": "err", "err": message}`.
-/// The interpreter calls this only for the runtime's own secret tool,
-/// whose recorded result carries `<redacted>` in place of the text.
-pub fn secret_read_result_to_value(json: serde_json::Value) -> Result<Value, ConvError> {
+/// The interpreter calls this only for the runtime's own secret tools,
+/// whose recorded results carry `<redacted>` in place of the text.
+pub fn secret_tool_result_to_value(json: serde_json::Value, return_ty: &Type) -> Result<Value, ConvError> {
+    match (return_ty, json) {
+        (Type::Secret, serde_json::Value::String(text)) => Ok(Value::Secret(corvid_crypto::Secret::new(&text))),
+        (Type::Result(ok, err), json) if **ok == Type::Secret && **err == Type::String => secret_read_result_to_value(json),
+        (other, _) => Err(ConvError::TypeMismatch {
+            expected: format!("{} (a tool that produces a secret)", other.display_name()),
+            got: "a result that is not a secret tool's".into(),
+        }),
+    }
+}
+
+/// The `Result<Secret, String>` of `secret(name)`.
+fn secret_read_result_to_value(json: serde_json::Value) -> Result<Value, ConvError> {
     let mismatch = || ConvError::TypeMismatch {
         expected: "Result<Secret, String>".into(),
         got: "a result that is not `secret(name)`'s".into(),

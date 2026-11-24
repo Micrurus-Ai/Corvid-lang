@@ -1,5 +1,6 @@
 //! Byte strings, hashing and HMAC on the interpreter tier: the `Bytes`
-//! methods, `String.utf8()` and `Secret.decode_base64_after`.
+//! methods, `String.utf8()`, `Secret.decode_base64_after` and
+//! `Secret.verify_password`.
 //!
 //! Every rule is `corvid_crypto`'s, the code the native runtime will
 //! call, so this file only moves values in and out of `Value`. Every
@@ -58,6 +59,12 @@ pub(super) fn eval_crypto_method(
         (SecretDecodeBase64After, Value::Secret(secret)) => match args.first() {
             Some(Value::String(prefix)) => Ok(decoded(secret.decode_base64_after(prefix).map(Value::Secret))),
             other => Err(internal(format!("a key prefix must be a String, not {other:?}"))),
+        },
+        // Argon2id at the hash's own cost: tens of milliseconds, on this
+        // thread (see the roadmap's B04 items).
+        (SecretVerifyPassword, Value::Secret(secret)) => match args.first() {
+            Some(Value::String(hash)) => Ok(Value::Bool(secret.verify_password(hash))),
+            other => Err(internal(format!("a password hash must be a String, not {other:?}"))),
         },
         (other, value) => Err(internal(format!("`{other:?}` cannot run on {}", value.type_name()))),
     }

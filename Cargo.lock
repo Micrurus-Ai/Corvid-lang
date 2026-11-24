@@ -848,8 +848,10 @@ dependencies = [
 name = "corvid-crypto"
 version = "0.0.1"
 dependencies = [
+ "argon2",
  "corvid-text",
  "hmac 0.12.1",
+ "rand_core 0.6.4",
  "sha2 0.10.9",
  "subtle",
 ]
@@ -909,6 +911,7 @@ dependencies = [
  "corvid-codegen-cl",
  "corvid-codegen-py",
  "corvid-codegen-wasm",
+ "corvid-crypto",
  "corvid-guarantees",
  "corvid-ir",
  "corvid-resolve",
@@ -1059,6 +1062,7 @@ dependencies = [
  "corvid-abi",
  "corvid-ast",
  "corvid-codegen-cl",
+ "corvid-crypto",
  "corvid-currency",
  "corvid-decimal",
  "corvid-guarantees",

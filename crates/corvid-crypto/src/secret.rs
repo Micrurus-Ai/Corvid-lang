@@ -14,8 +14,9 @@
 //!   the expected one cannot leak it byte by byte.
 //! - **The text is read in one place.** [`Secret::expose_text`] is the
 //!   only way to the text outside this crate. The interpreter calls it
-//!   when it hands a tool its arguments, and nowhere else. HMAC reads
-//!   the key's bytes inside this crate ([`crate::HmacKey`]).
+//!   when it hands a tool its arguments, and nowhere else. HMAC and
+//!   password verification read the bytes inside this crate
+//!   ([`crate::HmacKey`], [`Secret::verify_password`]).
 //!
 //! A secret read from the environment holds text. One made by
 //! [`Secret::decode_base64_after`], such as a Standard Webhooks signing
@@ -84,6 +85,15 @@ impl Secret {
         Ok(Secret { bytes: Arc::from(key), is_text: false })
     }
 
+    /// `password.verify_password(hash)`: whether this secret is the
+    /// password (or token) the Argon2id PHC string `hash` was made from,
+    /// compared in constant time. `false` when the hash is not one
+    /// [`crate::verify_password`] can read, because a malformed hash
+    /// verifies nothing.
+    pub fn verify_password(&self, hash: &str) -> bool {
+        crate::verify_password(&self.bytes, hash) == Ok(true)
+    }
+
     /// Constant-time equality, the meaning of `==` on `Secret`. Two
     /// secrets are equal when their bytes are: a decoded key equals a
     /// text secret only if it keys an HMAC exactly as that text does.
@@ -132,6 +142,14 @@ mod tests {
         assert_ne!(a, Secret::new("correct horsf"));
         assert_ne!(a, Secret::new("Correct horse"));
         assert_ne!(a, Secret::new("correct hors"));
+    }
+
+    #[test]
+    fn a_secret_verifies_against_the_hash_of_its_text() {
+        let hash = crate::hash_password(b"correct horse", crate::PasswordCost::OWASP_2023).unwrap();
+        assert!(Secret::new("correct horse").verify_password(&hash));
+        assert!(!Secret::new("correct horsf").verify_password(&hash));
+        assert!(!Secret::new("correct horse").verify_password("not a hash"), "a malformed hash verifies nothing");
     }
 
     #[test]

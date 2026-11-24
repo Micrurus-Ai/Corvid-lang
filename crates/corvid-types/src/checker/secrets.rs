@@ -9,7 +9,8 @@
 //!   at the first differing character; `+` and any mix with `String`
 //!   would turn the text into ordinary text.
 //! - **Methods.** None returns the text: no `to_string`, no `to_json`.
-//!   The one method, `decode_base64_after`, returns another secret.
+//!   `decode_base64_after` returns another secret and `verify_password`
+//!   a `Bool`.
 //! - **Boundaries.** A route's inputs and response, a store field, a
 //!   table column, a prompt's parameters and result, a connector
 //!   operation, `ask` and `choose`, and the `main` agent's signature
@@ -111,8 +112,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Refuses `secret.method(...)` unless it is a cryptography method
-    /// of the builtin-method table. The only one, `decode_base64_after`,
-    /// returns another secret, so no method can return the text; the
+    /// of the builtin-method table. `decode_base64_after` returns another
+    /// secret and `verify_password` a `Bool`, so no method can return the
+    /// text; the
     /// methods every type has, such as `to_json`, are refused here too.
     /// Returns the recovered result type when the call is refused, or
     /// `None` to continue ordinary dispatch.

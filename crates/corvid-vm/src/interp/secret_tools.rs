@@ -9,11 +9,11 @@
 //! revealed form is decided by the tool's declared parameter types, not
 //! by looking at the values.
 //!
-//! `secret(name)` from std/secrets is the one tool whose result is a
-//! `Secret`. JSON cannot mint one (`json_to_value` refuses it), so its
-//! result is decoded here.
+//! `secret(name)` from std/secrets and `random_token(bytes)` from
+//! std/crypto are the tools whose result is a `Secret`. JSON cannot mint
+//! one (`json_to_value` refuses it), so their results are decoded here.
 
-use crate::conv::{secret_read_result_to_value, tool_argument_json};
+use crate::conv::{secret_tool_result_to_value, tool_argument_json};
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::value::Value;
 use corvid_ast::Span;
@@ -78,18 +78,20 @@ fn holds_secret(ty: &Type, types_by_id: &HashMap<DefId, &IrType>, seen: &mut Vec
     }
 }
 
-/// `secret(name)`: the runtime reads the environment and records the
-/// call with its result redacted; the text becomes a `Value::Secret`.
+/// `secret(name)` and `random_token(bytes)`: the runtime reads the
+/// environment or draws the token and records the call with its result
+/// redacted; the text becomes a `Value::Secret`.
 pub(super) async fn dispatch_secret_value_tool(
     runtime: &Runtime,
     callee_name: &str,
     json_args: Vec<serde_json::Value>,
+    return_ty: &Type,
     span: Span,
 ) -> Result<Value, InterpError> {
     let result = runtime
         .call_tool(callee_name, json_args)
         .await
         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-    secret_read_result_to_value(result)
+    secret_tool_result_to_value(result, return_ty)
         .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")), span))
 }

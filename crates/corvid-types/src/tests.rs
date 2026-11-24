@@ -12,6 +12,7 @@ mod text_methods;
 mod bytes;
 mod hmac;
 mod secrets;
+mod passwords;
 
 fn check(src: &str) -> Checked {
     let tokens = lex(src).expect("lex failed");

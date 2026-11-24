@@ -4,6 +4,81 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Random tokens and declared-cost password hashing (B04, fourth slice)
+
+`std/crypto` is a new executing module. `random_token(bytes)` draws
+16 to 1024 random bytes from the operating system and returns their
+unpadded base64url text as a `Secret`, so `random_token(32)` is 43
+characters and never reaches a trace: its recorded result is
+`<redacted>`. `hash_password(password, cost)` hashes a `Secret` with
+Argon2id under a fresh 16-byte salt and returns the PHC string, and
+`password.verify_password(hash)` on a `Secret` checks one, reading
+the cost and salt from the hash. Hashing, verification, the token and
+the entropy all live in `corvid-crypto` (new `password.rs`, `token.rs`,
+`entropy.rs`) over the `argon2` 0.5 and `rand_core` 0.6 versions the
+workspace already locked. The Argon2id output is pinned to the
+reference implementation's test vector (t=2, m=256 KiB) and to a hash
+at the OWASP cost computed outside Corvid with OpenSSL 3.6's Argon2id
+KDF.
+
+The cost is declared, never chosen: `hash_password(password,
+owasp_2023())`, where `owasp_2023()` is a pure `fn` in `std/crypto`
+returning `PasswordCost(19456, 2, 1)`, or any `PasswordCost` of the
+program's own. A cost weaker than every setting OWASP lists as equal
+to its 2023 minimum stops the call with an error that names them, and
+so does more than 4 GiB of memory; verification refuses a stored hash
+that claims more, and refuses anything that is not Argon2id version
+19. The Corvid numbers and `corvid_crypto::PasswordCost::OWASP_2023`
+are two copies, because one is source and one is Rust, so a driver
+test asserts they are equal.
+
+Replay was the decision. The trace never holds a token, so replay
+cannot substitute one. Refusing to replay would make every program
+that issues a session or an API key unreplayable, and silently
+re-drawing could change a run without anyone noticing, so replay draws
+a fresh token and warns, keeping the warning for
+`Runtime::replay_redrawn_token_warnings()` as the scrubbed-result and
+tz-database warnings are kept. The token only ever reaches positions
+every record holds as `<redacted>`, so the `hash_password` call after
+it still matches its recording and is substituted: a replayed issuance
+returns the recorded hash. When the run's result does depend on the
+token, as in `key.verify_password(hash)` against the recorded hash,
+replay reports a `run_completed` divergence. Both cases are tested.
+
+`verify_password` returns `Bool`, `false` for a hash it cannot read: a
+`Result` would make every login a `match` for what is a corrupted
+database, not a user error. `corvid_crypto::verify_password` keeps the
+error, which the API-key store still reports as an invalid stored
+hash. The proposal's `token.reveal_once()` does not ship. A key must
+reach its owner, and today it does so through a tool that takes a
+`Secret` (an email, a notification), which receives the text while
+every record holds `<redacted>`. Showing it once in a route response
+needs the serve runtime to write a response it does not record, a
+contract marker and the frontend's binding; a `reveal_once()` the
+checker accepted before the runtime could keep that promise would be a
+silent degradation, so it is a roadmap item, with a `Secret` request
+body field for login forms.
+
+The runtime's API-key store (`auth/api_keys.rs`, the main line's auth
+area) now hashes and verifies through `corvid_crypto` with
+`API_KEY_HASH_COST = PasswordCost::OWASP_2023`, the setting
+`Argon2::default()` chose silently. The change is the two functions'
+bodies; a test proves a hash made by the old path still verifies.
+`argon2` is now only a dev-dependency of the runtime, for that test.
+`std/uuid` and `std/random` draw through `corvid_crypto::fill_random`,
+so the runtime has one entropy path for its tools. The interpreter's
+secret-result decoding is chosen by the tool's declared return type,
+so `random_token`'s bare `Secret` and `secret`'s `Result` share one
+path. The skill audit maps both new tools to a `crypto` group, ahead
+of the `random_` prefix.
+
+Syntax: `random_token(32)` names bytes, as `Bytes.length()` counts
+them, rather than a fixed-size `random_token()` (a hidden size) or a
+`Bytes` result (printable). `hash_password(password, owasp_2023())`
+won over a default cost (a hidden policy) and over a method (methods
+are pure; hashing draws a salt). `password.verify_password(hash)` reads
+as the question it asks and keeps cryptography methods off `String`.
+
 ## 2026-11-24 - HMAC and a verified payment webhook (B04, third slice)
 
 `bytes.hmac_sha256(key)` and `bytes.hmac_sha512(key)` return the HMAC

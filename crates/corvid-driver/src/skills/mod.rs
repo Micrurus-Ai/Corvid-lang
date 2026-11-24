@@ -53,6 +53,9 @@ fn capability_group(tool: &str) -> Option<&'static str> {
         "json"
     } else if tool.starts_with("time_") {
         "time"
+    } else if tool == "random_token" || tool == "hash_password" {
+        // std/crypto, checked before the `random_` prefix of std/random.
+        "crypto"
     } else if tool.starts_with("random_") {
         "random"
     } else if tool.starts_with("rag_") {
@@ -93,7 +96,7 @@ pub struct SkillMeta {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct SkillCapabilities {
     /// Allowed capability groups (io / http / db / json / time /
-    /// random / rag / mcp / secrets / cache / llm). Empty = the
+    /// random / crypto / rag / mcp / secrets / cache / llm). Empty = the
     /// skill claims to be pure vocabulary.
     #[serde(default)]
     pub uses: Vec<String>,
@@ -625,6 +628,13 @@ public agent summarize(repo: String) -> Result<String, String>:
         assert_eq!(audit.max_cost_usd, 0.25);
         let violations = verify_label(&manifest, &audit);
         assert!(violations.is_empty(), "got: {violations:?}");
+    }
+
+    #[test]
+    fn std_crypto_tools_are_their_own_capability_group() {
+        assert_eq!(capability_group("random_token"), Some("crypto"));
+        assert_eq!(capability_group("hash_password"), Some("crypto"));
+        assert_eq!(capability_group("random_int"), Some("random"));
     }
 
     #[test]
