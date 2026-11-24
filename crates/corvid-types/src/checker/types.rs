@@ -12,7 +12,15 @@ use crate::types::{ImportedStructType, Type};
 use corvid_ast::{TypeRef, WeakEffectRow};
 
 impl<'a> Checker<'a> {
+    /// Resolve a type reference written in the file being checked, and
+    /// record the result for IR lowering ([`super::Checked::type_refs`]).
     pub(super) fn type_ref_to_type(&mut self, tr: &TypeRef) -> Type {
+        let ty = self.resolve_root_type_ref(tr);
+        self.type_refs.insert(tr.span(), ty.clone());
+        ty
+    }
+
+    fn resolve_root_type_ref(&mut self, tr: &TypeRef) -> Type {
         match tr {
             TypeRef::Named { name, .. } => self.named_type_to_type(&name.name, name.span),
             TypeRef::Qualified { alias, name, span } => {
@@ -72,7 +80,7 @@ impl<'a> Checker<'a> {
                 };
                 match target_module.exports.get(&name.name) {
                     Some(export) if matches!(export.kind, corvid_resolve::DeclKind::Type) => {
-                        imported_struct_type(target_module, export.def_id, &export.name)
+                        self.imported_named_type(target_module, export.def_id, &export.name)
                     }
                     Some(_) => {
                         self.errors.push(TypeError::new(
@@ -178,7 +186,7 @@ impl<'a> Checker<'a> {
             ));
             return Type::Unknown;
         }
-        imported_struct_type(module, target.export.def_id, &target.export.name)
+        self.imported_named_type(module, target.export.def_id, &target.export.name)
     }
 
     fn qualified_type_ref_to_type(
@@ -209,7 +217,7 @@ impl<'a> Checker<'a> {
                     ));
                     return Type::Unknown;
                 }
-                imported_struct_type(module, export.def_id, &export.name)
+                self.imported_named_type(module, export.def_id, &export.name)
             }
             corvid_resolve::ModuleLookup::UnknownAlias => {
                 self.errors.push(TypeError::new(
@@ -243,7 +251,36 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn named_type_in_module(&self, name: &str, module: &corvid_resolve::ResolvedModule) -> Type {
+    /// The type a public type declared in another module stands for.
+    /// A record or sum type is an imported struct; an alias
+    /// (`public type Customers = List<Customer>`) expands to its target,
+    /// resolved in the declaring module, exactly as a local alias does.
+    pub(super) fn imported_named_type(
+        &mut self,
+        module: &corvid_resolve::ResolvedModule,
+        def_id: corvid_resolve::DefId,
+        name: &str,
+    ) -> Type {
+        let alias_target = module.file.decls.iter().find_map(|decl| match decl {
+            corvid_ast::Decl::Type(t) if module.resolved.symbols.lookup_def(&t.name.name) == Some(def_id) => {
+                t.alias.as_ref()
+            }
+            _ => None,
+        });
+        let Some(target) = alias_target else {
+            return imported_struct_type(module, def_id, name);
+        };
+        // A cycle is reported by the declaring module's own check.
+        if self.alias_depth >= 32 {
+            return Type::Unknown;
+        }
+        self.alias_depth += 1;
+        let ty = self.imported_type_ref_to_type(target, module);
+        self.alias_depth -= 1;
+        ty
+    }
+
+    fn named_type_in_module(&mut self, name: &str, module: &corvid_resolve::ResolvedModule) -> Type {
         if let Some(known) = Type::compiler_known(name) {
             return known;
         }
@@ -254,7 +291,7 @@ impl<'a> Checker<'a> {
                     corvid_resolve::DeclKind::Type
                 ) =>
             {
-                imported_struct_type(module, def_id, name)
+                self.imported_named_type(module, def_id, name)
             }
             _ => Type::Unknown,
         }
@@ -384,7 +421,7 @@ enum TypeContext<'a> {
     Imported(&'a corvid_resolve::ResolvedModule),
 }
 
-pub(super) fn imported_struct_type(
+fn imported_struct_type(
     module: &corvid_resolve::ResolvedModule,
     def_id: corvid_resolve::DefId,
     name: &str,

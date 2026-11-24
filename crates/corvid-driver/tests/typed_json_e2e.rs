@@ -351,20 +351,19 @@ agent main() -> String:
     assert_eq!(out, "[0].address.city | String");
 }
 
-/// Aliases declared in another module are not expanded in any type
-/// position yet, so `from_json` on one is refused with the local
-/// alias to write instead, rather than decoding the wrong shape.
-#[test]
-fn an_alias_declared_in_another_module_is_refused_with_the_local_spelling() {
-    let errors = compile_with_models(
-        "import \"./models\" use Customers\n\nagent main(text: String) -> Bool:\n    return Customers.from_json(text).is_ok()\n",
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_alias_declared_in_another_module_names_a_list_target() {
+    let out = run_with_models(
+        r#"import "./models" use Customers
+
+agent main() -> String:
+    return match Customers.from_json("[{\"id\": 1, \"address\": {\"city\": \"Mbale\"}}, {\"id\": 2, \"address\": {\"city\": \"Jinja\"}}]"):
+        Ok(customers) -> customers[1].address.city + " of " + customers.length().to_string()
+        Err(problem) -> problem.message
+"#,
     )
-    .expect_err("an imported alias target must be refused");
-    assert!(
-        errors.iter().any(|e| e.message.contains("alias declared in another module")
-            && e.hint.as_deref().is_some_and(|hint| hint.contains("type Customers = ..."))),
-        "expected the alias refusal with a local-alias hint, got {errors:#?}"
-    );
+    .await;
+    assert_eq!(out, "Jinja of 2");
 }
 
 #[test]

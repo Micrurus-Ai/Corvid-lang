@@ -543,6 +543,12 @@ agent main() -> String:
     return describe("c-42", 1999)
 ```
 
+An alias declared `public` in another module is just as transparent.
+After `import "./models" use Customers`, where the module declares
+`public type Customers = List<Customer>`, a `Customers` parameter is a
+list of `Customer` records, and so is a record field typed
+`m.Customers` after `import "./models" as m`.
+
 ## Type inference and annotations
 
 Local bindings don't need annotations — the type is inferred from the

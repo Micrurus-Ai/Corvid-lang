@@ -4,6 +4,37 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - One resolver for type references: aliases expand everywhere
+
+Fixing "aliases declared in another module" turned up a wider bug. IR
+lowering resolved type references with its own copy of the checker's
+logic, and the copy never expanded aliases. A local `type Orders =
+List<Order>` used as a parameter or a record field lowered to a record
+with no fields, so `Batch.from_json` on a record with an `orders: Orders`
+field expected an object where the JSON had an array. The checker had
+been right all along; the two layers disagreed.
+
+Decisions:
+
+- **The checker decides, the lowerer reads.** The checker now records
+  the resolved type of every type reference in `Checked::type_refs`, the
+  same way expression types already reach lowering. The lowerer's
+  resolver and three helpers in `corvid-ir/src/imports.rs` are deleted,
+  and lowering only remaps ids across modules.
+- **Completeness is enforced, not assumed.** A sweep
+  (`checker/signature_types.rs`) records every position lowering reads,
+  even in declarations the checker never needs to look inside. A missing
+  entry makes lowering stop with an internal compiler error that names
+  the sweep, so a new lowered position cannot silently fall back to a
+  wrong type. The full workspace suite ran to confirm no program hits it.
+- **Imported aliases expand in their own module.** One checker method
+  builds every imported type and expands an alias in the declaring
+  module's context, so `use Customers` and `m.Customers` both mean
+  `List<Customer>`. `from_json` no longer refuses them.
+- **The ABI emitter still has a third copy.** It is filed as the next
+  task rather than folded in, because it needs `Checked` passed through
+  ABI emission.
+
 ## 2026-11-23 - B01 fourth increment: decode types from other modules
 
 `from_json` and `from_json_strict` now accept a public type from another

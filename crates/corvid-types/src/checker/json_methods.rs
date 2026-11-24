@@ -9,7 +9,6 @@
 //! refuses tools declared for the retired `decode_<Type>_from_json`
 //! convention, which these methods replace.
 
-use super::types::imported_struct_type;
 use super::Checker;
 use crate::builtin_methods::{type_method, BuiltinMethodSig};
 use crate::errors::{TypeError, TypeErrorKind};
@@ -56,25 +55,9 @@ impl<'a> Checker<'a> {
         let type_name = receiver_display_name(target);
         let target_ty = match receiver {
             TypeReceiver::Local(def_id) => self.expand_possible_alias(def_id, target.span()),
-            TypeReceiver::Imported { module, def_id } => match imported_type_decl(module, def_id) {
-                Some(decl) if decl.alias.is_some() => {
-                    for arg in args {
-                        let _ = self.check_expr(arg);
-                    }
-                    let local = decl.name.name.clone();
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::NoJsonForm {
-                            method: method.name.clone(),
-                            ty: type_name,
-                            reason: "it is an alias declared in another module, and aliases from other modules are not expanded yet".into(),
-                            hint: format!("declare `type {local} = ...` with the same target in this module and call `{local}.{}`", method.name),
-                        },
-                        span,
-                    ));
-                    return Some(Type::Unknown);
-                }
-                _ => imported_struct_type(module, def_id, &type_name_of(module, def_id)),
-            },
+            TypeReceiver::Imported { module, def_id } => {
+                self.imported_named_type(module, def_id, &type_name_of(module, def_id))
+            }
         };
         let BuiltinMethodSig { params, ret, .. } = type_method(&target_ty, &method.name)?;
 

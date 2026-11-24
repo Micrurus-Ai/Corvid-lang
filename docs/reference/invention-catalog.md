@@ -715,7 +715,7 @@ Spec: [`std.json` reference](../../docs/reference/stdlib/json.md)
 Tour: `corvid tour --topic json`
 Roadmap: [Phase 33R5b](../../ROADMAP.md) + [B01 typed JSON](../../docs/backend-ai-roadmap.md)
 Proof: [end-to-end JSON tests](../../crates/corvid-driver/tests/executing_json_through_driver.rs) + [typed JSON tests](../../crates/corvid-driver/tests/typed_json_e2e.rs) + [runtime JSON tests](../../crates/corvid-runtime/src/json.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
-Non-scope: No JSON Path / JSONata / JMESPath query language (nested access via `json_get_object` chains). Native-target support and decoding into an alias declared in another module are follow-up slices.
+Non-scope: No JSON Path / JSONata / JMESPath query language (nested access via `json_get_object` chains). Native-target support is a follow-up slice.
 
 #### Governed Retrieval
 

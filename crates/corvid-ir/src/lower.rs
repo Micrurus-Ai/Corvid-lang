@@ -5,10 +5,7 @@
 
 mod stream;
 
-use crate::imports::{
-    build_imported_def_ids, resolve_module_qualified_type_ref, resolve_root_imported_type_ref,
-    resolve_root_lifted_type_ref, ImportedDefKey,
-};
+use crate::imports::{build_imported_def_ids, ImportedDefKey};
 use crate::types::*;
 use corvid_ast::{
     AgentAttribute, AgentDecl, BinaryOp, Block, ConnectorAuth, ConnectorDecl, Decl, Effect,
@@ -127,6 +124,10 @@ struct Lowerer<'a> {
     /// each match, so `@grounded_pure` (slice 9) can fail a function
     /// whose body launders a grounded value through any slot-check.
     grounded_coercion_sites: &'a std::collections::HashSet<Span>,
+    /// The checker's resolved type for every type reference
+    /// (`Checked.type_refs`). Lowering never resolves a type reference
+    /// itself; it reads this table and remaps ids across modules.
+    type_refs: &'a HashMap<Span, Type>,
     wrapping_arithmetic: bool,
     /// Route-local side-table (slice 52a): per-route `path`/`query`/
     /// `body`/`actor` `LocalId`s, so `lower_server` can build a
@@ -162,6 +163,7 @@ impl<'a> Lowerer<'a> {
             imported_def_ids,
             imported_calls: &checked.imported_calls,
             grounded_coercion_sites: &checked.grounded_coercion_sites,
+            type_refs: &checked.type_refs,
             wrapping_arithmetic: false,
             route_locals: &resolved.route_locals,
             next_synthetic_def_id: SYNTHETIC_ROUTE_AGENT_DEF_ID_BASE,
@@ -228,10 +230,24 @@ impl<'a> Lowerer<'a> {
         match ty {
             Type::Option(inner) => Type::Option(deep(inner)),
             Type::List(inner) => Type::List(deep(inner)),
+            Type::Stream(inner) => Type::Stream(deep(inner)),
             Type::Tainted(inner) => Type::Tainted(deep(inner)),
             Type::Grounded(inner) => Type::Grounded(deep(inner)),
+            Type::Partial(inner) => Type::Partial(deep(inner)),
+            Type::ResumeToken(inner) => Type::ResumeToken(deep(inner)),
+            Type::Upload(inner) => Type::Upload(deep(inner)),
+            Type::Page(inner) => Type::Page(deep(inner)),
+            Type::Weak(inner, effects) => Type::Weak(deep(inner), effects),
             Type::Map(key, item) => Type::Map(deep(key), deep(item)),
             Type::Result(ok, err) => Type::Result(deep(ok), deep(err)),
+            Type::Function { params, ret, effect } => Type::Function {
+                params: params.into_iter().map(|p| self.remap_struct_type_deep(p)).collect(),
+                ret: deep(ret),
+                effect,
+            },
+            Type::RouteParams(fields) => Type::RouteParams(
+                fields.into_iter().map(|(name, ty)| (name, self.remap_struct_type_deep(ty))).collect(),
+            ),
             other => self.remap_struct_type(other),
         }
     }
@@ -2298,96 +2314,21 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// The type a type reference stands for, as the checker resolved
+    /// it, with ids remapped into the merged IR. The checker records
+    /// every reference lowering reads (`checker/signature_types.rs`),
+    /// so a missing entry is a compiler bug, not a user error.
     fn type_ref_to_type(&self, tr: &TypeRef) -> Type {
-        match tr {
-            TypeRef::Named { name, .. } => match Type::compiler_known(&name.name) {
-                Some(known) => known,
-                None => match self.symbols.lookup_def(&name.name) {
-                    Some(id) => {
-                        if self.symbols.get(id).kind == DeclKind::ImportedUse {
-                            return self
-                                .module_resolution
-                                .and_then(|resolution| {
-                                    resolve_root_lifted_type_ref(resolution, &name.name)
-                                })
-                                .map(|ty| self.remap_struct_type(ty))
-                                .unwrap_or(Type::Unknown);
-                        }
-                        Type::Struct(self.remap_def_id(id))
-                    }
-                    None => Type::Unknown,
-                },
-            },
-            TypeRef::Qualified { alias, name, .. } => match self.current_module {
-                Some(module) => self
-                    .module_resolution
-                    .and_then(|resolution| {
-                        resolve_module_qualified_type_ref(
-                            resolution,
-                            module,
-                            self.imported_def_ids,
-                            &alias.name,
-                            &name.name,
-                        )
-                    })
-                    .unwrap_or(Type::Unknown),
-                None => self
-                    .module_resolution
-                    .and_then(|resolution| {
-                        resolve_root_imported_type_ref(resolution, &alias.name, &name.name)
-                    })
-                    .map(|ty| self.remap_struct_type(ty))
-                    .unwrap_or(Type::Unknown),
-            },
-            TypeRef::Generic { name, args, .. } => match name.name.as_str() {
-                "Map" if args.len() == 2 => Type::Map(
-                    Box::new(self.type_ref_to_type(&args[0])),
-                    Box::new(self.type_ref_to_type(&args[1])),
-                ),
-                "List" if args.len() == 1 => Type::List(Box::new(self.type_ref_to_type(&args[0]))),
-                "Stream" if args.len() == 1 => {
-                    Type::Stream(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "Grounded" if args.len() == 1 => {
-                    Type::Grounded(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "Partial" if args.len() == 1 => {
-                    Type::Partial(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "ResumeToken" if args.len() == 1 => {
-                    Type::ResumeToken(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "Option" if args.len() == 1 => {
-                    Type::Option(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "Result" if args.len() == 2 => Type::Result(
-                    Box::new(self.type_ref_to_type(&args[0])),
-                    Box::new(self.type_ref_to_type(&args[1])),
-                ),
-                // HTTP-boundary types (slice 51f / 52c). Lowered so the IR
-                // carries the real type — Contract Closure (52b) reads the
-                // route's `body_ty`/`response_ty` to decide whether the
-                // interpreter tier can serve it, and the 52c boundary-type
-                // runtime needs the format/item type.
-                "Upload" if args.len() == 1 => {
-                    Type::Upload(Box::new(self.type_ref_to_type(&args[0])))
-                }
-                "Page" if args.len() == 1 => Type::Page(Box::new(self.type_ref_to_type(&args[0]))),
-                _ => Type::Unknown,
-            },
-            TypeRef::Weak { inner, effects, .. } => Type::Weak(
-                Box::new(self.type_ref_to_type(inner)),
-                effects.unwrap_or_else(corvid_ast::WeakEffectRow::any),
-            ),
-            TypeRef::Function { params, ret, .. } => Type::Function {
-                params: params.iter().map(|p| self.type_ref_to_type(p)).collect(),
-                ret: Box::new(self.type_ref_to_type(ret)),
-                effect: Effect::Safe,
-            },
-        }
+        let Some(ty) = self.type_refs.get(&tr.span()) else {
+            panic!(
+                "internal compiler error: the type checker did not record the type reference at {:?}; \
+                 add its position to `record_signature_types`",
+                tr.span()
+            );
+        };
+        self.remap_struct_type_deep(ty.clone())
     }
 }
-
 /// Extract the `Upload<Format>` format tag (`Csv`, `Pdf`, …) from a
 /// route body type ref (slice 52c-2). Returns `None` for any other
 /// body type. The resolved `Type::Upload` loses the tag because the

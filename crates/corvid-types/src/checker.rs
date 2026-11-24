@@ -49,6 +49,12 @@ pub struct Checked {
     /// Sound enumeration is the load-bearing property: a missed site
     /// is a silent moat hole.
     pub grounded_coercion_sites: HashSet<Span>,
+    /// The type each type reference in this file resolved to, keyed by
+    /// the reference's span. Aliases are expanded, including aliases
+    /// declared in other modules. IR lowering reads its signature and
+    /// field types from here instead of resolving type references a
+    /// second time, so the two layers cannot disagree about a type.
+    pub type_refs: HashMap<Span, Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,6 +355,8 @@ fn typecheck_with_everything(
         }
     }
 
+    c.record_signature_types(file);
+
     Checked {
         types: c.types,
         local_types: c.local_types,
@@ -356,6 +364,7 @@ fn typecheck_with_everything(
         warnings: c.warnings,
         imported_calls: c.imported_calls,
         grounded_coercion_sites: c.grounded_coercion_sites,
+        type_refs: c.type_refs,
     }
 }
 
@@ -375,6 +384,9 @@ struct Checker<'a> {
     /// `Checked` so IR lowering can insert a visible `UnwrapGrounded`
     /// at each recorded span.
     grounded_coercion_sites: HashSet<Span>,
+    /// Every root-file type reference resolved so far, by span. See
+    /// [`Checked::type_refs`].
+    type_refs: HashMap<Span, Type>,
 
     /// Indexed declarations for O(1) lookup by DefId. Methods from
     /// `extend` blocks get inserted here too — a method `extend Order: agent
@@ -709,6 +721,7 @@ impl<'a> Checker<'a> {
             warnings: Vec::new(),
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
+            type_refs: HashMap::new(),
             tools_by_id: tools,
             file,
             operations_by_id: operations,
@@ -888,6 +901,7 @@ mod match_check;
 mod expr;
 mod import_call;
 mod json_methods;
+mod signature_types;
 mod ops;
 mod prompt;
 mod stmt;

@@ -83,10 +83,10 @@ agent count(text: String) -> Int:
 A public type from another module is called the way it is imported:
 `Customer.from_json(text)` after `import "./models" use Customer`, or
 `m.Customer.from_json(text)` after `import "./models" as m`. An alias
-declared in another module is refused for now, because aliases from
-other modules are not expanded in any type position yet. Declare the
-alias in your own module instead, such as
-`type Customers = List<m.Customer>`.
+from another module works the same way: after
+`import "./models" use Customers`, where the module declares
+`public type Customers = List<Customer>`, call
+`Customers.from_json(text)`.
 
 The checker refuses a call when the type has no JSON form in that
 direction, naming the field that prevents it. `from_json` refuses a
