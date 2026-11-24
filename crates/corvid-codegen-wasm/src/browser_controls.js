@@ -7,6 +7,14 @@ if (typeof document !== "undefined" && Array.from(
 
 // Each host decides the tag name and can mount the class more than once.
 export function componentElement(html) {
+  if (html.includes("data-corvid-module-field")) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    if (template.content.childElementCount === 1 &&
+        template.content.firstElementChild.matches("[data-corvid-module-field]")) {
+      return moduleFieldElement(template);
+    }
+  }
   return class extends HTMLElement {
     connectedCallback() {
       if (this.shadowRoot) return;

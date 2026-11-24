@@ -527,3 +527,11 @@ These projections read their nearest mounted record. Supply paths with `bind` an
 See [Keep a record in browser memory](../book/19-browser-views.md#keep-a-record-in-browser-memory).
 
 The earlier names `ui.local_field` and `ui.local_checkbox` are supported aliases for `ui.field` and `ui.checkbox`.
+
+### JavaScript module fields
+
+`ui.module_field(control: View, module_path: String, reader: String, handler: TextCallback) -> View` constructs the root view for a custom element backed by a JavaScript module. Supply a labelled control that emits a bubbling `change` event. A `browser callback name(text: String) -> String` declaration provides the rendering function `name() -> ui.TextCallback`. Return the view's HTML from the component entry and export it with `scripts/export_browser_component.py`. The generated `componentElement(html)` recognizes this root and returns a custom element constructor. The host registers the tag name.
+
+On change the browser imports `module_path` relative to the generated events module, or resolves a bare specifier through the host's import map. The named export implements the generated TypeScript type `CorvidFieldReader = (value: string | File | null, convert: (text: string) => string) => string | Promise<string>`. The changing control supplies its string value. A native file input supplies its first file or `null` when cleared. The `convert` callback invokes the named Corvid `(String) -> String` event handler. The example's `readNote(file, importedText)` decodes gzip bytes as UTF-8 and returns the callback result.
+
+The element exposes a writable string `value`, a named `hint` slot and a bubbling, composed `change` event on successful import. Property writes update the displayed value silently. A newer selection, a property write or disconnect supersedes an outstanding read. Synchronous exceptions and rejected promises leave the value intact and appear in the element's alert with the reader name and the declared callback's Corvid file, line and column. [Learning guide and example](../book/19-browser-views.md#read-a-compressed-note-with-a-typed-javascript-package)

@@ -1,0 +1,8 @@
+import "std:ui" as ui
+import "std:ui" use View
+
+agent main() -> String:
+    field = ui.text_area("Note", "note", "Draft")
+    importer = View("<compressed-note><span slot='hint'>Choose a gzip file.</span></compressed-note>")
+    modules = View("<script type='importmap'>{\"imports\":{\"fflate\":\"./target/wasm/fflate.js\"}}</script><script type='module'>import Note from './target/wasm/index.js'; customElements.define('compressed-note', Note);</script>")
+    return ui.interactive_page("Import a note", [modules, ui.bind_field(field, importer)])
