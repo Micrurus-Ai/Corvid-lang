@@ -514,13 +514,33 @@ pub fn emit_release(
     builder.ins().call(callee, &[v]);
 }
 
+/// Which question a native type check answers. The native-ability
+/// check and lowering ask about the same types at different stages, so
+/// both read one definition here, and the answers that differ are the
+/// arms that say why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeTypeQuestion {
+    /// Can lowering represent this type? Lowering runs after
+    /// `compile_to_object` has rewritten `JsonError` into a record.
+    Lowering,
+    /// Can the native tier run a program that mentions this type, as the
+    /// checker typed it? `JsonError` is still the built-in type then, and
+    /// `TraceId` is refused because native code cannot replay yet.
+    Program,
+}
+
 /// Whether a Corvid value of this type lives behind a refcounted heap
 /// allocation. When true, the codegen tracks ownership: `retain` on
 /// bind, `release` on scope exit, etc.
 ///
 /// Today `String` is refcounted. Future work extends this to `Struct`
 /// (12f), `List` (12g) — both will return true here.
+/// [`is_refcounted_type_for`] as lowering asks it.
 pub fn is_refcounted_type(ty: &Type) -> bool {
+    is_refcounted_type_for(ty, NativeTypeQuestion::Lowering)
+}
+
+pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
     match ty {
         Type::Function { .. } => crate::native_callback_type(ty),
         Type::String
@@ -541,25 +561,35 @@ pub fn is_refcounted_type(ty: &Type) -> bool {
         | Type::Partial(_)
         | Type::ResumeToken(_) => true,
         Type::Map(_, _) => crate::native_string_map(ty),
-        Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type(inner),
-        Type::Grounded(inner) => is_refcounted_type(inner),
-        Type::Tainted(inner) => is_refcounted_type(inner),
+        Type::Option(inner) => is_native_wide_option_type(ty) || is_refcounted_type_for(inner, question),
+        Type::Grounded(inner) => is_refcounted_type_for(inner, question),
+        Type::Tainted(inner) => is_refcounted_type_for(inner, question),
+        // Native code represents JsonError as a record of strings.
+        Type::JsonError => question == NativeTypeQuestion::Program,
         _ => false,
     }
 }
 
+/// [`is_native_value_type_for`] as lowering asks it.
 pub fn is_native_value_type(ty: &Type) -> bool {
+    is_native_value_type_for(ty, NativeTypeQuestion::Lowering)
+}
+
+pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) => true,
-        Type::Option(_) => is_native_option_type(ty),
-        Type::Result(ok, err) => is_native_value_type(ok) && is_native_value_type(err),
-        Type::Grounded(inner) => is_native_value_type(inner),
-        Type::Tainted(inner) => is_native_value_type(inner),
+        Type::Option(_) => is_native_option_type_for(ty, question),
+        Type::Result(ok, err) => is_native_value_type_for(ok, question) && is_native_value_type_for(err, question),
+        Type::Grounded(inner) => is_native_value_type_for(inner, question),
+        Type::Tainted(inner) => is_native_value_type_for(inner, question),
         // TraceId is a string-backed opaque handle at runtime;
         // treat it as a value type for native emission purposes.
-        Type::TraceId => true,
+        // Native code cannot replay yet, so a program that mentions
+        // `TraceId` runs on the interpreter even though lowering can
+        // represent the handle.
+        Type::TraceId => question == NativeTypeQuestion::Lowering,
         // Phase 33S3a — `DbHandle` has no native (Cranelift)
         // representation yet; the executing SQLite surface runs
         // through the interpreter tier only. Returning false here
@@ -577,7 +607,7 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         Type::JsonBuilder => false,
         // `compile_to_object` rewrites `JsonError` as an ordinary
         // record before lowering, so lowering never sees it.
-        Type::JsonError => false,
+        Type::JsonError => question == NativeTypeQuestion::Program,
         // B03 — regular expressions are interpreter-tier until the
         // native regex slice.
         Type::RegexMatch => false,
@@ -607,9 +637,14 @@ pub fn is_native_wide_option_type(ty: &Type) -> bool {
     matches!(ty, Type::Option(inner) if matches!(&**inner, Type::Int | Type::Bool | Type::Float))
 }
 
+/// [`is_native_option_type_for`] as lowering asks it.
 pub fn is_native_option_type(ty: &Type) -> bool {
+    is_native_option_type_for(ty, NativeTypeQuestion::Lowering)
+}
+
+pub fn is_native_option_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
     match ty {
-        Type::Option(inner) => is_refcounted_type(inner) || is_native_wide_option_type(ty),
+        Type::Option(inner) => is_refcounted_type_for(inner, question) || is_native_wide_option_type(ty),
         _ => false,
     }
 }
@@ -621,4 +656,51 @@ pub fn is_native_option_expr_type(ty: &Type) -> bool {
 
 pub fn is_native_result_type(ty: &Type) -> bool {
     matches!(ty, Type::Result(ok, err) if is_native_value_type(ok) && is_native_value_type(err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two questions answer alike except where a type changes
+    /// between the checked program and lowering: `JsonError` becomes a
+    /// record, and `TraceId` waits on native replay. A new difference has
+    /// to be added here on purpose.
+    #[test]
+    fn the_two_native_type_questions_differ_only_where_they_must() {
+        let types = [
+            Type::Int,
+            Type::String,
+            Type::Decimal,
+            Type::List(Box::new(Type::String)),
+            Type::Option(Box::new(Type::String)),
+            Type::Option(Box::new(Type::Int)),
+            Type::Grounded(Box::new(Type::String)),
+            Type::Tainted(Box::new(Type::String)),
+            Type::Result(Box::new(Type::Int), Box::new(Type::String)),
+            Type::DbHandle,
+            Type::JsonValue,
+            Type::Unknown,
+        ];
+        for ty in &types {
+            assert_eq!(
+                is_native_value_type_for(ty, NativeTypeQuestion::Lowering),
+                is_native_value_type_for(ty, NativeTypeQuestion::Program),
+                "native value answers differ for {ty:?}"
+            );
+            assert_eq!(
+                is_refcounted_type_for(ty, NativeTypeQuestion::Lowering),
+                is_refcounted_type_for(ty, NativeTypeQuestion::Program),
+                "refcounted answers differ for {ty:?}"
+            );
+        }
+        assert!(is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Program));
+        assert!(!is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Lowering));
+        assert!(is_refcounted_type_for(&Type::JsonError, NativeTypeQuestion::Program));
+        assert!(!is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Program));
+        assert!(is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Lowering));
+        // The differences reach inside containers too.
+        let wrapped = Type::Result(Box::new(Type::Int), Box::new(Type::JsonError));
+        assert!(is_native_value_type_for(&wrapped, NativeTypeQuestion::Program));
+    }
 }

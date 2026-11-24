@@ -290,6 +290,20 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - One definition of which types run natively
+
+`native_ability.rs` kept its own copies of four code-generator type
+checks, and they had drifted: the driver's refcounted check had lost
+callbacks and the `Grounded` and `Tainted` wrappers. The code
+generator's checks are now the only ones, and take a
+`NativeTypeQuestion`: `Lowering` (can lowering represent this type?) or
+`Program` (can the native tier run a program that mentions it, as the
+checker typed it?). The two answers differ only where the type changes
+between those stages, `JsonError`, which becomes a record, and where a
+tier policy applies, `TraceId`, refused until native replay. A unit test
+pins that these are the only differences, also inside containers, so a
+new one has to be added on purpose.
+
 ## 2026-11-24 - Native loops keep every update on the legacy ownership path
 
 With `CORVID_DUP_DROP_PASS=0`, a native loop that rebinds a refcounted

@@ -40,6 +40,7 @@ pub use time_methods::is_native_time_method;
 mod assignment;
 pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
 pub use lowering::native_public_json_type;
+pub use lowering::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod json_error_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};

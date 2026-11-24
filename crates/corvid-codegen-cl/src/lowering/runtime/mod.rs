@@ -25,6 +25,8 @@ pub(super) use type_query::{
     emit_retain, is_native_option_expr_type, is_native_option_type, is_native_result_type,
     is_native_wide_option_type, is_refcounted_type, mangle_type_name, option_uses_wrapper,
 };
+/// The native type checks the driver's native-ability check also asks.
+pub use type_query::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 pub(super) use typeinfo::{
     emit_callback_typeinfo, emit_list_typeinfo, emit_option_typeinfo, emit_result_typeinfo, emit_struct_typeinfo,
     typeinfo_data_for_refcounted_payload, OPTION_PAYLOAD_BYTES, OPTION_PAYLOAD_OFFSET,
