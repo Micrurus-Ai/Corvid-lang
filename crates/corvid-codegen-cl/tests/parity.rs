@@ -54,6 +54,8 @@ mod typed_json;
 mod sumtypes;
 #[path = "parity/text.rs"]
 mod text;
+#[path = "parity/decimal.rs"]
+mod decimal;
 
 /// Path to the `corvid-test-tools` staticlib. The parity harness links
 /// this into every compiled Corvid binary so `#[tool]`-declared mocks

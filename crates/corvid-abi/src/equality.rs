@@ -17,4 +17,7 @@ pub enum EqualityLayout {
     Result,
     StringMap,
     Identity,
+    /// B06 — a `Decimal` held as its canonical text, compared by
+    /// numeric value, so `1.0` equals `1.00`.
+    Decimal,
 }

@@ -60,6 +60,7 @@ corvid-resolve = { workspace = true }
 corvid-syntax = { workspace = true }
 corvid-types = { workspace = true }
 corvid-public-json = { workspace = true }
+corvid-decimal = { workspace = true }
 corvid-text = { workspace = true }
 corvid-time = { workspace = true }
 # `inventory` collects `ToolMetadata` entries from every `#[tool]`

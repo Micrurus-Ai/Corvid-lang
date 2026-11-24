@@ -66,6 +66,19 @@ fn a_type_without_a_plan_form_is_refused_by_name() {
     assert!(error.contains("Stream<Int>"), "{error}");
 }
 
+#[test]
+fn a_decimal_has_a_plan_form_and_the_time_types_do_not_yet() {
+    let decimals = Type::List(Box::new(Type::Option(Box::new(Type::Decimal))));
+    let plan = DecodePlan { root: decimals.clone(), types: vec![], shapes: BTreeMap::new(), owning_maps: vec![] };
+    let read = DecodePlan::from_text(&plan.to_text().expect("writes")).expect("reads");
+    assert_eq!(read.root, decimals);
+    for ty in [Type::Duration, Type::Instant, Type::TimeZone, Type::ZonedTime, Type::Currency, Type::Locale] {
+        let plan = DecodePlan { root: ty.clone(), types: vec![], shapes: BTreeMap::new(), owning_maps: vec![] };
+        let error = plan.to_text().expect_err("no native form until the time slice");
+        assert!(error.contains(&ty.display_name()), "{error}");
+    }
+}
+
 /// Records each shape the decoder asks for.
 #[derive(Default)]
 struct Recording(Vec<Shape>);

@@ -52,6 +52,7 @@ mod approval_exports;
 // slices have a settled home and the `SurfaceNotImplemented`
 // helper is reachable from regression tests.
 mod db_exports;
+mod decimal;
 mod http_exports;
 mod io_exports;
 mod json_exports;

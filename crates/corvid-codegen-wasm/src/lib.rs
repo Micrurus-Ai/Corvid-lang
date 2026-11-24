@@ -1119,7 +1119,7 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "currency formatting is interpreter-only until B06's native Decimal slice",
+                "currency formatting is interpreter-only until B06's native time and currency slice",
             ));
         }
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
@@ -1129,7 +1129,7 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Decimal(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "`Decimal` is interpreter-only until B06's native Decimal slice",
+                "`Decimal` has no WebAssembly form yet; it runs on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::String(value)) => {

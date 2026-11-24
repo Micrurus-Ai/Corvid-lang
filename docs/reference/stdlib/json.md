@@ -106,8 +106,9 @@ same mapping, so a compiled program accepts exactly the JSON the
 interpreter accepts, fails with the same `path`, `expected`, `found`
 and `message`, and encodes to the same text. A type the native target
 cannot hold runs on the interpreter: a map whose keys are not
-`String`, a `JsonValue`, or a `Grounded` value, whose sources native
-code does not keep.
+`String`, a `JsonValue`, a `Grounded` value, whose sources native
+code does not keep, or a time, zone, currency or locale value until
+B06's native time slice. A `Decimal` compiles.
 
 ## Public JSON mapping
 

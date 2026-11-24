@@ -125,11 +125,9 @@ pub(super) fn eval_decimal_method(
             other => Err(mismatch("Float", Some(other), span)),
         },
         StringParseDecimal => match receiver {
-            Value::String(text) => Ok(match Decimal::parse(text.trim()) {
+            Value::String(text) => Ok(match Decimal::parse_user_text(text) {
                 Ok(d) => Value::ResultOk(BoxedValue::new(Value::Decimal(d))),
-                Err(error) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(format!(
-                    "`{text}` is not a decimal number: {error}"
-                ))))),
+                Err(message) => Value::ResultErr(BoxedValue::new(Value::String(Arc::from(message)))),
             }),
             other => Err(mismatch("String", Some(other), span)),
         },

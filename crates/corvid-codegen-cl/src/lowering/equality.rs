@@ -59,6 +59,7 @@ impl LayoutTable<'_, '_> {
             Type::Float => (Layout::Float, vec![]),
             Type::Bool => (Layout::Bool, vec![]),
             Type::String => (Layout::String, vec![]),
+            Type::Decimal => (Layout::Decimal, vec![]),
             Type::List(item) => (Layout::List, vec![item.as_ref().clone()]),
             Type::Option(item) => (
                 if option_uses_wrapper(ty) {

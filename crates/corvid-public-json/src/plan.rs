@@ -188,6 +188,9 @@ fn write_type(ty: &Type) -> Result<J, String> {
         Type::Bool => json!("Bool"),
         Type::Nothing => json!("Nothing"),
         Type::JsonValue => json!("JsonValue"),
+        // B06 — native code holds a `Decimal` as its canonical text. The
+        // time and currency types have no native form until their slice.
+        Type::Decimal => json!("Decimal"),
         Type::Option(inner) => json!({ "Option": write_type(inner)? }),
         Type::List(inner) => json!({ "List": write_type(inner)? }),
         Type::Tainted(inner) => json!({ "Tainted": write_type(inner)? }),
@@ -210,6 +213,7 @@ fn read_type(json: &J) -> Result<Type, String> {
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
             "JsonValue" => Type::JsonValue,
+            "Decimal" => Type::Decimal,
             other => return Err(format!("decode plan names an unknown type `{other}`")),
         });
     }

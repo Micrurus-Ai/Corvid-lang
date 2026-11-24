@@ -572,13 +572,13 @@ impl Codegen {
             // the Python backend refuses decimals rather than change
             // their meaning.
             IrLiteral::Currency(_) | IrLiteral::Locale(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"currency formatting is interpreter-only until B06's native Decimal slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"currency formatting is interpreter-only until B06's native time and currency slice\"))",
             ),
             IrLiteral::TimeZone(_) => self.out.write(
                 "(_ for _ in ()).throw(NotImplementedError(\"TimeZone is interpreter-only until B06's native time slice\"))",
             ),
             IrLiteral::Decimal(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"Decimal is interpreter-only until B06's native Decimal slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"Decimal runs on the interpreter and native tiers; Python's decimal rounds to its context precision, so the Python backend refuses it\"))",
             ),
         }
     }
@@ -681,8 +681,8 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // B03 — the regex methods are builtin methods, which the
         // Python backend refuses before a hint is needed.
         T::RegexMatch => "object".into(),
-        // B06 — the Python backend refuses `Decimal` (interpreter-tier
-        // until its native slice) before a hint is needed.
+        // B06 — the Python backend refuses `Decimal` (its literals
+        // raise) before a hint is needed.
         T::Decimal => "object".into(),
         // B06 — the Python backend refuses time types like `Decimal`.
         T::Duration | T::Instant | T::TimeZone | T::ZonedTime | T::Currency | T::Locale => "object".into(),

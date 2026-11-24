@@ -19,6 +19,9 @@
 
 pub mod cdylib;
 pub mod dataflow;
+pub mod decimal_boundary;
+pub mod decimal_methods;
+pub use decimal_methods::is_native_decimal_method;
 pub mod dup_drop;
 pub mod errors;
 pub mod latency_rc;
