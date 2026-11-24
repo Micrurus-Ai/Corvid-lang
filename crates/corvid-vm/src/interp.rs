@@ -32,6 +32,8 @@ mod test_runner;
 mod text_methods;
 #[path = "interp/decimal.rs"]
 mod decimal;
+#[path = "interp/time.rs"]
+mod time;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 

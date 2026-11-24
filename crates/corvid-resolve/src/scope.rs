@@ -33,6 +33,10 @@ pub enum BuiltIn {
     /// values come from number literals the checker types as `Decimal`,
     /// `parse_decimal` and the `to_decimal` conversions.
     Decimal,
+    /// B06 — `Duration`, an exact length of elapsed time.
+    Duration,
+    /// B06 — `Instant`, an exact point on the UTC timeline.
+    Instant,
     String,
     Bool,
     Nothing,
@@ -176,6 +180,8 @@ impl SymbolTable {
         self.builtins.insert("Int".into(), BuiltIn::Int);
         self.builtins.insert("Float".into(), BuiltIn::Float);
         self.builtins.insert("Decimal".into(), BuiltIn::Decimal);
+        self.builtins.insert("Duration".into(), BuiltIn::Duration);
+        self.builtins.insert("Instant".into(), BuiltIn::Instant);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

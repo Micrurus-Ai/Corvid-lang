@@ -1698,7 +1698,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 fn is_stdlib_time_tool(name: &str) -> bool {
     matches!(
         name,
-        "time_now_utc" | "time_monotonic_ms" | "time_parse_iso" | "time_format_iso"
+        "time_now" | "time_now_utc" | "time_monotonic_ms" | "time_parse_iso" | "time_format_iso"
     )
 }
 
@@ -1770,6 +1770,16 @@ fn dispatch_stdlib_time_tool(
 ) -> Result<serde_json::Value, RuntimeError> {
     use chrono::{TimeZone, Utc};
     match name {
+        // B06 — the clock as an `Instant`, written in the RFC 3339 text
+        // `corvid_time` reads back, to the nanosecond the clock gives.
+        "time_now" => {
+            let now = Utc::now();
+            let nanoseconds =
+                i128::from(now.timestamp()) * 1_000_000_000 + i128::from(now.timestamp_subsec_nanos());
+            let instant = corvid_time::Instant::from_nanoseconds(nanoseconds)
+                .map_err(|error| RuntimeError::Other(format!("time_now: {error}")))?;
+            Ok(serde_json::Value::String(instant.to_string()))
+        }
         "time_now_utc" => {
             let now = Utc::now();
             let epoch_ms = now.timestamp_millis();

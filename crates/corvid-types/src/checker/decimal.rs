@@ -17,7 +17,7 @@ use super::Checker;
 use crate::builtin_methods::{decimal_rounding_mode, number_literal_text, BuiltinMethodKind};
 use crate::errors::{TypeError, TypeErrorKind};
 use crate::types::Type;
-use corvid_ast::{BinaryOp, Decl, ExtendMethodKind, Expr, File, Ident, Literal, Param, Span, TypeRef, UnaryOp};
+use corvid_ast::{BinaryOp, Expr, Ident, Literal, Span, UnaryOp};
 
 /// Whether `e` is built only from number literals, signs and
 /// arithmetic, so it has no type of its own until its context gives
@@ -172,78 +172,6 @@ impl<'a> Checker<'a> {
         let ty = self.check_expr(target);
         self.rounded_division = outer;
         ty
-    }
-
-    /// Refuses `Decimal` wherever a value leaves the program as JSON —
-    /// tool, prompt and connector signatures, routes, stores and table
-    /// rows — until B06's JSON slice gives it an exact JSON form.
-    /// Without this a decimal would cross as whatever the boundary's
-    /// fallback produced, which is not a decision anyone made. Runs
-    /// after `record_signature_types`, so every type is resolved.
-    pub(super) fn check_decimal_boundaries(&mut self, file: &File) {
-        for decl in &file.decls {
-            match decl {
-                Decl::Tool(t) => self.check_signature_boundary(&t.params, &t.return_ty, "a tool signature"),
-                Decl::Prompt(p) => self.check_signature_boundary(&p.params, &p.return_ty, "a prompt signature"),
-                Decl::Connector(c) => {
-                    for op in &c.operations {
-                        self.check_signature_boundary(&op.params, &op.return_ty, "a connector operation");
-                    }
-                }
-                Decl::Server(s) => {
-                    for route in &s.routes {
-                        for param in &route.path_params {
-                            self.check_boundary(&param.ty, "a route");
-                        }
-                        for ty in route.query_ty.iter().chain(route.body_ty.iter()) {
-                            self.check_boundary(ty, "a route");
-                        }
-                        self.check_boundary(&route.response.ty, "a route");
-                    }
-                }
-                Decl::Extend(ext) => {
-                    for method in &ext.methods {
-                        match &method.kind {
-                            ExtendMethodKind::Tool(t) => {
-                                self.check_signature_boundary(&t.params, &t.return_ty, "a tool signature")
-                            }
-                            ExtendMethodKind::Prompt(p) => {
-                                self.check_signature_boundary(&p.params, &p.return_ty, "a prompt signature")
-                            }
-                            ExtendMethodKind::Agent(_) => {}
-                        }
-                    }
-                }
-                Decl::Store(store) => {
-                    for field in &store.fields {
-                        self.check_boundary(&field.ty, "a store field");
-                    }
-                }
-                Decl::Table(table) => {
-                    for field in &table.record.fields {
-                        self.check_boundary(&field.ty, "a table column");
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn check_signature_boundary(&mut self, params: &[Param], return_ty: &TypeRef, boundary: &str) {
-        for param in params {
-            self.check_boundary(&param.ty, boundary);
-        }
-        self.check_boundary(return_ty, boundary);
-    }
-
-    fn check_boundary(&mut self, ty_ref: &TypeRef, boundary: &str) {
-        let Some(ty) = self.type_refs.get(&ty_ref.span()).cloned() else { return };
-        if self.reaches_decimal_without_json_form(&ty) {
-            self.errors.push(TypeError::new(
-                TypeErrorKind::DecimalAtBoundary { boundary: boundary.to_string() },
-                ty_ref.span(),
-            ));
-        }
     }
 
     /// Checks what the `Decimal` method signatures cannot: a literal

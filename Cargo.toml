@@ -15,6 +15,7 @@ members = [
     "crates/corvid-public-json",
     "crates/corvid-text",
     "crates/corvid-decimal",
+    "crates/corvid-time",
     "crates/corvid-prompt-format",
     "crates/corvid-vm",
     "crates/corvid-repl",
@@ -105,6 +106,7 @@ corvid-test-paths = { path = "crates/corvid-test-paths" }
 corvid-public-json = { path = "crates/corvid-public-json" }
 corvid-text = { path = "crates/corvid-text" }
 corvid-decimal = { path = "crates/corvid-decimal" }
+corvid-time = { path = "crates/corvid-time" }
 corvid-driver   = { path = "crates/corvid-driver" }
 corvid-differential-verify = { path = "crates/corvid-differential-verify" }
 corvid-shadow-daemon = { path = "crates/corvid-shadow-daemon" }

@@ -390,6 +390,30 @@ pub enum BuiltinMethodKind {
     /// whitespace like `parse_int`; the Err names the problem and its
     /// position.
     StringParseDecimal,
+
+    // ----- exact time (B06) ----------------------------------------
+    //
+    // Every rule is `corvid_time`'s, the code the native runtime will
+    // call. Readings truncate toward zero and trap outside the Int
+    // range; nothing reads the clock here (that is the `time_now` tool).
+    /// `Duration.whole_<unit>() -> Int` — whole units, truncated toward zero.
+    DurationWhole(corvid_time::TimeUnit),
+    /// `Duration.abs() -> Duration`.
+    DurationAbs,
+    /// `Duration.to_string() -> String` — ISO 8601 (`PT1H30M`).
+    DurationToString,
+    /// `Instant.epoch_milliseconds() -> Int` — rounded toward negative
+    /// infinity, as JavaScript's `Date` reads it.
+    InstantEpochMilliseconds,
+    /// `Instant.to_string() -> String` — RFC 3339 in UTC.
+    InstantToString,
+    /// `Instant.from_epoch_milliseconds(n: Int) -> Instant`, a method
+    /// of the type itself; traps outside years 1 to 9999.
+    InstantFromEpochMilliseconds,
+    /// `String.parse_duration() -> Result<Duration, String>` — ISO 8601.
+    StringParseDuration,
+    /// `String.parse_instant() -> Result<Instant, String>` — RFC 3339.
+    StringParseInstant,
 }
 
 impl BuiltinMethodKind {
@@ -434,6 +458,22 @@ impl BuiltinMethodKind {
         )
     }
 
+    /// The B06 methods that take or produce a `Duration` or an `Instant`.
+    pub fn is_time(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DurationWhole(_)
+                | DurationAbs
+                | DurationToString
+                | InstantEpochMilliseconds
+                | InstantToString
+                | InstantFromEpochMilliseconds
+                | StringParseDuration
+                | StringParseInstant
+        )
+    }
+
     /// The B03 regular-expression methods, whose first argument is a
     /// pattern literal.
     pub fn is_regex(self) -> bool {
@@ -455,6 +495,38 @@ impl BuiltinMethodKind {
 /// and IR lowering all read method names through this one function.
 pub fn decimal_rounding_mode(method: &str) -> Option<corvid_decimal::RoundingMode> {
     method.strip_prefix("round_").and_then(corvid_decimal::RoundingMode::from_suffix)
+}
+
+/// The unit a `Duration` reading names: `whole_seconds` names `Seconds`.
+pub fn duration_reading_unit(method: &str) -> Option<corvid_time::TimeUnit> {
+    method.strip_prefix("whole_").and_then(corvid_time::TimeUnit::from_name)
+}
+
+/// A method called on a compiler-known type name rather than a value:
+/// `Instant.from_epoch_milliseconds(n)`. The checker and IR lowering
+/// both look the call up here.
+pub fn builtin_type_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    match (receiver, name) {
+        (Type::Instant, "from_epoch_milliseconds") => Some(BuiltinMethodSig {
+            kind: BuiltinMethodKind::InstantFromEpochMilliseconds,
+            params: vec![Type::Int],
+            ret: Type::Instant,
+        }),
+        _ => None,
+    }
+}
+
+/// The compiler-known type a bare type name denotes when it is a
+/// method receiver (`Instant` in `Instant.from_epoch_milliseconds`).
+pub fn builtin_type_receiver(
+    target: &corvid_ast::Expr,
+    bindings: &std::collections::HashMap<corvid_ast::Span, corvid_resolve::Binding>,
+) -> Option<Type> {
+    let corvid_ast::Expr::Ident { name, .. } = target else { return None };
+    match bindings.get(&name.span)? {
+        corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Instant) => Some(Type::Instant),
+        _ => None,
+    }
 }
 
 /// The source digits of a number literal, which `corvid_decimal` reads
@@ -599,6 +671,25 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![],
             Type::Result(Box::new(Type::Decimal), Box::new(Type::String)),
         ),
+        (Type::String, "parse_duration") => sig(
+            StringParseDuration,
+            vec![],
+            Type::Result(Box::new(Type::Duration), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_instant") => sig(
+            StringParseInstant,
+            vec![],
+            Type::Result(Box::new(Type::Instant), Box::new(Type::String)),
+        ),
+        (Type::Duration, "abs") => sig(DurationAbs, vec![], Type::Duration),
+        (Type::Duration, "to_string") => sig(DurationToString, vec![], Type::String),
+        (Type::Duration, method) if duration_reading_unit(method).is_some() => sig(
+            DurationWhole(duration_reading_unit(method).expect("checked by the guard")),
+            vec![],
+            Type::Int,
+        ),
+        (Type::Instant, "epoch_milliseconds") => sig(InstantEpochMilliseconds, vec![], Type::Int),
+        (Type::Instant, "to_string") => sig(InstantToString, vec![], Type::String),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

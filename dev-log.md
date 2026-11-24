@@ -4,6 +4,37 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Durations and instants on the interpreter (B06, second slice)
+
+`Duration` and `Instant` are new primitive types, with every rule in a
+new `corvid-time` crate over the `chrono` the runtime already uses.
+Both count nanoseconds in 128 bits. An instant covers 0001 to 9999,
+the range RFC 3339 can write, so historical and far-future dates work
+where a 64-bit nanosecond clock stops at 1677 and 2262. A duration is
+at most the span of that range.
+
+The operators are a small table: instants subtract to a duration and
+move by one, durations add, scale and divide by an `Int`. A bare
+number next to a duration or instant is a compile error, the papercut
+`Int`-millisecond durations kept. Readings are `whole_seconds()` and
+friends, named for the truncation they do. Text is ISO 8601 for
+durations and RFC 3339 for instants, and `parse_duration` refuses
+`P1D`, because a day is not a fixed length. `time_now()` is a traced
+tool that returns the instant to the nanosecond.
+
+Tools and prompts may carry both types as that text on the
+interpreter, and a prompt's schema names the format, so a model never
+guesses one. Routes, stores, tables, connectors and `to_json` still
+refuse them until the JSON slice publishes the forms. The boundary
+pass moved into its own checker file now that it covers three types.
+
+The syntax check under the simplicity rule changed the plan: the
+proposal's `30.seconds()` methods are dropped in favour of a duration
+literal, `30 seconds`, matching the bounded ask's `within 30
+seconds`, with `attempts * 30 seconds` for computed values. The
+literal is shared grammar, so it is proposed to Codex and waits as
+slice 2b; this slice ships everything that does not depend on it.
+
 ## 2026-11-24 - Exact decimals on the interpreter (B06, first slice)
 
 `Decimal` is a new primitive type for money and other exact

@@ -73,6 +73,8 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::JsonBuilder
         | Type::RegexMatch
         | Type::Decimal
+        | Type::Duration
+        | Type::Instant
         | Type::Unknown => false,
     }
 }

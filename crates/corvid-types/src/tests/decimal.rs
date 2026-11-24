@@ -158,7 +158,7 @@ prompt estimate(item: String) -> Decimal:
     let boundaries: Vec<_> = errors
         .iter()
         .filter_map(|kind| match kind {
-            TypeErrorKind::DecimalAtBoundary { boundary } => Some(boundary.as_str()),
+            TypeErrorKind::PendingJsonFormAtBoundary { boundary, .. } => Some(boundary.as_str()),
             _ => None,
         })
         .collect();

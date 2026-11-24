@@ -75,9 +75,12 @@ impl<'a> Checker<'a> {
         let lt = lt.ungrounded().untainted().clone();
         let rt = rt.ungrounded().untainted().clone();
 
-        let decimal = self.check_decimal_binop(op, l, r, &lt, &rt, span);
-        let result = if let Some(decimal) = decimal {
-            decimal
+        let b06 = match self.check_decimal_binop(op, l, r, &lt, &rt, span) {
+            Some(decimal) => Some(decimal),
+            None => self.check_time_binop(op, l, r, &lt, &rt),
+        };
+        let result = if let Some(b06) = b06 {
+            b06
         } else {
             match op {
             // `+` is overloaded: numeric addition OR string concatenation.
@@ -171,6 +174,7 @@ impl<'a> Checker<'a> {
                 Type::Int => Type::Int,
                 Type::Float => Type::Float,
                 Type::Decimal => Type::Decimal,
+                Type::Duration if op == UnaryOp::Neg => Type::Duration,
                 Type::Unknown => Type::Unknown,
                 other => {
                     self.errors.push(TypeError::new(

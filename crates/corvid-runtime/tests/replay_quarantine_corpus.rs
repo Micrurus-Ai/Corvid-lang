@@ -718,3 +718,22 @@ async fn replay_substitutes_recorded_uuids() {
         assert_eq!(replayed.as_str(), Some(recorded), "replay must return the RECORDED {tool} result");
     }
 }
+
+/// B06 — `time_now` is a tool, so Substitute-mode replay returns the
+/// RECORDED instant text, to the nanosecond, not the live clock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_substitutes_the_recorded_instant() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace.jsonl");
+    let lines = [
+        r#"{"kind":"schema_header","version":2,"writer":"corvid-vm","ts_ms":0,"run_id":"r"}"#,
+        r#"{"kind":"seed_read","ts_ms":1,"run_id":"r","purpose":"rollout_default_seed","value":12345}"#,
+        r#"{"kind":"tool_call","ts_ms":3,"run_id":"r","tool":"time_now","args":[]}"#,
+        r#"{"kind":"tool_result","ts_ms":4,"run_id":"r","tool":"time_now","result":"2023-11-14T22:13:19.123456789Z"}"#,
+    ];
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let runtime = build_substitute_replay_runtime(&path);
+    assert!(runtime.is_replay_mode());
+    let instant = runtime.call_tool("time_now", vec![]).await.expect("replayed time_now must substitute");
+    assert_eq!(instant.as_str(), Some("2023-11-14T22:13:19.123456789Z"), "got {instant}");
+}

@@ -28,13 +28,21 @@ enum Direction {
 struct NoForm {
     reason: String,
     hint: String,
-    /// B06 — the missing form is a `Decimal`'s, which its JSON slice adds.
-    decimal: bool,
+    /// B06 — the type whose JSON form B06's JSON slice adds, when that
+    /// is what is missing.
+    pending: Option<&'static str>,
 }
 
 impl NoForm {
     fn new(reason: impl Into<String>, hint: impl Into<String>) -> Self {
-        Self { reason: reason.into(), hint: hint.into(), decimal: false }
+        Self { reason: reason.into(), hint: hint.into(), pending: None }
+    }
+
+    fn pending(type_name: &'static str, hint: &str) -> Self {
+        Self {
+            pending: Some(type_name),
+            ..NoForm::new(format!("`{type_name}` has no JSON form until B06's JSON slice"), hint)
+        }
     }
 }
 
@@ -166,12 +174,19 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    /// B06 — whether `ty` reaches a `Decimal` whose JSON form is still
-    /// missing, walking records the way `to_json` does.
-    pub(super) fn reaches_decimal_without_json_form(&mut self, ty: &Type) -> bool {
-        [Direction::Encode, Direction::Decode]
-            .into_iter()
-            .any(|direction| matches!(self.json_form(ty, direction, &mut Vec::new()), Err(NoForm { decimal: true, .. })))
+    /// B06 — the first type `ty` reaches whose JSON form is still
+    /// missing, walking records the way `to_json` does. At a tool or
+    /// prompt (`text_boundary`), durations and instants cross as text.
+    pub(super) fn pending_json_form(&mut self, ty: &Type, text_boundary: bool) -> Option<&'static str> {
+        let outer = std::mem::replace(&mut self.time_text_boundary, text_boundary);
+        let pending = [Direction::Encode, Direction::Decode].into_iter().find_map(|direction| {
+            match self.json_form(ty, direction, &mut Vec::new()) {
+                Err(NoForm { pending, .. }) => pending,
+                Ok(_) => None,
+            }
+        });
+        self.time_text_boundary = outer;
+        pending
     }
 
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
@@ -207,13 +222,22 @@ impl<'a> Checker<'a> {
                     "decode the error's fields into a record you declare",
                 )),
             },
-            Type::Decimal => Err(NoForm {
-                decimal: true,
-                ..NoForm::new(
-                    "`Decimal` has no JSON form yet; it arrives with B06's JSON slice, as an exact string such as \"19.99\"",
-                    "send `amount.to_string()` and read it back with `parse_decimal()`",
-                )
-            }),
+            Type::Decimal => Err(NoForm::pending(
+                "Decimal",
+                "send `amount.to_string()` and read it back with `parse_decimal()`",
+            )),
+            // Tools and prompts carry time as its standard text on the
+            // interpreter (RFC 3339, ISO 8601); the published mapping —
+            // routes, `from_json`, SDKs — arrives with the JSON slice.
+            Type::Duration | Type::Instant if self.time_text_boundary => Ok(false),
+            Type::Duration => Err(NoForm::pending(
+                "Duration",
+                "send `span.to_string()` and read it back with `parse_duration()`",
+            )),
+            Type::Instant => Err(NoForm::pending(
+                "Instant",
+                "send `at.to_string()` and read it back with `parse_instant()`",
+            )),
             Type::RegexMatch => Err(NoForm::new(
                 "a `RegexMatch` describes a position in one text and has no JSON form",
                 "copy the fields you need into a record you declare",

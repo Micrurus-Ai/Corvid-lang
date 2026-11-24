@@ -1883,6 +1883,9 @@ impl<'a> Lowerer<'a> {
             if let Some(rewrite) = self.try_table_call(callee, args) {
                 return rewrite;
             }
+            if let Some(rewrite) = self.try_builtin_type_method_call(target, field, args) {
+                return rewrite;
+            }
             if let Some(rewrite) = self.try_type_method_call(target, field, args) {
                 return rewrite;
             }
@@ -2321,6 +2324,20 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// `Instant.from_epoch_milliseconds(n)`: a method of a compiler-known
+    /// type name, found with the lookup the checker used. Its one
+    /// argument becomes the receiver.
+    fn try_builtin_type_method_call(&self, target: &Expr, field: &Ident, args: &[Expr]) -> Option<IrExprKind> {
+        let receiver = corvid_types::builtin_type_receiver(target, self.bindings)?;
+        let sig = corvid_types::builtin_type_method(&receiver, &field.name)?;
+        let (first, rest) = args.split_first()?;
+        Some(IrExprKind::BuiltinMethod {
+            kind: sig.kind,
+            receiver: Box::new(self.lower_expr(first)),
+            args: rest.iter().map(|a| self.lower_expr(a)).collect(),
+        })
+    }
+
     /// `Order.from_json(text)`: a method called on a type. The text
     /// becomes the receiver, and the target type travels in the call's
     /// checked `Result<T, JsonError>` type.
@@ -2437,6 +2454,8 @@ impl<'a> Lowerer<'a> {
             Some(Binding::BuiltIn(BuiltIn::Int)) => Type::Int,
             Some(Binding::BuiltIn(BuiltIn::Float)) => Type::Float,
             Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
+            Some(Binding::BuiltIn(BuiltIn::Duration)) => Type::Duration,
+            Some(Binding::BuiltIn(BuiltIn::Instant)) => Type::Instant,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,

@@ -96,6 +96,8 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::JsonError => "JsonError".into(),
         Type::RegexMatch => "RegexMatch".into(),
         Type::Decimal => "Decimal".into(),
+        Type::Duration => "Duration".into(),
+        Type::Instant => "Instant".into(),
         // Slice 51f — `Upload<Format>` / `Page<Item>` are
         // HTTP-boundary types; stable mangled names keep typeinfo
         // lookups from crashing, but any emission that USES them bails
@@ -565,6 +567,7 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // B06 — exact decimals are interpreter-tier until the native
         // Decimal slice.
         Type::Decimal => false,
+        Type::Duration | Type::Instant => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the

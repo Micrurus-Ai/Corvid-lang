@@ -70,6 +70,8 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         // roadmap item, after B06's JSON slice). The checker refuses
         // `Decimal` table columns until then.
         Type::Decimal => (ColumnKind::Json, false),
+        // B06 — the same deferred decision for durations and instants.
+        Type::Duration | Type::Instant => (ColumnKind::Json, false),
         _ => (ColumnKind::Json, false),
     }
 }

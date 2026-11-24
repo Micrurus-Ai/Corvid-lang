@@ -87,9 +87,12 @@ pub enum TypeErrorKind {
     /// B06 — a `Decimal` division or remainder by the literal zero.
     DecimalDivisionByZero,
 
-    /// B06 — a `Decimal` in a type that leaves the program as JSON
-    /// before `Decimal` has a JSON form.
-    DecimalAtBoundary { boundary: String },
+    /// B06 — an operator that does not apply to the time types involved.
+    TimeOperatorMismatch { left: String, right: String, hint: String },
+
+    /// B06 — a `Decimal`, `Duration` or `Instant` in a type that leaves
+    /// the program as JSON before B06's JSON slice gives it a form.
+    PendingJsonFormAtBoundary { type_name: String, boundary: String },
 
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
@@ -620,8 +623,11 @@ impl TypeErrorKind {
                 format!("a `Decimal` rounds to between 0 and 28 places, not {places}")
             }
             Self::DecimalDivisionByZero => "this `Decimal` division is by zero".into(),
-            Self::DecimalAtBoundary { boundary } => format!(
-                "a `Decimal` cannot appear in {boundary} yet: its exact JSON form arrives with B06's JSON slice"
+            Self::TimeOperatorMismatch { left, right, .. } => {
+                format!("this operator does not combine `{left}` and `{right}`")
+            }
+            Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
+                "a `{type_name}` cannot appear in {boundary} yet: its JSON form arrives with B06's JSON slice"
             ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
@@ -1068,9 +1074,12 @@ impl TypeErrorKind {
                 "places is the number of digits after the point, from 0 to 28".into(),
             ),
             Self::DecimalDivisionByZero => Some("divide by a non-zero value".into()),
-            Self::DecimalAtBoundary { .. } => Some(
-                "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
-            ),
+            Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::PendingJsonFormAtBoundary { type_name, .. } => Some(match type_name.as_str() {
+                "Decimal" => "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
+                "Duration" => "carry it as a String with `span.to_string()` and read it back with `parse_duration()`".into(),
+                _ => "carry it as a String with `at.to_string()` and read it back with `parse_instant()`".into(),
+            }),
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),
