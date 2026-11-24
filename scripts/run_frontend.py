@@ -1,6 +1,7 @@
 """Develop the browser frontend queue in an isolated Git worktree."""
 
 import argparse
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 import hashlib
 import json
@@ -10,6 +11,7 @@ import re
 import subprocess
 import tempfile
 import time
+from threading import Lock
 
 from run_roadmap import FIELDS
 
@@ -145,19 +147,48 @@ def ancestor(tree, older, newer):
     return result.returncode == 0
 
 
-def finish(tree, branch):
+merge_lock = Lock()
+
+
+def draft_pull_request(tree, branch, title, check):
+    args = ["gh", "pr", "list", "--base", "main", "--head", branch, "--state", "open",
+            "--json", "number,isDraft"]
+    existing = json.loads(subprocess.check_output(args, cwd=tree))
+    if existing:
+        return existing[0]
+    subprocess.run(["gh", "pr", "create", "--draft", "--base", "main", "--head", branch,
+                    "--title", title, "--body-file", "-"], input=check + "\n",
+                   cwd=tree, text=True, check=True)
+    return json.loads(subprocess.check_output(args, cwd=tree))[0]
+
+
+def finish(tree, branch, pull):
     tip = git(tree, "rev-parse", "HEAD")
     git(tree, "fetch", "origin", "main")
     if not ancestor(tree, tip, "origin/main"):
         if not ancestor(tree, "origin/main", tip):
             return False
-        try:
-            git(tree, "push", "origin", "HEAD:refs/heads/main")
-        except subprocess.CalledProcessError:
-            git(tree, "fetch", "origin", "main")
-            if not ancestor(tree, "origin/main", tip) and not ancestor(tree, tip, "origin/main"):
+        number = str(pull["number"])
+        if pull["isDraft"]:
+            subprocess.run(["gh", "pr", "ready", number], cwd=tree, check=True)
+        while True:
+            details = json.loads(subprocess.check_output(
+                ["gh", "pr", "view", number, "--json", "mergeStateStatus,headRefOid"], cwd=tree))
+            if details["headRefOid"] != tip:
+                raise RuntimeError(f"Pull request #{number} changed after verification.")
+            if details["mergeStateStatus"] == "BEHIND":
                 return False
-            raise
+            if details["mergeStateStatus"] not in ("BLOCKED", "UNSTABLE", "UNKNOWN"):
+                break
+            checks = json.loads(subprocess.check_output(
+                ["gh", "pr", "view", number, "--json", "statusCheckRollup"], cwd=tree))
+            if not any(item.get("status") in ("QUEUED", "IN_PROGRESS", "PENDING")
+                       or item.get("state") in ("PENDING", "EXPECTED")
+                       for item in checks["statusCheckRollup"]):
+                break
+            time.sleep(30)
+        subprocess.run(["gh", "pr", "merge", number, "--merge", "--match-head-commit", tip],
+                       cwd=tree, check=True)
         git(tree, "fetch", "origin", "main")
     if not ancestor(tree, tip, "origin/main"):
         raise RuntimeError("Main verification failed.")
@@ -205,7 +236,7 @@ def verify_blocked_browser(tree, state, task, report):
                 break
     if run is None:
         raise RuntimeError(f"GitHub has not listed the dispatched run: {title}")
-    write(state / "current.json", {"task": task, "head": revision,
+    write(state / f"current-{task}.json", {"task": task, "head": revision,
                                    "status": "waiting for browser check", "run": run})
     while True:
         result = json.loads(gh("run", "view", str(run), "--json", "status,conclusion,url"))
@@ -230,17 +261,21 @@ def run_task(tree, state, task, title, check):
         git(tree, "switch", branch)
     elif remote_tip(tree, branch):
         git(tree, "fetch", "origin", branch)
-        git(tree, "switch", "-c", branch, "FETCH_HEAD")
+        git(tree, "switch", "-c", branch, f"origin/{branch}")
     else:
         git(tree, "switch", "-c", branch, "origin/main")
     while True:
         git(tree, "fetch", "origin", "main")
         if not ancestor(tree, "origin/main", "HEAD"):
             git(tree, "merge", "--no-edit", "origin/main")
+        if git(tree, "rev-parse", "HEAD") == git(tree, "rev-parse", "origin/main"):
+            git(tree, "commit", "--allow-empty", "-m", f"Start {title}")
+        git(tree, "push", "origin", f"HEAD:refs/heads/{branch}")
+        draft_pull_request(tree, branch, title, check)
         head = git(tree, "rev-parse", "HEAD")
         print(f"{task} started at {head[:9]}: {title}", flush=True)
         previous = load(note)
-        write(state / "current.json", {"task": task, "head": head, "status": "working"})
+        write(state / f"current-{task}.json", {"task": task, "head": head, "status": "working"})
         report = worker(tree, state, task, title, check, previous)
         if git(tree, "rev-parse", "HEAD") != head or git(tree, "diff", "--cached", "--name-only"):
             raise RuntimeError("Checkout changed during the worker pass.")
@@ -263,15 +298,19 @@ def run_task(tree, state, task, title, check):
         git(tree, "push", "origin", f"HEAD:refs/heads/{branch}")
         if remote_tip(tree, branch) != git(tree, "rev-parse", "HEAD"):
             raise RuntimeError("Task push verification failed.")
+        pull = draft_pull_request(tree, branch, title, check)
         write(note, report)
         print(f"{task} {status}: {report['summary']}", flush=True)
         if status == "complete":
-            if finish(tree, branch):
-                return
+            with merge_lock:
+                if finish(tree, branch, pull):
+                    write(state / f"current-{task}.json", {"task": task, "status": "merged"})
+                    return
             continue
         if status == "blocked" and verify_blocked_browser(tree, state, task, report):
             continue
         if status != "continue":
+            write(state / f"current-{task}.json", {"task": task, "status": status})
             return
 
 
@@ -295,40 +334,75 @@ def main():
             if task not in done and deps - done:
                 status = "waiting for " + ", ".join(sorted(deps - done))
             print(f"{task}  {status:24} {title}")
-        print("Last runner event:", load(state / "current.json"), "\nCheckout:", tree, "\nLogs:", state)
+        print("Supervisor:", load(state / "current.json"))
+        for event in sorted(state.glob("current-F*.json")):
+            print(load(event))
         return
     state.mkdir(exist_ok=True)
     with exclusive(state):
-        try:
-            git(root, "fetch", "origin", "main")
-            if not tree.exists():
-                tree.parent.mkdir(parents=True, exist_ok=True)
-                git(root, "worktree", "add", "--detach", str(tree), "origin/main")
-            if Path(git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve() != common.resolve():
-                raise RuntimeError("Unexpected worktree repository.")
-            if git(tree, "status", "--porcelain"):
-                event = load(state / "current.json")
-                resume = event.get("task", "")
-                if (resume not in tasks or git(tree, "branch", "--show-current") != BRANCHES[resume]
-                        or event.get("head") != git(tree, "rev-parse", "HEAD")
-                        or git(tree, "diff", "--cached", "--name-only")):
-                    raise RuntimeError(f"Unattributed or staged changes in {tree}. Inspect before resuming.")
-                title, _, check = tasks[resume]
-                run_task(tree, state, resume, title, check)
-            write(state / "schema.json", {"type": "object", "properties": FIELDS,
-                                         "required": list(FIELDS), "additionalProperties": False})
-            tasks = queue(git(root, "show", "origin/main:docs/frontend-roadmap.md"))
-            for task, (title, deps, check) in tasks.items():
-                done = completed(tree)
-                if task in done or deps - done:
+        git(root, "fetch", "origin", "main")
+        tasks = queue(git(root, "show", "origin/main:docs/frontend-roadmap.md"))
+        write(state / "schema.json", {"type": "object", "properties": FIELDS,
+                                     "required": list(FIELDS), "additionalProperties": False})
+        trees = [tree, tree.with_name(tree.name + "-parallel")]
+        for checkout in trees:
+            if not checkout.exists():
+                checkout.parent.mkdir(parents=True, exist_ok=True)
+                git(root, "worktree", "add", "--detach", str(checkout), "origin/main")
+            if Path(git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve() != common.resolve():
+                raise RuntimeError(f"Unexpected worktree: {checkout}")
+        run_queue(root, trees, state, tasks, args.retry_blocked)
+
+
+def run_queue(root, trees, state, tasks, retry_blocked):
+    attempted = set()
+    running = {}
+    errors = {}
+    with ThreadPoolExecutor(max_workers=len(trees)) as pool:
+        while True:
+            done = completed(root)
+            ready = [task for task, (_, deps, _) in tasks.items()
+                     if task not in done | attempted and deps <= done
+                     and (retry_blocked or load(state / f"{task}.json").get("status")
+                          not in ("blocked", "awaiting_feedback"))]
+            branches = {tree: git(tree, "branch", "--show-current") for tree in trees}
+            for tree in trees:
+                if tree in running.values() or tree in errors:
                     continue
-                if load(state / f"{task}.json").get("status") in ("blocked", "awaiting_feedback") and not args.retry_blocked:
+                reserved = {branch for other, branch in branches.items() if other != tree}
+                task = next((t for t in ready if BRANCHES[t] == branches[tree]), None)
+                task = task or next((t for t in ready if BRANCHES[t] not in reserved), None)
+                if task is None:
                     continue
-                run_task(tree, state, task, title, check)
-            write(state / "current.json", {"status": "finished pass", "remaining": sorted(tasks.keys() - completed(tree))})
-        except Exception as error:
-            write(state / "current.json", {**load(state / "current.json"), "status": "stopped", "error": str(error)})
-            raise
+                dirty = git(tree, "status", "--porcelain")
+                if dirty:
+                    event = load(state / f"current-{task}.json") or load(state / "current.json")
+                    if (branches[tree] != BRANCHES[task] or event.get("task") != task
+                            or event.get("head") != git(tree, "rev-parse", "HEAD")
+                            or git(tree, "diff", "--cached", "--name-only")):
+                        errors[tree] = f"Inspect staged or unattributed work in {tree}"
+                        continue
+                title, _, check = tasks[task]
+                attempted.add(task)
+                ready.remove(task)
+                running[pool.submit(run_task, tree, state, task, title, check)] = tree
+            if not running:
+                break
+            write(state / "current.json", {"status": "running", "workers": len(running),
+                                           "capacity": len(trees)})
+            finished, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in finished:
+                tree = running.pop(future)
+                try:
+                    future.result()
+                except Exception as exc:
+                    errors[tree] = str(exc)
+                    print(f"{tree}: {exc}", flush=True)
+    write(state / "current.json", {"status": "stopped" if errors else "finished pass",
+                                   "errors": {str(k): v for k, v in errors.items()},
+                                   "remaining": sorted(tasks.keys() - completed(root))})
+    if errors:
+        raise RuntimeError(str(errors))
 
 
 if __name__ == "__main__":
