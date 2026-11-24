@@ -958,6 +958,9 @@ impl Resolver {
                 self.bindings.insert(var.span, Binding::Local(id));
                 self.resolve_block(body);
             }
+            Stmt::Atomic { body, .. } => {
+                self.resolve_block(body);
+            }
             Stmt::While { cond, body, .. } => {
                 self.resolve_expr(cond);
                 self.resolve_block(body);

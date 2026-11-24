@@ -432,6 +432,7 @@ stmt              ::= return_stmt
                     | while_stmt
                     | destructure_stmt
                     | parallel_stmt
+                    | atomic_stmt
                     | approve_stmt
                     | break_stmt | continue_stmt | pass_stmt
                     | assign_stmt
@@ -555,6 +556,13 @@ destructure_stmt  ::= struct_literal '=' expr NEWLINE
 # error rule is arm-ordered. `parallel` is contextual, not
 # reserved.
 parallel_stmt     ::= 'parallel' ':' INDENT (IDENT '=' expr NEWLINE)+ DEDENT
+
+# `atomic:` (B09 P7a) — the block's table writes commit together when it
+# reaches its end, or are all undone when it is left through an error.
+# The checker refuses anything the database cannot undo inside it, any
+# `return`, `break` or `continue` that would leave it, nesting, and
+# tables in more than one database. `atomic` is contextual, not reserved.
+atomic_stmt       ::= 'atomic' ':' NEWLINE INDENT stmt+ DEDENT
 
 # `match` is exhaustiveness-checked: sum scrutinees must cover every
 # variant irrefutably (or carry a catch-all), Option needs Some+None,

@@ -141,7 +141,7 @@ agent shelves_of(user: String) -> List<Shelf>:
     cannot be replayed into in-memory SQLite.
 - [ ] P5. MySQL on the same suite.
 - [ ] P6. Native target.
-- [ ] P7. Port `examples/reading_list` from hand-written SQL to tables.
+- [ ] P7. Port `examples/reading_list` from hand-written SQL to tables, in three parts: atomic writes (P7a, done), keys of two or more columns (P7b), and the port (P7c).
 
 ## Settled during implementation
 
@@ -218,6 +218,31 @@ database library:
   concurrent connections stay correct; a connection pool is planned with
   B19's concurrency work, not designed out.
 
+## Atomic writes (P7a)
+
+- `atomic:` is a block, not a function taking a closure or a
+  `transaction { }` keyword pair. Simpler spellings considered:
+  `transaction:` names the mechanism rather than the guarantee the reader
+  needs; `all or nothing:` reads well but is three words for a statement;
+  a closure form (`Shelf.atomic(fn () -> ...)`) adds punctuation and a
+  return value nobody needs. `atomic:` says what happens in one word and
+  matches `parallel:`.
+- Commit when the block ends, undo when it is left through an error. A
+  conflict stays an ordinary value, so code chooses: `?` to undo the
+  whole block, or record the outcome and keep the other writes, which the
+  reading list's review flow needs.
+- A plain `return` is refused inside the block rather than given a
+  meaning, because "return early" could mean keep or discard and a reader
+  should not have to know which.
+- What the database cannot undo is refused at compile time, following
+  agents the block calls. An approval inside a transaction would hold
+  database locks while a person decides, and a model call would hold them
+  for seconds and could not be taken back.
+- Across the tiers: the guarantee is the backend's, and the frontend and
+  assistants see its result through B10's actions. An action whose body
+  is one `atomic:` block is exactly the "all or nothing" a form submit or
+  an agent's tool call needs, with conflicts returned as typed values the
+  form or the agent can show or retry.
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.

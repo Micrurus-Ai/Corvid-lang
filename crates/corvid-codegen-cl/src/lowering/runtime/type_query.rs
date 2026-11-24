@@ -343,6 +343,9 @@ fn visit_block_types(
                     visit_block_types(eb, seen, order, visit);
                 }
             }
+            IrStmt::Atomic { body, .. } => {
+                visit_block_types(body, seen, order, visit);
+            }
             IrStmt::While { cond, body, .. } => {
                 visit_expr_types(cond, seen, order, visit);
                 visit_block_types(body, seen, order, visit);

@@ -157,6 +157,10 @@ struct Interpreter<'ir> {
     /// from live timing. `None` for completed/errored arms and outside
     /// replay.
     replay_cancel_after: Option<usize>,
+    /// The open `atomic:` block's transaction (B09 P7a), shared with
+    /// the agents it calls so their table operations join it. `None`
+    /// outside an `atomic:` block.
+    table_transaction: Option<Arc<corvid_runtime::tables::TableTransaction>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -197,6 +201,7 @@ impl<'ir> Interpreter<'ir> {
             parallel_cancel: None,
             dispatch_count: None,
             replay_cancel_after: None,
+            table_transaction: None,
         }
     }
 
@@ -1956,6 +1961,8 @@ impl<'ir> Interpreter<'ir> {
                 sub.parallel_cancel = self.parallel_cancel.clone();
                 sub.dispatch_count = self.dispatch_count.clone();
                 sub.replay_cancel_after = self.replay_cancel_after;
+                // An agent called inside an `atomic:` block writes inside it.
+                sub.table_transaction = self.table_transaction.clone();
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {

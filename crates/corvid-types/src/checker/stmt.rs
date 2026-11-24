@@ -278,6 +278,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            Stmt::Atomic { body, span } => self.check_atomic(body, *span),
             Stmt::While { cond, body, .. } => {
                 // Same Grounded<Bool> acceptance rule as `if`: the
                 // branch consumes the bool, it does not launder it.

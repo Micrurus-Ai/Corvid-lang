@@ -299,6 +299,9 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
             collect_expr_deps(iter, resolved, deps);
             collect_block_deps(body, resolved, deps);
         }
+        Stmt::Atomic { body, .. } => {
+            collect_block_deps(body, resolved, deps);
+        }
         Stmt::While { cond, body, .. } => {
             collect_expr_deps(cond, resolved, deps);
             collect_block_deps(body, resolved, deps);

@@ -106,6 +106,55 @@ agent store(renamed: Shelf) -> String:
         Err(current) -> "someone else changed the shelf first"
 ```
 
+## Atomic writes
+
+An `atomic:` block's table writes commit together when the block reaches
+its end. If the block is left through an error, every write in it is
+undone: a `?` that passes an error out of it, or a runtime failure such
+as a division by zero.
+
+```corvid
+agent move_title(from: Shelf, to: Shelf) -> Result<String, Option<Shelf>>:
+    atomic:
+        cleared = Shelf.save(Shelf { title: "", ..from })?
+        filled = Shelf.save(Shelf { title: from.title, ..to })?
+    return Ok(filled.title)
+```
+
+If `to` changed since it was read, its save is a conflict, the `?` passes
+the conflict out, and `from` keeps its title. A conflict is still an
+ordinary value, so a block can also record it and carry on, keeping the
+other writes:
+
+```corvid
+atomic:
+    outcome = Shelf.save(edited)
+    Review.save(Review { outcome: describe(outcome), ..review })
+```
+
+The checker keeps a block to what the database can undo. Inside one:
+
+| Refused | Why |
+| --- | --- |
+| A tool, prompt, Python or imported call, `ask` or `choose` | The database cannot undo it. Do it before or after the block. |
+| `approve`, `yield`, `parallel:` | The same. |
+| `return`, or a `break` or `continue` that leaves the block | It would leave without saying whether to keep the writes. Finish the block, then leave. A `break` inside a loop of its own within the block is fine. |
+| Another `atomic:` block | Its writes already commit together. |
+| Tables in more than one database | A transaction cannot span databases. |
+
+An agent called inside a block runs inside its transaction, so the same
+rules apply to that agent's body, and its table operations join the
+block's transaction.
+
+Each block runs on its own connection, so no other agent's writes land
+inside it. On SQLite a block also holds the file's writer turn from start
+to finish: other writers wait their turn instead of deadlocking against
+the open transaction. On Postgres the block runs at Postgres's default
+isolation, read committed; each write is still compare-and-set on its
+row's revision, so no write is lost. The trace records each block's
+start and how it ended, as `table:<database>.begin`, `.commit` or
+`.rollback`, and a replay serves them from the trace.
+
 ## Queries
 
 A query starts with `Shelf.where(fn (s) -> condition)` or `Shelf.all()`,

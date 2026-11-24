@@ -371,6 +371,10 @@ fn lower_stmt(
             "parallel blocks are interpreter-only in 46e",
             *span,
         )),
+        IrStmt::Atomic { span, .. } => Err(CodegenError::not_supported(
+            "atomic blocks run on the interpreter until native tables land (B09 P6); use `corvid run --tier interp`",
+            *span,
+        )),
         IrStmt::While { cond, body, span } => lower_while(
             builder,
             cond,
@@ -923,6 +927,7 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
         IrStmt::While { cond, body, .. } => {
             expr_mentions_local(cond, target) || block_mentions_local(body, target)
         }
+        IrStmt::Atomic { body, .. } => block_mentions_local(body, target),
         IrStmt::Destructure { value, .. } => expr_mentions_local(value, target),
         IrStmt::Parallel { arms, .. } => {
             arms.iter().any(|arm| expr_mentions_local(&arm.call, target))

@@ -366,6 +366,9 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
                 intern_expr_literals(iter, pool);
                 intern_string_literals(body, pool);
             }
+            IrStmt::Atomic { body, .. } => {
+                intern_string_literals(body, pool);
+            }
             IrStmt::While { cond, body, .. } => {
                 intern_expr_literals(cond, pool);
                 intern_string_literals(body, pool);
@@ -483,6 +486,11 @@ fn collect_block_imports(
             IrStmt::Parallel { .. } => {
                 return Err(WasmCodegenError::unsupported(
                     "parallel blocks are interpreter-only in 46e".to_string(),
+                ));
+            }
+            IrStmt::Atomic { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "atomic blocks run on the interpreter (B09)".to_string(),
                 ));
             }
             IrStmt::Approve { label, args, .. } => {
@@ -1015,6 +1023,7 @@ fn emit_block(
             | IrStmt::While { .. }
             | IrStmt::Destructure { .. }
             | IrStmt::Parallel { .. }
+            | IrStmt::Atomic { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(

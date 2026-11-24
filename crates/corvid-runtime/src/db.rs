@@ -69,6 +69,15 @@ impl DbHandleInner {
             writer: None,
         }
     }
+
+    /// Take this file's writer turn and keep it until the guard drops.
+    /// An `atomic:` block (B09 P7a) holds it from `BEGIN IMMEDIATE` to
+    /// its commit or rollback, so other writers wait in the queue rather
+    /// than on SQLite's lock, where they could deadlock against it.
+    /// `None` for an in-memory database, which has no other writers.
+    pub(crate) async fn hold_writer_turn(&self) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        Some(self.writer.clone()?.lock_owned().await)
+    }
 }
 
 impl Drop for DbHandleInner {

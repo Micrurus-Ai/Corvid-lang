@@ -623,6 +623,7 @@ impl<'ir> Interpreter<'ir> {
             // `while cond:` (slice 45k) — re-evaluate the condition
             // before every iteration; a non-Bool condition traps
             // (the checker only lets Bool/Unknown through).
+            IrStmt::Atomic { database, body, span } => self.eval_atomic(database.as_ref(), body, *span).await,
             IrStmt::While { cond, body, span } => {
                 loop {
                     let cond_val = match self.eval_expr(cond).await?.into_value() {

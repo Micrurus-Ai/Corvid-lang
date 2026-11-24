@@ -2349,6 +2349,7 @@ fn stmt_reaches_approve(
         IrStmt::While { cond, body, .. } => {
             expr_reaches_approve(ir, cond, visited) || block_reaches_approve(ir, body, visited)
         }
+        IrStmt::Atomic { body, .. } => block_reaches_approve(ir, body, visited),
         IrStmt::Parallel { arms, .. } => arms
             .iter()
             .any(|arm| expr_reaches_approve(ir, &arm.call, visited)),

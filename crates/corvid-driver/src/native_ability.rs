@@ -22,6 +22,8 @@ pub enum NotNativeReason {
     TableOperation {
         table: String,
     },
+    /// An `atomic:` block (B09 P7a), which groups table writes.
+    AtomicBlock,
     PythonImport {
         module: String,
     },
@@ -87,6 +89,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::TableOperation { table } => write!(
                 f,
                 "program reads or writes table `{table}` - table operations run on the interpreter until native tables land (B09 P6)"
+            ),
+            Self::AtomicBlock => write!(
+                f,
+                "program uses an `atomic:` block - atomic table writes run on the interpreter until native tables land (B09 P6)"
             ),
             Self::StreamLoweringNotImplemented => {
                 write!(f, "program uses `Stream<T>` - Stream lowering is not yet implemented")
@@ -293,6 +299,8 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
         // Parallel blocks are interpreter-only in 46e.
         IrStmt::Parallel { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `while` (45k) lowers natively like `for` — walk cond + body.
+        // Native tables arrive with B09 P6; an atomic block groups table writes.
+        IrStmt::Atomic { .. } => Err(NotNativeReason::AtomicBlock),
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, current_return_ty, context)?;
             scan_block(body, current_return_ty, context)

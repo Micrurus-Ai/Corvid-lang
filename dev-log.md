@@ -201,6 +201,31 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - Atomic table writes (B09 P7a)
+
+`atomic:` blocks make several table writes succeed or fail together. The
+writes commit when the block ends; leaving it through an error, a
+propagated `?` or a runtime failure, undoes them. Conflicts stay
+ordinary values, so the reading list's review can record "Conflict" for
+one shelf and still save the rest in one transaction. The checker keeps
+a block to what the database can undo: tools, prompts, approvals,
+`ask`, `parallel:` and calls that reach them through an agent are
+refused, as are a `return` or an escaping `break` (either would leave
+without saying whether to keep the writes), nesting, and tables in two
+databases. `atomic` stays contextual, like `parallel`.
+
+Each block runs on its own connection, so no other agent's statement
+lands inside it. On SQLite the block also holds the file's writer turn
+from `BEGIN IMMEDIATE` to its end, so another writer waits in the
+registry's queue instead of on SQLite's lock, where the two could
+deadlock; a test runs two runtimes writing to one file through atomic
+blocks and checks that every write lands. The trace records
+`table:<database>.begin`, `.commit` and `.rollback`, and a replay serves
+them without the database. A new `corvid_ast::visit` module walks every
+statement and expression of a block, so the checker's rules and IR
+lowering read a block's tables through one function, `atomic_tables`,
+which follows called agents.
+
 ## 2026-11-24 - Migrations on Postgres (B09 P4b)
 
 `corvid migrate` now plans and applies Postgres migrations. Postgres

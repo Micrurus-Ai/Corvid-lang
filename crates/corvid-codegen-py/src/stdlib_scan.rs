@@ -131,6 +131,9 @@ fn scan_stmt(stmt: &IrStmt, hits: &mut Vec<StdlibToolCall>) {
             scan_expr(iter, hits);
             scan_block(body, hits);
         }
+        IrStmt::Atomic { body, .. } => {
+            scan_block(body, hits);
+        }
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, hits);
             scan_block(body, hits);

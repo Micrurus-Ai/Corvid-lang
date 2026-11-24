@@ -99,6 +99,14 @@ impl<'a> Parser<'a> {
             {
                 self.parse_parallel_stmt()
             }
+            // `atomic:` (B09 P7a) — contextual in the same way.
+            TokKind::Ident(name)
+                if name == "atomic"
+                    && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokKind::Colon))
+                    && matches!(self.tokens.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::Newline)) =>
+            {
+                self.parse_atomic_stmt()
+            }
             TokKind::Ident(_) => self.parse_assign_or_expr_stmt(),
             _ => self.parse_expr_stmt(),
         }
@@ -275,6 +283,17 @@ impl<'a> Parser<'a> {
     }
 
     /// `while cond:` — conditional loop (slice 45k).
+    /// `atomic:` followed by an indented block of statements.
+    fn parse_atomic_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // atomic (contextual ident)
+        self.expect(TokKind::Colon, "`:` after `atomic`")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let end = body.span;
+        Ok(Stmt::Atomic { body, span: start.merge(end) })
+    }
+
     fn parse_while_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.peek_span();
         self.bump(); // while

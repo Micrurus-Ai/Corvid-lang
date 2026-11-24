@@ -934,6 +934,7 @@ fn stmt_reaches_approval(
                     visited_agents,
                 )
         }
+        Stmt::Atomic { body, .. } => block_reaches_approval(body, bindings, agents, methods, types, visited_agents),
         Stmt::While { cond, body, .. } => {
             expr_reaches_approval(cond, bindings, agents, methods, types, visited_agents)
                 || block_reaches_approval(
@@ -1359,6 +1360,9 @@ fn collect_ident_spans_by_name_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<
         }
         Stmt::For { iter, body, .. } => {
             collect_ident_spans_by_name_in_expr(iter, name, spans);
+            collect_ident_spans_by_name_in_block(body, name, spans);
+        }
+        Stmt::Atomic { body, .. } => {
             collect_ident_spans_by_name_in_block(body, name, spans);
         }
         Stmt::While { cond, body, .. } => {

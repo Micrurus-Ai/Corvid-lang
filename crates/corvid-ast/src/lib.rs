@@ -13,6 +13,7 @@ pub mod replay_expr;
 pub mod span;
 pub mod stmt;
 pub mod ty;
+pub mod visit;
 
 pub use decl::*;
 pub use effect::*;

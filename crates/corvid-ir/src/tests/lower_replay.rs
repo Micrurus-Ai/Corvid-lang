@@ -56,6 +56,7 @@ use super::*;
                 find_replay_in_expr(cond).or_else(|| find_replay_in_block(body))
             }
             IrStmt::Destructure { value, .. } => find_replay_in_expr(value),
+            IrStmt::Atomic { body, .. } => find_replay_in_block(body),
             IrStmt::Parallel { arms, .. } => {
                 arms.iter().find_map(|arm| find_replay_in_expr(&arm.call))
             }

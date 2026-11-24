@@ -133,6 +133,7 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::If { .. }
         | IrStmt::For { .. }
         | IrStmt::While { .. }
+        | IrStmt::Atomic { .. }
         | IrStmt::Destructure { .. }
         | IrStmt::Parallel { .. }
         | IrStmt::Return { .. }
@@ -190,6 +191,9 @@ fn stmt_local_mentions(stmt: &IrStmt, local_id: LocalId) -> usize {
         IrStmt::If { cond, .. } => count_local_mentions_expr(cond, local_id),
         IrStmt::For { iter, .. } => count_local_mentions_expr(iter, local_id),
         IrStmt::While { cond, .. } => count_local_mentions_expr(cond, local_id),
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        // Counted as a mention so no pair is eliminated across one.
+        IrStmt::Atomic { .. } => 1,
         IrStmt::Destructure { value, .. } => count_local_mentions_expr(value, local_id),
         IrStmt::Parallel { arms, .. } => arms
             .iter()
