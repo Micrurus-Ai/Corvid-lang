@@ -628,6 +628,7 @@ dependencies = [
  "corvid-ast",
  "corvid-guarantees",
  "corvid-ir",
+ "corvid-prompt-format",
  "corvid-resolve",
  "corvid-syntax",
  "corvid-types",

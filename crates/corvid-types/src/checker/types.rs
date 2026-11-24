@@ -108,41 +108,22 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn named_type_to_type(&mut self, name: &str, span: corvid_ast::Span) -> Type {
-        match name {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "String" => Type::String,
-            "Bool" => Type::Bool,
-            "Nothing" => Type::Nothing,
-            // Phase 33S3a — `DbHandle` is an opaque, refcounted
-            // primitive type produced ONLY by the executing
-            // `db_open` stdlib tool (see `std/db.cor` from 33S3b).
-            // Users cannot construct or fabricate a value of this
-            // type; the language-level promise is that any
-            // `DbHandle` your code holds came from `db_open`. The
-            // value-side representation is `Value::DbHandle` in
-            // `corvid-vm`; the JSON marshalling path rejects this
-            // type because there is no JSON representation for the
-            // refcounted Arc inside.
-            "DbHandle" => Type::DbHandle,
-            "TraceId" => Type::TraceId,
-            // Phase 33R5b-a — JsonValue and JsonBuilder are
-            // opaque primitives produced ONLY by the executing
-            // stdlib JSON tools. Same shape as DbHandle but
-            // without the opacity gate at json_to_value (the
-            // payload IS the JSON shape; no underlying registry).
-            "JsonValue" => Type::JsonValue,
-            "JsonBuilder" => Type::JsonBuilder,
-            _ => match self.symbols.lookup_def(name) {
-                Some(id) => {
-                    let entry = self.symbols.get(id);
-                    if entry.kind == corvid_resolve::DeclKind::ImportedUse {
-                        return self.imported_use_type_to_type(name, span);
-                    }
-                    self.expand_possible_alias(id, span)
+        // `DbHandle` (Phase 33S3a) and `JsonValue` / `JsonBuilder`
+        // (Phase 33R5b-a) are opaque primitives produced ONLY by the
+        // executing stdlib tools, so user code holding one cannot have
+        // fabricated it.
+        if let Some(known) = Type::compiler_known(name) {
+            return known;
+        }
+        match self.symbols.lookup_def(name) {
+            Some(id) => {
+                let entry = self.symbols.get(id);
+                if entry.kind == corvid_resolve::DeclKind::ImportedUse {
+                    return self.imported_use_type_to_type(name, span);
                 }
-                None => Type::Unknown,
-            },
+                self.expand_possible_alias(id, span)
+            }
+            None => Type::Unknown,
         }
     }
 
@@ -263,27 +244,19 @@ impl<'a> Checker<'a> {
     }
 
     fn named_type_in_module(&self, name: &str, module: &corvid_resolve::ResolvedModule) -> Type {
-        match name {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "String" => Type::String,
-            "Bool" => Type::Bool,
-            "Nothing" => Type::Nothing,
-            "DbHandle" => Type::DbHandle,
-            "TraceId" => Type::TraceId,
-            "JsonValue" => Type::JsonValue,
-            "JsonBuilder" => Type::JsonBuilder,
-            _ => match module.resolved.symbols.lookup_def(name) {
-                Some(def_id)
-                    if matches!(
-                        module.resolved.symbols.get(def_id).kind,
-                        corvid_resolve::DeclKind::Type
-                    ) =>
-                {
-                    imported_struct_type(module, def_id, name)
-                }
-                _ => Type::Unknown,
-            },
+        if let Some(known) = Type::compiler_known(name) {
+            return known;
+        }
+        match module.resolved.symbols.lookup_def(name) {
+            Some(def_id)
+                if matches!(
+                    module.resolved.symbols.get(def_id).kind,
+                    corvid_resolve::DeclKind::Type
+                ) =>
+            {
+                imported_struct_type(module, def_id, name)
+            }
+            _ => Type::Unknown,
         }
     }
 

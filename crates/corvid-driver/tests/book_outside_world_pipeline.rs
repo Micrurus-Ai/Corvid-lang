@@ -2,7 +2,7 @@
 //! book chapter pipeline.
 //!
 //! The chapter at `docs/book/18-talking-to-the-outside-world.md`
-//! describes an end-to-end HTTP → typed-decoder JSON → SQLite
+//! describes an end-to-end HTTP → typed JSON decoding → SQLite
 //! pipeline using zero Python glue — the load-bearing
 //! acceptance claim of the 33S + 33R5b umbrella. This test
 //! lifts the chapter's `src/main.cor` body verbatim and runs it
@@ -17,8 +17,8 @@
 //!   `compile_to_ir_with_config_at_path`.
 //! - The pipeline runs end-to-end through `run_ir_with_runtime`.
 //! - The Corvid program does an HTTP GET, decodes the JSON
-//!   response into a `User` struct via the typed-decoder
-//!   convention, opens a `:memory:` SQLite database, creates a
+//!   response into a `User` struct with `User.from_json`,
+//!   opens a `:memory:` SQLite database, creates a
 //!   table, parameter-binds an INSERT, runs a SELECT, returns
 //!   `Ok(rows_affected)` (0 for the SELECT envelope).
 //!
@@ -125,9 +125,8 @@ agent main() -> Result<String, String>:
 /// runs end-to-end. HTTP GET against a wiremock-served loopback
 /// endpoint (DNS-routed from `api.example.com`); the response
 /// body is `{"id": 7, "email": "alice@example.com"}`; the
-/// typed-decoder `decode_user_from_json` converts it into a
-/// `User` struct via the generic
-/// `serde_json::from_str + json_to_value` dispatch path; the
+/// `User.from_json` decodes it into a `User` struct through the
+/// public JSON mapping; the
 /// SQLite pipeline opens `:memory:`, CREATEs, INSERTs the typed
 /// param-bound row, and SELECTs it back; the agent returns
 /// `Ok(rows_affected)` which is 0 for the SELECT envelope.
@@ -156,9 +155,6 @@ async fn book_chapter_no_python_pipeline_runs_end_to_end_through_real_corvid_pro
     let main_path = stage_book_pipeline_project(
         project.path(),
         r#"
-effect json_decode_eff:
-    reversible: true
-
 type User:
     id: Int
     email: String
@@ -166,11 +162,9 @@ type User:
 import "./std/http" use http_get
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
-
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     response = http_get(url)?
-    user = decode_user_from_json(response.body)?
+    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
     handle = db_open(db_path)?
     db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
     db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?

@@ -1,13 +1,13 @@
 # `std.json` — Executing JSON surface
 
-> **Status:** Phase 33R5b (closed 2026-06-10). 13 executing
-> tools + the typed-decoder convention. Two RuntimeChecked
-> guarantees: parse-safety (malformed input is recoverable,
-> never panics) and field-type-safety (typed-accessor mismatches
-> return Err, never coerce or panic). The umbrella ships BOTH
-> the opaque-handle shape (for dynamic JSON) AND the typed-
-> decoder convention (for typed APIs) so a Corvid program needs
-> ZERO Python glue to consume JSON.
+> **Status:** Phase 33R5b (closed 2026-06-10) and B01 typed JSON.
+> 13 executing tools plus `T.from_json` / `value.to_json()`. Two
+> RuntimeChecked guarantees: parse-safety (malformed input is
+> recoverable, never panics) and field-type-safety (shape and
+> accessor mismatches return Err, never coerce or panic). Corvid
+> ships BOTH the opaque-handle shape (for dynamic JSON) AND typed
+> decoding (for typed APIs) so a program needs ZERO Python glue to
+> consume JSON.
 
 ## Quick reference
 
@@ -28,31 +28,109 @@ Parse text into an opaque `JsonValue`, access fields via typed
 getters that return `Result<T, String>`. Use the `?` postfix
 operator (TryPropagate) for Result chaining.
 
-### 2. Typed-decoder convention — for typed APIs
+### 2. Typed decoding — for typed APIs
 
 ```corvid
-effect json_decode_eff:
-    reversible: true
-
 type User:
     id: Int
     email: String
 
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
-
 agent fetch_user(text: String) -> Result<User, String>:
-    return decode_user_from_json(text)
+    return User.from_json(text).map_err(fn (e) -> e.message)
 ```
 
-The user declares the target struct + a tool matching the
-`decode_<X>_from_json` pattern. (Declaring your own effect works,
-as here; since slice 45o you can also import the module's own row —
-`import "std:json" use json_parse, json_egress_read` — and write
-`uses json_egress_read` directly.) The runtime intercepts the call
-(via `is_typed_json_decoder_tool_call`) and routes through
-`serde_json::from_str` + `json_to_value` against the declared
-target type. **No per-type runtime handler exists** — the
-dispatch is generic over the declared signature.
+Declare the record and call `from_json` on its name. No import, tool
+or effect is needed. The next section describes the methods.
+
+## Typed decoding and encoding
+
+Every type has `to_json`, and `from_json` is called on a type name.
+Neither needs an import:
+
+```corvid
+agent read_order(text: String) -> String:
+    return match Order.from_json(text):
+        Ok(order) -> order.to_json()
+        Err(problem) -> problem.message
+```
+
+| Call | Result |
+| --- | --- |
+| `T.from_json(text)` | `Result<T, JsonError>`. Keys `T` does not declare are skipped, because external APIs add fields. |
+| `T.from_json_strict(text)` | `Result<T, JsonError>`. The first undeclared key is an error. |
+| `value.to_json()` | Compact JSON text with object keys in sorted order, so the same value always encodes to the same text. |
+
+A `JsonError` has four `String` fields: `path` (such as
+`lines[0].quantity`, empty when the problem is the whole text),
+`expected`, `found`, and `message`, which combines them into one line.
+Text that is not JSON fails at the root, and its `found` gives the line
+and column. In an agent that returns `Result<_, String>`, write
+`T.from_json(text).map_err(fn (e) -> e.message)?` to pass a failure
+to the caller.
+
+To decode a list, map or option at the top level, name it with a type
+alias:
+
+```corvid
+type Orders = List<Order>
+
+agent count(text: String) -> Int:
+    return match Orders.from_json(text):
+        Ok(orders) -> orders.length()
+        Err(problem) -> 0
+```
+
+The checker refuses a call when the type has no JSON form in that
+direction, naming the field that prevents it. `from_json` refuses a
+type that contains `Grounded`, because JSON text cannot prove where a
+value came from. Neither method accepts a type that contains a function,
+stream, handle, upload or JSON builder. `to_json` on a value that
+contains `Tainted` data returns `Tainted<String>`, so encoding never
+removes taint. An `extend` block cannot declare a method named
+`to_json`, `from_json` or `from_json_strict`.
+
+The methods are pure, so `@deterministic` code may call them and replay
+reproduces their results. Encoding a `Float` that is NaN or infinite
+stops the program, because JSON has no form for it. The native target
+and decoding types imported from another module are not supported yet.
+Programs that use these methods run on the interpreter.
+
+## Public JSON mapping
+
+The public mapping is the JSON Corvid exchanges with code outside the
+program. HTTP request bodies and JSON replies, `T.from_json` and
+`to_json` use it, and the published OpenAPI schemas describe it.
+
+| Corvid | JSON |
+| --- | --- |
+| `Int` | integer; a fractional or out-of-range number is an error |
+| `Float` | number; an integer is accepted |
+| `String`, `Bool` | string, boolean |
+| `Nothing` | `null` |
+| record | object with one key per field |
+| `Option<T>` | the `T` value, or `null` for `None`; a record field may also be left out |
+| `List<T>` | array |
+| `Map<String, V>` | object |
+| `Map<K, V>` with another key type | array of `[key, value]` pairs |
+| `Result<T, E>` | `{"tag": "ok", "ok": T}` or `{"tag": "err", "err": E}`; `tag` is optional on input but must agree with the key present |
+| sum type | `{"tag": "variant", "type": "<Type>", "variant": "<Variant>", "fields": [...]}` with payload fields in declaration order; on input only `variant` and, for a payload, `fields` are required |
+| `Grounded<T>` | `{"value": T, "sources": [...]}` on output only |
+| `JsonValue` | the JSON value itself |
+
+Decoding never invents provenance. A `Grounded<T>` target is rejected
+because JSON text cannot show where a value came from. Functions,
+handles, streams and JSON builders have no JSON form.
+
+A decode error names the first problem by path, such as `items[2].price`
+or `["user id"]` for a key that is not an identifier, with the expected
+type and what was found. Field refinements are checked at the same
+path. HTTP routes and `from_json_strict` reject keys a record does not
+declare, as the published schemas state `additionalProperties: false`.
+
+Prompt structured output, tool arguments and recorded traces use
+Corvid's internal envelope instead, which represents `Option` as
+`{"tag": "some", "value": …}` or `{"tag": "none"}`. Records, lists,
+scalars and sum types have the same form in both.
 
 ## The opaque shape
 
@@ -134,76 +212,30 @@ Fluent — `json_object_set_*` returns the same builder for
 chaining. `json_object_finish` snapshots and serialises; the
 builder remains usable for further set+finish cycles.
 
-## The typed-decoder convention
+## Retired: the `decode_<Type>_from_json` tool convention
 
-A user declares a tool with the signature:
+Before `T.from_json` existed, declaring
+`tool decode_<X>_from_json(text: String) -> Result<X, String>` made
+the runtime decode JSON in place of calling the tool. That convention
+is retired. It decoded through the internal envelope instead of the
+public mapping, reported errors as text with no field path, and was
+triggered by a tool's name rather than anything the program states.
 
-```corvid
-tool decode_<X>_from_json(text: String) -> Result<X, String> uses <effect>
-```
-
-where:
-
-- `<X>` is any Corvid type the runtime can convert from JSON
-  (a user-declared struct, a primitive, a list, etc.).
-- `<effect>` is any effect the user declares inline. Effects
-  don't export via `use` — the runtime dispatch keys on the
-  tool name pattern + return type, not the effect.
-
-### How the dispatch fires
-
-The interpreter's tool-call site recognises the pattern via
-`is_typed_json_decoder_tool_call(callee_name, result_decode_ty)`,
-which checks TWO conditions simultaneously:
-
-1. Name matches `decode_*_from_json` (where `*` is non-empty).
-2. Return type matches `Result<T, String>` for some T.
-
-Both conditions together prevent the dispatch from silently
-intercepting an unrelated user tool that happens to have one
-or the other property.
-
-When the gate fires:
-
-1. The text argument is extracted.
-2. `Type::Result(ok_ty, _err_ty)` is unpacked to get the target
-   type T.
-3. `serde_json::from_str(text)` is called. Failure → wrap in
-   `Result::Err("malformed JSON in `<tool>`: ...")`.
-4. `json_to_value(parsed, ok_ty, &types_by_id)` converts the
-   parsed JSON to the typed Corvid Value. Type-shape mismatches
-   → wrap in `Result::Err("JSON shape mismatch in `<tool>`: ...")`.
-5. Success → wrap in `Result::Ok(typed_value)`.
-
-The conversion uses the same `json_to_value` path that the io /
-http / db dispatch surfaces use — handles structs, lists,
-options, results, nested types.
-
-### Worked example
+A tool declared in that shape is now a compile error that names the
+replacement. A tool with such a name but another return type was never
+decoded by the runtime and is unaffected. To migrate, delete the tool
+and its effect, then change each call:
 
 ```corvid
-effect json_decode_eff:
-    reversible: true
+# before
+user = decode_user_from_json(text)?
 
-type Address:
-    street: String
-    city: String
-
-type User:
-    id: Int
-    email: String
-    address: Address
-
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
-
-agent main(text: String) -> Result<String, String>:
-    user = decode_user_from_json(text)?
-    return Ok(user.email)
+# after
+user = User.from_json(text).map_err(fn (e) -> e.message)?
 ```
 
-A single tool declaration handles arbitrary JSON shapes that
-match the `User` type — including nested objects (the runtime
-recursively converts JSON objects to Corvid structs).
+For a list or map target, name it first with a type alias, such as
+`type Users = List<User>`, and call `Users.from_json(text)`.
 
 ## Safety properties
 
@@ -211,8 +243,9 @@ recursively converts JSON objects to Corvid structs).
 
 `json_parse(text)` against arbitrary bytes returns
 `Result::Err(message)` rather than panicking. The runtime's
-parse path goes through `serde_json::from_str`; the typed-
-decoder convention inherits the same property.
+parse path goes through `serde_json::from_str`. Typed decoding
+holds the same property: `T.from_json` on malformed text returns
+`Err` with a `JsonError` at the root.
 
 ```corvid
 import "std:json" use json_parse
@@ -243,10 +276,9 @@ agent main() -> Result<Int, String>:
 String)")`. Typed JSON access is safe at the runtime level even
 though the JSON itself is dynamically typed.
 
-The typed-decoder convention inherits this property — a
-`decode_user_from_json("...")` call where the JSON has a String
-where `User.id: Int` is declared returns `Result::Err` with a
-structured diagnostic.
+Typed decoding holds the same property: `User.from_json(text)` on
+JSON with a String where `User.id: Int` is declared returns `Err`
+with a `JsonError` whose `path` is `id`.
 
 ## Determinism
 
@@ -304,9 +336,6 @@ The 33S4 batteries-quickstart tutorial weaves the JSON, HTTP,
 and SQLite surfaces into a single pipeline:
 
 ```corvid
-effect json_decode_eff:
-    reversible: true
-
 type User:
     id: Int
     email: String
@@ -314,20 +343,18 @@ type User:
 import "std:http" use http_get
 import "std:db" use db_open, db_execute, db_param_int, db_param_text
 
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
-
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     # Fetch the JSON (Result: transport/policy failures are Err values).
     response = http_get(url)?
-    # Decode into the typed struct (typed-decoder convention).
-    user = decode_user_from_json(response.body)?
+    # Decode into the typed record; a mismatch names the field.
+    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
     # Persist via parameterised SQL (Result: SQL errors are Err values).
     handle = db_open(db_path)?
     db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?
     return Ok(user.id)
 ```
 
-No Python glue. No string interpolation. The typed-decoder
+No Python glue. No string interpolation. Typed decoding
 catches shape mismatches; the executing SQLite surface catches
 SQL-injection attempts structurally; the executing HTTP surface
 gates the URL through `[http] allow`. End-to-end through
@@ -335,16 +362,6 @@ gates the URL through `[http] allow`. End-to-end through
 
 ## Post-v1.0 — what's deliberately NOT in scope
 
-- **Encoder for JsonValue.** Today the builder side produces
-  JSON Strings; there's no `json_encode(value: JsonValue) ->
-  String` for an already-parsed JsonValue. The pattern is to
-  build a new `JsonBuilder` rather than re-encoding a parsed
-  value. A follow-up slice may add `json_encode` if real
-  programs need it.
-- **Polymorphic typed decoder.** The typed-decoder convention
-  fires on `decode_<X>_from_json` only. A `decode_either_from_json`
-  shape (for sum types of JSON shapes) isn't in scope; users
-  declare per-variant decoders and dispatch in user code.
 - **JSON Path / JSONata / JMESPath.** The opaque-path accessors
   are field-level only (`json_get_int(value, "field")`). Nested
   access requires `json_get_object` + chained `json_get_*`. A
@@ -370,5 +387,7 @@ gates the URL through `[http] allow`. End-to-end through
   `Runtime::json_parse_tool` / `json_get_*_tool` /
   `json_object_*_tool` typed-Value dispatch methods.
 - `crates/corvid-vm/src/interp.rs` — `dispatch_stdlib_json_tool`
-  + `dispatch_typed_json_decoder` interpreter routing branches.
+  interpreter routing branch.
+- `crates/corvid-vm/src/public_json.rs` — the public mapping that
+  `from_json` and `to_json` use.
 - `std/json.cor` — the tool declarations + envelope types.

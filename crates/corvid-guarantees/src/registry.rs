@@ -544,8 +544,8 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
     // The executing JSON surface (`json_parse` / `json_get_*` /
     // `json_object_new` / `json_object_set_*` / `json_object_finish`
     // declared in `std/json.cor`) ships two RuntimeChecked
-    // guarantees plus the typed-decoder convention (which uses
-    // the same parse path so its safety properties are inherited).
+    // guarantees. Typed decoding (`T.from_json`, B01) holds the
+    // same two properties through the public JSON mapping.
     //
     // JSON has no security boundary beyond serde validation —
     // no I/O, no network, no filesystem, no SQLite. The
@@ -581,10 +581,9 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              route the diagnostic up to its caller. A Corvid \
              program calling `json_parse` on malformed text \
              cannot crash the runtime regardless of what bytes \
-             are in the input. The typed-decoder convention \
-             (`decode_<X>_from_json`) inherits this property — \
-             malformed input through the decoder dispatch path \
-             also returns `Result::Err`.",
+             are in the input. Typed decoding holds the same \
+             property — `T.from_json(text)` on malformed text \
+             returns `Result::Err` with a `JsonError` at the root.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/json.rs::parse_round_trips_a_typical_object",
@@ -608,21 +607,20 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
              on missing fields AND on type mismatches. \
              `json_get_int(value, field)` against a string-valued \
              field returns `Err(\"field 'x' is not an Int\")` rather \
-             than coercing or panicking. The typed-decoder \
-             convention inherits the same property — shape \
-             mismatches (a JSON String where the user declared an \
-             Int) flow through `json_to_value` against the target \
-             struct and surface as `Result::Err` with a structured \
-             diagnostic.",
+             than coercing or panicking. Typed decoding holds the \
+             same property — a shape mismatch in `T.from_json(text)` \
+             (a JSON String where the record declares an Int) \
+             returns `Result::Err` with a `JsonError` naming the \
+             field's path.",
         out_of_scope_reason: "",
         positive_test_refs: &[
             "crates/corvid-runtime/src/json.rs::get_object_returns_subtree_for_further_typed_access",
-            "crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_decodes_typed_struct_via_decode_x_from_json_convention",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::real_corvid_program_decodes_typed_struct_via_from_json",
         ],
         adversarial_test_refs: &[
             "crates/corvid-runtime/src/json.rs::typed_accessor_mismatch_returns_recoverable_error",
             "crates/corvid-runtime/src/json.rs::missing_field_returns_recoverable_error_naming_the_field",
-            "crates/corvid-driver/tests/executing_json_through_driver.rs::typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program",
+            "crates/corvid-driver/tests/executing_json_through_driver.rs::typed_decoding_shape_mismatch_returns_result_err_through_real_corvid_program",
         ],
     },
     // ----- Grounded<T> --------------------------------------------

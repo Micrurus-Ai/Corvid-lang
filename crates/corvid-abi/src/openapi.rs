@@ -315,6 +315,9 @@ fn scalar_schema(name: &str) -> Option<Value> {
         "String" | "TraceId" => json!({ "type": "string" }),
         "Bool" => json!({ "type": "boolean" }),
         "Nothing" => json!({ "type": "null" }),
+        // The compiler-known `JsonError` record has no declaration to
+        // publish as a component, so it is described inline.
+        "JsonError" => corvid_prompt_format::json_error_schema(),
         _ => return None,
     })
 }
@@ -350,26 +353,33 @@ fn schema_for_type_name(name: &str) -> Value {
                 "type": "object",
                 "properties": {
                     "items": { "type": "array", "items": schema_for_type_name(inner) },
-                    "next_cursor": { "type": "string", "nullable": true },
+                    "next_cursor": { "type": ["string", "null"] },
                     "has_more": { "type": "boolean" }
                 },
                 "required": ["items", "has_more"]
             }),
-            "Option" => {
-                let mut s = schema_for_type_name(inner);
-                if let Value::Object(map) = &mut s {
-                    map.insert("nullable".into(), json!(true));
-                }
-                s
-            }
+            // OpenAPI 3.1 is JSON Schema 2020-12, which has no
+            // `nullable`; `None` is `null` in the type itself.
+            "Option" => nullable(schema_for_type_name(inner)),
             "List" => json!({ "type": "array", "items": schema_for_type_name(inner) }),
             "Result" => {
-                // Result<T, E> → oneOf ok/err tagged shape.
+                // Result<T, E> → `{"tag": "ok", "ok": T}` or
+                // `{"tag": "err", "err": E}`; `tag` is optional on input.
                 let (ok, err) = inner.split_once(',').unwrap_or((inner, "String"));
                 json!({
                     "oneOf": [
-                        { "type": "object", "properties": { "ok": schema_for_type_name(ok.trim()) }, "required": ["ok"] },
-                        { "type": "object", "properties": { "err": schema_for_type_name(err.trim()) }, "required": ["err"] }
+                        {
+                            "type": "object",
+                            "properties": { "tag": { "const": "ok" }, "ok": schema_for_type_name(ok.trim()) },
+                            "required": ["ok"],
+                            "additionalProperties": false
+                        },
+                        {
+                            "type": "object",
+                            "properties": { "tag": { "const": "err" }, "err": schema_for_type_name(err.trim()) },
+                            "required": ["err"],
+                            "additionalProperties": false
+                        }
                     ]
                 })
             }
@@ -378,6 +388,19 @@ fn schema_for_type_name(name: &str) -> Value {
     }
     // A bare named type references its component schema.
     json!({ "$ref": format!("#/components/schemas/{name}") })
+}
+
+/// Allow `null` alongside `schema`: add it to a simple `type`, or wrap
+/// a reference or composite schema in `anyOf`.
+fn nullable(schema: Value) -> Value {
+    match schema.get("type") {
+        Some(Value::String(kind)) => {
+            let mut schema = schema.clone();
+            schema["type"] = json!([kind, "null"]);
+            schema
+        }
+        _ => json!({ "anyOf": [schema, { "type": "null" }] }),
+    }
 }
 
 /// Whether a route body type (or the type it directly references)
@@ -708,7 +731,7 @@ mod tests {
             schema["properties"]["items"]["items"]["$ref"],
             "#/components/schemas/Item"
         );
-        assert_eq!(schema["properties"]["next_cursor"]["nullable"], true);
+        assert_eq!(schema["properties"]["next_cursor"]["type"], serde_json::json!(["string", "null"]));
     }
 
     #[test]

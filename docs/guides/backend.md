@@ -95,6 +95,37 @@ The typechecker enforces:
 - Body types are `serde`-roundtrippable (otherwise the codegen
   fails).
 
+### JSON bodies and replies
+
+A `body` route reads ordinary JSON, and a `json` route replies with
+it, following the schema published at `/openapi.json`:
+
+| Corvid | JSON |
+| --- | --- |
+| `Option<T>` field | the value, `null`, or the key left out |
+| `Result<T, E>` | `{"tag": "ok", "ok": …}` or `{"tag": "err", "err": …}`; `tag` is optional in a request |
+| sum type | `{"tag": "variant", "type": "Outcome", "variant": "Changed", "fields": [2, "Dune"]}`; only `variant` and `fields` are required in a request |
+| `Grounded<T>` | `{"value": …, "sources": [...]}` in a reply; it cannot be sent in a request |
+
+A request body is checked against its declared type before the
+handler runs. A key the type does not declare, a value of the wrong
+kind, a missing field or a refinement violation returns HTTP 400 with
+the location of the first problem:
+
+```json
+{
+  "error": "invalid_body",
+  "path": "lines[0].quantity",
+  "expected": "Int",
+  "found": "a string",
+  "detail": "at `lines[0].quantity`: expected Int, found a string"
+}
+```
+
+Route types do not need to be `public` to appear in the published
+schema. The [JSON reference](../reference/stdlib/json.md#public-json-mapping)
+defines the complete mapping.
+
 ## Building and running
 
 ```sh

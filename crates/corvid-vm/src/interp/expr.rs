@@ -772,11 +772,56 @@ pub(super) fn eval_builtin_method(
             )))
         }
 
+        // `value.to_json()` (B01). A non-finite Float is the only value
+        // the checker cannot rule out, and it traps like other
+        // impossible conversions.
+        JsonEncode => crate::public_json::encode_public_json_text(&recv)
+            .map(|text| Value::String(std::sync::Arc::from(text)))
+            .map_err(|reason| InterpError::new(InterpErrorKind::Other(format!("to_json: {reason}")), span)),
+        // Needs the call's checked type, so `eval_json_decode` runs it.
+        JsonDecode | JsonDecodeStrict => Err(InterpError::new(
+            InterpErrorKind::Other("from_json was evaluated without its target type".into()),
+            span,
+        )),
+
         _ => {
             let s = want_string(&recv, span)?;
             eval_string_method(kind, s, args, span)
         }
     }
+}
+
+/// `T.from_json(text)` and `T.from_json_strict(text)`. `call_ty` is the
+/// call's checked `Result<T, JsonError>`; a decode failure is an `Err`
+/// value, never a trap.
+pub(super) fn eval_json_decode(
+    kind: corvid_types::BuiltinMethodKind,
+    text: &Value,
+    call_ty: &corvid_types::Type,
+    types: &std::collections::HashMap<corvid_resolve::DefId, &corvid_ir::IrType>,
+    span: Span,
+) -> Result<Value, InterpError> {
+    use crate::public_json::{decode_public_json_text, UnknownFields};
+    let corvid_types::Type::Result(target, _) = call_ty else {
+        return Err(InterpError::new(
+            InterpErrorKind::Other(format!("from_json has no target type (its call is typed `{}`)", call_ty.display_name())),
+            span,
+        ));
+    };
+    let Value::String(text) = text else {
+        return Err(InterpError::new(
+            InterpErrorKind::TypeMismatch { expected: "String".into(), got: text.type_name() },
+            span,
+        ));
+    };
+    let unknown_fields = match kind {
+        corvid_types::BuiltinMethodKind::JsonDecodeStrict => UnknownFields::Reject,
+        _ => UnknownFields::Ignore,
+    };
+    Ok(match decode_public_json_text(text, target, types, unknown_fields) {
+        Ok(value) => Value::ResultOk(crate::value::BoxedValue::new(value)),
+        Err(error) => Value::ResultErr(crate::value::BoxedValue::new(error.to_value())),
+    })
 }
 
 /// Read a field from the `Upload<Format>` struct value `corvid serve`

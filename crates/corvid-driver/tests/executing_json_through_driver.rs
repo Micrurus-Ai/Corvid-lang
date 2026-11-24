@@ -8,19 +8,15 @@
 //!      `json_get_string`), builder side (`json_object_new` +
 //!      `json_object_set_*` + `json_object_finish`).
 //!
-//!   2. **Typed-decoder convention** — user declares
-//!      `tool decode_<X>_from_json(text: String) -> Result<X, String>`
-//!      where X is any Corvid type the runtime can convert from
-//!      JSON. The interpreter intercepts the call, runs
-//!      `serde_json::from_str` + `json_to_value` against the
-//!      target type. No per-type runtime handler needed.
+//!   2. **Typed decoding** — `User.from_json(text)` decodes into a
+//!      declared record through the public JSON mapping. These tests
+//!      also pin the refusal of the retired `decode_<Type>_from_json`
+//!      tool convention it replaced; the method surface itself is
+//!      covered in `typed_json_e2e.rs`.
 //!
-//! Result handling is done via Corvid's `try` operator, which
-//! propagates `Err` to the enclosing agent's `Result<...>` return
-//! type. The test assertions then check `Value::ResultOk` /
-//! `Value::ResultErr`. Corvid has no `match` expression today
-//! (only `if`/`else` and `try`), so the agents themselves return
-//! `Result` and the test infrastructure unwraps.
+//! Result handling uses the `?` operator, which propagates `Err` to
+//! the enclosing agent's `Result<...>` return type. The test
+//! assertions then check `Value::ResultOk` / `Value::ResultErr`.
 
 use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime};
 use corvid_runtime::Runtime;
@@ -86,24 +82,52 @@ agent main() -> Result<Int, String>:
     }
 }
 
-/// 33R5b-b load-bearing acceptance — typed-decoder convention.
-/// Real Corvid program declares a `User` struct, declares
-/// `decode_user_from_json` matching the convention, calls it,
-/// returns `Ok(user.id)`. Proves the interpreter's pattern-match
-/// dispatch routes through `serde_json::from_str` +
-/// `json_to_value` against the declared target type — NO
-/// per-type runtime handler exists, the dispatch is generic
-/// over the declared signature.
+/// Typed decoding: `User.from_json(text)` decodes into the declared
+/// record, and `map_err` + `?` carry a failure into an agent that
+/// returns `Result<_, String>` — the one-line replacement for the
+/// retired `decode_<Type>_from_json` tool.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn real_corvid_program_decodes_typed_struct_via_decode_x_from_json_convention() {
+async fn real_corvid_program_decodes_typed_struct_via_from_json() {
     let project = tempfile::tempdir().expect("tempdir");
     let main_path = stage_project(
         project.path(),
-        // The effect `json_decode_eff` is declared inline because
-        // effects don't export via `use`. Any effect name works
-        // for the typed-decoder convention — the runtime
-        // dispatches based on the tool name pattern + return type,
-        // not the effect.
+        r#"
+type User:
+    id: Int
+    email: String
+
+agent main() -> Result<Int, String>:
+    user = User.from_json("{\"id\": 7, \"email\": \"alice@example.com\"}").map_err(fn (e) -> e.message)?
+    return Ok(user.id)
+"#,
+    );
+
+    let source = fs::read_to_string(&main_path).unwrap();
+    let ir = compile_to_ir_with_config_at_path(&source, &main_path, None)
+        .expect("typed-decoding corvid program should compile");
+    let runtime = Runtime::builder().build();
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
+        .await
+        .expect("typed decoding should run end-to-end");
+
+    match result {
+        Value::ResultOk(inner) => match inner.get() {
+            Value::Int(7) => {}
+            other => panic!("expected ResultOk(Int(7)) from user.id; got Ok({other:?})"),
+        },
+        other => panic!("expected main to return ResultOk; got {other:?}"),
+    }
+}
+
+/// A tool declared for the retired `decode_<Type>_from_json`
+/// convention is refused at compile time, naming the replacement,
+/// rather than compiling into a tool with no implementation.
+#[test]
+fn retired_decoder_tool_declaration_is_refused_with_the_replacement() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let main_path = stage_project(
+        project.path(),
         r#"
 effect json_decode_eff:
     reversible: true
@@ -115,33 +139,47 @@ type User:
 tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
 agent main() -> Result<Int, String>:
-    user = decode_user_from_json("{\"id\": 7, \"email\": \"alice@example.com\"}")?
+    user = decode_user_from_json("{\"id\": 7, \"email\": \"a\"}")?
     return Ok(user.id)
 "#,
     );
 
     let source = fs::read_to_string(&main_path).unwrap();
-    let ir = compile_to_ir_with_config_at_path(&source, &main_path, None)
-        .expect("typed-decoder corvid program should compile");
-    let runtime = Runtime::builder().build();
+    let diagnostics = compile_to_ir_with_config_at_path(&source, &main_path, None)
+        .expect_err("a retired decoder tool must not compile");
+    let rendered = format!("{diagnostics:?}");
+    assert!(
+        rendered.contains("retired `decode_<Type>_from_json` convention"),
+        "the refusal should name the retired convention; got {rendered}"
+    );
+    assert!(
+        rendered.contains("User.from_json(text)"),
+        "the refusal should name the replacement call; got {rendered}"
+    );
+}
 
-    let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
-        .await
-        .expect("typed-decoder convention should decode end-to-end");
+/// The refusal matches only the shape the runtime used to decode: a
+/// tool with that name but another return type was never intercepted
+/// and still compiles as an ordinary tool.
+#[test]
+fn a_decoder_shaped_name_with_another_return_type_still_compiles() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let main_path = stage_project(
+        project.path(),
+        r#"
+effect json_decode_eff:
+    reversible: true
 
-    match result {
-        Value::ResultOk(inner) => match inner.get() {
-            Value::Int(7) => {}
-            other => panic!(
-                "expected ResultOk(Int(7)) from user.id; got Ok({other:?}) — \
-                 the typed-decoder convention may not be intercepting the call"
-            ),
-        },
-        other => panic!(
-            "expected main to return ResultOk; got {other:?} — \
-             the typed-decoder convention may not be intercepting the call"
-        ),
-    }
+tool decode_score_from_json(text: String) -> Int uses json_decode_eff
+
+agent main() -> Int:
+    return decode_score_from_json("1")
+"#,
+    );
+
+    let source = fs::read_to_string(&main_path).unwrap();
+    compile_to_ir_with_config_at_path(&source, &main_path, None)
+        .expect("a tool outside the retired shape is an ordinary tool");
 }
 
 /// 33R5b-b — **the load-bearing parse-safety property
@@ -196,54 +234,48 @@ agent main() -> Result<Int, String>:
     }
 }
 
-/// 33R5b-b — companion: the typed-decoder convention surfaces
-/// JSON-shape mismatches as `Result::Err(message)`, not panics.
-/// A program declares `decode_user_from_json` (expects
-/// `{id: Int, email: String}`) but the input has `id` as a
-/// String — the runtime returns Err, the agent propagates it.
+/// Companion: a JSON shape mismatch in typed decoding is a
+/// `Result::Err`, not a panic. `User` expects `id: Int` but the
+/// input has a String there; the `JsonError` names the path and the
+/// agent propagates its message.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn typed_decoder_shape_mismatch_returns_result_err_through_real_corvid_program() {
+async fn typed_decoding_shape_mismatch_returns_result_err_through_real_corvid_program() {
     let project = tempfile::tempdir().expect("tempdir");
     let main_path = stage_project(
         project.path(),
         r#"
-effect json_decode_eff:
-    reversible: true
-
 type User:
     id: Int
     email: String
 
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
-
 agent main() -> Result<Int, String>:
-    user = decode_user_from_json("{\"id\": \"not an int\", \"email\": \"alice\"}")?
+    user = User.from_json("{\"id\": \"not an int\", \"email\": \"alice\"}").map_err(fn (e) -> e.path + ": " + e.message)?
     return Ok(user.id)
 "#,
     );
 
     let source = fs::read_to_string(&main_path).unwrap();
     let ir = compile_to_ir_with_config_at_path(&source, &main_path, None)
-        .expect("typed-decoder shape-mismatch corvid program should compile");
+        .expect("shape-mismatch corvid program should compile");
     let runtime = Runtime::builder().build();
 
     let result = run_ir_with_runtime(&ir, None, vec![], &runtime)
         .await
-        .expect("typed-decoder shape mismatch must not error the runtime — it returns Err");
+        .expect("a shape mismatch must not error the runtime — it returns Err");
 
     match result {
         Value::ResultErr(inner) => match inner.get() {
             Value::String(s) => {
                 let msg = s.to_string();
                 assert!(
-                    msg.contains("shape mismatch") || msg.contains("Int") || msg.contains("String"),
-                    "Err message should name the type mismatch; got: {msg}"
+                    msg.starts_with("id: "),
+                    "Err message should name the mismatched field's path; got: {msg}"
                 );
             }
             other => panic!("expected Err to wrap a String; got Err({other:?})"),
         },
         Value::ResultOk(_) => panic!(
-            "typed decoder returned Ok despite shape mismatch — the field-type-safety property is broken"
+            "typed decoding returned Ok despite a shape mismatch — the field-type-safety property is broken"
         ),
         other => panic!("expected main to return ResultErr; got {other:?}"),
     }

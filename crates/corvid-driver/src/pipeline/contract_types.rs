@@ -36,15 +36,17 @@ impl From<&ModuleResolution> for Imports {
     }
 }
 
+/// `graph` is `None` for a program without imports; its routes still
+/// publish schemas for the root file's own non-public types.
 pub(super) fn include_exchange_types(
     root: &mut File,
-    graph: &ModuleResolution,
+    graph: Option<&ModuleResolution>,
     scopes: &HashMap<PathBuf, Imports>,
 ) {
     let root_path = PathBuf::new();
     let mut types = HashMap::new();
     for (path, file) in std::iter::once((&root_path, &*root))
-        .chain(graph.all_modules.iter().map(|(p, m)| (p, m.file.as_ref())))
+        .chain(graph.into_iter().flat_map(|g| g.all_modules.iter().map(|(p, m)| (p, m.file.as_ref()))))
     {
         for decl in &file.decls {
             if let Decl::Type(t) = decl {
@@ -65,7 +67,7 @@ pub(super) fn include_exchange_types(
             .collect(),
         pending: Vec::new(),
     };
-    let imports = Imports::from(graph);
+    let imports = graph.map(Imports::from).unwrap_or_default();
     for decl in &mut root.decls {
         match decl {
             Decl::Server(server) => {

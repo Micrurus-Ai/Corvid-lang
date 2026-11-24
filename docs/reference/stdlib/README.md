@@ -26,7 +26,7 @@ things, states which in its file header, and appears in this table:
 | `std/io` | **Executing** | `io_read_text` / `io_write_text` / `io_list_dir` over `[io] root` confinement |
 | `std/http` | **Executing** | `http_get` / `http_post_json` over SSRF block + `[http] allow` |
 | `std/db` | **Executing** (SQLite) | `db_open` / `db_query` / `db_execute`; Postgres path is contract-only |
-| `std/json` | **Executing** | `json_parse` family + typed-decoder convention |
+| `std/json` | **Executing** | `json_parse` family; typed decoding is `T.from_json` |
 | `std/mcp` | **Executing** | `mcp_call` over governed `[mcp]` servers |
 | `std/rag` | **Executing** | `rag_ingest` / `rag_search` over `[io] root` + optional `[rag]` embedder |
 | `std/time` | **Executing** | clock tools (traced + replay-substituted) |
@@ -186,7 +186,7 @@ example, and the v1.0 post-scope.
 
 `std/json.cor` defines the executing JSON surface added in Phase 33R5b. The
 umbrella ships TWO complementary shapes: the opaque-handle path (for
-dynamic JSON) and the typed-decoder convention (for typed APIs). Together
+dynamic JSON) and typed decoding with `T.from_json` (for typed APIs). Together
 they make "no Python required for JSON" structurally true at the language
 level.
 
@@ -197,13 +197,11 @@ Executing tools (opaque path):
 - `json_object_new() -> JsonBuilder` + `json_object_set_int / _float / _string / _bool(builder, key, value) -> JsonBuilder` — fluent builder
 - `json_object_finish(builder) -> String` — snapshot semantics; builder remains usable
 
-Typed-decoder convention: the user declares
-`tool decode_<X>_from_json(text: String) -> Result<X, String> uses <effect>`
-where `<X>` is any Corvid type the runtime can convert from JSON. The
-interpreter pattern-matches the tool name + return type and routes through
-`serde_json::from_str` + `json_to_value` against the declared target type.
-**No per-type runtime handler exists** — the dispatch is generic over the
-declared signature.
+Typed decoding is built into every type rather than this module:
+`User.from_json(text)` returns `Result<User, JsonError>` through the public
+JSON mapping, and `value.to_json()` encodes. The older
+`decode_<X>_from_json` tool convention is retired; declaring such a tool is
+a compile error that names the replacement.
 
 `JsonValue` and `JsonBuilder` are opaque, refcounted primitive types
 produced ONLY by the executing JSON tools. The codegen-cl backend emits a
@@ -221,7 +219,7 @@ call these tools from a `@deterministic` agent are rejected at typecheck
 non-deterministic).
 
 See [`json.md`](./json.md) for the full reference, including the two
-shapes (opaque + typed-decoder), the worked typed-user-store HTTP →
+shapes (opaque + typed), the worked typed-user-store HTTP →
 JSON → SQLite pipeline (no Python glue), and the v1.0 post-scope.
 
 ## `std.secrets`

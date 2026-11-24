@@ -42,7 +42,7 @@ pub use law_check::{
     DEFAULT_SAMPLES,
 };
 pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_NAME};
-pub use builtin_methods::{builtin_method, BuiltinMethodKind, BuiltinMethodSig};
+pub use builtin_methods::{builtin_method, json_error_fields, type_method, BuiltinMethodKind, BuiltinMethodSig};
 pub use types::Type;
 
 #[cfg(test)]

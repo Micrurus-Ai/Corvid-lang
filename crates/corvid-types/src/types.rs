@@ -168,6 +168,13 @@ pub enum Type {
     /// reason as `JsonValue` — interpreter-only in 33R5b.
     JsonBuilder,
 
+    /// Compiler-known `JsonError` — why `T.from_json(text)` failed.
+    /// A read-only record whose fields are listed by
+    /// [`crate::builtin_methods::json_error_fields`]: `path` (such as
+    /// `items[1].quantity`, empty at the root), `expected`, `found`
+    /// and `message`. At runtime it is an ordinary record value.
+    JsonError,
+
     /// Synthetic struct-like value for backend route path captures.
     RouteParams(Vec<(String, Type)>),
 
@@ -177,6 +184,28 @@ pub enum Type {
 }
 
 impl Type {
+    /// The type a bare compiler-known name denotes in source (`Int`,
+    /// `DbHandle`, `JsonValue`, ...), or `None` for a name that must be
+    /// looked up among declarations. The checker, the IR lowerer and
+    /// the ABI emitter all resolve names through this one table.
+    pub fn compiler_known(name: &str) -> Option<Type> {
+        Some(match name {
+            "Int" => Type::Int,
+            "Float" => Type::Float,
+            "String" => Type::String,
+            "Bool" => Type::Bool,
+            "Nothing" => Type::Nothing,
+            // Opaque runtime handles: only the executing stdlib tools
+            // (`db_open`, `json_parse`, `json_object_new`) produce them.
+            "DbHandle" => Type::DbHandle,
+            "TraceId" => Type::TraceId,
+            "JsonValue" => Type::JsonValue,
+            "JsonBuilder" => Type::JsonBuilder,
+            "JsonError" => Type::JsonError,
+            _ => return None,
+        })
+    }
+
     /// Human-readable name used in diagnostic messages.
     pub fn display_name(&self) -> String {
         match self {
@@ -223,6 +252,7 @@ impl Type {
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),
             Type::JsonBuilder => "JsonBuilder".into(),
+            Type::JsonError => "JsonError".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

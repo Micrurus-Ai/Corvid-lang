@@ -31,6 +31,8 @@ def render():
             raise ValueError(f"Missing documented signature for {variant[2]}")
         call = signature[1]
         group = call.split(".", 1)[0].split("<", 1)[0] if "." in call else "Built-in functions"
+        # `T.method` signatures (typed JSON) apply to every type.
+        group = "Every type" if group == "T" else group
         groups.setdefault(group, []).append(call)
     if sum(map(len, groups.values())) != len(re.findall(r"^    \w+,$", enum, re.M)):
         raise ValueError("Every builtin method needs a documented signature")
