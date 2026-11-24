@@ -545,6 +545,9 @@ fn collect_expr_imports(
             collect_expr_imports(next_cursor, tools, prompts, plan, agent_name)?;
             Ok(())
         }
+        IrExprKind::TableOp { .. } => Err(WasmCodegenError::unsupported(
+            "table operations run on the interpreter (B09)".to_string(),
+        )),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
             for arg in args {
@@ -1086,6 +1089,11 @@ fn emit_expr(
         IrExprKind::PageNew { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "Page<Item> is interpreter-only in 52c-2".to_string(),
+            ));
+        }
+        IrExprKind::TableOp { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "table operations run on the interpreter (B09)".to_string(),
             ));
         }
         IrExprKind::MapLiteral { .. } => {

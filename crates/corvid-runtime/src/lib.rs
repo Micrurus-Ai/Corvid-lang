@@ -111,6 +111,7 @@ pub mod replay;
 pub mod replay_dispatch;
 pub mod review_queue;
 pub mod runtime;
+pub mod tables;
 pub mod secrets;
 pub mod string;
 pub mod store;

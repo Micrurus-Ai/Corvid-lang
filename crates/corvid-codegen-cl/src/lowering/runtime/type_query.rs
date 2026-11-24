@@ -399,6 +399,7 @@ fn visit_expr_types(
             visit_expr_types(items, seen, order, visit);
             visit_expr_types(next_cursor, seen, order, visit);
         }
+        IrExprKind::TableOp { arg, .. } => visit_expr_types(arg, seen, order, visit),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             visit_expr_types(receiver, seen, order, visit);
             for a in args {

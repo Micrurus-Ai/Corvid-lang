@@ -486,6 +486,7 @@ impl RuntimeBuilder {
             rag_embedder: self.rag_embedder,
             mcp: self.mcp,
             db_registry,
+            table_databases: crate::tables::TableDatabases::default(),
             secrets: SecretRuntime::new(),
             cache: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::cache::CacheRuntime::new(),

@@ -25,6 +25,7 @@ mod run_validate;
 mod stmt;
 #[path = "interp/stream_ops.rs"]
 mod stream_ops;
+mod tables;
 #[path = "interp/test_runner.rs"]
 mod test_runner;
 #[path = "interp/test_trace.rs"]
@@ -1187,6 +1188,14 @@ impl<'ir> Interpreter<'ir> {
                         .collect::<Vec<_>>(),
                 );
                 Ok(ExprFlow::Value(Value::Struct(page)))
+            },
+
+            IrExprKind::TableOp { op, table, arg } => {
+                let arg_v = match self.eval_expr(arg).await?.into_value() {
+                    Ok(v) => v,
+                    Err(v) => return Ok(ExprFlow::Propagate(v)),
+                };
+                self.eval_table_op(*op, table, arg_v, expr.span).await.map(ExprFlow::Value)
             },
 
             IrExprKind::TryPropagate { inner } => {

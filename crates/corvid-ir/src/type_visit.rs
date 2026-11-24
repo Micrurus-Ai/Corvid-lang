@@ -199,6 +199,7 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
             visit_expr(items, visit);
             visit_expr(next_cursor, visit);
         }
+        IrExprKind::TableOp { arg, .. } => visit_expr(arg, visit),
     }
 }
 

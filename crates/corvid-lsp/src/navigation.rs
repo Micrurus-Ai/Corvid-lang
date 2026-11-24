@@ -329,6 +329,22 @@ fn top_level_definitions(file: &File, resolved: &Resolved) -> Vec<Definition> {
                 store.name.span,
                 SymbolKind::STRUCT,
             ),
+            Decl::Table(table) => push_definition(
+                &mut out,
+                resolved,
+                &table.record.name.name,
+                DeclKind::Type,
+                table.record.name.span,
+                SymbolKind::STRUCT,
+            ),
+            Decl::Database(database) => push_definition(
+                &mut out,
+                resolved,
+                &database.name.name,
+                DeclKind::Database,
+                database.name.span,
+                SymbolKind::MODULE,
+            ),
             Decl::Tool(ToolDecl { name, .. }) => push_definition(
                 &mut out,
                 resolved,

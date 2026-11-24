@@ -959,6 +959,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_mentions_local(items, target) || expr_mentions_local(next_cursor, target)
         }
+        IrExprKind::TableOp { arg, .. } => expr_mentions_local(arg, target),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

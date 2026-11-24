@@ -1211,6 +1211,15 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
                     names.insert(field.name.name.clone());
                 }
             }
+            Decl::Table(table) => {
+                names.insert(table.record.name.name.clone());
+                for field in &table.record.fields {
+                    names.insert(field.name.name.clone());
+                }
+            }
+            Decl::Database(database) => {
+                names.insert(database.name.name.clone());
+            }
             Decl::Store(store) => {
                 names.insert(store.name.name.clone());
                 for field in &store.fields {

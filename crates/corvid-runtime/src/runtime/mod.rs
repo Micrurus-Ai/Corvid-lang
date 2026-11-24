@@ -115,6 +115,9 @@ pub struct Runtime {
     /// `Arc` so all clones share the same backing slotmap and
     /// the same write-quarantine flag.
     pub(super) db_registry: crate::db::DbHandleRegistry,
+    /// One open handle per table database location (B09), shared by
+    /// clones so every operation on a database uses one connection.
+    pub(crate) table_databases: crate::tables::TableDatabases,
     secrets: SecretRuntime,
     /// In-memory cache shared across Runtime clones (worker pools,
     /// per-job tracer swaps). The stdlib cache tools lock it per

@@ -26,7 +26,7 @@ use std::path::PathBuf;
 /// Entry point: produce an `IrFile` from parsed/resolved/checked sources.
 pub fn lower(file: &File, resolved: &Resolved, checked: &Checked) -> IrFile {
     let imported_def_ids = HashMap::new();
-    let mut l = Lowerer::new(resolved, checked, None, None, &imported_def_ids);
+    let mut l = Lowerer::new(file, resolved, checked, None, None, &imported_def_ids);
     l.lower_file(file)
 }
 
@@ -42,7 +42,7 @@ pub fn lower_with_modules(
     checked_modules: &HashMap<PathBuf, Checked>,
 ) -> IrFile {
     let imported_def_ids = build_imported_def_ids(resolved, modules);
-    let mut l = Lowerer::new(resolved, checked, Some(modules), None, &imported_def_ids);
+    let mut l = Lowerer::new(file, resolved, checked, Some(modules), None, &imported_def_ids);
     let mut ir = l.lower_file(file);
 
     let mut loaded = modules.all_modules.values().collect::<Vec<_>>();
@@ -52,6 +52,7 @@ pub fn lower_with_modules(
             continue;
         };
         let mut module_lowerer = Lowerer::new(
+            module.file.as_ref(),
             module.resolved.as_ref(),
             module_checked,
             Some(modules),
@@ -66,6 +67,11 @@ pub fn lower_with_modules(
     }
 
     ir
+}
+
+/// The revision of a table row that has never been stored (B09).
+fn zero_revision(span: Span) -> IrExpr {
+    IrExpr { kind: IrExprKind::Literal(IrLiteral::Int(0)), ty: Type::Int, span }
 }
 
 /// High base for synthetic per-route handler-agent `DefId`s (slice
@@ -98,6 +104,8 @@ fn actor_route_params_type() -> Type {
 }
 
 struct Lowerer<'a> {
+    /// The file being lowered, for declarations expressions refer to.
+    file: &'a File,
     python_members: HashMap<(DefId, String), (DefId, String)>,
     symbols: &'a SymbolTable,
     bindings: &'a HashMap<Span, Binding>,
@@ -143,6 +151,7 @@ struct Lowerer<'a> {
 
 impl<'a> Lowerer<'a> {
     fn new(
+        file: &'a File,
         resolved: &'a Resolved,
         checked: &'a Checked,
         module_resolution: Option<&'a ModuleResolution>,
@@ -150,6 +159,7 @@ impl<'a> Lowerer<'a> {
         imported_def_ids: &'a HashMap<ImportedDefKey, DefId>,
     ) -> Self {
         Self {
+            file,
             python_members: HashMap::new(),
             symbols: &resolved.symbols,
             bindings: &resolved.bindings,
@@ -329,6 +339,10 @@ impl<'a> Lowerer<'a> {
                 Decl::Import(i) => imports.push(self.lower_import(i)),
                 Decl::Type(t) => types.push(self.lower_type(t)),
                 Decl::Store(_) => {}
+                // A table is a record type; its storage travels with each
+                // operation (IrExprKind::TableOp).
+                Decl::Table(t) => types.push(self.lower_type(&t.record)),
+                Decl::Database(_) => {}
                 Decl::Tool(t) => tools.push(self.lower_tool(t)),
                 Decl::Prompt(p) => prompts.push(self.lower_prompt(p)),
                 Decl::Agent(a) => agents.push(self.lower_agent(a)),
@@ -1449,6 +1463,14 @@ impl<'a> Lowerer<'a> {
                             };
                             (f.name.name.clone(), value)
                         })
+                        .chain(
+                            // A row built without `revision` and without
+                            // a base has never been stored (B09).
+                            (spread.is_none()
+                                && self.table_named(name).is_some()
+                                && !fields.iter().any(|f| f.name.name == corvid_ast::TableDecl::REVISION_FIELD))
+                            .then(|| (corvid_ast::TableDecl::REVISION_FIELD.to_string(), zero_revision(name.span))),
+                        )
                         .collect(),
                     spread: spread.as_ref().map(|s| Box::new(self.lower_expr(s))),
                 }
@@ -1844,6 +1866,9 @@ impl<'a> Lowerer<'a> {
                     args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
                 };
             }
+            if let Some(rewrite) = self.try_table_call(callee, args) {
+                return rewrite;
+            }
             if let Some(rewrite) = self.try_type_method_call(target, field, args) {
                 return rewrite;
             }
@@ -2117,11 +2142,21 @@ impl<'a> Lowerer<'a> {
             },
             _ => (IrCallKind::Unknown, "<indirect>".to_string()),
         };
-        IrExprKind::Call {
-            kind,
-            callee_name,
-            args: args.iter().map(|a| self.lower_expr(a)).collect(),
+        let mut lowered: Vec<IrExpr> = args.iter().map(|a| self.lower_expr(a)).collect();
+        // A table row built without its trailing `revision` has never
+        // been stored, so its revision is 0 (B09).
+        if let (IrCallKind::StructConstructor { .. }, Expr::Ident { name, .. }) = (&kind, callee) {
+            if self.table_named(name).is_some_and(|t| args.len() + 1 == t.record.fields.len()) {
+                lowered.push(zero_revision(name.span));
+            }
         }
+        IrExprKind::Call { kind, callee_name, args: lowered }
+    }
+
+    /// The table a type name refers to, if it names one.
+    fn table_named(&self, name: &Ident) -> Option<&'a corvid_ast::TableDecl> {
+        let Some(Binding::Decl(id)) = self.bindings.get(&name.span) else { return None };
+        corvid_types::table_decl(self.file, self.symbols.get(*id).span)
     }
 
     /// Detect and lower a `target.method(args)` call. Returns
@@ -2177,6 +2212,33 @@ impl<'a> Lowerer<'a> {
             kind: sig.kind,
             receiver: Box::new(self.lower_expr(target)),
             args: args.iter().map(|a| self.lower_expr(a)).collect(),
+        })
+    }
+
+    /// `Shelf.save(row)`: a table operation (B09), recognized by the
+    /// same `table_call_target` the checker uses.
+    fn try_table_call(&self, callee: &Expr, args: &[Expr]) -> Option<IrExprKind> {
+        let (table, op) = corvid_types::table_call_target(callee, self.file, self.symbols, self.bindings)?;
+        let arg = args.first()?;
+        let def_id = self.remap_def_id(self.symbols.lookup_def(&table.name().name)?);
+        let database = self.file.decls.iter().find_map(|decl| match decl {
+            Decl::Database(db) if db.tables.iter().any(|t| t.name == table.name().name) => Some(db),
+            _ => None,
+        })?;
+        Some(IrExprKind::TableOp {
+            op,
+            table: crate::types::IrTable {
+                def_id,
+                name: table.name().name.clone(),
+                key: table.key.as_ref()?.name.clone(),
+                columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
+                database: crate::types::IrDatabase {
+                    name: database.name.name.clone(),
+                    engine: database.engine.as_ref()?.name.clone(),
+                    location: database.location.clone()?,
+                },
+            },
+            arg: Box::new(self.lower_expr(arg)),
         })
     }
 

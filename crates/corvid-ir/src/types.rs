@@ -1088,6 +1088,35 @@ pub enum IrExprKind {
         items: Box<IrExpr>,
         next_cursor: Box<IrExpr>,
     },
+
+    /// `Shelf.get(key)`, `Shelf.insert(row)`, `Shelf.save(row)` or
+    /// `Shelf.delete(row)` (B09). `arg` is the key for `get` and the
+    /// row otherwise; the call's type is the operation's result.
+    TableOp {
+        op: corvid_types::TableOp,
+        table: IrTable,
+        arg: Box<IrExpr>,
+    },
+}
+
+/// What a table operation needs to run (B09): the table's row type,
+/// key and columns, and the database that holds it.
+#[derive(Debug, Clone)]
+pub struct IrTable {
+    pub def_id: DefId,
+    pub name: String,
+    pub key: String,
+    /// Column names in declaration order, with `revision` last.
+    pub columns: Vec<String>,
+    pub database: IrDatabase,
+}
+
+/// A `database` block's engine and location (B09).
+#[derive(Debug, Clone)]
+pub struct IrDatabase {
+    pub name: String,
+    pub engine: String,
+    pub location: corvid_ast::DatabaseLocation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

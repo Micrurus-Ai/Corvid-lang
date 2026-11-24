@@ -424,6 +424,7 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
             scan_expr(items, max_id);
             scan_expr(next_cursor, max_id);
         }
+        IrExprKind::TableOp { arg, .. } => scan_expr(arg, max_id),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             scan_expr(receiver, max_id);
             for a in args {
@@ -528,6 +529,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_reads_local(items, target) || expr_reads_local(next_cursor, target)
         }
+        IrExprKind::TableOp { arg, .. } => expr_reads_local(arg, target),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }

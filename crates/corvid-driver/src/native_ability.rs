@@ -18,6 +18,10 @@ use corvid_types::Type;
 /// Why a program can't run via the native tier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotNativeReason {
+    /// A table operation (B09). Native tables are slice P6.
+    TableOperation {
+        table: String,
+    },
     PythonImport {
         module: String,
     },
@@ -74,6 +78,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::TaggedUnionRetryNotNative => write!(
                 f,
                 "program uses a tagged-union or retry shape outside the current native subset - native AOT supports nullable-pointer `Option<T>`, wide scalar `Option<Int|Bool|Float>`, compositional native `Result<T, E>`, postfix `?`, and `try ... retry` over native `Result<T, E>` and `Option<T>` bodies; wider shapes still run in the interpreter"
+            ),
+            Self::TableOperation { table } => write!(
+                f,
+                "program reads or writes table `{table}` - table operations run on the interpreter until native tables land (B09 P6)"
             ),
             Self::StreamLoweringNotImplemented => {
                 write!(f, "program uses `Stream<T>` - Stream lowering is not yet implemented")
@@ -325,6 +333,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::StructLiteral { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         // `Page<Item>` responses are interpreter-only in 52c-2.
         IrExprKind::PageNew { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
+        IrExprKind::TableOp { table, .. } => Err(NotNativeReason::TableOperation { table: table.name.clone() }),
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListFirst | corvid_types::BuiltinMethodKind::ListLast,
             receiver,

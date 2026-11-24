@@ -64,6 +64,7 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_uses_runtime(items) || expr_uses_runtime(next_cursor)
         }
+        IrExprKind::TableOp { .. } => true,
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }

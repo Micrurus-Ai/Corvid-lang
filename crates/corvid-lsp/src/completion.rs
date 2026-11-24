@@ -234,6 +234,18 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 store.kind.as_str(),
                 format!("{} {}", store.kind.as_str(), store.name.name),
             )),
+            Decl::Table(table) => items.add(symbol_item(
+                &table.record.name.name,
+                CompletionItemKind::STRUCT,
+                "table",
+                format!("table {}", table.record.name.name),
+            )),
+            Decl::Database(database) => items.add(symbol_item(
+                &database.name.name,
+                CompletionItemKind::MODULE,
+                "database",
+                format!("database {}", database.name.name),
+            )),
             Decl::Effect(effect) => items.add(symbol_item(
                 &effect.name.name,
                 CompletionItemKind::EVENT,

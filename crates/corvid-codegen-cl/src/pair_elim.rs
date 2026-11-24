@@ -244,6 +244,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             count_local_mentions_expr(items, local_id)
                 + count_local_mentions_expr(next_cursor, local_id)
         }
+        IrExprKind::TableOp { arg, .. } => count_local_mentions_expr(arg, local_id),
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -336,6 +337,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         IrExprKind::StructLiteral { .. } => true,
         // `Page(...)` builds a new struct cell (items + cursor handles).
         IrExprKind::PageNew { .. } => true,
+        IrExprKind::TableOp { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

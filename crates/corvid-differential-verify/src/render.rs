@@ -1,4 +1,4 @@
-﻿use corvid_ast::{
+use corvid_ast::{
     AgentDecl, Backoff, BackpressurePolicy, BinaryOp, Block, Decl, DimensionValue, Effect,
     EffectConstraint, EvalAssert, Expr, ExtendMethod, ExtendMethodKind, File, FixtureDecl,
     ImportSource, Literal, MockDecl, Param, PromptDecl, Stmt, ToolDecl, TypeRef, UnaryOp,
@@ -22,6 +22,12 @@ pub fn render_file(file: &File) -> String {
 
 fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
     match decl {
+        Decl::Table(_) | Decl::Database(_) => {
+            // Never synthesized by rewrite passes; placeholder keeps
+            // the renderer total.
+            push_indent(indent, out);
+            out.push_str("<table or database decl>\n");
+        }
         Decl::Fn(_) => {
             // Never synthesized by rewrite passes; placeholder keeps
             // the renderer total.

@@ -340,6 +340,11 @@ impl Codegen {
                     "(_ for _ in ()).throw(NotImplementedError(\"Page<Item> is interpreter-only in 52c-2\"))",
                 );
             }
+            IrExprKind::TableOp { .. } => {
+                self.out.write(
+                    "(_ for _ in ()).throw(NotImplementedError(\"table operations run on the interpreter (B09)\"))",
+                );
+            }
             IrExprKind::MapLiteral { keys, values }
                 if matches!(&e.ty, Type::Map(key, _)
                     if matches!(key.as_ref(), Type::String | Type::Int | Type::Bool)) =>

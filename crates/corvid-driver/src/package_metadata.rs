@@ -146,6 +146,7 @@ fn kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Model => "model",
         DeclKind::Server => "server",
         DeclKind::Identity => "identity",
+        DeclKind::Database => "database",
     }
 }
 
