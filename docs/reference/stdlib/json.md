@@ -99,9 +99,15 @@ removes taint. An `extend` block cannot declare a method named
 
 The methods are pure, so `@deterministic` code may call them and replay
 reproduces their results. Encoding a `Float` that is NaN or infinite
-stops the program, because JSON has no form for it. The native target
-is not supported yet, so programs that use these methods run on the
-interpreter.
+stops the program, because JSON has no form for it.
+
+`from_json` and `from_json_strict` also compile to native code. Both
+targets run the same decoder, so a compiled program accepts exactly the
+JSON the interpreter accepts and fails with the same `path`,
+`expected`, `found` and `message`. A target type the native target
+cannot hold, such as a map whose keys are not `String`, runs on the
+interpreter. Programs that call `to_json` run on the interpreter until
+native encoding lands.
 
 ## Public JSON mapping
 
@@ -396,6 +402,11 @@ gates the URL through `[http] allow`. End-to-end through
   `json_object_*_tool` typed-Value dispatch methods.
 - `crates/corvid-vm/src/interp.rs` — `dispatch_stdlib_json_tool`
   interpreter routing branch.
-- `crates/corvid-vm/src/public_json.rs` — the public mapping that
-  `from_json` and `to_json` use.
+- `crates/corvid-public-json` — the public mapping's decoder, which
+  the interpreter and native code share, and the decode plan native
+  code embeds for each `from_json` target.
+- `crates/corvid-vm/src/public_json.rs` — interpreter values for that
+  decoder, and the `to_json` encoder.
+- `crates/corvid-runtime/src/ffi_bridge/typed_json.rs` — native values
+  for that decoder.
 - `std/json.cor` — the tool declarations + envelope types.

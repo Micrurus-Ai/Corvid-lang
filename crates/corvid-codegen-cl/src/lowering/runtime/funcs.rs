@@ -16,6 +16,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_eq: FuncId,
     pub structural_eq: FuncId,
     pub equality_layouts: std::cell::RefCell<HashMap<Type, cranelift_module::DataId>>,
+    /// One embedded decode plan per `from_json` target type: the plan text,
+    /// its length, and the typeinfo table the plan indexes.
+    pub json_decode_plans: std::cell::RefCell<HashMap<Type, (cranelift_module::DataId, i64, cranelift_module::DataId)>>,
     pub list_map_int: FuncId,
     pub list_filter_int: FuncId,
     pub list_fold_int: FuncId,
@@ -41,6 +44,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_replace: FuncId,
     pub string_split: FuncId,
     pub string_parse_int: FuncId,
+    /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
+    pub json_decode_typed: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older

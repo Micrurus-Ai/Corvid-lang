@@ -62,6 +62,7 @@ mod state;
 mod strings;
 mod tokio_handle;
 mod tool_iter;
+mod typed_json;
 pub use approval_exports::{corvid_approve_sync, corvid_citation_verify_or_panic};
 pub use json_exports::{
     corvid_json_field_present, corvid_json_get_field_bool, corvid_json_get_field_float,

@@ -48,6 +48,8 @@ mod prompt;
 mod method;
 #[path = "parity/weak.rs"]
 mod weak;
+#[path = "parity/typed_json.rs"]
+mod typed_json;
 #[path = "parity/sumtypes.rs"]
 mod sumtypes;
 

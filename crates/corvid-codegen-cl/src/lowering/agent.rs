@@ -455,8 +455,8 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`JsonBuilder` - the JSON builder surface (`json_object_new` / `json_object_set_*` / `json_object_finish` from std/json.cor) is interpreter-only in 33R5b; cdylib bridging lands in a follow-up slice. Use the interpreter tier (`corvid run --tier interp`) until then.",
             span,
         )),
-        Type::JsonError => Err(CodegenError::not_supported(
-            "`JsonError` - `T.from_json(text)` runs on the interpreter tier until the native target gains the public JSON mapping. Use the interpreter tier (`corvid run --tier interp`) until then.",
+        Type::JsonError => Err(CodegenError::cranelift(
+            "internal compiler error: `JsonError` reached native lowering; `compile_to_object` represents it as a record first",
             span,
         )),
         Type::Upload(_) => Err(CodegenError::not_supported(

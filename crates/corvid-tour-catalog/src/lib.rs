@@ -628,7 +628,7 @@ agent roll() -> Int:
         spec: "docs/reference/stdlib/json.md",
         roadmap: "Phase 33R5b executing JSON surface + B01 typed JSON",
         test: "crates/corvid-driver/tests/executing_json_through_driver.rs + crates/corvid-driver/tests/typed_json_e2e.rs + crates/corvid-runtime/src/json.rs tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_json_*",
-        non_scope: "JsonValue / JsonBuilder and the from_json / to_json methods run on the interpreter; the native target does not compile them yet. No JSON Path / JSONata / JMESPath query language; nested access via json_get_object chains.",
+        non_scope: "JsonValue / JsonBuilder and value.to_json() run on the interpreter; T.from_json and T.from_json_strict also compile natively through the same decoder. No JSON Path / JSONata / JMESPath query language; nested access via json_get_object chains.",
         source: r#"type User:
     id: Int
     email: String
