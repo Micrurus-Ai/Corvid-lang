@@ -503,6 +503,13 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 - `ui.record_text(pattern: String) -> View` renders text with named placeholders such as `{width}` or `{profile.name}`.
 - `ui.record_swatch(red: String, green: String, blue: String) -> View` binds three named integer fields to an RGB sample.
 - `ui.local_selection(state: RecordState, controls: View, preview: View) -> View` mounts one record editor in an interactive page. Field names in controls and preview bindings are resolved on mounting.
+- `ui.derived_value(handler: String, fields: List<String>) -> View` displays the scalar return value of a compiled browser agent as plain text.
+- `ui.conditional_view(predicate: String, fields: List<String>, content: List<View>) -> View` shows the children when the agent returns `true`. Hidden children retain their DOM state.
+- `ui.projected_rows(label: String, count: String, key_at: String, fields: List<String>, row: List<View>) -> View` renders a labelled ordered list. The count agent returns a nonnegative `Int`. The key agent receives the same fields followed by a zero-based `Int` index. It returns a unique nonempty `String` or an `Int`. The renderer validates all keys before updating the list, reuses rows by key, and clones the row template for new keys.
+- `ui.row_key() -> View` displays the enclosing projected row's key as plain text.
+
+These projections read their nearest mounted record. Supply paths with `bind` and define the named agents in `src/events.cor`. On mount, the runtime checks each argument against its field type. Choices pass their variant name as a `String`. Synchronous record edits schedule one render per subscribed projection. Disconnecting a projection releases its subscription and cancels any pending render. Browser event agents can match a named integer or boolean local against literal and wildcard patterns with optional guards and an `Int`, `Bool` or `Float` result. [Reading plan walkthrough](../book/19-browser-views.md#derive-two-views-from-a-reading-plan)
+
 - `browser state name = initial` obtains a `ui.RecordState` from a record whose editable leaves are text, booleans, named choices, or bounded integers. Use `bind settings.tools.web_search` to bind a nested leaf. A list initializer retains its record element type for keyed rows.
 - `ui.checkbox(label: String, field: String) -> View` creates a native checkbox. Use `bind state.enabled` for a checked boolean field.
 - `ui.segmented_choice(label: String, field: String) -> View` displays a named choice as a labelled group of native radio buttons. Use the arrow keys to select adjacent options. Each mounted group uses its own radio name.

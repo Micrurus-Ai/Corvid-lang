@@ -223,7 +223,7 @@ fn emit_module(ir: &IrFile, module_name: &str, locate: Option<&Locate<'_>>)
             agent_index_base + idx as u32,
         );
         let mut sites = TrapSites { locate, labels, global: location_global, agent };
-        let function = compile_agent(agent, &agent_indices, &host_plan, &string_pool, &mut sites)?;
+        let function = compile_agent(agent, &agent_indices, &host_plan, &string_pool, &mut sites, module_name == "events")?;
         labels = sites.labels;
         code.function(&function);
     }
@@ -397,6 +397,15 @@ fn intern_expr_literals(expr: &IrExpr, pool: &mut StringPool) {
             pool.intern(value);
         }
         IrExprKind::Literal(_) | IrExprKind::Local { .. } => {}
+        IrExprKind::Match { scrutinee, arms } => {
+            intern_expr_literals(scrutinee, pool);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    intern_expr_literals(guard, pool);
+                }
+                intern_expr_literals(&arm.body, pool);
+            }
+        }
         IrExprKind::Call { args, .. } => {
             for arg in args {
                 intern_expr_literals(arg, pool);
@@ -733,8 +742,9 @@ fn compile_agent(
     host_plan: &HostImportPlan,
     string_pool: &StringPool,
     sites: &mut TrapSites<'_>,
+    browser_events: bool,
 ) -> Result<Function, WasmCodegenError> {
-    let mut locals = LocalLayout::from_agent(agent)?;
+    let mut locals = LocalLayout::from_agent(agent, browser_events)?;
     collect_block_locals(&agent.body, &mut locals)?;
     let local_groups = locals.local_groups();
     let mut function = Function::new(local_groups);
@@ -805,13 +815,15 @@ struct LocalSlot {
 }
 
 struct LocalLayout {
+    browser_events: bool,
     map: HashMap<LocalId, LocalSlot>,
     locals: Vec<(String, ValType)>,
 }
 
 impl LocalLayout {
-    fn from_agent(agent: &IrAgent) -> Result<Self, WasmCodegenError> {
+    fn from_agent(agent: &IrAgent, browser_events: bool) -> Result<Self, WasmCodegenError> {
         let mut layout = Self {
+            browser_events,
             map: HashMap::new(),
             locals: Vec::new(),
         };
@@ -1020,6 +1032,41 @@ fn emit_expr(
     sites: &mut TrapSites<'_>,
 ) -> Result<(), WasmCodegenError> {
     match &expr.kind {
+        IrExprKind::Match { scrutinee, arms } if locals.browser_events => {
+            use corvid_ir::IrPattern;
+            let IrExprKind::Local { local_id, name } = &scrutinee.kind else {
+                return Err(WasmCodegenError::unsupported("match a named local in browser events"));
+            };
+            let slot = locals.slot(*local_id, name)?;
+            function.instruction(&Instruction::Block(BlockType::Result(wasm_val_type(&expr.ty)?)));
+            for arm in arms {
+                match &arm.pattern {
+                    IrPattern::Literal(IrLiteral::Int(value)) => {
+                        function.instruction(&Instruction::LocalGet(slot.start));
+                        function.instruction(&Instruction::I64Const(*value));
+                        function.instruction(&Instruction::I64Eq);
+                    }
+                    IrPattern::Literal(IrLiteral::Bool(value)) => {
+                        function.instruction(&Instruction::LocalGet(slot.start));
+                        function.instruction(&Instruction::I32Const(i32::from(*value)));
+                        function.instruction(&Instruction::I32Eq);
+                    }
+                    IrPattern::Wildcard => { function.instruction(&Instruction::I32Const(1)); }
+                    _ => return Err(WasmCodegenError::unsupported("browser match supports integer and boolean literals and _")),
+                }
+                function.instruction(&Instruction::If(BlockType::Empty));
+                if let Some(guard) = &arm.guard {
+                    emit_expr(guard, function, locals, agent_indices, host_plan, string_pool, sites)?;
+                    function.instruction(&Instruction::If(BlockType::Empty));
+                }
+                emit_expr(&arm.body, function, locals, agent_indices, host_plan, string_pool, sites)?;
+                function.instruction(&Instruction::Br(if arm.guard.is_some() { 2 } else { 1 }));
+                if arm.guard.is_some() { function.instruction(&Instruction::End); }
+                function.instruction(&Instruction::End);
+            }
+            function.instruction(&Instruction::Unreachable);
+            function.instruction(&Instruction::End);
+        }
         IrExprKind::Match { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "match is interpreter-only in 45i".to_string(),
