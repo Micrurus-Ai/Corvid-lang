@@ -18,17 +18,19 @@
 //!   to `Float`. Making a column required fails while a row still has
 //!   no value, and the migration then leaves the table as it was.
 //!
-//! Renames, new columns and retired columns use `ALTER TABLE`. A type
-//! or nullability change rebuilds the table: create it under a
-//! temporary name, copy every row, drop the old table and rename the new
-//! one. `corvid migrate up` runs each migration in one transaction, so a
+//! Renames, new columns and retired columns use `ALTER TABLE`. On
+//! Postgres a type or nullability change is `ALTER COLUMN` too. SQLite
+//! cannot alter a column, so there the change rebuilds the table:
+//! create it under a temporary name, copy every row, drop the old table
+//! and rename the new one. `corvid migrate up` runs each migration in one transaction, so a
 //! failed copy changes nothing.
 
 use super::{create_table_named, quote, ColumnKind, TableSchema};
 use crate::tables::column_kind;
 use std::collections::BTreeSet;
 
-/// One column of a stored table, as `pragma_table_info` reports it.
+/// One column of a stored table, as the engine's catalog reports it
+/// (`pragma_table_info` on SQLite, `information_schema` on Postgres).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredColumn {
     pub name: String,
@@ -90,7 +92,7 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
 
     let mut renames = Vec::new();
     let mut added = Vec::new();
-    let mut rebuild = Vec::new();
+    let mut altered: Vec<Alteration<'_>> = Vec::new();
     for (name, ty, source) in &columns {
         let (kind, nullable) = column_kind(ty);
         let is_key = *name == table.key;
@@ -119,7 +121,7 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
                     ));
                     continue;
                 }
-                let Some(stored_kind) = ColumnKind::from_sql_type(&column.sql_type) else {
+                let Some(stored_kind) = table.engine.kind_of(&column.sql_type) else {
                     refusals.push(format!(
                         "table `{}`: column `{}` has the type `{}`, which Corvid does not create, so the planner cannot tell how its values are stored",
                         table.name, column.name, column.sql_type
@@ -136,7 +138,12 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
                         kind_label(kind)
                     ));
                 } else if kind_changes || null_changes {
-                    rebuild.push(change_label(name, stored_kind, column.not_null, kind, nullable));
+                    altered.push(Alteration {
+                        name,
+                        label: change_label(name, stored_kind, column.not_null, kind, nullable),
+                        new_type: kind_changes.then_some(kind),
+                        nullable: null_changes.then_some(nullable),
+                    });
                 }
             }
         }
@@ -144,7 +151,7 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
     if !refusals.is_empty() {
         return Err(refusals);
     }
-    if renames.is_empty() && added.is_empty() && retired.is_empty() && rebuild.is_empty() {
+    if renames.is_empty() && added.is_empty() && retired.is_empty() && altered.is_empty() {
         return Ok(None);
     }
 
@@ -152,25 +159,48 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
     summary.extend(renames.iter().map(|(old, new)| format!("rename `{old}` to `{new}`")));
     summary.extend(added.iter().map(|(name, _)| format!("add `{name}`")));
     summary.extend(retired.iter().map(|name| format!("drop retired `{name}` and its data")));
-    summary.extend(rebuild.iter().cloned());
+    summary.extend(altered.iter().map(|a| a.label.clone()));
 
     let table_name = quote(&table.name);
-    let statements = if rebuild.is_empty() {
+    let statements = if altered.is_empty() || !table.engine.rebuilds_to_alter() {
         let mut statements = Vec::new();
         for (old, new) in &renames {
             statements.push(format!("ALTER TABLE {table_name} RENAME COLUMN {} TO {};", quote(old), quote(new)));
         }
         for (name, kind) in &added {
-            statements.push(format!("ALTER TABLE {table_name} ADD COLUMN {} {};", quote(name), kind.sql_type()));
+            statements.push(format!("ALTER TABLE {table_name} ADD COLUMN {} {};", quote(name), table.engine.column_type(*kind)));
         }
         for name in &retired {
             statements.push(format!("ALTER TABLE {table_name} DROP COLUMN {};", quote(name)));
+        }
+        // Postgres alters a column in place; renames ran first, so the
+        // column has its declared name.
+        for alteration in &altered {
+            let column = quote(alteration.name);
+            if let Some(kind) = alteration.new_type {
+                statements.push(format!("ALTER TABLE {table_name} ALTER COLUMN {column} TYPE {};", table.engine.column_type(kind)));
+            }
+            match alteration.nullable {
+                Some(true) => statements.push(format!("ALTER TABLE {table_name} ALTER COLUMN {column} DROP NOT NULL;")),
+                Some(false) => statements.push(format!("ALTER TABLE {table_name} ALTER COLUMN {column} SET NOT NULL;")),
+                None => {}
+            }
         }
         statements
     } else {
         rebuild_statements(table, &columns)
     };
     Ok(Some(TableChange { statements, summary }))
+}
+
+/// A stored column whose type or nullability changes.
+struct Alteration<'a> {
+    name: &'a str,
+    label: String,
+    /// The new storage kind, when it changes.
+    new_type: Option<ColumnKind>,
+    /// Whether the column now admits no value, when that changes.
+    nullable: Option<bool>,
 }
 
 /// Create the declared table under a temporary name, copy every row
@@ -183,7 +213,7 @@ fn rebuild_statements(table: &TableSchema, columns: &[(&str, &corvid_types::Type
         let Source::Stored(column) = source else { continue };
         targets.push(quote(name));
         let converts_to_real = column_kind(ty).0 == ColumnKind::Real
-            && ColumnKind::from_sql_type(&column.sql_type) == Some(ColumnKind::Integer);
+            && table.engine.kind_of(&column.sql_type) == Some(ColumnKind::Integer);
         values.push(if converts_to_real {
             format!("CAST({} AS REAL)", quote(&column.name))
         } else {

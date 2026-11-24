@@ -4,6 +4,35 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Currency formatting (B06, fourth slice)
+
+`amount.format_currency("EUR", "de-DE")` writes money from Unicode
+CLDR data through ICU4X, in a new `corvid-currency` crate. Two small
+types, `Currency` and `Locale`, take string literals by their slot and
+check them at compile time, so the draft's second method
+(`format_currency_checked`) went: run-time text goes through
+`parse_currency` and `parse_locale`. A locale is accepted when its
+language has CLDR data (checked with CLDR's likely subtags), so a tag
+never silently formats with the root locale.
+
+The measurement the proposal asked for decided the library. A probe
+formatting in every locale, with the currency-name and likely-subtags
+data the checks need, is 1.7 MB in a release build, and ICU4X covers
+all of CLDR. The probe also showed that CLDR formatters round to the
+currency's minor unit (`1.005` USD printed `$1.01`, `1234.5` JPY
+`￥1,235`). Formatting therefore checks the amount's scale against the
+minor unit from the same CLDR data and traps beyond it, asking for a
+declared rounding; `currency.minor_digits()` supplies the places. The
+draft's `$1.005` is not a form CLDR writes, so the trap is the honest
+version of "formatting never rounds".
+
+ICU4X's currency formatter is in `icu_experimental`, which is not yet
+stable, so it is pinned to `=0.7.0` and used from one crate; the
+existing ICU 2.2 crates (through `idna`) moved to 2.4 with it. In
+debug builds ICU prints a line to stderr when a locale has no symbol
+for a currency and falls back to its code (`fr-CH` and CHF); release
+builds are silent.
+
 ## 2026-11-24 - The tz database version in traces (B06, 3b)
 
 Zone-dependent results are pure functions of the IANA database
@@ -116,6 +145,34 @@ Found on the way: an `Int` value in a `Float` slot is never converted
 at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
+
+## 2026-11-24 - Migrations on Postgres (B09 P4b)
+
+`corvid migrate` now plans and applies Postgres migrations. Postgres
+migrations cannot replay into in-memory SQLite, so `migrate plan
+--scratch ENV_VAR` plans against a scratch database. It refuses one that
+holds any table, so it cannot be pointed at real data by mistake, and it
+applies the migrations inside a transaction it rolls back, so the
+scratch database ends empty (a test checks both). On Postgres the planner
+alters a column in place (`ALTER COLUMN ... TYPE`, `SET NOT NULL`) rather
+than rebuilding the table as SQLite must.
+
+`migrate up | status | down --program <source>` connects to the database
+the program's `database` block declares, with its TLS policy, instead of
+taking a connection string on the command line, where it would land in
+shell history; the one declaration serves the runtime and every command.
+The history lives in the database under an advisory lock, as on SQLite
+it lives under a writer lock. SQLite's authorizer stops a migration from
+ending the runner's transaction; Postgres has none, so migration text is
+scanned first, skipping comments, quotes, dollar-quoted bodies and
+`BEGIN ATOMIC` function bodies, and a `BEGIN`, `COMMIT` or `ROLLBACK` is
+refused before anything runs.
+
+`migrate_cmd.rs` was split first, moving the SQLite history store to its
+own module, and the status report is now shared by both engines rather
+than copied. A program whose tables live in more than one database is
+refused by `corvid migrate` until each database gets its own history,
+now on the roadmap.
 
 ## 2026-11-24 - Tables on Postgres (B09 P4a)
 

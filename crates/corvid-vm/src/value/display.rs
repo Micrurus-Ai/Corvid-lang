@@ -25,6 +25,8 @@ impl fmt::Display for Value {
             Value::Instant(i) => write!(f, "{i}"),
             Value::TimeZone(z) => write!(f, "{z}"),
             Value::ZonedTime(z) => write!(f, "{z}"),
+            Value::Currency(c) => write!(f, "{c}"),
+            Value::Locale(l) => write!(f, "{l}"),
             Value::String(s) => write!(f, "\"{}\"", escape_display(s)),
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Nothing => write!(f, "nothing"),

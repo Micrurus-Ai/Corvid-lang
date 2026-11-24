@@ -72,7 +72,7 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         // `Decimal` table columns until then.
         Type::Decimal => (ColumnKind::Json, false),
         // B06 — the same deferred decision for the time types.
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime => (ColumnKind::Json, false),
+        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => (ColumnKind::Json, false),
         _ => (ColumnKind::Json, false),
     }
 }

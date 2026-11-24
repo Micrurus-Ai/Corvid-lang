@@ -77,6 +77,8 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::Instant
         | Type::TimeZone
         | Type::ZonedTime
+        | Type::Currency
+        | Type::Locale
         | Type::Unknown => false,
     }
 }

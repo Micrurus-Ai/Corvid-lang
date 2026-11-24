@@ -47,6 +47,10 @@ pub enum Value {
     TimeZone(corvid_time::TimeZone),
     /// B06 — an instant seen in a time zone.
     ZonedTime(corvid_time::ZonedTime),
+    /// B06 — an ISO 4217 currency.
+    Currency(corvid_currency::Currency),
+    /// B06 — a BCP 47 locale with CLDR data.
+    Locale(Arc<corvid_currency::Locale>),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -237,6 +241,8 @@ impl Clone for Value {
             Value::Instant(i) => Value::Instant(*i),
             Value::TimeZone(z) => Value::TimeZone(*z),
             Value::ZonedTime(z) => Value::ZonedTime(*z),
+            Value::Currency(c) => Value::Currency(*c),
+            Value::Locale(l) => Value::Locale(l.clone()),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -282,6 +288,8 @@ impl Value {
             Value::Instant(_) => "Instant".into(),
             Value::TimeZone(_) => "TimeZone".into(),
             Value::ZonedTime(_) => "ZonedTime".into(),
+            Value::Currency(_) => "Currency".into(),
+            Value::Locale(_) => "Locale".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -354,6 +362,8 @@ impl PartialEq for Value {
             (Value::Instant(a), Value::Instant(b)) => a == b,
             (Value::TimeZone(a), Value::TimeZone(b)) => a == b,
             (Value::ZonedTime(a), Value::ZonedTime(b)) => a == b,
+            (Value::Currency(a), Value::Currency(b)) => a == b,
+            (Value::Locale(a), Value::Locale(b)) => a == b,
             (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
             (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,

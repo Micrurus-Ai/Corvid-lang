@@ -6,6 +6,7 @@ mod regex_methods;
 mod decimal;
 mod time;
 mod time_zones;
+mod currency;
 mod text_methods;
 
 fn check(src: &str) -> Checked {

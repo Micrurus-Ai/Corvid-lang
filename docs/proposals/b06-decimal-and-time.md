@@ -80,12 +80,13 @@ Amended on 2026-11-24 under the project's syntax simplicity rule, before slice 1
 
 **Other methods.** `d.abs()`, `d.scale()` (the number of fractional digits), `d.to_string()` (plain notation, never an exponent) and `d.to_int_truncated()`, which traps outside the `Int` range.
 
-**Currency formatting.** `d.format_currency(currency, locale)` returns a `String`:
+**Currency formatting.** `d.format_currency(currency, locale)` returns a `String` (amended under the syntax simplicity rule before slice 4 landed):
 
-- `currency` is an ISO 4217 code and `locale` is a BCP 47 tag. When they are literals, the compiler checks them against the bundled data. When they are computed at run time, the method returns a `Result`, through a separate method, `format_currency_checked`, so the common literal case stays total.
+- `currency` is a `Currency` and `locale` is a `Locale`, two small types. A string literal where one is meant is one, checked against the bundled CLDR data, as zones are: `total.format_currency("EUR", "de-DE")`. A currency CLDR does not name, or a locale whose language CLDR has no data for, is a compile error. Text that arrives at run time goes through `text.parse_currency()` or `text.parse_locale()`, which return a `Result`. The draft's second method, `format_currency_checked`, is gone, because the types carry the check. A region or script without its own data falls back within its language, as CLDR intends (`de-LU` formats as German), but never to the root locale.
+- `currency.minor_digits()` gives the digits the currency shows (2 for USD, 0 for JPY, 3 for KWD), so a program rounds with `amount.round_half_even(currency.minor_digits())`.
 - **There is no default locale.** Whether `1234.5` prints as `$1,234.50` or `1.234,50 $` is visible to every customer, so the author declares the locale. A process-wide locale picked up from the host, as C's `setlocale` does, would make output depend on the machine.
-- **Formatting never rounds.** Any amount shows at least the currency's minor-unit digits (`USD` has 2 and `JPY` has 0) and never fewer digits than the value has, so `1.005` formatted with `format_currency("USD", "en-US")` is `$1.005`. A program rounds with a declared mode first. A formatter that rounded would introduce a second, hidden rounding policy into an invoice.
-- The locale data is CLDR, compiled into the binary. The formatting slice chooses the library after measuring how much each candidate adds to binary size. The slice ships only if it can format every locale CLDR covers, and not a hand-picked subset.
+- **Formatting never rounds.** An amount shows at least the currency's minor-unit digits, padded with zeros. An amount with more digits than the currency shows, such as `1.005` in USD, traps with a message that asks for a declared rounding first. CLDR formatters round to the minor unit, and a formatter that rounded would introduce a second, hidden rounding policy into an invoice. The draft showed the extra digits (`$1.005`) instead, but no CLDR pattern writes money that way, so the trap is the honest choice.
+- The locale data is CLDR through ICU4X, the Unicode Consortium's Rust implementation, compiled into the binary. ICU4X's currency formatter lives in `icu_experimental`, whose API is not yet stable, so it is pinned exactly (`=0.7.0`) and used only from the `corvid-currency` crate. A probe binary that formats in every CLDR locale, with the currency names and likely-subtags data the checks need, is 1.7 MB in a release build. ICU4X covers every locale in CLDR, not a hand-picked subset.
 
 ### Duration
 
@@ -164,6 +165,7 @@ Recorded under the project's syntax simplicity rule.
 - **Division.** Six `divide_<mode>(b, places)` methods doubled the API and read backwards (`a.divide_half_even(b, 2)`). A default rounding for `/` would hide a money policy. `(a / b).round_<mode>(places)` keeps `/` where a reader expects it and puts the policy next to it, with one set of mode names for rounding and division.
 - **Duration construction.** `30.seconds()` (methods on `Int`) reads as code, not as a time, and would remain a second spelling once a literal exists. `seconds(30)` is a function call for a constant. `Duration.parse("PT30S")` is a string. `30 seconds` won: it is how the sentence is said, it matches `within 30 seconds`, and multiplying it covers computed values without a second constructor.
 - **Zones.** `TimeZone("Europe/Berlin")` is a call wrapped around a string the compiler can already check where a zone is meant, and a second spelling of a zone. Typing the literal by its slot, as decimals are, won. `text.parse_zoned_time(zone)` for local text was renamed `parse_local_time(zone)`, because the text holds a local time, not a zoned one; `parse_zoned_time()` reads RFC 9557 text that names its own zone.
+- **Currency formatting.** `format_currency("EUR", "de-DE")` with literals and `format_currency_checked(currency, locale)` returning a `Result` for computed values was two methods for one job. Typing the arguments as `Currency` and `Locale`, checked by their slot like zones, leaves one total method.
 - **Duration readings.** `total_seconds()` (Python) returns a fraction in Python, so the same name truncating would surprise; `in_seconds()` does not say it truncates. `whole_seconds()` says what it returns.
 - **Epoch numbers.** `n.epoch_milliseconds_to_instant()` puts the unit in a long method name on `Int`. `Instant.from_epoch_milliseconds(n)` names the type it makes, as Temporal does.
 - **The mode.** `round(2, half_even)` needs six names in scope in every program, and `Up` and `Down` would collide with user sum types. `round(2, "half_even")` is a string the reader must trust. The mode in the method name (`round_half_even(2)`) is plain words, needs no import and autocompletes as a family.
@@ -175,7 +177,7 @@ Recorded under the project's syntax simplicity rule.
 2b. **The duration literal** (`30 seconds`) with the calendar-unit diagnostic, after agreement with frontend development.
 3. **Time zones on the interpreter.** `TimeZone`, `ZonedTime`, zone literals checked by their slot, conversion, `parse_local_time` with its errors for gaps and folds, `parse_zoned_time`, calendar arithmetic, the Berlin daylight-saving acceptance test, and the scheduler moved onto `corvid-time`.
 3b. **The tz database version in the trace header**, with replay reporting a mismatch.
-4. **Currency formatting.** `format_currency` and `format_currency_checked` with CLDR data.
+4. **Currency formatting.** `Currency`, `Locale`, `format_currency` and `minor_digits` with CLDR data.
 5. **JSON, contracts and SDKs** for all five types.
 6. **Native Decimal**, with parity tests.
 7. **Native time types**, with parity tests.

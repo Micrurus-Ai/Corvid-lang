@@ -2,19 +2,26 @@
 //! brings the stored tables to the program's declarations.
 //!
 //! The migration files are the schema's history, so the planner applies
-//! every existing migration to an empty in-memory database and compares
-//! the declared tables with what that leaves. A table no migration
-//! creates gets a `CREATE TABLE`; a stored table that differs gets the
-//! change [`plan_table_change`] plans, or its refusals. The new file is
-//! checked by running it on the history before it is written.
+//! every existing migration to a database and compares the declared
+//! tables with what that leaves. A table no migration creates gets a
+//! `CREATE TABLE`; a stored table that differs gets the change
+//! [`plan_table_change`] plans, or its refusals. The new file is checked
+//! by running it on the history before it is written.
+//!
+//! On SQLite the history is an in-memory database. Postgres migrations
+//! cannot run there, so a Postgres program names a scratch database with
+//! `--scratch ENV_VAR`: the planner refuses one that is not empty, applies
+//! the migrations inside a transaction, and rolls the transaction back,
+//! so the scratch database ends as it began.
 
 use crate::migrate_cmd::{migration_version, scan_migration_files};
+use crate::migrate_postgres;
 use anyhow::{bail, Context, Result};
-use corvid_runtime::tables::{create_table_sql, plan_table_change, StoredColumn, TableEngine};
+use corvid_runtime::tables::{create_table_sql_on, plan_table_change, StoredColumn, TableEngine, TableSchema};
 use rusqlite::Connection;
 use std::path::Path;
 
-pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Result<u8> {
+pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch: Option<&str>) -> Result<u8> {
     let text = std::fs::read_to_string(source).with_context(|| format!("cannot read `{}`", source.display()))?;
     let schemas = match corvid_driver::table_schemas(&text) {
         Ok(schemas) => schemas,
@@ -23,34 +30,103 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
             return Ok(1);
         }
     };
-    if schemas.is_empty() {
+    let Some(engine) = schemas.first().map(|t| t.engine) else {
         println!("plan: `{}` declares no tables", source.display());
         return Ok(0);
-    }
-    if let Some(table) = schemas.iter().find(|t| t.engine != TableEngine::Sqlite) {
-        eprintln!(
-            "plan: table `{}` is in a {} database; planning its migrations arrives in B09 P4b, so write that migration by hand for now",
-            table.name,
-            table.engine.name()
+    };
+    if schemas.iter().any(|t| t.engine != engine) {
+        bail!(
+            "`{}` keeps tables on more than one engine; migrations per database are planned work, so plan each database with its own program for now",
+            source.display()
         );
-        return Ok(1);
+    }
+    match engine {
+        TableEngine::Sqlite => {
+            if scratch.is_some() {
+                bail!("`--scratch` names a Postgres scratch database, but `{}` keeps its tables on SQLite", source.display());
+            }
+            let connection = Connection::open_in_memory().context("open an in-memory database")?;
+            plan(source, dir, dry_run, &schemas, &mut History::Sqlite(connection))
+        }
+        TableEngine::Postgres { .. } => {
+            let Some(variable) = scratch else {
+                bail!(
+                    "`{}` keeps its tables on Postgres; pass `--scratch ENV_VAR`, the environment variable holding an empty scratch database's connection string, to plan against",
+                    source.display()
+                );
+            };
+            let url = std::env::var(variable)
+                .with_context(|| format!("the scratch database comes from `{variable}`, which is not set"))?;
+            let mut client = migrate_postgres::connect(&url, engine)?;
+            let mut tx = client.transaction()?;
+            let user_tables: i64 = tx
+                .query_one(
+                    "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')",
+                    &[],
+                )?
+                .get(0);
+            if user_tables > 0 {
+                bail!(
+                    "the scratch database from `{variable}` is not empty ({user_tables} tables); the planner applies every migration to it, so name an empty database, never one that holds data"
+                );
+            }
+            // The transaction is never committed: dropping it rolls back
+            // everything the planner applied.
+            plan(source, dir, dry_run, &schemas, &mut History::Postgres(&mut tx))
+        }
+    }
+}
+
+/// Where the migrations are applied while planning.
+enum History<'a, 'c> {
+    Sqlite(Connection),
+    Postgres(&'a mut postgres::Transaction<'c>),
+}
+
+impl History<'_, '_> {
+    fn run(&mut self, sql: &str) -> Result<()> {
+        match self {
+            History::Sqlite(connection) => connection.execute_batch(sql).map_err(Into::into),
+            History::Postgres(tx) => migrate_postgres::run_migration_sql(tx, sql),
+        }
     }
 
-    let history = Connection::open_in_memory().context("open an in-memory database")?;
+    /// A table's columns as the migrations left them; empty if no
+    /// migration creates it.
+    fn stored_columns(&mut self, table: &str) -> Result<Vec<StoredColumn>> {
+        match self {
+            History::Sqlite(connection) => {
+                let mut statement = connection.prepare("SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1)")?;
+                let columns = statement.query_map([table], |row| {
+                    Ok(StoredColumn {
+                        name: row.get(0)?,
+                        sql_type: row.get(1)?,
+                        not_null: row.get::<_, i64>(2)? != 0,
+                        primary_key: row.get::<_, i64>(3)? != 0,
+                    })
+                })?;
+                Ok(columns.collect::<rusqlite::Result<_>>()?)
+            }
+            History::Postgres(tx) => migrate_postgres::stored_columns(tx, table),
+        }
+    }
+}
+
+fn plan(source: &Path, dir: &Path, dry_run: bool, schemas: &[TableSchema], history: &mut History<'_, '_>) -> Result<u8> {
     let migrations = scan_migration_files(dir)?;
     for migration in &migrations {
         let sql = std::fs::read_to_string(&migration.path)
             .with_context(|| format!("cannot read migration `{}`", migration.path.display()))?;
         history
-            .execute_batch(&sql)
+            .run(&sql)
             .with_context(|| format!("migration `{}` does not apply in order to an empty database", migration.name))?;
     }
 
     let mut created = Vec::new();
     let mut changed = Vec::new();
     let mut refusals = Vec::new();
-    for schema in &schemas {
-        let stored = stored_columns(&history, &schema.name)?;
+    for schema in schemas {
+        let stored = history.stored_columns(&schema.name)?;
         if stored.is_empty() {
             created.push(schema);
             continue;
@@ -79,7 +155,7 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
     );
     for table in &created {
         sql.push_str(&format!("-- Create `{}`.\n", table.name));
-        sql.push_str(&create_table_sql(table));
+        sql.push_str(&create_table_sql_on(table, table.engine));
         sql.push('\n');
     }
     for (table, change) in &changed {
@@ -95,9 +171,9 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
 
     // The plan must bring the history to the declarations exactly;
     // check that before handing it to a person.
-    history.execute_batch(&sql).context("the planned migration does not run on the migrated schema")?;
-    for schema in &schemas {
-        let stored = stored_columns(&history, &schema.name)?;
+    history.run(&sql).context("the planned migration does not run on the migrated schema")?;
+    for schema in schemas {
+        let stored = history.stored_columns(&schema.name)?;
         if !matches!(plan_table_change(schema, &stored), Ok(None)) {
             bail!("the planned migration leaves table `{}` different from its declaration; this is a planner bug", schema.name);
         }
@@ -120,21 +196,6 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool) -> Resu
     Ok(0)
 }
 
-/// A table's columns as the migrations left them; empty if no migration
-/// creates it.
-fn stored_columns(history: &Connection, table: &str) -> Result<Vec<StoredColumn>> {
-    let mut statement = history.prepare("SELECT name, type, \"notnull\", pk FROM pragma_table_info(?1)")?;
-    let columns = statement.query_map([table], |row| {
-        Ok(StoredColumn {
-            name: row.get(0)?,
-            sql_type: row.get(1)?,
-            not_null: row.get::<_, i64>(2)? != 0,
-            primary_key: row.get::<_, i64>(3)? != 0,
-        })
-    })?;
-    Ok(columns.collect::<rusqlite::Result<_>>()?)
-}
-
 /// The next numeric version, padded like the existing ones.
 fn next_version(migrations: &[crate::migrate_cmd::MigrationFile]) -> String {
     let numbers: Vec<(u64, usize)> = migrations
@@ -152,7 +213,7 @@ fn next_version(migrations: &[crate::migrate_cmd::MigrationFile]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use corvid_runtime::tables::TableSchema;
+    use corvid_runtime::tables::{create_table_sql, TableSchema};
 
     fn schema() -> TableSchema {
         use corvid_types::Type;
@@ -179,9 +240,9 @@ mod tests {
             sql,
             "CREATE TABLE \"Shelf\" (\n    \"shelf\" INTEGER PRIMARY KEY NOT NULL,\n    \"title\" TEXT NOT NULL,\n    \"note\" TEXT,\n    \"tags\" JSON TEXT NOT NULL,\n    \"revision\" INTEGER NOT NULL\n);\n"
         );
-        let history = Connection::open_in_memory().unwrap();
-        history.execute_batch(&sql).expect("the statement runs");
-        let stored = stored_columns(&history, "Shelf").unwrap();
+        let mut history = History::Sqlite(Connection::open_in_memory().unwrap());
+        history.run(&sql).expect("the statement runs");
+        let stored = history.stored_columns("Shelf").unwrap();
         assert_eq!(stored.len(), 5);
         assert_eq!(plan_table_change(&schema(), &stored).unwrap(), None, "a created table matches its declaration");
     }

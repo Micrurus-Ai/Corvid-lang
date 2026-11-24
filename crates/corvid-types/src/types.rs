@@ -33,6 +33,10 @@ pub enum Type {
     TimeZone,
     /// B06 — an instant seen in a time zone (`corvid_time::ZonedTime`).
     ZonedTime,
+    /// B06 — an ISO 4217 currency (`corvid_currency::Currency`).
+    Currency,
+    /// B06 — a BCP 47 locale with CLDR data (`corvid_currency::Locale`).
+    Locale,
     String,
     Bool,
     Nothing,
@@ -227,6 +231,8 @@ impl Type {
             "Instant" => Type::Instant,
             "TimeZone" => Type::TimeZone,
             "ZonedTime" => Type::ZonedTime,
+            "Currency" => Type::Currency,
+            "Locale" => Type::Locale,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -252,6 +258,8 @@ impl Type {
             Type::Instant => "Instant".into(),
             Type::TimeZone => "TimeZone".into(),
             Type::ZonedTime => "ZonedTime".into(),
+            Type::Currency => "Currency".into(),
+            Type::Locale => "Locale".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),
