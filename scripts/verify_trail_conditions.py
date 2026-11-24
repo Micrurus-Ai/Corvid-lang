@@ -11,6 +11,8 @@ from verify_reading_list import serve
 def check_cards(page, url):
     page.emulate_media(media="screen", color_scheme="light")
     page.goto(url)
+    body = page.locator("body")
+    expect(body).to_have_css("font-family", "system-ui")
     forest = page.locator(".trail-card.forest")
     river = page.locator(".trail-card.river")
     expect(forest.get_by_role("heading")).to_have_css("color", "rgb(40, 94, 56)")
@@ -59,6 +61,7 @@ def check_cards(page, url):
     }""", river_top)
 
     page.emulate_media(media="print")
+    expect(body).to_have_css("font-family", "sans-serif")
     expect(note).to_have_css("position", "static")
     assert note.bounding_box()["y"] + note.bounding_box()["height"] <= river.bounding_box()["y"]
     forest_toggle.press("Space")
@@ -71,7 +74,6 @@ def check_cards(page, url):
     expect(river.locator(".trail-summary")).to_have_css("flex-direction", "row")
 
     page.emulate_media(media="screen", color_scheme="dark")
-    body = page.locator("body")
     expect(body).to_have_css("background-color", "rgb(24, 35, 29)")
     expect(body).to_have_css("color", "rgb(242, 245, 243)")
     expect(forest.get_by_role("heading")).to_have_css("color", "rgb(154, 221, 171)")

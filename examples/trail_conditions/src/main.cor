@@ -6,7 +6,8 @@ fn trail_card(theme: String, trail: String, condition: String, note: String) -> 
     return ui.class_group("trail-card " + theme, [summary, notes])
 
 fn conditions_page() -> String:
-    css = """body { font-family: system-ui, sans-serif; background: white; color: #18231d }
+    css = """@import url("data:text/css,:root{--trail-font:system-ui}") screen;
+body { font-family: var(--trail-font, sans-serif); background: white; color: #18231d }
 .trail-list { display: grid; gap: 1rem }
 .trail-card { container: trail-card / inline-size; --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
 .trail-card.river { --trail-accent: #225782 }
@@ -43,6 +44,11 @@ fn conditions_page() -> String:
     return ui.styled_page("en", "Trail conditions", css, [
         ui.h1("Trail conditions"), ui.class_group("trail-list", [forest, river])
     ])
+
+test trail_page_places_font_import_before_style_rules:
+    page = conditions_page()
+    assert page.contains("<style>@import url(\"data:text/css,:root{--trail-font:system-ui}\") screen;")
+    assert page.contains("font-family: var(--trail-font, sans-serif)")
 
 test class_group_escapes_classes_and_keeps_child_order:
     group = ui.class_group("map\" & <trail>", [ui.text("First"), ui.text("Second")])
