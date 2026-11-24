@@ -1416,9 +1416,20 @@ impl<'a> Lowerer<'a> {
             }
         }
         let kind = match e {
+            // B06 — a number literal the checker typed `Decimal`, read
+            // from its source digits by the parser the checker used.
+            Expr::Literal { value, .. } if matches!(ty, Type::Decimal) => {
+                IrExprKind::Literal(IrLiteral::Decimal(
+                    corvid_types::number_literal_text(value)
+                        .and_then(|text| corvid_decimal::Decimal::parse(&text).ok())
+                        // Unreachable for a program that checked: the
+                        // checker reports a literal with no exact value.
+                        .unwrap_or(corvid_decimal::Decimal::ZERO),
+                ))
+            }
             Expr::Literal { value, .. } => IrExprKind::Literal(match value {
                 Literal::Int(n) => IrLiteral::Int(*n),
-                Literal::Float(f) => IrLiteral::Float(*f),
+                Literal::Float { value: f, .. } => IrLiteral::Float(*f),
                 Literal::String(s) => IrLiteral::String(s.clone()),
                 Literal::Bool(b) => IrLiteral::Bool(*b),
                 Literal::Nothing => IrLiteral::Nothing,
@@ -1710,7 +1721,7 @@ impl<'a> Lowerer<'a> {
             Pattern::Wildcard { .. } => IrPattern::Wildcard,
             Pattern::Literal { value, .. } => IrPattern::Literal(match value {
                 corvid_ast::Literal::Int(v) => IrLiteral::Int(*v),
-                corvid_ast::Literal::Float(v) => IrLiteral::Float(*v),
+                corvid_ast::Literal::Float { value: v, .. } => IrLiteral::Float(*v),
                 corvid_ast::Literal::String(s) => IrLiteral::String(s.clone()),
                 corvid_ast::Literal::Bool(b) => IrLiteral::Bool(*b),
                 corvid_ast::Literal::Nothing => IrLiteral::Nothing,
@@ -2211,6 +2222,19 @@ impl<'a> Lowerer<'a> {
     ) -> Option<IrExprKind> {
         let recv_ty = self.types.get(&target.span())?;
         let sig = corvid_types::builtin_method(recv_ty, &field.name)?;
+        // B06 — `(a / b).round_<mode>(places)` on decimals is one
+        // rounded division: the quotient never exists unrounded.
+        if let (corvid_types::BuiltinMethodKind::DecimalRound(mode), Expr::BinOp { op: BinaryOp::Div, left, right, .. }) =
+            (sig.kind, target)
+        {
+            return Some(IrExprKind::BuiltinMethod {
+                kind: corvid_types::BuiltinMethodKind::DecimalDivideRound(mode),
+                receiver: Box::new(self.lower_expr(left)),
+                args: std::iter::once(self.lower_expr(right))
+                    .chain(args.iter().map(|a| self.lower_expr(a)))
+                    .collect(),
+            });
+        }
         Some(IrExprKind::BuiltinMethod {
             kind: corvid_types::refine_builtin_method_kind(sig.kind, args),
             receiver: Box::new(self.lower_expr(target)),
@@ -2412,6 +2436,7 @@ impl<'a> Lowerer<'a> {
         match self.bindings.get(&name.span) {
             Some(Binding::BuiltIn(BuiltIn::Int)) => Type::Int,
             Some(Binding::BuiltIn(BuiltIn::Float)) => Type::Float,
+            Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,

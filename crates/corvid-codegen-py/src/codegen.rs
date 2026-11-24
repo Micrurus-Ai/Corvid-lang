@@ -567,6 +567,13 @@ impl Codegen {
             IrLiteral::String(s) => self.out.write(&format!("\"{}\"", escape_string(s))),
             IrLiteral::Bool(b) => self.out.write(if *b { "True" } else { "False" }),
             IrLiteral::Nothing => self.out.write("None"),
+            // B06 — Python's `decimal` rounds products to its context
+            // precision, which Corvid's exact `Decimal` never does, so
+            // the Python backend refuses decimals rather than change
+            // their meaning.
+            IrLiteral::Decimal(_) => self.out.write(
+                "(_ for _ in ()).throw(NotImplementedError(\"Decimal is interpreter-only until B06's native Decimal slice\"))",
+            ),
         }
     }
 }
@@ -668,6 +675,9 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // B03 — the regex methods are builtin methods, which the
         // Python backend refuses before a hint is needed.
         T::RegexMatch => "object".into(),
+        // B06 — the Python backend refuses `Decimal` (interpreter-tier
+        // until its native slice) before a hint is needed.
+        T::Decimal => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

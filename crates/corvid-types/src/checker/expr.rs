@@ -24,9 +24,15 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_expr_as(&mut self, e: &Expr, expected: Option<&Type>) -> Type {
         let ty = match e {
+            // B06 — a number literal where a `Decimal` is meant is one.
+            Expr::Literal { value: value @ (Literal::Int(_) | Literal::Float { .. }), span }
+                if matches!(expected, Some(Type::Decimal)) =>
+            {
+                self.check_decimal_literal(value, *span)
+            }
             Expr::Literal { value, .. } => match value {
                 Literal::Int(_) => Type::Int,
-                Literal::Float(_) => Type::Float,
+                Literal::Float { value: _, .. } => Type::Float,
                 Literal::String(_) => Type::String,
                 Literal::Bool(_) => Type::Bool,
                 Literal::Nothing => Type::Nothing,
@@ -105,8 +111,8 @@ impl<'a> Checker<'a> {
                 left,
                 right,
                 span,
-            } => self.check_binop(*op, left, right, *span),
-            Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand),
+            } => self.check_binop(*op, left, right, *span, expected),
+            Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand, expected),
             Expr::Match {
                 scrutinee,
                 arms,
@@ -261,6 +267,7 @@ impl<'a> Checker<'a> {
             Binding::BuiltIn(b) => match b {
                 BuiltIn::Int
                 | BuiltIn::Float
+                | BuiltIn::Decimal
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

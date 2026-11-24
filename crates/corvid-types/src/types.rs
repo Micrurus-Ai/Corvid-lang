@@ -21,6 +21,10 @@ pub enum Type {
     // Primitives
     Int,
     Float,
+    /// B06 — an exact base-10 number (`corvid_decimal::Decimal`). Mixing
+    /// it with `Float` is a compile error; `Int` mixes in arithmetic
+    /// because the conversion is exact.
+    Decimal,
     String,
     Bool,
     Nothing,
@@ -210,6 +214,7 @@ impl Type {
         Some(match name {
             "Int" => Type::Int,
             "Float" => Type::Float,
+            "Decimal" => Type::Decimal,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -230,6 +235,7 @@ impl Type {
         match self {
             Type::Int => "Int".into(),
             Type::Float => "Float".into(),
+            Type::Decimal => "Decimal".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),

@@ -26,6 +26,10 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Int(n) => serde_json::Value::from(*n),
         Value::Float(f) => serde_json::Value::from(*f),
+        // B06 — exact text, never a JSON number, which would round.
+        // The checker refuses `Decimal` at JSON boundaries until the
+        // JSON slice; this keeps traces of decimal values exact.
+        Value::Decimal(d) => serde_json::Value::String(d.to_string()),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -491,6 +495,7 @@ fn type_label(t: &Type) -> String {
         Type::JsonBuilder => "JsonBuilder".into(),
         Type::JsonError => "JsonError".into(),
         Type::RegexMatch => "RegexMatch".into(),
+        Type::Decimal => "Decimal".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

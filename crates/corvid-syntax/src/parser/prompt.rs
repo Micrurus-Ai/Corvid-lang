@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
 
         // Percentage — accept Int or Float, mandatory `%`.
         let variant_percent = match self.peek().clone() {
-            TokKind::Float(n) => {
+            TokKind::Float { value: n, .. } => {
                 self.bump();
                 n
             }
@@ -710,7 +710,7 @@ impl<'a> Parser<'a> {
         let threshold = if matches!(self.peek(), TokKind::KwBelow) {
             self.bump(); // below
             match self.peek().clone() {
-                TokKind::Float(n) => {
+                TokKind::Float { value: n, .. } => {
                     self.bump();
                     Some(n)
                 }

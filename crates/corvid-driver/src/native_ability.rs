@@ -157,6 +157,9 @@ fn is_native_value_type(ty: &Type) -> bool {
         // B03 — regular expressions run on the interpreter until the
         // native regex slice.
         Type::RegexMatch => false,
+        // B06 — exact decimals run on the interpreter until the native
+        // Decimal slice.
+        Type::Decimal => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types served
         // by `corvid serve`; the tier-picker routes any program
         // mentioning them to the interpreter tier, mirroring `DbHandle`.

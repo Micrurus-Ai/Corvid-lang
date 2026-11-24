@@ -962,7 +962,7 @@ fn render_type_ref(ty: &TypeRef) -> String {
 fn render_literal(literal: &Literal) -> String {
     match literal {
         Literal::Int(value) => value.to_string(),
-        Literal::Float(value) => render_float(*value),
+        Literal::Float { value, .. } => render_float(*value),
         Literal::String(value) => render_string_literal(value),
         Literal::Bool(value) => value.to_string(),
         Literal::Nothing => "nothing".into(),

@@ -139,6 +139,13 @@ pub fn emit_type_description(
         Type::RegexMatch => TypeDescription::Struct {
             name: "RegexMatch".to_string(),
         },
+        // B06 — `Decimal` is interpreter-tier until its native slice and
+        // has no JSON form until its JSON slice, which decides its
+        // contract form. Named opaque, like `RegexMatch`, so signed
+        // manifests stay total.
+        Type::Decimal => TypeDescription::Struct {
+            name: "Decimal".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

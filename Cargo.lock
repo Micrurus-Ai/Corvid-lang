@@ -842,6 +842,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-decimal"
+version = "0.0.1"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
 name = "corvid-differential-verify"
 version = "0.0.1"
 dependencies = [
@@ -917,6 +927,7 @@ name = "corvid-ir"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-decimal",
  "corvid-resolve",
  "corvid-syntax",
  "corvid-types",
@@ -1144,6 +1155,7 @@ name = "corvid-types"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-decimal",
  "corvid-guarantees",
  "corvid-resolve",
  "corvid-syntax",
@@ -1159,6 +1171,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "corvid-ast",
+ "corvid-decimal",
  "corvid-ir",
  "corvid-prompt-format",
  "corvid-public-json",

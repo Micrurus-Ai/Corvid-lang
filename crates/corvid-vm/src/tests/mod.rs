@@ -18,6 +18,7 @@ mod core;
 mod dispatch;
 mod parallel;
 mod regex;
+mod decimal;
 mod test_runner;
 mod text;
 

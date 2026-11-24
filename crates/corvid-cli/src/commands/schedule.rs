@@ -239,7 +239,7 @@ fn literal_arg_to_json(
     };
     Ok(match value {
         Literal::Int(n) => serde_json::json!(n),
-        Literal::Float(f) => serde_json::json!(f),
+        Literal::Float { value: f, .. } => serde_json::json!(f),
         Literal::String(s) => serde_json::json!(s),
         Literal::Bool(b) => serde_json::json!(b),
         Literal::Nothing => serde_json::Value::Null,

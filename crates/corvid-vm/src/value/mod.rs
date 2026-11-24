@@ -36,6 +36,9 @@ pub use weak::{ListWeakValue, StructWeakValue, WeakValue};
 pub enum Value {
     Int(i64),
     Float(f64),
+    /// B06 — an exact decimal. Equality and hashing are numeric
+    /// (`1.0 == 1.00`); the scale is kept for display.
+    Decimal(corvid_decimal::Decimal),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -221,6 +224,7 @@ impl Clone for Value {
         match self {
             Value::Int(n) => Value::Int(*n),
             Value::Float(x) => Value::Float(*x),
+            Value::Decimal(d) => Value::Decimal(*d),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -261,6 +265,7 @@ impl Value {
         match self {
             Value::Int(_) => "Int".into(),
             Value::Float(_) => "Float".into(),
+            Value::Decimal(_) => "Decimal".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -328,6 +333,9 @@ impl PartialEq for Value {
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
             (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
+            (Value::Decimal(a), Value::Decimal(b)) => a == b,
+            (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
+            (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nothing, Value::Nothing) => true,
