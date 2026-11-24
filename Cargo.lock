@@ -1020,6 +1020,7 @@ dependencies = [
  "corvid-runtime-core",
  "corvid-syntax",
  "corvid-test-paths",
+ "corvid-text",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -1115,6 +1116,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-text"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "regex",
+ "regex-syntax",
+]
+
+[[package]]
 name = "corvid-tour-catalog"
 version = "0.0.1"
 dependencies = [
@@ -1137,6 +1147,7 @@ dependencies = [
  "corvid-guarantees",
  "corvid-resolve",
  "corvid-syntax",
+ "corvid-text",
  "serde",
  "toml 0.8.23",
 ]
@@ -1154,6 +1165,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-text",
  "corvid-trace-schema",
  "corvid-types",
  "futures",

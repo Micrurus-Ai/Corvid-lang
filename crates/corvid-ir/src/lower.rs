@@ -2212,7 +2212,7 @@ impl<'a> Lowerer<'a> {
         let recv_ty = self.types.get(&target.span())?;
         let sig = corvid_types::builtin_method(recv_ty, &field.name)?;
         Some(IrExprKind::BuiltinMethod {
-            kind: sig.kind,
+            kind: corvid_types::refine_builtin_method_kind(sig.kind, args),
             receiver: Box::new(self.lower_expr(target)),
             args: args.iter().map(|a| self.lower_expr(a)).collect(),
         })

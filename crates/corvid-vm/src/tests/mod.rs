@@ -17,7 +17,9 @@ mod stream;
 mod core;
 mod dispatch;
 mod parallel;
+mod regex;
 mod test_runner;
+mod text;
 
 /// Compile source text all the way down to IR. Panics on any frontend
 /// error — tests should pass clean programs.

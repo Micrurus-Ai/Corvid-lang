@@ -22,6 +22,120 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 native regular expressions, first part
+
+`contains_regex`, `replace_regex` (both the template and the verbatim
+kind) and `split_regex` compile to native code. They join the text
+method table and take their arguments through the ordinary string
+method lowering, so the pattern literal, the replacement and the split
+list are handled as `contains`, `replace` and `split` handle theirs. The
+runtime entry points call `corvid-text`; a pattern error there would be
+a compiler bug, so it aborts with the message instead of returning a
+value. Parity tests cover Unicode classes, case folding, named and
+numbered references, verbatim replacement and empty split pieces.
+
+`find_regex` and `find_all_regex` stay on the interpreter: native code
+would have to allocate `RegexMatch` records holding a
+`List<Option<String>>`, and the runtime must not decide native layouts
+itself. The roadmap records the plan, following the `JsonError` record
+and the JSON decode plan.
+
+## 2026-11-24 - B03 encoding and UUID parsing compile to native code
+
+The eight encoding methods and `parse_uuid` now compile. Each is one
+call into a `corvid-runtime` entry point that calls the `corvid-text`
+function the interpreter calls, so the tiers share every rule and every
+error message. Encoders return a String; decoders fill a native
+`Result<String, String>` payload slot and return its tag, the shape
+`parse_int` already uses.
+
+One table in the code generator names the runtime symbol and call shape
+of each method. The import declarations, the lowering, the tier picker
+and native match arms all read it, so a method is native in all four
+places or none. Parity tests compare both tiers on encoded text, Ok and
+Err results and `?` propagation, with balanced allocations.
+
+## 2026-11-24 - B03 UUID generation
+
+`std/uuid` adds `uuid_v4()` and `uuid_v7()`, both returning the
+canonical string `parse_uuid` produces.
+
+Decisions:
+
+- **Tools, not builtins.** Generation draws entropy and version 7 reads
+  the clock, so the generators are tools like `random_int`: traced,
+  replay returns the recorded UUID, and the checker refuses them inside
+  `@deterministic` agents. A replay test pins the substitution.
+- **Version 7 is offered alongside version 4** because it sorts by
+  creation time, which keeps database indexes compact for B09 tables.
+- **The runtime supplies only entropy and the clock.** The bit layout
+  is `corvid-text`'s, tested against the RFC 9562 example, and the
+  dispatcher lives in its own file next to `path`, not in the LLM
+  dispatch file.
+- **Interpreter only for now.** Native binaries do not dispatch any
+  stdlib tool yet; UUID generation follows `random_int` when they do.
+
+Found on the way: `@deterministic` accepted a tool brought in with
+`import ... use`, so `random_int` from the stdlib slipped through. The
+check now resolves imported uses and refuses tools and prompts, fixed
+in its own commit before this one.
+
+## 2026-11-24 - B03 regular expressions on the interpreter
+
+Five String methods match regular expressions: `contains_regex`,
+`find_regex`, `find_all_regex`, `replace_regex` and `split_regex`.
+
+Decisions:
+
+- **Only literal patterns, checked at compile time.** The checker parses
+  each pattern with `corvid-text`, which compiles it with the same
+  `regex` crate the runtime uses, so an accepted pattern cannot fail at
+  run time. A pattern in a variable is refused; run-time patterns need a
+  validated pattern value and wait for a program that needs one.
+- **A literal replacement is a checked template; any other replacement
+  is inserted verbatim.** The checker reads `$` references exactly as
+  the crate does, so `$1a`, a reference to a missing group and a stray
+  `$` are compile errors instead of silent empty expansions. The IR
+  lowerer picks the verbatim kind for a non-literal replacement, using
+  the same literal test as the checker, so user data is never expanded.
+- **`RegexMatch` is a compiler-known record**, like `JsonError`, with
+  character positions so `substring(m.start, m.end)` round-trips, and
+  `groups[i]` numbered as `$i` is. It is nameable in signatures and has
+  no JSON form.
+- **`split_regex` refuses patterns that can match empty text**, read
+  from the parsed pattern's minimum length, as `split("")` is refused.
+
+Found on the way: `JsonError` is not registered as a resolver builtin,
+so it cannot be written in a signature, though `Type::compiler_known`
+knows it. `RegexMatch` is registered; `JsonError` is left for B01.
+
+## 2026-11-24 - B03 text and encoding: encoders, decoders and UUID parsing
+
+[The proposal](docs/proposals/b03-text-and-encoding.md) settles the
+surface for all of B03, and this slice ships the first part on the
+interpreter: eight encoding methods and `parse_uuid`, all builtin
+`String` methods.
+
+Decisions:
+
+- **Methods, not tools.** The operations are pure, so they belong next
+  to `replace` and `parse_int`: no import, allowed in `@deterministic`
+  code, nothing to trace or substitute in replay. UUID generation is not
+  pure and will be a tool.
+- **One crate for every rule.** `corvid-text` holds the codecs and the
+  UUID parser. The interpreter calls it now and the native runtime will
+  call the same functions, so the tiers cannot drift. It depends on no
+  Corvid crate, because the checker needs it for regex patterns next.
+- **Decoders return `Result`.** Malformed input and decoded bytes that
+  are not UTF-8 are `Err` values naming the first problem and its
+  position in characters. Padding is the only optional part of base64.
+- **A UUID is a canonical `String`.** `parse_uuid` normalizes every
+  common spelling, so equality is string equality, and no new type
+  needs a JSON, database and SDK mapping.
+- **No byte encoders yet.** A `List<Int>` can hold values outside a
+  byte, so encoding one would need a trap or a fallible encoder. B04
+  decides the byte representation and adds them.
+
 ## 2026-11-24 - Table operations replay from the trace (B09 P1b)
 
 A table operation is now recorded like a tool call, `table:Shelf.save`

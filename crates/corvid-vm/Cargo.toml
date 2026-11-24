@@ -11,6 +11,7 @@ corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-public-json = { workspace = true }
+corvid-text = { workspace = true }
 corvid-runtime = { workspace = true }
 corvid-trace-schema = { workspace = true }
 corvid-prompt-format = { workspace = true }

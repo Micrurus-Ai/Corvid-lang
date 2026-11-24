@@ -18,6 +18,23 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.substring(start: Int, end: Int) -> String`
 - `String.parse_int() -> Result<Int, String>`
 - `String.parse_float() -> Result<Float, String>`
+- `String.encode_base64() -> String`
+- `String.decode_base64() -> Result<String, String>`
+- `String.encode_base64_url() -> String`
+- `String.decode_base64_url() -> Result<String, String>`
+- `String.encode_hex() -> String`
+- `String.decode_hex() -> Result<String, String>`
+- `String.encode_url_component() -> String`
+- `String.decode_url_component() -> Result<String, String>`
+- `String.parse_uuid() -> Result<String, String>`
+
+- `String.contains_regex(pattern: String) -> Bool`
+- `String.find_regex(pattern: String) -> Option<RegexMatch>`
+- `String.find_all_regex(pattern: String) -> List<RegexMatch>`
+- `String.replace_regex(pattern: String, replacement: String) -> String`
+- `String.split_regex(pattern: String) -> List<String>`
+
+The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must be a string literal, which the compiler checks. A `RegexMatch` has the fields `text: String`, `start: Int`, `end: Int` and `groups: List<Option<String>>`. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
 
@@ -384,6 +401,13 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `tool time_monotonic_ms() -> Int uses time_monotonic`
 - `tool time_parse_iso(text: String) -> Result<Int, String> uses time_wall`
 - `tool time_format_iso(epoch_ms: Int) -> String uses time_wall`
+
+### [std/uuid](../../std/uuid.cor)
+
+- `tool uuid_v4() -> String uses uuid_generate`
+- `tool uuid_v7() -> String uses uuid_generate`
+
+Both return the canonical lowercase hyphenated form. See [Generating UUIDs](text-and-encoding.md#generating-uuids).
 
 ### [std/ui](../../std/ui.cor)
 

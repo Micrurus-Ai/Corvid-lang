@@ -490,6 +490,7 @@ fn type_label(t: &Type) -> String {
         Type::JsonValue => "JsonValue".into(),
         Type::JsonBuilder => "JsonBuilder".into(),
         Type::JsonError => "JsonError".into(),
+        Type::RegexMatch => "RegexMatch".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

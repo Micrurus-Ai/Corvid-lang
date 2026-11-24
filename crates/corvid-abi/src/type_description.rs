@@ -133,6 +133,12 @@ pub fn emit_type_description(
         Type::JsonError => TypeDescription::Struct {
             name: "JsonError".to_string(),
         },
+        // B03 — a `RegexMatch` has no JSON form, so no projection
+        // describes its fields; like `Map`, it is a named opaque
+        // struct so signed manifests stay total.
+        Type::RegexMatch => TypeDescription::Struct {
+            name: "RegexMatch".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

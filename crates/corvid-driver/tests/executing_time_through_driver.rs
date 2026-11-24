@@ -81,3 +81,28 @@ agent main() -> String:
         other => panic!("expected String, got {other:?}"),
     }
 }
+
+/// An imported stdlib tool is as nondeterministic as a local one, so
+/// `@deterministic` refuses `random_int` brought in with `use`.
+#[test]
+fn imported_tools_are_refused_in_deterministic_agents() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("repo root");
+    fs::create_dir_all(project.path().join("src").join("std")).unwrap();
+    fs::copy(repo.join("std").join("random.cor"), project.path().join("src").join("std").join("random.cor")).unwrap();
+    let source = r#"
+import "./std/random" use random_int
+
+@deterministic
+agent roll() -> Int:
+    return random_int(1, 6)
+"#;
+    let main_path = project.path().join("src").join("main.cor");
+    fs::write(&main_path, source).unwrap();
+    let error = compile_to_ir_with_config_at_path(source, &main_path, None)
+        .expect_err("an imported tool call inside @deterministic must not compile");
+    assert!(format!("{error:?}").contains("random_int"), "{error:?}");
+}

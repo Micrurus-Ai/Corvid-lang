@@ -1,0 +1,25 @@
+# Standard UUID generation surface (B03).
+#
+# Design: generating a UUID draws operating-system entropy, and a
+# version 7 UUID also reads the clock, so the generators are TOOLS,
+# never builtins, for the reason std/random.cor and std/time.cor give:
+# tool calls are traced and substituted under replay, so a program that
+# generated a UUID generates the same one again on every re-run, and the
+# checker refuses tool calls inside `@deterministic` bodies.
+#
+# Parsing is pure, so it is the builtin String method
+# `text.parse_uuid()`, which needs no import. A UUID is a String in the
+# canonical form: 36 lowercase characters, hyphenated 8-4-4-4-12.
+# See docs/reference/text-and-encoding.md.
+
+public effect uuid_generate:
+    reversible: true
+
+# A random UUID (RFC 9562 version 4): 122 random bits.
+public tool uuid_v4() -> String uses uuid_generate
+
+# A time-ordered UUID (RFC 9562 version 7): the Unix time in
+# milliseconds, then 74 random bits. Later UUIDs sort after earlier
+# ones, which keeps database indexes compact. Two UUIDs generated in the
+# same millisecond are ordered randomly.
+public tool uuid_v7() -> String uses uuid_generate

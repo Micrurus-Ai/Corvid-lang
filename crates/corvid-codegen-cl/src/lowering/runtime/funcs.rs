@@ -44,6 +44,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_replace: FuncId,
     pub string_split: FuncId,
     pub string_parse_int: FuncId,
+    /// The B03 text encoders and decoders, by method.
+    pub text_methods: Vec<(corvid_types::BuiltinMethodKind, FuncId)>,
     /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.

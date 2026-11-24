@@ -94,6 +94,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::JsonValue => "JsonValue".into(),
         Type::JsonBuilder => "JsonBuilder".into(),
         Type::JsonError => "JsonError".into(),
+        Type::RegexMatch => "RegexMatch".into(),
         // Slice 51f — `Upload<Format>` / `Page<Item>` are
         // HTTP-boundary types; stable mangled names keep typeinfo
         // lookups from crashing, but any emission that USES them bails
@@ -557,6 +558,9 @@ pub fn is_native_value_type(ty: &Type) -> bool {
         // `compile_to_object` rewrites `JsonError` as an ordinary
         // record before lowering, so lowering never sees it.
         Type::JsonError => false,
+        // B03 — regular expressions are interpreter-tier until the
+        // native regex slice.
+        Type::RegexMatch => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the
