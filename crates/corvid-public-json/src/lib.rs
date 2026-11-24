@@ -31,6 +31,8 @@
 
 mod decode;
 mod error;
+pub mod plan;
 
 pub use decode::{decode, decode_text, ValueBuilder};
 pub use error::{parse_json_text, JsonDecodeError, UnknownFields};
+pub use plan::{builder_shapes, reachable_types, DecodePlan, Shape};
