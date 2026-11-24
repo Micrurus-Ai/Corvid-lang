@@ -291,7 +291,12 @@ pub fn json_to_value(
                 }),
             }
         }
-        (Type::Struct(def_id), J::Object(map)) => {
+        // An imported record carries its id in the merged IR type
+        // table, so it decodes exactly like a local one.
+        (
+            Type::Struct(def_id) | Type::ImportedStruct(corvid_types::types::ImportedStructType { def_id, .. }),
+            J::Object(map),
+        ) => {
             let ir_type = types_by_id
                 .get(def_id)
                 .copied()
@@ -578,7 +583,7 @@ fn partial_from_json(
     types_by_id: &HashMap<DefId, &IrType>,
 ) -> Result<Value, ConvError> {
     let (type_id, type_name, fields) = match inner_ty {
-        Type::Struct(def_id) => {
+        Type::Struct(def_id) | Type::ImportedStruct(corvid_types::types::ImportedStructType { def_id, .. }) => {
             let ir_type = types_by_id
                 .get(def_id)
                 .copied()

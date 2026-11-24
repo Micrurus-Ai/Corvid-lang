@@ -2026,22 +2026,17 @@ fn db_value_to_json_param(value: &crate::db::DbValue) -> serde_json::Value {
 
 /// Slice 33S3b — marshal `DbQueryRows` into the JSON envelope
 /// the interpreter then converts to a `List<DbResult>` via the
-/// standard `json_to_value` path. The envelope carries one
-/// `DbResult`-shaped object per row with `rows_affected: 0`
-/// (irrelevant for SELECTs) and the row's cells folded into the
-/// effect_meta as a debug aid. The richer "rows as a
-/// `List<Map<String, Cell>>`" shape is post-v1.0 — for 33S3b
-/// the minimum-viable shape is row-as-`DbResult` so the existing
-/// std/db.cor envelopes work without changes.
+/// standard `json_to_value` path: one `DbResult` per row with
+/// `rows_affected: 0` (irrelevant for SELECTs). Every field matches
+/// the type `std/db.cor` declares, because the interpreter decodes
+/// `effect_meta` as the declared `EffectEnvelope`. Row values are
+/// read through `db_query_rows`, which returns each row as a
+/// `JsonValue`; they are not packed into the envelope.
 fn db_query_rows_to_envelope(rows: &crate::db::DbQueryRows) -> serde_json::Value {
-    let cells: Vec<serde_json::Value> = rows
+    let results: Vec<serde_json::Value> = rows
         .rows
         .iter()
-        .map(|row| {
-            let cells: serde_json::Map<String, serde_json::Value> = row
-                .iter()
-                .map(|(name, cell)| (name.clone(), db_value_to_json_param(&cell.value)))
-                .collect();
+        .map(|_| {
             serde_json::json!({
                 "rows_affected": 0_i64,
                 "row_count": rows.row_count as i64,
@@ -2051,10 +2046,10 @@ fn db_query_rows_to_envelope(rows: &crate::db::DbQueryRows) -> serde_json::Value
                     "provenance_key": "",
                     "approval_label": "",
                     "cache_key": "",
-                    "replay_key": serde_json::Value::Object(cells),
+                    "replay_key": "std.db.query",
                 }),
             })
         })
         .collect();
-    serde_json::Value::Array(cells)
+    serde_json::Value::Array(results)
 }

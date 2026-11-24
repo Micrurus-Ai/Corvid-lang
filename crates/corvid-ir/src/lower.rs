@@ -211,12 +211,20 @@ impl<'a> Lowerer<'a> {
         match ty {
             Type::Struct(id) => Type::Struct(self.remap_def_id(id)),
             Type::ImportedStruct(mut imported) => {
-                if let Some(remapped) = self.imported_def_ids.get(&ImportedDefKey {
+                let Some(remapped) = self.imported_def_ids.get(&ImportedDefKey {
                     module_path: imported.module_path.clone(),
                     def_id: imported.def_id,
-                }) {
-                    imported.def_id = *remapped;
+                }) else {
+                    return Type::ImportedStruct(imported);
+                };
+                // Inside an imported module, a type from another module is
+                // simply a record in the merged IR type table. The root
+                // file keeps `ImportedStruct` so its signatures still name
+                // the module the type came from.
+                if self.current_module.is_some() {
+                    return Type::Struct(*remapped);
                 }
+                imported.def_id = *remapped;
                 Type::ImportedStruct(imported)
             }
             other => other,
