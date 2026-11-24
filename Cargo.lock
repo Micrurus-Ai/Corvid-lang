@@ -631,6 +631,7 @@ dependencies = [
  "corvid-prompt-format",
  "corvid-resolve",
  "corvid-syntax",
+ "corvid-test-paths",
  "corvid-types",
  "ed25519-dalek",
  "hex",
@@ -733,6 +734,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-test-paths",
  "corvid-tour-catalog",
  "corvid-trace-schema",
  "corvid-types",
@@ -775,6 +777,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-test-paths",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -903,6 +906,7 @@ name = "corvid-host-compliance-tests"
 version = "0.0.1"
 dependencies = [
  "cc",
+ "corvid-test-paths",
  "target-lexicon",
 ]
 
@@ -1001,6 +1005,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime-core",
  "corvid-syntax",
+ "corvid-test-paths",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -1081,6 +1086,10 @@ dependencies = [
  "corvid-ast",
  "serde",
 ]
+
+[[package]]
+name = "corvid-test-paths"
+version = "0.0.1"
 
 [[package]]
 name = "corvid-test-tools"
@@ -2919,6 +2928,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "offline_refund_bot"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "corvid-driver",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3734,16 +3753,6 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
- "corvid-driver",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "offline_refund_bot"
-version = "0.0.1"
-dependencies = [
- "anyhow",
  "corvid-driver",
  "serde_json",
  "tokio",

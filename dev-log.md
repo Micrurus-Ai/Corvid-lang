@@ -4,6 +4,26 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - Tests find Cargo's build output wherever it is
+
+About 200 native and C-library tests failed on a machine that builds
+outside the checkout. Each test ran `cargo build -p corvid-test-tools
+--release`, which honors `CARGO_TARGET_DIR`, and then looked for the
+staticlib under `<workspace>/target/release`, where that build never
+wrote. Fifteen test files carried their own copy of that path.
+`build_integration` went further and set `CARGO_TARGET_DIR` to
+`<workspace>/target`, which rebuilt the whole workspace a second time
+there.
+
+The new test-only crate `corvid-test-paths` answers the question once.
+It takes `CARGO_TARGET_DIR` first, because a child `cargo build`
+inherits it. Otherwise it walks up from the running test binary to the
+`CACHEDIR.TAG` file Cargo writes at the root of every target directory,
+which also covers `build.target-dir` in a Cargo config, since no
+environment variable reports that setting. The last fallback is
+`<workspace>/target`. Paths under a Corvid project's own `target/` are
+Corvid's output, not Cargo's, and are unchanged.
+
 ## 2026-11-23 - The ABI descriptor reads the checker's types
 
 The third copy of type resolution, in the ABI emitter, is gone.
@@ -14,6 +34,7 @@ a signed library's descriptor could describe an alias-typed parameter
 as a record named after the alias. Store fields join the checker's
 sweep because the ABI describes them. A missing entry is the same
 internal compiler error lowering raises.
+
 ## 2026-11-23 - One resolver for type references: aliases expand everywhere
 
 Fixing "aliases declared in another module" turned up a wider bug. IR

@@ -55,6 +55,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
+corvid-test-paths = { workspace = true }
 cc = "1"
 tempfile = { workspace = true }
 target-lexicon = "0.13"
