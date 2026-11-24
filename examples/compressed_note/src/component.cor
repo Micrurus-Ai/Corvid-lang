@@ -1,0 +1,8 @@
+import "std:ui" as ui
+import "std:ui" use View
+import "./events" use imported_text
+
+agent main() -> String:
+    picker = View("<label>Import a compressed note<input type='file'></label>")
+    field = ui.module_field(picker, "./read_note.js", "readNote", imported_text())
+    return field.html

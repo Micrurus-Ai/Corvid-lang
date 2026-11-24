@@ -257,6 +257,7 @@ fn emit_module(ir: &IrFile, module_name: &str, locate: Option<&Locate<'_>>)
         &host_plan.imports,
         module.finish(),
         &labels,
+        locate,
     )
 }
 

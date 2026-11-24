@@ -10,7 +10,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn compliance_target_dir() -> PathBuf {
-    workspace_root().join("target").join("host-compliance")
+    corvid_test_paths::cargo_target_dir().join("host-compliance")
 }
 
 fn shared_library_name(stem: &str) -> String {

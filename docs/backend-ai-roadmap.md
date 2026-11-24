@@ -117,6 +117,10 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Native target support.
 - [ ] Swift, Kotlin and Python SDK sum types use the wire shape, and the SDKs describe `JsonError`.
 
+**Test infrastructure**
+
+- [x] Integration tests that link Corvid programs find Cargo's build output wherever it is. The `corvid-test-paths` crate resolves the target directory from `CARGO_TARGET_DIR`, then from the `CACHEDIR.TAG` marker above the running test binary (which covers `build.target-dir`), then `<workspace>/target`. It replaces 15 copies of a `<workspace>/target/release` path, and `build_integration` no longer builds the whole workspace a second time into `<workspace>/target`.
+
 B01 to B06 are the foundation. Interoperability (B02, B07, B08) and built-in capability (B03 to B06, B09 onward) advance together, so a developer always has a typed path to a capability before Corvid gains a built-in version of it.
 
 ### Coordination with frontend development

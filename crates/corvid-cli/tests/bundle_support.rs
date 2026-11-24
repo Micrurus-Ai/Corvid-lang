@@ -41,11 +41,7 @@ pub fn shared_library_name(stem: &str) -> String {
 }
 
 fn tools_staticlib_name() -> &'static str {
-    if cfg!(windows) {
-        "corvid_test_tools.lib"
-    } else {
-        "libcorvid_test_tools.a"
-    }
+    corvid_test_paths::test_tools_staticlib_name()
 }
 
 fn target_triple() -> &'static str {
@@ -107,7 +103,7 @@ fn test_tools_lib_path() -> PathBuf {
         .status()
         .expect("build corvid-test-tools");
     assert!(status.success(), "building corvid-test-tools failed");
-    let path = root.join("target").join("release").join(tools_staticlib_name());
+    let path = corvid_test_paths::release_dir().join(tools_staticlib_name());
     // Route the linker through `corvid_test_tools.lib` (which already
     // bundles `corvid-runtime` transitively) instead of pairing it
     // with the standalone `corvid_runtime.lib`. See

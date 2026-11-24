@@ -59,19 +59,22 @@ impl Parser<'_> {
             (Decl::Agent(hook), "ElementCallback")
         } else {
             let update = self.parse_fn_decl(visibility)?;
-            if update.params.len() != 1
-                || !named(&update.params[0].ty, "Int")
-                || !named(&update.return_ty, "Int")
-            {
+            let signature = |ty| update.params.len() == 1
+                && named(&update.params[0].ty, ty) && named(&update.return_ty, ty);
+            let binding_type = if signature("Int") {
+                "IntCallback"
+            } else if signature("String") {
+                "TextCallback"
+            } else {
                 return Err(ParseError {
                     span: update.name.span,
                     kind: ParseErrorKind::UnexpectedToken {
                         got: "browser callback signature".into(),
-                        expected: "one Int parameter and an Int return type".into(),
+                        expected: "an (Int) -> Int or (String) -> String callback".into(),
                     },
                 });
-            }
-            (Decl::Fn(update), "IntCallback")
+            };
+            (Decl::Fn(update), binding_type)
         };
         if self.emit_browser_exports {
             return Ok(implementation);

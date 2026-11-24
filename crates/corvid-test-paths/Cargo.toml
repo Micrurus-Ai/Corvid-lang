@@ -1,0 +1,9 @@
+[package]
+name = "corvid-test-paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Locates the workspace root and Cargo's target directory for integration tests, honoring CARGO_TARGET_DIR and build.target-dir. Test-only."
+
+[dependencies]

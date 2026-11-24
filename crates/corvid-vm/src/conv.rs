@@ -683,12 +683,9 @@ pub fn check_field_refinement(
     let Some(refinement) = &field.refinement else {
         return Ok(());
     };
-    let violated = match (refinement, value) {
-        (corvid_ast::Refinement::Between { min, max }, Value::Int(n)) => n < min || n > max,
-        (corvid_ast::Refinement::LenBetween { min, max }, Value::String(s)) => {
-            let len = s.chars().count() as u64;
-            len < *min || len > *max
-        }
+    let violated = match value {
+        Value::Int(n) => !refinement.admits_int(*n),
+        Value::String(s) => !refinement.admits_text(s),
         // Form/type mismatches are rejected at typecheck; anything
         // else reaching here decodes without a value check.
         _ => false,

@@ -69,11 +69,7 @@ fn test_tools_lib_path() -> PathBuf {
         .status()
         .expect("build corvid-test-tools");
     assert!(status.success(), "building corvid-test-tools failed");
-    let path = if cfg!(windows) {
-        root.join("target").join("release").join("corvid_test_tools.lib")
-    } else {
-        root.join("target").join("release").join("libcorvid_test_tools.a")
-    };
+    let path = corvid_test_paths::test_tools_staticlib();
     // Route the linker through `corvid_test_tools.lib` (which already
     // bundles `corvid-runtime` transitively) instead of pairing it
     // with the standalone `corvid_runtime.lib`. See

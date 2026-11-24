@@ -528,6 +528,22 @@ See [Keep a record in browser memory](../book/19-browser-views.md#keep-a-record-
 
 The earlier names `ui.local_field` and `ui.local_checkbox` are supported aliases for `ui.field` and `ui.checkbox`.
 
+### JavaScript module fields
+
+`ui.module_field(control: View, module_path: String, reader: String, handler: TextCallback) -> View` constructs the root view for a custom element backed by a JavaScript module. Supply a labelled control that emits a bubbling `change` event. A `browser callback name(text: String) -> String` declaration provides the rendering function `name() -> ui.TextCallback`. Return the view's HTML from the component entry and export it with `scripts/export_browser_component.py`. The generated `componentElement(html)` recognizes this root and returns a custom element constructor. The host registers the tag name.
+
+On change the browser imports `module_path` relative to the generated events module, or resolves a bare specifier through the host's import map. The named export implements the generated TypeScript type `CorvidFieldReader = (value: string | File | null, convert: (text: string) => string) => string | Promise<string>`. The changing control supplies its string value. A native file input supplies its first file or `null` when cleared. The `convert` callback invokes the named Corvid `(String) -> String` event handler. The example's `readNote(file, importedText)` decodes gzip bytes as UTF-8 and returns the callback result.
+
+The element exposes a writable string `value`, a named `hint` slot and a bubbling, composed `change` event on successful import. Property writes update the displayed value silently. A newer selection, a property write or disconnect supersedes an outstanding read. Synchronous exceptions and rejected promises leave the value intact and appear in the element's alert with the reader name and the declared callback's Corvid file, line and column. [Learning guide and example](../book/19-browser-views.md#read-a-compressed-note-with-a-typed-javascript-package)
+
+### Browser API extension bindings
+
+Run `python scripts/derive_browser_bindings.py INPUT.webidl OUTPUT.d.ts` to derive TypeScript interfaces for a frontend extension. Each `partial interface Name` produces an exported `NameBinding`. The generator supports operations returning `Promise<T>` with zero or more required, named scalar or buffer arguments. Its type mappings are `ArrayBuffer` to `ArrayBuffer`, `DOMString` and `USVString` to `string`, `boolean` to `boolean` and an `undefined` result to `void`. Unsupported operations or types fail generation. For other Web IDL constructs, use the browser declarations in TypeScript's DOM or WebWorker library, or supply a local structural declaration for a newer API.
+
+In the file preview, `BlobBinding.arrayBuffer() -> Promise<ArrayBuffer>` reads a selected file and `ClipboardBinding.writeText(data: string) -> Promise<void>` writes the preview on user activation. Check each operation before calling it and handle exceptions or rejected promises. The DOM library supplies the observer callback, nullable file selection and worker transfer-list signatures. The worker receives ownership of the buffer passed in the transfer list. [IDL and adapter](../../examples/file_preview/file_access.webidl) · [Worker](../../examples/file_preview/decode_file.ts)
+
+The example's `open_preview() -> ui.ElementCallback` and `close_preview() -> ui.ElementCallback` bindings invoke the element's synchronous `start_preview() -> Nothing` and `stop_preview() -> Nothing` methods through `ui.owned_element`. Setup installs per-element subscriptions. Release cancels those subscriptions and any live worker. Use the same lifecycle interface to own another browser extension. [Learning guide](../book/19-browser-views.md#use-a-browser-api-newer-than-corvid)
+
 ### TypeScript browser route client
 
 - `CorvidClient.request<T>(method, path, body?, signal?): Promise<T>` fetches a JSON route and accepts an optional abort signal.

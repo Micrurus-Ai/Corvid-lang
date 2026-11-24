@@ -231,9 +231,11 @@ To run native/interpreter parity on its own, build the mock tool archive from th
 
 ```sh
 cargo build --locked -p corvid-runtime
-cargo build --locked --release -p corvid-test-tools --target-dir target
+cargo build --locked --release -p corvid-test-tools
 cargo test --locked -p corvid-codegen-cl --test parity
 ```
+
+The tests look for Cargo's output through the `corvid-test-paths` crate, so `CARGO_TARGET_DIR` and `build.target-dir` work as long as the build and the test run use the same setting.
 
 ### Git
 

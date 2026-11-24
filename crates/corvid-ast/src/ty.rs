@@ -266,4 +266,25 @@ impl Refinement {
             Self::LenBetween { min, max } => format!("len_between({min}, {max})"),
         }
     }
+
+    /// Whether an `Int` satisfies this refinement. A refinement of
+    /// another form says nothing about an `Int`; the checker rejects
+    /// that pairing.
+    pub fn admits_int(&self, value: i64) -> bool {
+        match self {
+            Self::Between { min, max } => (*min..=*max).contains(&value),
+            Self::LenBetween { .. } => true,
+        }
+    }
+
+    /// Whether a `String` satisfies this refinement, counting characters.
+    pub fn admits_text(&self, value: &str) -> bool {
+        match self {
+            Self::LenBetween { min, max } => {
+                let len = value.chars().count() as u64;
+                (*min..=*max).contains(&len)
+            }
+            Self::Between { .. } => true,
+        }
+    }
 }
