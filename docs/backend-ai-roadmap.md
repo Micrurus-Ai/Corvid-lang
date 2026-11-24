@@ -137,14 +137,15 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 **B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/b06-decimal-and-time.md)
 
-- [ ] Decimal on the interpreter: the `corvid-decimal` crate, the `Decimal` type, `Decimal("…")` checked at compile time, `parse_decimal`, conversions to and from `Int` and `Float`, `+ - * %` and comparisons with `Int` widening, a compile error for mixing with `Float`, `/` refused in favour of the six `divide_<mode>` methods, the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`.
+- [x] Decimal on the interpreter: the `corvid-decimal` crate and the `Decimal` type. Number literals are decimals where a decimal is meant (`price: Decimal = 19.99`, `price * 1.08`) and keep their digits. `parse_decimal`, conversions to and from `Int` and `Float`, exact `+ - * %` and comparisons with `Int`, a compile error for mixing with `Float`, division written with its rounding (`(total / 3).round_half_even(2)`), the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`. `Decimal` is refused at tool, prompt, connector, route, store and table boundaries until the JSON slice. [Exact decimals](reference/decimal.md)
 - [ ] Duration and Instant on the interpreter: the `corvid-time` crate, the unit constructors on `Int` with a compile error for `days()`, duration and instant arithmetic, ISO 8601 and RFC 3339 parsing and formatting, and `time_now` in `std/time`.
 - [ ] Time zones on the interpreter: `TimeZone` checked at compile time against the bundled database, `ZonedTime`, `in_zone`, `parse_zoned_time` with errors for gaps and folds, `add_days`, `add_months` and `add_years`, the Berlin daylight-saving acceptance test, the queue scheduler moved onto `corvid-time`, and the database version recorded in traces.
 - [ ] Currency formatting: `format_currency` and `format_currency_checked` with CLDR data, an explicit locale and no rounding.
 - [ ] JSON, OpenAPI, the TypeScript client and the Swift, Kotlin and Python SDKs for all five types.
 - [ ] Native Decimal, with parity tests.
 - [ ] Native Duration, Instant, TimeZone and ZonedTime, with parity tests.
-- [ ] A decimal literal suffix (`19.99d`). Agree the lexical rule with frontend development first.
+- [ ] Integer literals beyond `Int`'s range in a `Decimal` slot. Lex integer literals as digits, as float literals now are; until then a larger whole number is written with a point.
+- [ ] A value of type `Int` in a `Float` slot is not converted at run time, so `x: Float = 3` then `x.to_string()` traps with a type mismatch on the interpreter. Found during B06; `Decimal` avoids it by accepting only literals in `Decimal` slots. Insert the conversion at slot sites, as `grounded_coercion_sites` does for grounding, then let `Int` values widen into `Decimal` slots too.
 - [ ] Decimal, Instant, Duration and ZonedTime as B09 table columns. Coordinate with the main line after the JSON slice.
 - [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
 - [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
@@ -174,4 +175,5 @@ Backend and AI semantics are owned here. Changes to shared types, actions or par
 - **B08 with F09.** One package resolution, lock format and type import path for npm packages on the server and in the browser.
 - **B14 with F08.** One typed message and subscription contract for real-time updates.
 - **B01 with all client data.** Browser code decodes the same records with the same errors.
+- **B06 with client forms and display.** From B06's JSON slice, `Decimal`, `Instant`, `Duration`, `TimeZone` and `ZonedTime` reach the browser as typed values. Price inputs validate with the `corvid-decimal` rules compiled to WebAssembly, and times display in the viewer's zone. Agree the client form bindings with frontend development before the JSON slice. [Across the tiers](proposals/b06-decimal-and-time.md#across-the-tiers)
 - **B24, B25, B27 and B28 with the platform plan's proposals F-P1 to F-P4.** The flagship demo, screen state for assistants, agent activity and the timeline inspector each need both halves. [Platform plan](proposals/corvid-platform-plan.md#proposals-for-frontend-development)

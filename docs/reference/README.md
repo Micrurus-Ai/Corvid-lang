@@ -13,6 +13,8 @@ shape, or invariant. Read top-to-bottom rarely.
 - [Functions](functions.md) — every builtin method and stdlib call.
 - [Text and encoding](text-and-encoding.md) — base64, hex and URL
   encoding, and UUIDs.
+- [Exact decimals](decimal.md) — the `Decimal` type for money and
+  other exact quantities.
 
 ## CLI
 

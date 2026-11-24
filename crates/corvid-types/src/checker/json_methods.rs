@@ -28,11 +28,13 @@ enum Direction {
 struct NoForm {
     reason: String,
     hint: String,
+    /// B06 — the missing form is a `Decimal`'s, which its JSON slice adds.
+    decimal: bool,
 }
 
 impl NoForm {
     fn new(reason: impl Into<String>, hint: impl Into<String>) -> Self {
-        Self { reason: reason.into(), hint: hint.into() }
+        Self { reason: reason.into(), hint: hint.into(), decimal: false }
     }
 }
 
@@ -164,6 +166,14 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// B06 — whether `ty` reaches a `Decimal` whose JSON form is still
+    /// missing, walking records the way `to_json` does.
+    pub(super) fn reaches_decimal_without_json_form(&mut self, ty: &Type) -> bool {
+        [Direction::Encode, Direction::Decode]
+            .into_iter()
+            .any(|direction| matches!(self.json_form(ty, direction, &mut Vec::new()), Err(NoForm { decimal: true, .. })))
+    }
+
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
     /// reports whether any part of it is `Tainted`. `seen` stops
     /// recursion through self-referential records.
@@ -197,6 +207,13 @@ impl<'a> Checker<'a> {
                     "decode the error's fields into a record you declare",
                 )),
             },
+            Type::Decimal => Err(NoForm {
+                decimal: true,
+                ..NoForm::new(
+                    "`Decimal` has no JSON form yet; it arrives with B06's JSON slice, as an exact string such as \"19.99\"",
+                    "send `amount.to_string()` and read it back with `parse_decimal()`",
+                )
+            }),
             Type::RegexMatch => Err(NoForm::new(
                 "a `RegexMatch` describes a position in one text and has no JSON form",
                 "copy the fields you need into a record you declare",
@@ -297,10 +314,10 @@ impl<'a> Checker<'a> {
             match self.json_form(&field_ty, direction, seen) {
                 Ok(field_tainted) => tainted |= field_tainted,
                 Err(no_form) => {
-                    return Err(NoForm::new(
-                        format!("field `{}.{}`: {}", decl.name.name, field.name.name, no_form.reason),
-                        no_form.hint,
-                    ))
+                    return Err(NoForm {
+                        reason: format!("field `{}.{}`: {}", decl.name.name, field.name.name, no_form.reason),
+                        ..no_form
+                    })
                 }
             }
         }

@@ -352,6 +352,44 @@ pub enum BuiltinMethodKind {
     /// `String.split_regex(pattern: String) -> List<String>` — the
     /// checker refuses patterns that can match the empty string.
     StringSplitRegex,
+
+    // ----- exact decimals (B06) ------------------------------------
+    //
+    // Every Decimal method calls `corvid_decimal`, the code the
+    // checker parses literals with, so the tiers cannot disagree on a
+    // digit. Results are exact or the call traps; only the rounding
+    // methods drop digits, and each names its mode.
+    /// `Decimal.round_<mode>(places: Int) -> Decimal` — exactly
+    /// `places` fractional digits, rounded with `mode`.
+    DecimalRound(corvid_decimal::RoundingMode),
+    /// `(a / b).round_<mode>(places)` on `Decimal` values. Not in the
+    /// method table: IR lowering fuses a rounded `/` into this kind
+    /// with `a` as the receiver and `b`, `places` as the arguments, so
+    /// the quotient is rounded once and never exists unrounded.
+    DecimalDivideRound(corvid_decimal::RoundingMode),
+    /// `Decimal.abs() -> Decimal`.
+    DecimalAbs,
+    /// `Decimal.scale() -> Int` — the number of fractional digits.
+    DecimalScale,
+    /// `Decimal.to_string() -> String` — plain notation with every
+    /// fractional digit the value has (`2.50`), never an exponent.
+    DecimalToString,
+    /// `Decimal.to_float() -> Float` — the nearest Float; the only
+    /// lossy direction, named so the loss is visible.
+    DecimalToFloat,
+    /// `Decimal.to_int_truncated() -> Int` — toward zero; traps out
+    /// of the Int range.
+    DecimalToIntTruncated,
+    /// `Int.to_decimal() -> Decimal` — exact.
+    IntToDecimal,
+    /// `Float.to_decimal() -> Decimal` — the shortest decimal that
+    /// reads back as the same Float (the digits `to_string` shows);
+    /// traps on NaN and infinity.
+    FloatToDecimal,
+    /// `String.parse_decimal() -> Result<Decimal, String>` — trims
+    /// whitespace like `parse_int`; the Err names the problem and its
+    /// position.
+    StringParseDecimal,
 }
 
 impl BuiltinMethodKind {
@@ -378,6 +416,24 @@ impl BuiltinMethodKind {
         )
     }
 
+    /// The B06 methods that take or produce a `Decimal`.
+    pub fn is_decimal(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DecimalRound(_)
+                | DecimalDivideRound(_)
+                | DecimalAbs
+                | DecimalScale
+                | DecimalToString
+                | DecimalToFloat
+                | DecimalToIntTruncated
+                | IntToDecimal
+                | FloatToDecimal
+                | StringParseDecimal
+        )
+    }
+
     /// The B03 regular-expression methods, whose first argument is a
     /// pattern literal.
     pub fn is_regex(self) -> bool {
@@ -391,6 +447,24 @@ impl BuiltinMethodKind {
                 | StringReplaceRegexVerbatim
                 | StringSplitRegex
         )
+    }
+}
+
+/// The rounding mode a `Decimal` rounding method names:
+/// `round_half_even` names `HalfEven`. The checker, the method table
+/// and IR lowering all read method names through this one function.
+pub fn decimal_rounding_mode(method: &str) -> Option<corvid_decimal::RoundingMode> {
+    method.strip_prefix("round_").and_then(corvid_decimal::RoundingMode::from_suffix)
+}
+
+/// The source digits of a number literal, which `corvid_decimal` reads
+/// when the checker types the literal `Decimal`. The checker and the IR
+/// lowerer both read literal digits here.
+pub fn number_literal_text(value: &corvid_ast::Literal) -> Option<String> {
+    match value {
+        corvid_ast::Literal::Int(n) => Some(n.to_string()),
+        corvid_ast::Literal::Float { text, .. } => Some(text.clone()),
+        _ => None,
     }
 }
 
@@ -518,6 +592,23 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Float, "to_string") => sig(FloatToString, vec![], Type::String),
         (Type::Bool, "to_string") => sig(BoolToString, vec![], Type::String),
         (Type::Int, "to_float") => sig(IntToFloat, vec![], Type::Float),
+        (Type::Int, "to_decimal") => sig(IntToDecimal, vec![], Type::Decimal),
+        (Type::Float, "to_decimal") => sig(FloatToDecimal, vec![], Type::Decimal),
+        (Type::String, "parse_decimal") => sig(
+            StringParseDecimal,
+            vec![],
+            Type::Result(Box::new(Type::Decimal), Box::new(Type::String)),
+        ),
+        (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
+        (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
+        (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),
+        (Type::Decimal, "to_float") => sig(DecimalToFloat, vec![], Type::Float),
+        (Type::Decimal, "to_int_truncated") => sig(DecimalToIntTruncated, vec![], Type::Int),
+        (Type::Decimal, method) if decimal_rounding_mode(method).is_some() => sig(
+            DecimalRound(decimal_rounding_mode(method).expect("checked by the guard")),
+            vec![Type::Int],
+            Type::Decimal,
+        ),
         (Type::Float, "to_int_truncated") => sig(FloatToIntTruncated, vec![], Type::Int),
         (Type::String, "parse_int") => sig(
             StringParseInt,

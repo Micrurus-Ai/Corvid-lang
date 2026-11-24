@@ -463,6 +463,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
             span,
         )),
+        Type::Decimal => Err(CodegenError::not_supported(
+            "`Decimal` - exact decimals run on the interpreter tier until B06's native Decimal slice lands",
+            span,
+        )),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

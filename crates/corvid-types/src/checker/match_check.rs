@@ -469,7 +469,7 @@ impl<'a> Checker<'a> {
 fn literal_type(lit: &corvid_ast::Literal) -> Type {
     match lit {
         corvid_ast::Literal::Int(_) => Type::Int,
-        corvid_ast::Literal::Float(_) => Type::Float,
+        corvid_ast::Literal::Float { value: _, .. } => Type::Float,
         corvid_ast::Literal::String(_) => Type::String,
         corvid_ast::Literal::Bool(_) => Type::Bool,
         corvid_ast::Literal::Nothing => Type::Nothing,

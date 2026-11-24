@@ -18,6 +18,7 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.substring(start: Int, end: Int) -> String`
 - `String.parse_int() -> Result<Int, String>`
 - `String.parse_float() -> Result<Float, String>`
+- `String.parse_decimal() -> Result<Decimal, String>`
 - `String.encode_base64() -> String`
 - `String.decode_base64() -> Result<String, String>`
 - `String.encode_base64_url() -> String`
@@ -40,6 +41,7 @@ The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must b
 
 - `Int.to_string() -> String`
 - `Int.to_float() -> Float`
+- `Int.to_decimal() -> Decimal`
 - `Int.abs() -> Int`
 - `Int.min(other: Int) -> Int`
 - `Int.max(other: Int) -> Int`
@@ -49,6 +51,7 @@ The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must b
 
 - `Float.to_string() -> String`
 - `Float.to_int_truncated() -> Int`
+- `Float.to_decimal() -> Decimal`
 - `Float.abs() -> Float`
 - `Float.min(other: Float) -> Float`
 - `Float.max(other: Float) -> Float`
@@ -57,6 +60,22 @@ The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must b
 - `Float.floor() -> Int`
 - `Float.ceil() -> Int`
 - `Float.round() -> Int`
+
+## Decimal
+
+- `Decimal.round_half_even(places: Int) -> Decimal`
+- `Decimal.round_half_up(places: Int) -> Decimal`
+- `Decimal.round_toward_zero(places: Int) -> Decimal`
+- `Decimal.round_away_from_zero(places: Int) -> Decimal`
+- `Decimal.round_floor(places: Int) -> Decimal`
+- `Decimal.round_ceiling(places: Int) -> Decimal`
+- `Decimal.abs() -> Decimal`
+- `Decimal.scale() -> Int`
+- `Decimal.to_string() -> String`
+- `Decimal.to_float() -> Float`
+- `Decimal.to_int_truncated() -> Int`
+
+A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19.99`, `price * 1.08`. `/` on decimals is written with its rounding, `(total / 3).round_half_even(2)`. Mixing `Decimal` and `Float` is a compile error. See [Exact decimals](decimal.md).
 
 ## Bool
 

@@ -208,7 +208,7 @@ impl<'a> Parser<'a> {
                         self.bump();
                         Ok(DimensionValue::Cost(n as f64))
                     }
-                    TokKind::Float(n) => {
+                    TokKind::Float { value: n, .. } => {
                         self.bump();
                         Ok(DimensionValue::Cost(n))
                     }
@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
                     self.consume_optional_duration_suffix(n as f64),
                 ))
             }
-            TokKind::Float(n) => {
+            TokKind::Float { value: n, .. } => {
                 self.bump();
                 Ok(DimensionValue::Number(self.consume_optional_duration_suffix(n)))
             }
@@ -249,7 +249,7 @@ impl<'a> Parser<'a> {
                 if name.ends_with("_if_confident") && matches!(self.peek(), TokKind::LParen) {
                     self.bump(); // (
                     let threshold = match self.peek().clone() {
-                        TokKind::Float(f) => { self.bump(); f }
+                        TokKind::Float { value: f, .. } => { self.bump(); f }
                         TokKind::Int(n) => { self.bump(); n as f64 }
                         other => {
                             return Err(ParseError {

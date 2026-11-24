@@ -232,6 +232,10 @@ fn schema_for_inner(
         // matched; a model has no such text to point into, so it is
         // not a prompt return type. Permissive, like `DbHandle`.
         Type::RegexMatch => json!({}),
+        // B06 — `Decimal` has no JSON form until B06's JSON slice, and
+        // the checker refuses it at prompt boundaries until then.
+        // Permissive, like `RegexMatch`.
+        Type::Decimal => json!({}),
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types, not prompt return types: an upload is
         // received bytes and a page is assembled by the server, so

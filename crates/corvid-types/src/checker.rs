@@ -356,6 +356,7 @@ fn typecheck_with_everything(
     }
 
     c.record_signature_types(file);
+    c.check_decimal_boundaries(file);
 
     Checked {
         types: c.types,
@@ -384,6 +385,10 @@ struct Checker<'a> {
     /// `Checked` so IR lowering can insert a visible `UnwrapGrounded`
     /// at each recorded span.
     grounded_coercion_sites: HashSet<Span>,
+    /// B06 — the span of the `Decimal` `/` being checked as the
+    /// receiver of a `round_<mode>` call, the one place such a division
+    /// is accepted. See `checker/decimal.rs`.
+    rounded_division: Option<Span>,
     /// Every root-file type reference resolved so far, by span. See
     /// [`Checked::type_refs`].
     type_refs: HashMap<Span, Type>,
@@ -727,6 +732,7 @@ impl<'a> Checker<'a> {
             warnings: Vec::new(),
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
+            rounded_division: None,
             type_refs: HashMap::new(),
             tools_by_id: tools,
             file,
@@ -898,6 +904,7 @@ mod case;
 mod decl;
 mod decl_eval;
 mod decl_extern_c;
+mod decimal;
 mod form;
 mod decl_grounded_pure;
 mod decl_replayability;

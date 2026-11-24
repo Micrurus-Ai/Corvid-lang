@@ -70,6 +70,27 @@ pub enum TypeErrorKind {
     /// `split_regex` with a pattern that can match the empty string.
     RegexSplitMatchesEmpty { pattern: String },
 
+    /// B06 — a number literal the checker reads as a `Decimal` that has
+    /// no exact `Decimal` value (too many digits).
+    InvalidDecimalLiteral { literal: String, problem: String },
+
+    /// B06 — `Decimal` and `Float` meeting in one operator.
+    DecimalFloatMix { context: String },
+
+    /// B06 — `a / b` on `Decimal` values that is not rounded at once
+    /// with a `round_<mode>(places)` call.
+    DecimalDivisionNeedsRounding,
+
+    /// B06 — a literal `places` argument outside 0 to 28.
+    DecimalPlacesOutOfRange { places: i64 },
+
+    /// B06 — a `Decimal` division or remainder by the literal zero.
+    DecimalDivisionByZero,
+
+    /// B06 — a `Decimal` in a type that leaves the program as JSON
+    /// before `Decimal` has a JSON form.
+    DecimalAtBoundary { boundary: String },
+
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
     BareFunctionReference { name: String },
@@ -586,6 +607,22 @@ impl TypeErrorKind {
             Self::RegexSplitMatchesEmpty { pattern } => format!(
                 "`split_regex` needs a pattern that cannot match empty text, but `{pattern}` can"
             ),
+            Self::InvalidDecimalLiteral { literal, problem } => {
+                format!("`{literal}` is not an exact `Decimal`: {problem}")
+            }
+            Self::DecimalFloatMix { context } => {
+                format!("`Decimal` and `Float` cannot be mixed in {context}")
+            }
+            Self::DecimalDivisionNeedsRounding => {
+                "dividing `Decimal` values must say how to round the result".into()
+            }
+            Self::DecimalPlacesOutOfRange { places } => {
+                format!("a `Decimal` rounds to between 0 and 28 places, not {places}")
+            }
+            Self::DecimalDivisionByZero => "this `Decimal` division is by zero".into(),
+            Self::DecimalAtBoundary { boundary } => format!(
+                "a `Decimal` cannot appear in {boundary} yet: its exact JSON form arrives with B06's JSON slice"
+            ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
             }
@@ -1012,9 +1049,28 @@ impl TypeErrorKind {
                 "`{callee}` takes {expected} argument{}",
                 if *expected == 1 { "" } else { "s" }
             )),
-            Self::TypeMismatch { expected, .. } => Some(format!(
-                "change the value to produce a `{expected}`, or update the signature"
-            )),
+            Self::TypeMismatch { expected, got, .. } => Some(match (expected.as_str(), got.as_str()) {
+                ("Decimal", "Int") => "convert with `.to_decimal()`, which is exact".into(),
+                ("Decimal", "Float") => "convert with `.to_decimal()`, which keeps the digits the Float shows, or declare the value as a `Decimal` from the start".into(),
+                ("Float", "Decimal") => "convert with `.to_float()`, which gives the nearest Float".into(),
+                _ => format!("change the value to produce a `{expected}`, or update the signature"),
+            }),
+            Self::InvalidDecimalLiteral { .. } => Some(
+                "a `Decimal` holds at most 38 significant digits, at most 28 of them after the point".into(),
+            ),
+            Self::DecimalFloatMix { .. } => Some(
+                "convert one side: `x.to_decimal()` makes a Float exact at the digits it shows, and `amount.to_float()` gives the nearest Float".into(),
+            ),
+            Self::DecimalDivisionNeedsRounding => Some(
+                "round the quotient where you divide, such as `(total / 3).round_half_even(2)`; the modes are half_even, half_up, toward_zero, away_from_zero, floor and ceiling".into(),
+            ),
+            Self::DecimalPlacesOutOfRange { .. } => Some(
+                "places is the number of digits after the point, from 0 to 28".into(),
+            ),
+            Self::DecimalDivisionByZero => Some("divide by a non-zero value".into()),
+            Self::DecimalAtBoundary { .. } => Some(
+                "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
+            ),
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),

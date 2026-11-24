@@ -15,9 +15,17 @@ use crate::types::Type;
 use corvid_ast::{BinaryOp, Expr, Span, UnaryOp};
 
 impl<'a> Checker<'a> {
-    pub(super) fn check_binop(&mut self, op: BinaryOp, l: &Expr, r: &Expr, _span: Span) -> Type {
-        let lt = self.check_expr(l);
-        let rt = self.check_expr(r);
+    pub(super) fn check_binop(
+        &mut self,
+        op: BinaryOp,
+        l: &Expr,
+        r: &Expr,
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Type {
+        // B06 — literal operands read as `Decimal` when one is expected.
+        let lt = self.check_operand(l, expected);
+        let rt = self.check_operand(r, expected);
         use BinaryOp::*;
 
         // `&&` / `||` short-circuit; the Provenance Propagation design
@@ -67,7 +75,11 @@ impl<'a> Checker<'a> {
         let lt = lt.ungrounded().untainted().clone();
         let rt = rt.ungrounded().untainted().clone();
 
-        let result = match op {
+        let decimal = self.check_decimal_binop(op, l, r, &lt, &rt, span);
+        let result = if let Some(decimal) = decimal {
+            decimal
+        } else {
+            match op {
             // `+` is overloaded: numeric addition OR string concatenation.
             Add => match (&lt, &rt) {
                 (Type::Int, Type::Int) => Type::Int,
@@ -122,6 +134,7 @@ impl<'a> Checker<'a> {
                 Type::Bool
             }
             And | Or => unreachable!("handled by the early return above"),
+            }
         };
 
         // Re-wrap unless the operator itself failed (`Type::Unknown` is
@@ -139,8 +152,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn check_unop(&mut self, op: UnaryOp, operand: &Expr) -> Type {
-        let t = self.check_expr(operand);
+    pub(super) fn check_unop(&mut self, op: UnaryOp, operand: &Expr, expected: Option<&Type>) -> Type {
+        let t = match op {
+            UnaryOp::Neg | UnaryOp::Pos => self.check_operand(operand, expected),
+            UnaryOp::Not => self.check_expr(operand),
+        };
 
         // D1 part B — the contagion law covers unary operators too:
         // strip `Grounded<>`, run the normal rule, re-wrap if the
@@ -154,11 +170,12 @@ impl<'a> Checker<'a> {
             UnaryOp::Neg | UnaryOp::Pos => match t {
                 Type::Int => Type::Int,
                 Type::Float => Type::Float,
+                Type::Decimal => Type::Decimal,
                 Type::Unknown => Type::Unknown,
                 other => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeMismatch {
-                            expected: "Int or Float".into(),
+                            expected: "Int, Float or Decimal".into(),
                             got: other.display_name(),
                             context: match op {
                                 UnaryOp::Pos => "unary `+`".into(),

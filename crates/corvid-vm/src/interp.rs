@@ -30,6 +30,8 @@ mod tables;
 mod test_runner;
 #[path = "interp/text_methods.rs"]
 mod text_methods;
+#[path = "interp/decimal.rs"]
+mod decimal;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 

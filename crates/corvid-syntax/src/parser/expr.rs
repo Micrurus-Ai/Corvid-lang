@@ -422,10 +422,10 @@ impl<'a> Parser<'a> {
                     span: start_span,
                 })
             }
-            TokKind::Float(f) => {
+            TokKind::Float { value: f, text } => {
                 self.bump();
                 Ok(Expr::Literal {
-                    value: Literal::Float(f),
+                    value: Literal::Float { value: f, text },
                     span: start_span,
                 })
             }

@@ -20,6 +20,7 @@ impl fmt::Display for Value {
         match self {
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(x) => write!(f, "{x}"),
+            Value::Decimal(d) => write!(f, "{d}"),
             Value::String(s) => write!(f, "\"{}\"", escape_display(s)),
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Nothing => write!(f, "nothing"),

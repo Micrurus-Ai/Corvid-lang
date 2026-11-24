@@ -382,7 +382,7 @@ fn describe_token(t: &TokKind) -> String {
     match t {
         TokKind::Ident(s) => format!("identifier `{s}`"),
         TokKind::Int(n) => format!("integer `{n}`"),
-        TokKind::Float(f) => format!("float `{f}`"),
+        TokKind::Float { value: f, .. } => format!("float `{f}`"),
         TokKind::StringLit(s) => format!("string `\"{s}\"`"),
         TokKind::Eof => "end of input".into(),
         other => format!("{other:?}"),
