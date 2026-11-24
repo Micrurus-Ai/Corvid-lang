@@ -123,7 +123,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B09 typed persistence** (in progress). [Proposal](proposals/b09-typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
-- [ ] P1b. Record table operations in the trace and replay table reads from it. Today a replay refuses table writes but reads the live database.
+- [x] P1b. Table operations are recorded in the trace as `table:<Table>.<op>` calls, and a replay serves reads and write outcomes from it without opening the database.
 - [ ] P2. Typed queries (`where`, `order_by`, `descending`, `take`, `all`), refused at compile time when a condition cannot run in the database.
 - [ ] P3. Migrations from declaration changes, with declared renames (`renamed from`) and drops (`retired`).
 - [ ] P4. Postgres, with a query suite every engine runs.

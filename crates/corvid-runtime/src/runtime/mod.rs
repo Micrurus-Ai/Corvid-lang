@@ -49,6 +49,7 @@ mod llm_dispatch;
 mod model_catalog;
 mod replay_reports;
 mod store_dispatch;
+mod table_replay;
 
 pub(super) const APPROVAL_TOKEN_SCOPE_ONE_TIME: &str = "one_time";
 pub(super) const APPROVAL_TOKEN_TTL_MS: u64 = 5 * 60 * 1000;

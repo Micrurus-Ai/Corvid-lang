@@ -653,7 +653,7 @@ agent typed_path(text: String) -> Result<Int, String>:
         spec: "docs/reference/tables.md",
         roadmap: "B09 typed persistence (P1)",
         test: "crates/corvid-driver/tests/tables_e2e.rs + crates/corvid-cli/tests/tables_migrate.rs + crates/corvid-types/src/checker/tables.rs tests",
-        non_scope: "SQLite through the interpreter only; queries beyond get-by-key, Postgres, MySQL, migrations of changed tables, recorded replay of table operations and the native target are later B09 slices.",
+        non_scope: "SQLite through the interpreter only; queries beyond get-by-key, Postgres, MySQL, migrations of changed tables and the native target are later B09 slices; table operations replay from the trace.",
         source: r#"database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")

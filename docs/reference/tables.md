@@ -82,9 +82,17 @@ agent store(renamed: Shelf) -> String:
 `save` and `delete` use `db_egress_write`, the effects `std.db` uses.
 A pure `fn` cannot call a table operation, and neither can a
 `@deterministic` agent. Table operations run through the same database
-handles as `std.db`, so they share its one-writer-per-file lock, its
-parameter-only binding, and its replay quarantine: during a replay,
-writes are refused.
+handles as `std.db`, so they share its one-writer-per-file lock and its
+parameter-only binding.
+
+## Replay
+
+Each table operation is recorded in the trace as a call named
+`table:<Table>.<op>`, with its argument and its outcome. A replay serves
+every operation from the trace: reads return the recorded rows and
+writes return the recorded outcomes, and the database is never opened.
+A replayed run whose table operations differ from the recording stops
+with a divergence naming the operation.
 
 ## Storage
 
@@ -120,5 +128,5 @@ commands.
 These are later slices of [B09](../proposals/b09-typed-persistence.md):
 queries beyond get-by-key (`where`, `order_by`, `take`), migrations of
 changed tables with declared renames and drops, Postgres and MySQL,
-recorded replay of table reads, and the native target. Programs that
+and the native target. Programs that
 use tables run on the interpreter.

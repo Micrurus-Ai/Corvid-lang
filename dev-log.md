@@ -4,6 +4,18 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - Table operations replay from the trace (B09 P1b)
+
+A table operation is now recorded like a tool call, `table:Shelf.save`
+with its argument and outcome, and a replay serves it from the trace
+through the same cursor tool calls use. A replayed run therefore
+reproduces the rows it read and the outcomes of its writes without
+opening the database, and an operation that differs from the recording
+is a divergence rather than a silent live read. Before this, a replay
+refused table writes and read the live database. The `std.db` docs list
+substituting `db_query` reads as a planned follow-up, not a privacy
+choice, so tables take the substituting design now.
+
 ## 2026-11-24 - Tables: typed rows with revision-checked writes (B09 P1)
 
 A Corvid program can now declare `table Shelf:` and `database library:`

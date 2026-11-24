@@ -84,6 +84,34 @@ async fn table_operations_run_with_revision_checked_writes() {
     );
 }
 
+/// P1b: a recorded run replays from its trace alone. The database is
+/// deleted before the replay, and the replay neither needs it nor
+/// recreates it, yet every read and every write outcome comes back as
+/// recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_run_replays_its_table_operations_without_the_database() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("library.sqlite");
+    let location = path.to_string_lossy().replace('\\', "/");
+    let ir = compile_to_ir(&program(&location)).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+
+    let trace_dir = tempfile::tempdir().expect("trace dir");
+    let record = Runtime::builder().trace_to(trace_dir.path()).build();
+    let setup = record.db_registry().open(&location).expect("open database");
+    record.db_registry().execute(setup.handle_id, SCHEMA, &[]).expect("create table");
+    let recorded = run_ir_with_runtime(&ir, Some("main"), vec![], &record).await.expect("recorded run");
+    let trace = record.tracer().path().to_path_buf();
+    drop(record);
+    let raw = std::fs::read_to_string(&trace).expect("trace readable");
+    assert!(raw.contains("table:Shelf.save"), "table operations are recorded");
+
+    std::fs::remove_file(&path).expect("remove the database");
+    let replay = Runtime::builder().replay_from(&trace).build();
+    let replayed = run_ir_with_runtime(&ir, Some("main"), vec![], &replay).await.expect("replay from the trace");
+    assert_eq!(replayed, recorded);
+    assert!(!path.exists(), "a replay never opens the database");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_table_names_the_migration_commands() {
     let dir = tempfile::tempdir().expect("tempdir");
