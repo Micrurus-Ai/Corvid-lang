@@ -789,6 +789,21 @@ To try offline drawing, wait for “Ready for offline reload.” and stop the lo
 
 The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
 
+## Edit landscape tiles with a WebGL canvas
+
+From the repository root, build the example and serve it on loopback.
+
+```sh
+python scripts/verify_scene_editor.py --cli target/debug/corvid.exe --build-only
+python -m http.server 8000 --bind 127.0.0.1 --directory examples/scene_editor
+```
+
+Open `http://127.0.0.1:8000/`. Drag to pan, zoom in, then click a tile. Move it with the directional buttons and choose **Undo move** to return it to its previous world coordinates. Undo works across tile selections and preserves the current view. The labeled selector, pan and zoom buttons, and tile position list let you make the same edits with a keyboard, including while graphics are unavailable.
+
+The module worker loads the Corvid viewport from Wasm. For each axis, `screen_position(world, scale, offset)` multiplies the world coordinate by the zoom level and adds the pan in CSS pixels. The worker uses `contains_pixel(pixel, start, size)` on both axes to pick the topmost tile. The far edge belongs to the next cell. `zoom_level(current, change)` limits magnification to 1–4. The main thread schedules a single pending animation frame for scene, size and density updates. WebGL draws the tiles in device pixels. After context restoration it redraws from the worker's latest scene.
+
+Choose **Start camera** for a local muted preview. Denying access leaves the editor usable. **Stop camera** releases the tracks. To exercise the browser paths with Python Playwright and Edge, run `python scripts/verify_scene_editor.py --cli target/debug/corvid.exe --channel msedge`. The trial uses a synthetic camera, a display scale factor of two and the WebGL context loss extension. [Example source](../../examples/scene_editor)
+
 ### Check the storefront across browsers and devices
 
 Run the packaged storefront trial with Python Playwright. Install its Firefox and WebKit engines with `python -m playwright install firefox webkit` and use an installed Google Chrome for the Chromium check.

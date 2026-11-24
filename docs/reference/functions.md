@@ -543,3 +543,15 @@ Run `python scripts/derive_browser_bindings.py INPUT.webidl OUTPUT.d.ts` to deri
 In the file preview, `BlobBinding.arrayBuffer() -> Promise<ArrayBuffer>` reads a selected file and `ClipboardBinding.writeText(data: string) -> Promise<void>` writes the preview on user activation. Check each operation before calling it and handle exceptions or rejected promises. The DOM library supplies the observer callback, nullable file selection and worker transfer-list signatures. The worker receives ownership of the buffer passed in the transfer list. [IDL and adapter](../../examples/file_preview/file_access.webidl) · [Worker](../../examples/file_preview/decode_file.ts)
 
 The example's `open_preview() -> ui.ElementCallback` and `close_preview() -> ui.ElementCallback` bindings invoke the element's synchronous `start_preview() -> Nothing` and `stop_preview() -> Nothing` methods through `ui.owned_element`. Setup installs per-element subscriptions. Release cancels those subscriptions and any live worker. Use the same lifecycle interface to own another browser extension. [Learning guide](../book/19-browser-views.md#use-a-browser-api-newer-than-corvid)
+
+### Landscape editor viewport
+
+The scene editor builds three example agents for its browser worker. The generated JavaScript loader accepts Corvid `Int` arguments as `bigint`.
+
+| Example agent | Result |
+| --- | --- |
+| `screen_position(world: Int, scale: Int, offset: Int) -> Int` | CSS pixel coordinate along one axis, equal to `world * scale + offset`. |
+| `contains_pixel(pixel: Int, start: Int, size: Int) -> Bool` | True from `start` up to, and excluding, `start + size`. |
+| `zoom_level(current: Int, change: Int) -> Int` | Sum of the current level and signed change, clamped to 1 through 4 inclusive. |
+
+[Build and use the landscape editor](../book/19-browser-views.md#edit-landscape-tiles-with-a-webgl-canvas)

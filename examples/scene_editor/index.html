@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landscape tile editor</title>
+<style>
+  body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui; }
+  canvas { display: block; width: 100%; height: 220px; touch-action: none; outline: 1px solid; }
+  fieldset { margin: 1rem 0; }
+  button, select { padding: .4rem; }
+  video { max-width: 100%; }
+</style>
+<main>
+  <h1>Landscape tile editor</h1>
+  <p>Click a tile to select it. Drag to pan. The controls below also work with a keyboard.</p>
+  <canvas aria-label="Landscape tiles"></canvas>
+  <p id="graphics" role="status">Loading graphics.</p>
+  <fieldset id="controls" disabled>
+    <legend>Scene controls</legend>
+    <label>Selected tile <select id="selection"><option value="-1">None</option></select></label>
+    <div id="move"><span>Move tile</span>
+      <button data-x="-8">Move left</button> <button data-x="8">Move right</button>
+      <button data-y="-8">Move up</button> <button data-y="8">Move down</button>
+    </div>
+    <button id="undo">Undo move</button>
+    <div id="pan">
+      <button data-x="-16">Pan left</button> <button data-x="16">Pan right</button>
+      <button data-y="-16">Pan up</button> <button data-y="16">Pan down</button>
+    </div>
+    <button id="smaller">Zoom out</button> <button id="larger">Zoom in</button>
+  </fieldset>
+  <output id="description"></output>
+  <ul id="positions" aria-label="Tile positions"></ul>
+  <h2>Camera preview</h2>
+  <button id="start">Start camera</button> <button id="stop" disabled>Stop camera</button>
+  <p role="status" id="camera-status">Camera off.</p>
+  <video muted autoplay playsinline hidden aria-label="Live camera preview"></video>
+</main>
+<script type="module" src="./editor.js"></script>
+</html>
