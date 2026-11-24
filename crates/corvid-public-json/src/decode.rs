@@ -306,7 +306,9 @@ impl<B: ValueBuilder> Decoder<'_, B> {
                     }
                     Err(error) => return Err(self.discard_all(fields, error)),
                 },
-                None if matches!(field.ty, Type::Option(_)) => self.builder.none(&field.ty),
+                // `Tainted` is transparent here too: an absent
+                // `Tainted<Option<T>>` field is `None`.
+                None if matches!(untainted(&field.ty), Type::Option(_)) => self.builder.none(untainted(&field.ty)),
                 None => {
                     let error = JsonDecodeError::new(path, self.type_name(&field.ty), "no value (the field is missing)");
                     return Err(self.discard_all(fields, error));
@@ -424,16 +426,20 @@ impl<B: ValueBuilder> Decoder<'_, B> {
 /// and the finding is the value as JSON, so `"ab"` keeps its quotes.
 fn refinement_violation(path: &str, field: &IrField, raw: &J) -> Option<JsonDecodeError> {
     let refinement = field.refinement.as_ref()?;
-    let mut ty = &field.ty;
-    while let Type::Tainted(inner) = ty {
-        ty = inner;
-    }
-    let admitted = match (ty, raw) {
+    let admitted = match (untainted(&field.ty), raw) {
         (Type::Int, J::Number(n)) => n.as_i64().map_or(true, |i| refinement.admits_int(i)),
         (Type::String, J::String(s)) => refinement.admits_text(s),
         _ => true,
     };
     (!admitted).then(|| JsonDecodeError::new(path, format!("a value {}", refinement.describe()), raw.to_string()))
+}
+
+/// `ty` without any `Tainted` wrappers; taint is tracked statically.
+fn untainted(mut ty: &Type) -> &Type {
+    while let Type::Tainted(inner) = ty {
+        ty = inner;
+    }
+    ty
 }
 
 fn mismatch(path: &str, expected: &str, found: &J) -> JsonDecodeError {

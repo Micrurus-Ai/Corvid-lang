@@ -144,6 +144,22 @@ fn every_failure_releases_what_was_built_before_it() {
 }
 
 #[test]
+fn an_absent_tainted_option_field_is_none() {
+    let span = Span::new(0, 0);
+    let note = IrType {
+        id: DefId(9),
+        name: "Note".into(),
+        fields: vec![field("origin", Type::Tainted(Box::new(Type::Option(Box::new(Type::Int)))))],
+        variants: vec![],
+        span,
+    };
+    let by_id: HashMap<DefId, &IrType> = [(note.id, &note)].into_iter().collect();
+    let mut builder = Counting::default();
+    let decoded = decode(&json!({}), &Type::Struct(DefId(9)), &by_id, UnknownFields::Reject, &mut builder);
+    assert!(decoded.is_ok(), "{decoded:?}");
+}
+
+#[test]
 fn failures_inside_results_pairs_and_variants_release_too() {
     let outcome = Type::Struct(DefId(3));
     let result_ty = Type::Result(Box::new(Type::List(Box::new(Type::Int))), Box::new(Type::String));
