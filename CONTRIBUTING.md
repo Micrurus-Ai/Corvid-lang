@@ -162,8 +162,9 @@ door.
 
 Every new invention ships with:
 
-- A README catalog entry, or an explicit update explaining why an existing entry
-  already covers it.
+- A row in the README's invention table and an entry in
+  `docs/reference/invention-catalog.md`, or an explicit update explaining why an
+  existing entry already covers it.
 - A `corvid tour --topic <name>` demo whose source compiles through the normal
   driver pipeline.
 - A `docs/reference/inventions.md` proof-matrix row with shipped status, runnable command,
