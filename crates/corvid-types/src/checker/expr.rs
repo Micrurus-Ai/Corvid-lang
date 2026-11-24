@@ -30,6 +30,13 @@ impl<'a> Checker<'a> {
             {
                 self.check_decimal_literal(value, *span)
             }
+            // B06 — likewise for a `Currency` and a `Locale`.
+            Expr::Literal { value: Literal::String(code), span } if matches!(expected, Some(Type::Currency)) => {
+                self.check_currency_literal(code, *span)
+            }
+            Expr::Literal { value: Literal::String(tag), span } if matches!(expected, Some(Type::Locale)) => {
+                self.check_locale_literal(tag, *span)
+            }
             // B06 — a string literal where a `TimeZone` is meant is one.
             Expr::Literal { value: Literal::String(name), span } if matches!(expected, Some(Type::TimeZone)) => {
                 self.check_time_zone_literal(name, *span)
@@ -276,6 +283,8 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Instant
                 | BuiltIn::TimeZone
                 | BuiltIn::ZonedTime
+                | BuiltIn::Currency
+                | BuiltIn::Locale
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

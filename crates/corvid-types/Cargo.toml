@@ -12,6 +12,7 @@ corvid-guarantees = { workspace = true }
 corvid-text = { workspace = true }
 corvid-decimal = { workspace = true }
 corvid-time = { workspace = true }
+corvid-currency = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 

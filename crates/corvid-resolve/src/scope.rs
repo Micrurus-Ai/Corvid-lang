@@ -42,6 +42,11 @@ pub enum BuiltIn {
     TimeZone,
     /// B06 — `ZonedTime`, an instant seen in a zone.
     ZonedTime,
+    /// B06 — `Currency`, an ISO 4217 currency; a string literal in a
+    /// `Currency` slot is one, checked at compile time.
+    Currency,
+    /// B06 — `Locale`, a BCP 47 locale with CLDR data, checked the same way.
+    Locale,
     String,
     Bool,
     Nothing,
@@ -189,6 +194,8 @@ impl SymbolTable {
         self.builtins.insert("Instant".into(), BuiltIn::Instant);
         self.builtins.insert("TimeZone".into(), BuiltIn::TimeZone);
         self.builtins.insert("ZonedTime".into(), BuiltIn::ZonedTime);
+        self.builtins.insert("Currency".into(), BuiltIn::Currency);
+        self.builtins.insert("Locale".into(), BuiltIn::Locale);
         self.builtins.insert("String".into(), BuiltIn::String);
         self.builtins.insert("Bool".into(), BuiltIn::Bool);
         self.builtins.insert("Nothing".into(), BuiltIn::Nothing);

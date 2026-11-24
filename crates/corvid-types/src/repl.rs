@@ -136,6 +136,8 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
         Type::Instant => named_type("Instant", span),
         Type::TimeZone => named_type("TimeZone", span),
         Type::ZonedTime => named_type("ZonedTime", span),
+        Type::Currency => named_type("Currency", span),
+        Type::Locale => named_type("Locale", span),
         Type::String => named_type("String", span),
         Type::Bool => named_type("Bool", span),
         Type::Nothing => named_type("Nothing", span),

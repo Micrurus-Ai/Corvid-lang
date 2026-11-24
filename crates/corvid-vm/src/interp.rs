@@ -34,6 +34,8 @@ mod text_methods;
 mod decimal;
 #[path = "interp/time.rs"]
 mod time;
+#[path = "interp/currency.rs"]
+mod currency;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 

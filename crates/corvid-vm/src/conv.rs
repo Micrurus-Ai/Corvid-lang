@@ -36,6 +36,8 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Instant(i) => serde_json::Value::String(i.to_string()),
         Value::TimeZone(z) => serde_json::Value::String(z.to_string()),
         Value::ZonedTime(z) => serde_json::Value::String(z.to_string()),
+        Value::Currency(c) => serde_json::Value::String(c.to_string()),
+        Value::Locale(l) => serde_json::Value::String(l.to_string()),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -197,6 +199,12 @@ pub fn json_to_value(
         (Type::Instant, J::String(text)) => corvid_time::Instant::parse(&text)
             .map(Value::Instant)
             .map_err(|error| ConvError::TypeMismatch { expected: "Instant".into(), got: format!("`{text}`: {error}") }),
+        (Type::Currency, J::String(text)) => corvid_currency::Currency::parse(&text)
+            .map(Value::Currency)
+            .map_err(|error| ConvError::TypeMismatch { expected: "Currency".into(), got: error.to_string() }),
+        (Type::Locale, J::String(text)) => corvid_currency::Locale::parse(&text)
+            .map(|locale| Value::Locale(std::sync::Arc::new(locale)))
+            .map_err(|error| ConvError::TypeMismatch { expected: "Locale".into(), got: error.to_string() }),
         (Type::TimeZone, J::String(text)) => corvid_time::TimeZone::parse(&text)
             .map(Value::TimeZone)
             .map_err(|error| ConvError::TypeMismatch { expected: "TimeZone".into(), got: error.to_string() }),
@@ -519,6 +527,8 @@ fn type_label(t: &Type) -> String {
         Type::Instant => "Instant".into(),
         Type::TimeZone => "TimeZone".into(),
         Type::ZonedTime => "ZonedTime".into(),
+        Type::Currency => "Currency".into(),
+        Type::Locale => "Locale".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

@@ -447,6 +447,25 @@ pub enum BuiltinMethodKind {
     /// String>` — a wall-clock time; a skipped or repeated local time
     /// is an `Err` naming both offsets.
     StringParseLocalTime,
+
+    // ----- currency formatting (B06) -------------------------------
+    //
+    // Every rule is `corvid_currency`'s, over Unicode CLDR data.
+    // Formatting never rounds: an amount with more digits than the
+    // currency shows traps and asks for a declared rounding first.
+    /// `Decimal.format_currency(currency: Currency, locale: Locale) ->
+    /// String` — `$1,234.50` in en-US, `1.234,50 €` in de-DE.
+    DecimalFormatCurrency,
+    /// `Currency.minor_digits() -> Int` — 2 for USD, 0 for JPY.
+    CurrencyMinorDigits,
+    /// `Currency.to_string() -> String` — the ISO 4217 code.
+    CurrencyToString,
+    /// `Locale.to_string() -> String` — the canonical BCP 47 tag.
+    LocaleToString,
+    /// `String.parse_currency() -> Result<Currency, String>`.
+    StringParseCurrency,
+    /// `String.parse_locale() -> Result<Locale, String>`.
+    StringParseLocale,
 }
 
 impl BuiltinMethodKind {
@@ -517,6 +536,20 @@ impl BuiltinMethodKind {
                 | StringParseTimeZone
                 | StringParseZonedTime
                 | StringParseLocalTime
+        )
+    }
+
+    /// The B06 currency-formatting methods.
+    pub fn is_currency(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DecimalFormatCurrency
+                | CurrencyMinorDigits
+                | CurrencyToString
+                | LocaleToString
+                | StringParseCurrency
+                | StringParseLocale
         )
     }
 
@@ -764,6 +797,24 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             StringParseLocalTime,
             vec![Type::TimeZone],
             Type::Result(Box::new(Type::ZonedTime), Box::new(Type::String)),
+        ),
+        (Type::Decimal, "format_currency") => sig(
+            DecimalFormatCurrency,
+            vec![Type::Currency, Type::Locale],
+            Type::String,
+        ),
+        (Type::Currency, "minor_digits") => sig(CurrencyMinorDigits, vec![], Type::Int),
+        (Type::Currency, "to_string") => sig(CurrencyToString, vec![], Type::String),
+        (Type::Locale, "to_string") => sig(LocaleToString, vec![], Type::String),
+        (Type::String, "parse_currency") => sig(
+            StringParseCurrency,
+            vec![],
+            Type::Result(Box::new(Type::Currency), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_locale") => sig(
+            StringParseLocale,
+            vec![],
+            Type::Result(Box::new(Type::Locale), Box::new(Type::String)),
         ),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),

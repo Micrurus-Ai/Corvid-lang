@@ -21,6 +21,7 @@ mod regex;
 mod decimal;
 mod time;
 mod time_zones;
+mod currency;
 mod test_runner;
 mod text;
 

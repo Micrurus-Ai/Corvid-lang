@@ -496,7 +496,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime => Err(CodegenError::not_supported(
+        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - the time types run on the interpreter tier until B06's native time slice lands; use the interpreter tier (`corvid run --tier interp`).",
                 ty.display_name()

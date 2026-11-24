@@ -1427,6 +1427,21 @@ impl<'a> Lowerer<'a> {
                         .unwrap_or(corvid_decimal::Decimal::ZERO),
                 ))
             }
+            // B06 — string literals the checker typed `Currency` or
+            // `Locale`, read with the parser the checker used.
+            Expr::Literal { value: Literal::String(code), .. } if matches!(ty, Type::Currency) => {
+                match corvid_currency::Currency::parse(code) {
+                    Ok(currency) => IrExprKind::Literal(IrLiteral::Currency(currency)),
+                    // Unreachable for a program that checked.
+                    Err(_) => IrExprKind::Literal(IrLiteral::String(code.clone())),
+                }
+            }
+            Expr::Literal { value: Literal::String(tag), .. } if matches!(ty, Type::Locale) => {
+                match corvid_currency::Locale::parse(tag) {
+                    Ok(locale) => IrExprKind::Literal(IrLiteral::Locale(locale)),
+                    Err(_) => IrExprKind::Literal(IrLiteral::String(tag.clone())),
+                }
+            }
             // B06 — a string literal the checker typed `TimeZone`, looked
             // up with the parser the checker used.
             Expr::Literal { value: Literal::String(name), .. } if matches!(ty, Type::TimeZone) => {
@@ -2468,6 +2483,8 @@ impl<'a> Lowerer<'a> {
             Some(Binding::BuiltIn(BuiltIn::Instant)) => Type::Instant,
             Some(Binding::BuiltIn(BuiltIn::TimeZone)) => Type::TimeZone,
             Some(Binding::BuiltIn(BuiltIn::ZonedTime)) => Type::ZonedTime,
+            Some(Binding::BuiltIn(BuiltIn::Currency)) => Type::Currency,
+            Some(Binding::BuiltIn(BuiltIn::Locale)) => Type::Locale,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,

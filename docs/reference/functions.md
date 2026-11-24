@@ -79,6 +79,17 @@ The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must b
 - `Decimal.to_string() -> String`
 - `Decimal.to_float() -> Float`
 - `Decimal.to_int_truncated() -> Int`
+- `Decimal.format_currency(currency: Currency, locale: Locale) -> String`
+
+## Currency and Locale
+
+- `Currency.minor_digits() -> Int`
+- `Currency.to_string() -> String`
+- `Locale.to_string() -> String`
+- `String.parse_currency() -> Result<Currency, String>`
+- `String.parse_locale() -> Result<Locale, String>`
+
+A string literal where a `Currency` or `Locale` is meant is one the compiler checks against CLDR: `total.format_currency("EUR", "de-DE")`. See [Formatting money](decimal.md#formatting-money).
 
 A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19.99`, `price * 1.08`. `/` on decimals is written with its rounding, `(total / 3).round_half_even(2)`. Mixing `Decimal` and `Float` is a compile error. See [Exact decimals](decimal.md).
 
