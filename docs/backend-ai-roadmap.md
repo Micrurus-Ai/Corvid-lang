@@ -120,6 +120,19 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Swift, Kotlin and Python SDK models read and write the public JSON mapping: sum types in the wire shape, `Result`, maps with non-String keys as pairs, `null` for absent values, `JsonError` and the `Page` envelope. Kotlin `Int` fields are `Long`, as Corvid's `Int` is 64-bit. Tests run the generated Python and compile and run the generated Kotlin and Swift.
 - [ ] The Application Contract names field types as written in source, so a field typed with an alias (`orders: Orders`) names `Orders`, which no SDK declares. Name types from the checker's resolved types instead, as IR lowering does. The TypeScript client and the frontend read the contract, so agree the change with frontend development first.
 
+**B03 text and encoding** (in progress). [Proposal](proposals/b03-text-and-encoding.md)
+
+- [ ] Encoding and UUID parsing on the interpreter: base64 (standard and URL-safe), hex and URL-component encoders and decoders, and `parse_uuid`, all pure String methods backed by one `corvid-text` crate. Decoders return `Result` values and never trap.
+- [ ] Regular expressions on the interpreter: `contains_regex`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex`, with the pattern and a literal replacement checked at compile time, and the `RegexMatch` record with character positions and capture groups.
+- [ ] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted.
+- [ ] Native encoding and UUID parsing, with parity tests.
+- [ ] Native regular expressions, with parity tests.
+- [ ] Patterns built at run time, through a validated pattern value. Deferred until a backend example needs one.
+- [ ] Named-group lookup on `RegexMatch` checked against the pattern's group names.
+- [ ] Raw string literals for patterns. Agree the lexical rule with frontend development first.
+- [ ] Byte-list encoders and decoders, with B04's byte representation.
+- [ ] Native UUID generation, with native dispatch of the other stdlib tools.
+
 **B09 typed persistence** (in progress). [Proposal](proposals/b09-typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
