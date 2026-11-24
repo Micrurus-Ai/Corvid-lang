@@ -1,6 +1,6 @@
 // Bump the version when any shell asset (including generated Wasm) changes.
 const prefix = "corvid-sketch:" + self.registration.scope + "|";
-const version = prefix + "v1";
+const version = prefix + "v2";
 const assets = [
   "index.html", "editor.js", "drawing-store.js", "stroke-worker.js", "raster.mjs",
   "target/wasm/stroke.js", "target/wasm/stroke.wasm",

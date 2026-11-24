@@ -1,10 +1,12 @@
-import { openDrawing, restoreCells, saveCells } from "./drawing-store.js";
+import { openDrawing, restoreCells, saveCells, synchronizeDrawing } from "./drawing-store.js";
 
 const canvas = document.querySelector("canvas");
 const status = document.querySelector('[role="status"]');
 const context = canvas.getContext("2d");
 const storage = document.querySelector("#storage");
 const offline = document.querySelector("#offline");
+const syncStatus = document.querySelector("#sync-status");
+const retry = document.querySelector("#retry-sync");
 
 if ("serviceWorker" in navigator) {
   const showOffline = () => {
@@ -68,13 +70,55 @@ if (typeof Worker === "undefined" || !context) {
 } else {
   let db;
   try {
-    db = await openDrawing();
+    db = await openDrawing(() => {
+      storage.textContent = "Close older sketchbook tabs to finish upgrading your drawing.";
+    });
     for (const [x, y] of await restoreCells(db)) context.fillRect(x, y, 1, 1);
     storage.textContent = "Drawings save on this device.";
-  } catch {
+  } catch (error) {
     db?.close();
     db = null;
-    storage.textContent = "Storage unavailable. New marks last until reload.";
+    storage.textContent = error.name === "VersionError"
+      ? "A newer editor saved this drawing. Reload the latest editor to continue."
+      : "Storage unavailable. New marks last until reload.";
+    if (error.name === "VersionError") canvas.inert = true;
+  }
+  let syncing = false;
+  let requested = false;
+  async function sync() {
+    if (!db) return;
+    requested = true;
+    if (syncing) return;
+    syncing = true;
+    try {
+      while (requested) {
+        requested = false;
+        if (!navigator.onLine) {
+          syncStatus.textContent = "Offline. Saved edits will sync on reconnect.";
+          break;
+        }
+        await synchronizeDrawing(db, "./sketch.json");
+        for (const [x, y] of await restoreCells(db)) context.fillRect(x, y, 1, 1);
+        syncStatus.textContent = "Drawing synchronized.";
+      }
+    } catch (error) {
+      syncStatus.textContent = "Sync incomplete. Saved edits remain on this device. " + error.message;
+    } finally {
+      syncing = false;
+      if (requested) void sync();
+    }
+  }
+  if (db) {
+    retry.hidden = false;
+    retry.onclick = sync;
+    window.addEventListener("online", sync);
+    window.addEventListener("focus", sync);
+    db.addEventListener("versionchange", () => {
+      canvas.inert = true;
+      retry.hidden = true;
+      storage.textContent = "Drawing storage changed. Reload the latest editor before drawing.";
+    });
+    void sync();
   }
   let pending = 0;
   const worker = new Worker("./stroke-worker.js", { type: "module" });
@@ -95,6 +139,7 @@ if (typeof Worker === "undefined" || !context) {
       try {
         await saveCells(db, data);
         if (--pending === 0 && db) storage.textContent = "Drawing saved.";
+        void sync();
       } catch {
         db?.close();
         db = null;
