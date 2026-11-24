@@ -26,9 +26,9 @@ agent main(ticket: String) -> String:
 
 Open shelf 2 and choose **Suggest a title**. The task is to recommend a different book for that shelf. To run the exercise with repeatable answers, follow the [packaged reading-list trial](19-browser-views.md#try-a-typed-suggestion).
 
-The reading-list authoring prototype takes a shelf and returns a suggestion.
+The reading-list authoring prototype takes a shelf and returns a suggestion. This excerpt uses the `Shelf`, `BookSuggestion`, `recommend` and `lookup_shelf` declarations from the example application linked below.
 
-```corvid
+```corvid-fragment
 agent suggest_title(shelf: Shelf) -> BookSuggestion:
     title = ask recommend(shelf.title)
         allow lookup_shelf once
