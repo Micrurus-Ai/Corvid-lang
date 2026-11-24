@@ -16,10 +16,16 @@ def verify(args):
     project = root / "examples/orders_api"
     env = dict(os.environ, CORVID_HOME=str(root))
     cli = shutil.which(args.cli) or str(Path(args.cli).resolve())
-    compiler = Path(args.tsc).resolve() if args.tsc else shutil.which("tsc")
-    if not compiler:
-        raise RuntimeError("Install TypeScript or pass --tsc PATH_TO_TYPESCRIPT/bin/tsc")
-    command = ["node", compiler] if args.tsc else [compiler]
+    if args.tsc:
+        command = ["node", Path(args.tsc).resolve()]
+    elif compiler := shutil.which("tsc"):
+        command = [compiler]
+    else:
+        # Hosted Windows has Node and npm but no global TypeScript compiler.
+        npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
+        if not npm:
+            raise RuntimeError("Install npm or pass --tsc PATH_TO_TYPESCRIPT/bin/tsc")
+        command = [npm, "exec", "--yes", "--package=typescript@5.9.3", "--", "tsc"]
     with (nullcontext(args.work_dir) if args.work_dir else TemporaryDirectory()) as temporary:
         build = Path(temporary).resolve()
         if args.work_dir:
