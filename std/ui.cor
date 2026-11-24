@@ -11,6 +11,27 @@ fn children(views: List<View>) -> String:
         parts.append(item.html)
     return parts.join("")
 
+public fn fragment(content: List<View>) -> View:
+    return View(children(content))
+
+public fn portal(target_id: String, content: List<View>) -> View:
+    return View("<corvid-portal data-target-id=\"" + escaped(target_id) + "\"><div>" + children(content) + "</div></corvid-portal>")
+
+public fn portal_target(target_id: String) -> View:
+    return View("<div id=\"" + escaped(target_id) + "\" data-corvid-portal-target></div>")
+
+public type ElementCallback:
+    export_name: String
+
+public fn owned_element(element: View, mount: ElementCallback, release: ElementCallback) -> View:
+    return View("<corvid-owned-element data-mount=\"" + escaped(mount.export_name) + "\" data-release=\"" + escaped(release.export_name) + "\">" + element.html + "<span role=\"alert\"></span></corvid-owned-element>")
+
+public fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View:
+    recovered = match result:
+        Ok(content) -> content
+        Err(reason) -> render_error(reason)
+    return recovered
+
 public fn text(value: String) -> View:
     return View("<p>" + escaped(value) + "</p>")
 
@@ -205,7 +226,7 @@ public fn date_field(label: String, name: String, initial: String) -> View:
 
 # Pair one native field with a custom element that has a value property and a change event.
 public fn bind_field(field: View, component: View) -> View:
-    return View("<div data-corvid-bind-field>" + field.html + "<div hidden data-corvid-component>" + component.html + "</div></div>")
+    return View("<div data-corvid-bind-field>" + field.html + "<div hidden data-corvid-component>" + component.html + "</div><corvid-field-binding hidden></corvid-field-binding></div>")
 
 public fn submit(label: String) -> View:
     return View("<button type=\"submit\">" + escaped(label) + "</button>")
@@ -299,6 +320,12 @@ public fn page_with_landmarks(language: String, title: String, header: List<View
 # Supply application-authored CSS, just as for a literal style element.
 public fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String:
     return document_page(" lang=\"" + escaped(language) + "\"", title, "<style>" + trusted_css + "</style>", main_landmark(content))
+
+public type IntCallback:
+    export_name: String
+
+public fn callback_button(label: String, update: IntCallback) -> View:
+    return action(label, update.export_name)
 
 public fn action(label: String, handler: String) -> View:
     return View("<button type=\"button\" data-corvid-action=\"" + escaped(handler) + "\" disabled>" + escaped(label) + "</button>")

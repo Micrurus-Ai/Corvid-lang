@@ -3,7 +3,22 @@ import "std:ui" as ui
 type PackingNote:
     note: String
 
-fn guide(note: String) -> String:
+type GuideContext:
+    preview_path: String
+
+type PackingPanel:
+    content: ui.View
+    footer_action: ui.View
+
+fn guide_layout(title: String, navigation: ui.View, route_details: ui.View, packing: Result<PackingPanel, String>) -> String:
+    panel = match packing:
+        Ok(details) -> details
+        Err(reason) -> PackingPanel(ui.text(reason), ui.fragment([]))
+    return ui.page_with_landmarks("en", title, [ui.h1(title), navigation],
+        [route_details, ui.section("packing", "Packing note", [panel.content])],
+        [panel.footer_action, ui.link("Back to route", "#route")])
+
+fn guide(note: String, context: GuideContext) -> String:
     title = "River trail guide"
     navigation = ui.navigation("Guide sections", [
         ui.link_with_content("#route", [ui.inline_text("Route, "), ui.abbreviation("3 km", "3 kilometres")]),
@@ -25,10 +40,36 @@ fn guide(note: String) -> String:
     route_details = ui.section("route", "Route", [
         ui.figure("Follow this marker to the lookout.", [marker]), walking_time, stops, distances
     ])
+    packing = packing_panel(note, context, fn (text: String) -> render_packing_preview(text))
+    return guide_layout(title, navigation, route_details, packing)
+
+fn packing_preview(note: String) -> Result<ui.View, String>:
+    if note == "":
+        return Err("Enter a packing note to see its preview.")
+    return Ok(ui.preformatted_text(note))
+
+fn render_packing_preview(note: String) -> ui.View:
+    return ui.recover_view(packing_preview(note), fn (reason: String) -> ui.text(reason))
+
+fn packing_panel(note: String, context: GuideContext, render_preview: (String) -> ui.View) -> Result<PackingPanel, String>:
+    preview = render_preview(note)
+    supplies = ui.unordered_list([
+        ui.list_item([ui.checkbox_field_with_value("Water bottle", "supply", "water", false)]),
+        ui.list_item([ui.checkbox_field_with_value("Trail map", "supply", "map", false)])
+    ])
+    checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
+    supplies_aside = ui.aside("Suggested supplies", [checklist])
+    content = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview,
+        packing_note_editor(note, context)])?
+    return Ok(PackingPanel(content, packing_suggestions(context)))
+
+fn packing_note_editor(note: String, context: GuideContext) -> ui.View:
     note_field = ui.text_area_with_rows("Your note", "note", note, 4, true)
     editor = ui.fieldset("Edit packing note", [note_field, ui.submit("Preview"), ui.reset_button("Restore note")])
     preview_hint = ui.no_script("Select Preview to reload the guide with your note.")
-    form = ui.named_query_form("Packing note preview", "/guide", [preview_hint, editor])
+    return ui.named_query_form("Packing note preview", context.preview_path, [preview_hint, editor])
+
+fn packing_suggestions(context: GuideContext) -> ui.View:
     preset = ui.select_field("Suggested note", "note", [
         ui.option_group("Food and drink", [
             ui.option("Bring water", "Water bottle", true),
@@ -39,24 +80,53 @@ fn guide(note: String) -> String:
             ui.option("Bring a compass", "Compass", false)
         ])
     ])
-    preset_form = ui.named_query_form("Suggested packing notes", "/guide", [preset, ui.submit("Use suggestion")])
-    preview = ui.preformatted_text(note)
-    supplies = ui.unordered_list([
-        ui.list_item([ui.checkbox_field_with_value("Water bottle", "supply", "water", false)]),
-        ui.list_item([ui.checkbox_field_with_value("Trail map", "supply", "map", false)])
-    ])
-    checklist = ui.disclosure_with_initial_state("Packing checklist", true, [supplies])
-    supplies_aside = ui.aside("Suggested supplies", [checklist])
-    packing = ui.data_group("trail-note", note, [supplies_aside, ui.h3("Current note"), preview, form, preset_form])
-    return match packing:
-        Ok(details) -> ui.page_with_landmarks("en", title, [ui.h1(title), navigation], [
-            route_details, ui.section("packing", "Packing note", [details])
-        ], [ui.link("Back to route", "#route")])
-        Err(reason) -> ui.page_in_language("en", title, [ui.text(reason)])
+    return ui.named_query_form("Suggested packing notes", context.preview_path, [preset, ui.submit("Use suggestion")])
+
+test packing_panel_renders_the_note_with_the_callers_preview:
+    panel = packing_panel("Map & compass", GuideContext("/guide"), fn (text: String) -> ui.text(text))
+    has_paragraph_preview = match panel:
+        Ok(details) -> details.content.html.contains("<h3>Current note</h3><p>Map &amp; compass</p>")
+        Err(_) -> false
+    assert has_paragraph_preview
+
+test each_guide_supplies_the_destination_for_both_packing_forms:
+    river = guide("Bring water", GuideContext("/river"))
+    ridge = guide("Bring water", GuideContext("/ridge"))
+    assert river.contains("action=\"/river\" aria-label=\"Packing note preview\"")
+    assert river.contains("action=\"/river\" aria-label=\"Suggested packing notes\"")
+    assert ridge.contains("action=\"/ridge\" aria-label=\"Packing note preview\"")
+    assert ridge.contains("action=\"/ridge\" aria-label=\"Suggested packing notes\"")
+
+test packing_error_keeps_the_route_and_escapes_the_message:
+    route_heading = ui.h2("Route")
+    packing: Result<PackingPanel, String> = Err("Missing <note> & supplies")
+    page = guide_layout("Guide", ui.fragment([]), route_heading, packing)
+    expected_packing = ui.section("packing", "Packing note", [ui.text("Missing <note> & supplies")])
+    assert page.contains("<main>" + route_heading.html + expected_packing.html + "</main>")
+    assert page.contains("<p>Missing &lt;note&gt; &amp; supplies</p>")
+    assert page.contains("<footer>" + ui.link("Back to route", "#route").html + "</footer>")
+
+test packing_suggestions_render_once_in_the_page_footer:
+    context = GuideContext("/ridge")
+    page = guide("Bring water", context)
+    suggestions = packing_suggestions(context).html
+    assert page.contains("</main><footer>" + suggestions)
+    assert page.split(suggestions).length() == 2
+
+test empty_preview_keeps_the_packing_editor_and_footer_action:
+    context = GuideContext("/ridge")
+    page = guide("", context)
+    assert page.contains("<h3>Current note</h3><p>Enter a packing note to see its preview.</p>")
+    assert page.contains(packing_note_editor("", context).html)
+    assert page.contains("</main><footer>" + packing_suggestions(context).html)
+
+test successful_preview_preserves_the_child_markup:
+    page = guide("Water & snacks", GuideContext("/ridge"))
+    assert page.contains("<h3>Current note</h3>" + ui.preformatted_text("Water & snacks").html)
 
 server trail_guide:
     route GET "/" -> html:
-        return guide("Bring water")
+        return guide("Bring water", GuideContext("/guide"))
 
     route GET "/guide" query PackingNote -> html:
-        return guide(query.note)
+        return guide(query.note, GuideContext("/guide"))

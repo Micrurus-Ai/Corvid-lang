@@ -1,0 +1,25 @@
+import "std:ui" as ui
+import "./events" use add_spare, add_pair, open_instructions, close_instructions
+
+fn packing_item(name: String, action_target: String, add: ui.IntCallback) -> ui.View:
+    packed = ui.checkbox_field_with_value(name + " packed", "packed", name, false)
+    spares = ui.int_state(name + " spares", 0, [ui.callback_button("Add spares", add)])
+    return ui.aside(name, [ui.text(name), spares, ui.portal(action_target, [packed])])
+
+fn packing_page() -> String:
+    items = ui.section("items", "Packing list", [
+        packing_item("Map", "packing-actions", add_spare()),
+        packing_item("Water", "packing-actions", add_pair())
+    ])
+    actions = ui.section("actions", "Mark packed items", [ui.portal_target("packing-actions")])
+    instructions = ui.View("<dialog aria-label=\"Packing instructions\">Mark each item when packed.</dialog>")
+    return ui.interactive_page("Packing list", [items, actions, ui.owned_element(instructions, open_instructions(), close_instructions())])
+
+test packing_actions_are_available_at_their_source_before_mount:
+    page = packing_page()
+    assert page.contains(ui.portal("packing-actions", [ui.checkbox_field_with_value("Map packed", "packed", "Map", false)]).html)
+    assert page.contains("<div id=\"packing-actions\" data-corvid-portal-target></div>")
+
+server packing_list:
+    route GET "/" -> html:
+        return packing_page()

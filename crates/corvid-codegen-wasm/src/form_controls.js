@@ -1,28 +1,158 @@
 // This module is loaded by interactive pages, including pages with no Wasm exports.
+if (!customElements.get("corvid-owned-element")) {
+  customElements.define("corvid-owned-element", class extends HTMLElement {
+    #waitingFor;
+    #mount;
+    #release;
+
+    connectedCallback() {
+      queueMicrotask(() => this.mountElement());
+    }
+
+    async mountElement() {
+      if (!this.isConnected || this.#mount) return;
+      const element = this.firstElementChild;
+      const alert = this.lastElementChild;
+      if (!element || !alert) return;
+      if (element.localName.includes("-") && !customElements.get(element.localName)) {
+        if (this.#waitingFor !== element.localName) {
+          this.#waitingFor = element.localName;
+          customElements.whenDefined(element.localName).then(retryElementMount(new WeakRef(this)));
+        }
+        return;
+      }
+      const mount = {};
+      this.#mount = mount;
+      try {
+        if (typeof instantiate !== "function") throw Error("Build the browser lifecycle callbacks in src/events.cor.");
+        // The Wasm loader requests only tool imports declared by the Corvid module.
+        const methods = new Proxy(Object.create(null), {
+          get: (_, name) => (...args) => element[name](...args),
+        });
+        const callbacks = await instantiate({tools: methods});
+        if (this.#mount !== mount) return;
+        const acquire = callbacks[this.dataset.mount];
+        const release = callbacks[this.dataset.release];
+        if (typeof acquire !== "function" || typeof release !== "function") {
+          throw Error("The owned element needs both browser lifecycle callbacks.");
+        }
+        this.#release = release;
+        alert.textContent = "";
+        acquire();
+      } catch (error) {
+        if (this.#mount !== mount) return;
+        this.#dispose();
+        alert.textContent = error.message;
+      }
+    }
+
+    #dispose() {
+      const release = this.#release;
+      this.#release = undefined;
+      try { release?.(); }
+      catch (error) { this.lastElementChild.textContent = error.message; }
+    }
+
+    disconnectedCallback() {
+      this.#mount = undefined;
+      this.#dispose();
+    }
+  });
+}
+
+function retryElementMount(owner) {
+  return () => owner.deref()?.mountElement();
+}
+
+if (!customElements.get("corvid-portal")) {
+  customElements.define("corvid-portal", class extends HTMLElement {
+    #content;
+
+    connectedCallback() {
+      // Let the caller finish inserting its children and the destination.
+      queueMicrotask(() => {
+        if (!this.isConnected || this.#content) return;
+        const target = this.getRootNode().getElementById(this.dataset.targetId);
+        const content = this.firstElementChild;
+        if (!target?.hasAttribute("data-corvid-portal-target") || !content || this.contains(target)) return;
+        this.#content = content;
+        target.append(content);
+      });
+    }
+
+    disconnectedCallback() {
+      if (!this.#content) return;
+      this.append(this.#content);
+      this.#content = undefined;
+    }
+  });
+}
+
 for (const select of document.querySelectorAll("select[data-corvid-submit-change]")) {
   select.addEventListener("change", () => select.form.requestSubmit());
 }
 
-for (const binding of document.querySelectorAll("[data-corvid-bind-field]")) {
-  const field = binding.querySelector("input, select, textarea");
-  const slot = binding.querySelector("[data-corvid-component]");
-  const component = slot?.firstElementChild;
-  if (!field || !component || !component.localName.includes("-")) continue;
-  customElements.whenDefined(component.localName).then(() => {
-    if (!("value" in component)) return;
-    const sync = () => { if (component.value !== field.value) component.value = field.value; };
-    sync();
-    field.addEventListener("input", sync);
-    field.addEventListener("change", sync);
-    field.form?.addEventListener("reset", () => queueMicrotask(sync));
-    component.addEventListener("change", () => {
-      if (field.value === component.value) return;
-      field.value = component.value;
-      field.dispatchEvent(new Event("input", { bubbles: true }));
-      field.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    slot.hidden = false;
+// A missing optional module can leave whenDefined pending for the life of the page.
+function connectWhenDefined(bindingRef) {
+  return () => bindingRef.deref()?.connectField();
+}
+
+if (!customElements.get("corvid-field-binding")) {
+  customElements.define("corvid-field-binding", class extends HTMLElement {
+    #listeners;
+    #waitingFor;
+
+    connectedCallback() {
+      queueMicrotask(() => this.connectField());
+    }
+
+    connectField() {
+      if (!this.isConnected || this.#listeners) return;
+      const binding = this.parentElement;
+      const slot = binding?.querySelector(":scope > [data-corvid-component]");
+      const component = slot?.firstElementChild;
+      const field = binding?.querySelector("input, select, textarea");
+      if (!field || !component || !component.localName.includes("-")) return;
+      if (!customElements.get(component.localName)) {
+        if (this.#waitingFor !== component.localName) {
+          this.#waitingFor = component.localName;
+          customElements.whenDefined(component.localName).then(connectWhenDefined(new WeakRef(this)));
+        }
+        return;
+      }
+      if (!("value" in component)) return;
+      this.#listeners = new AbortController();
+      const options = { signal: this.#listeners.signal };
+      const sync = () => {
+        if (!options.signal.aborted && component.value !== field.value) component.value = field.value;
+      };
+      field.addEventListener("input", sync, options);
+      field.addEventListener("change", sync, options);
+      field.form?.addEventListener("reset", () => queueMicrotask(sync), options);
+      component.addEventListener("change", () => {
+        if (field.value === component.value) return;
+        field.value = component.value;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      }, options);
+      slot.hidden = false;
+      sync();
+    }
+
+    disconnectedCallback() {
+      this.#listeners?.abort();
+      this.#listeners = undefined;
+    }
   });
+}
+
+// Previously rendered views may predate the lifecycle element.
+for (const binding of document.querySelectorAll("[data-corvid-bind-field]")) {
+  if (!binding.querySelector(":scope > corvid-field-binding")) {
+    const lifecycle = document.createElement("corvid-field-binding");
+    lifecycle.hidden = true;
+    binding.append(lifecycle);
+  }
 }
 
 for (const form of document.querySelectorAll("form[data-corvid-receipt]")) {

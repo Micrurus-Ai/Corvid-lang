@@ -79,6 +79,95 @@ fn calendar_search() -> View:
 
 ## Static view functions
 
+A layout can give each slot a name and a `View` parameter. To fill one slot with several siblings, pass `ui.fragment(content)`. In the example below, both packing items become direct children of the list. Pass `ui.fragment([])` when there are no items.
+
+```corvid-fragment
+fn packing_list(heading: View, items: View) -> View:
+    return ui.fragment([heading, ui.unordered_list([items])])
+
+fn weekend_packing() -> View:
+    items = ui.fragment([
+        ui.list_item([ui.inline_text("Water")]),
+        ui.list_item([ui.inline_text("Map")])
+    ])
+    return packing_list(ui.h2("Weekend packing"), items)
+```
+
+### Place a component's controls in another region
+
+In the [packing actions example](../../examples/packing_actions/src/main.cor), each item creates its own checkbox with `ui.portal("packing-actions", [packed])`. The layout places `ui.portal_target("packing-actions")` in the actions section. On an interactive page, mounting each item moves its controls to that destination. Removing one item removes its checkbox from the actions section. Reattaching the item moves the same checkbox back, preserving its checked state.
+
+Give the destination a unique HTML ID and render it in the same document or shadow root before the portal mounts. Without scripting or a matching destination, the controls appear with the item.
+
+### Pass a browser callback and release a resource
+
+The packing list also gives each item its own spare count. The caller chooses how a click changes that count. Declare the update in `src/events.cor`:
+
+```corvid
+browser callback add_pair(current: Int) -> Int:
+    return current + 2
+```
+
+Import the callback in the page module and pass its binding through an ordinary typed parameter. Calling `add_pair()` creates the binding during rendering. Clicking the button runs the compiled function in the browser with that item's current count.
+
+```corvid
+import "./events" use add_pair
+import "std:ui" as ui
+
+fn spare_counter(update: ui.IntCallback) -> ui.View:
+    return ui.int_state("Spare bottles", 0, [ui.callback_button("Add spares", update)])
+
+fn packing_controls() -> ui.View:
+    return spare_counter(add_pair())
+```
+
+Use `corvid build src/main.cor --target web` and serve the extracted package. To serve from the source tree, build `src/events.cor` with `--target wasm` first.
+
+To own a resource exposed by an element, define its setup and cleanup in the same events module. A tool called from a lifecycle callback invokes the matching synchronous method on that instance. The packing page uses the native dialog methods:
+
+```corvid
+tool show() -> Nothing
+tool close() -> Nothing
+
+browser lifecycle open_instructions() -> Nothing:
+    show()
+
+browser lifecycle close_instructions() -> Nothing:
+    close()
+```
+
+Import those two bindings and render `ui.owned_element(instructions, open_instructions(), close_instructions())`, where `instructions` is the dialog view. Removing the owner runs the cleanup on that dialog. Reattaching it runs setup again. To own a custom element's subscription, declare its subscribe and unsubscribe methods the same way. Corvid waits for the element's definition before running setup.
+
+### Pass context across a layout
+
+In the trail guide, the route supplies `GuideContext("/guide")` to the page. The page passes that record to the packing panel, which passes it to the note editor and the suggestions form. Both forms read `context.preview_path` for their GET action. To render the guide for a different destination, supply another record at the page call. The context belongs to that render and follows ordinary typed function arguments.
+
+### Let the caller render a preview
+
+The trail guide's packing panel takes a callback named `render_preview` with type `(String) -> ui.View`. The panel calls `render_preview(note)` while building the page and places the returned view below **Current note**. The guide supplies a preformatted preview to preserve line breaks. Another caller can supply a paragraph using the same panel.
+
+```corvid-fragment
+packing = packing_panel(note, context, fn (text: String) -> ui.text(text))
+```
+
+### Recover inside a component slot
+
+Use `ui.recover_view` to handle a failure where the child appears. In the trail guide, `packing_preview` returns an error for an empty note. The caller renders the message under **Current note**, and the editor and footer action still use the route's context. A successful preview keeps its original formatting.
+
+```corvid-fragment
+preview = ui.recover_view(packing_preview(note), fn (reason: String) -> ui.text(reason))
+```
+
+The packing component returns a `Result<PackingPanel, String>`. On success, the record carries two views. The layout renders `content` inside the packing section and `footer_action` in the page footer, after the main landmark. This lets the component send its suggestions form across a layout boundary during server rendering. The form still uses the preview path from the component's context.
+
+On failure, the layout keeps the route details and the footer's navigation link. It fills the packing section with escaped error text and supplies an empty footer action.
+
+```corvid-fragment
+panel = match packing:
+    Ok(details) -> details
+    Err(reason) -> PackingPanel(ui.text(reason), ui.fragment([]))
+```
+
 Run `corvid serve examples/trail_guide/src/main.cor --listen 127.0.0.1:8080` from the repository root and open `http://127.0.0.1:8080/`. The [trail guide](../../examples/trail_guide/src/main.cor) combines a navigation landmark, route marker, ordered stops, distance table and packing form. Turn off JavaScript, enter a note such as `Rain & <wind>`, and select **Preview**. The GET route renders the note as text and fills the field with the same value.
 
 ### Give the page an outline
@@ -518,6 +607,8 @@ server help:
 
 Set `CORVID_MODEL` to your streaming provider and run `corvid serve src/main.cor`. Open the root page and press Start. The answer appears as chunks arrive. Cancel closes the connection and keeps the text already received. If the connection fails, Start again makes a fresh request and clears the old answer. Leaving the page closes an active stream. The path argument is an application-relative GET URL on the same origin. Each message must carry a JSON string. The Corvid server sends the completion and error events and serves the browser module.
 
+Each answer view owns its connection. Removing the view while an answer is arriving closes the stream and leaves the received text in the view. If you mount that view again, press **Start again** to request a fresh answer.
+
 ## Packaging an interactive application
 
 Place the server in `src/main.cor`. Use `ui.link` with a trusted application path to navigate between pages.
@@ -602,6 +693,8 @@ import "./pickers" use calendar_picker as picker
 Change `calendar_picker` to `native_picker` to use the browser's date control. Both pickers take the saved date and return a view. The server receives the same `Booking` value and checks the date before writing to SQLite. [Booking application](../../examples/booking/src/main.cor)
 
 Use `ui.date_field(label, name, initial)` for a required date input. On an interactive page, `ui.bind_field(field, component)` connects that input to a custom element with a string `value` property and a `change` event. The example loads a pinned Cally module with an integrity hash. The native input remains usable if the download fails. [Picker definitions](../../examples/booking/src/pickers.cor)
+
+The picker owns its event listeners. Removing the bound view disconnects the calendar from the field and the form. When you put the view into another form, the calendar reads the field's current value and follows resets on that form.
 
 Wrap the picker and submit button in `ui.agent_post_form(name, description, path, controls)` to expose the form in a WebMCP-capable browser. Chrome derives the tool argument from the named field. The person can review the filled date and submit it. The tool receives the server's receipt. Run `python scripts/verify_booking.py target/debug/corvid.exe --channel chrome` with Python Playwright, Chrome and network access to the calendar module. [Browser trial](../../scripts/verify_booking.py)
 

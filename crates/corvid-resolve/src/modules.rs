@@ -287,6 +287,11 @@ pub fn collect_public_exports(file: &File, resolved: &Resolved) -> HashMap<Strin
 /// in the Corvid import syntax, so this helper adds it when the
 /// user wrote a bare name.
 pub fn resolve_import_path(importing_file: &Path, module: &str) -> PathBuf {
+    // A component's public signature may refer to its own import of std:ui.
+    // Use the bundled module identity when resolving that transitive type.
+    if matches!(module, "std:ui" | "std:ui.cor") {
+        return Path::new("<corvid:std>").join("ui.cor");
+    }
     let base = importing_file
         .parent()
         .map(|p| p.to_path_buf())

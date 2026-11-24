@@ -293,6 +293,7 @@ import python "mylib" as ml effects: network:
 "#,
     ),
     ("native_counter", include_str!("../../../examples/reading_counter/src/main.cor")),
+    ("packing_callbacks", include_str!("../../../examples/packing_actions/src/events.cor")),
     ("native_ask", include_str!("../../../examples/book_suggestions/src/main.cor")),
     ("choice_declaration", "public choice Action:\n    Lookup(shelf: Int)\n    Stop\n"),
     (
@@ -699,6 +700,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("model_field", "effects_and_models"),
     ("component_decl", "native_counter"),
     ("component_button", "native_counter"),
+    ("browser_callback_decl", "packing_callbacks"),
+    ("browser_lifecycle_decl", "packing_callbacks"),
     ("bounded_ask", "native_ask"),
     ("agent_decl", "agents_annotations_extern"),
     ("annotation", "agents_annotations_extern"),

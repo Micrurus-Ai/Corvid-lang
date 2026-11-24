@@ -390,6 +390,12 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 The [trail guide example](../../examples/trail_guide/src/main.cor) combines the static view functions in a server-rendered document.
 
 - `fn text(value: String) -> View`
+- `fn fragment(content: List<View>) -> View` groups siblings into one view for a component slot. It concatenates each child's existing markup in order. Nested fragments add no element or spacing. An empty fragment renders an empty string.
+- `fn portal(target_id: String, content: List<View>) -> View` renders children together at the call site. On an interactive page, mounting the portal moves their container to the matching portal target in the same document or shadow root. Children stay inline if the target is absent or inside the portal. Unmounting returns the container to its owner. Reconnecting the owner looks up the target again.
+- `fn portal_target(target_id: String) -> View` renders a block destination with the supplied HTML ID. Give it a unique, nonempty ID. Multiple portals can append their content here in mount order.
+- `browser lifecycle name() -> Nothing:` declares a public lifecycle callback in `src/events.cor`. Import and call `name()` in a rendering module to get a `ui.ElementCallback`. In the browser, tool calls from its body invoke same-named synchronous methods on its owned element using the existing Wasm host ABI.
+- `fn owned_element(element: View, mount: ElementCallback, release: ElementCallback) -> View` gives one root element a resource lifetime on an interactive page. After connection, module loading and custom-element registration the wrapper invokes `mount`. On disconnection it runs `release` with the same browser module instance and element. Reconnection acquires again. A failed acquisition also attempts release, so release must handle partial acquisition. Errors appear in the wrapper's alert.
+- `fn recover_view(result: Result<View, String>, render_error: (String) -> View) -> View` returns the child view on success. On error it calls `render_error` with the message and returns that view in the child's place. Use `ui.text` inside the callback to escape error text.
 - `fn inline_text(value: String) -> View` escapes text into a view without adding a surrounding element.
 - `fn isolated_text(value: String) -> View` renders escaped text inside a `bdi` element. The browser determines its direction from its content and isolates it from surrounding text.
 - `fn preformatted_text(value: String) -> View` renders escaped text in a `pre` element with `dir="auto"`. It preserves spaces and line breaks, including a leading newline. The browser infers the block's writing direction from its text.
@@ -427,7 +433,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn checkbox_field(label: String, name: String, checked: Bool) -> View` renders a labeled native checkbox and escapes both strings. The Boolean sets the initial checked state. In a form, a checked box submits its name with the value `on`. An unchecked box contributes no entry.
 - `fn checkbox_field_with_value(label: String, name: String, value: String, checked: Bool) -> View` renders a labeled checkbox with an explicit `value` attribute. It escapes all three strings. The Boolean sets the initial checked state. A checked box submits the supplied value, including an empty string. An unchecked box contributes no entry.
 - `fn date_field(label: String, name: String, initial: String) -> View`
-- `fn bind_field(field: View, component: View) -> View`
+- `fn bind_field(field: View, component: View) -> View` synchronizes a native field with a custom element's string `value` on interactive pages. Removing the bound view releases its field, component and form reset listeners. Reattaching it copies the field's current value into the component and binds to the current form.
 - `fn submit(label: String) -> View`
 - `fn reset_button(label: String) -> View` renders a native `<button type="reset">` with an escaped text label. Activating it restores the controls in its form to their default values.
 - `fn post_form(path: String, controls: List<View>) -> View`
@@ -451,6 +457,8 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn action(label: String, handler: String) -> View`
 - `fn assistant_action(label: String, handler: String, name: String, description: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`
+- `browser callback name(current: Int) -> Int:` declares a public integer state update in `src/events.cor`. Its indented body uses ordinary Corvid function statements supported by the browser compiler. Import the name into the rendering module and call `name()` to obtain a `ui.IntCallback` binding. Pass that value as an input to a component or button. The web build packages the function under its declared name.
+- `fn callback_button(label: String, update: IntCallback) -> View` creates a button inside an integer state control. A click supplies that control's current integer to the bound browser callback and displays its return value.
 - `fn shared_int_state(name: String, label: String, initial: Int, controls: List<View>) -> View`
 - `fn state_output(name: String, label: String) -> View`
 - `fn event_module() -> View`
@@ -462,7 +470,7 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn agent_query_form(name: String, description: String, path: String, controls: List<View>) -> View`
 - `fn link(label: String, path: String) -> View`
 - `fn link_with_content(path: String, content: List<View>) -> View` renders a native anchor with an escaped `href` and its children in list order. Supply a trusted destination and inline views such as text, an abbreviation or an image. Keep other links and interactive controls outside the anchor.
-- `fn stream_text(label: String, path: String) -> View`
+- `fn stream_text(label: String, path: String) -> View` gives each mounted view its own stream connection. Removing the view closes its active connection and disables both controls. Mounting the same view again enables Start and preserves the last output until the next request.
 
 `assistant_action` opts an integer-state button into WebMCP. Use a unique tool name per page. `assistant_text_state` exposes a single-line text control. Its tool requires one string field named for the handler parameter and returns the handler's string result.
 

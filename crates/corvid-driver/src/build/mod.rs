@@ -339,7 +339,12 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
         .map_err(|e| anyhow::anyhow!("cannot read `{}`: {}", source_path.display(), e))?;
 
     let config = load_corvid_config_for(source_path);
-    match build_frontend_bundle(&source, source_path, config.as_ref()) {
+    let parser = if source_path.canonicalize()?.ends_with("src/events.cor") {
+        corvid_syntax::parser::parse_browser_exports
+    } else {
+        parse_file
+    };
+    match build_frontend_bundle_with_parser(&source, source_path, config.as_ref(), parser) {
         Err(diagnostics) => Ok(WasmBuildOutput {
             source,
             wasm_path: None,
@@ -474,6 +479,15 @@ pub(super) fn build_frontend_bundle(
     source_path: &Path,
     config: Option<&CorvidConfig>,
 ) -> Result<FrontendBundle, Vec<Diagnostic>> {
+    build_frontend_bundle_with_parser(source, source_path, config, parse_file)
+}
+
+fn build_frontend_bundle_with_parser(
+    source: &str,
+    source_path: &Path,
+    config: Option<&CorvidConfig>,
+    parser: fn(&[corvid_syntax::Token]) -> (corvid_ast::File, Vec<corvid_syntax::ParseError>),
+) -> Result<FrontendBundle, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let tokens = match lex(source) {
         Ok(tokens) => tokens,
@@ -482,7 +496,7 @@ pub(super) fn build_frontend_bundle(
             return Err(diagnostics);
         }
     };
-    let (file, parse_errs) = parse_file(&tokens);
+    let (file, parse_errs) = parser(&tokens);
     diagnostics.extend(parse_errs.into_iter().map(Diagnostic::from));
     let resolved = resolve(&file);
     diagnostics.extend(resolved.errors.iter().cloned().map(Diagnostic::from));

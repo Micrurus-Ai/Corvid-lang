@@ -16,10 +16,14 @@ class CorvidTextStream extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("pagehide", this.onLeave);
     this.stop("Interrupted");
+    this.start.onclick = null;
+    this.cancel.onclick = null;
+    this.start.disabled = true;
+    this.cancel.disabled = true;
   }
 
   open() {
-    if (this.source) return;
+    if (!this.isConnected || this.source) return;
     const path = this.dataset.path;
     let url;
     try {

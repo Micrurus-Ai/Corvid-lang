@@ -62,6 +62,8 @@ decl              ::= visibility? (
                       | server_decl
                       )
                     | import_decl
+                    | browser_callback_decl
+                    | browser_lifecycle_decl
                     | identity_decl
                     | connector_decl
                     | schedule_decl
@@ -628,6 +630,25 @@ on drag(parameter: Stroke):
 For a resizable region use `panel(state_name, minimum, maximum, children)`, where children has type `List<ui.View>`. Sizes and bounds are integer literals from 1 to 8192. Panel bounds must contain the initial width. The optional line statement is available on a canvas. End the handler with an assignment using `=` or `+=`. The expression accepts integer literals, the state name, point coordinates, parentheses, and the arithmetic operators `+`, `-`, and `*`.
 
 The types in `std:ui` are `Point(x: Int, y: Int)` and `Stroke(start: Point, end: Point)`. The compiler renders surfaces with `ui.drag_canvas(label, initial, width, height, handler, draw)` and `ui.drag_panel(label, initial, minimum, maximum, handler, content)`. Both return a `View`. Use `ui.assistant_drag(component, name, description)` to expose the mounted component's action. See [Drawing and resizing with a Stroke](../book/19-browser-views.md#drawing-and-resizing-with-a-stroke).
+
+### Browser callbacks and lifecycle
+
+```ebnf
+browser_callback_decl  ::= 'browser' 'callback' IDENT '(' IDENT ':' 'Int' ')' '->' 'Int' ':' INDENT block DEDENT
+browser_lifecycle_decl ::= 'browser' 'lifecycle' IDENT '(' ')' '->' 'Nothing' uses_clause? ':' INDENT block DEDENT
+```
+
+Two top-level declarations in `src/events.cor` create typed component bindings.
+
+```text
+browser callback name(parameter: Int) -> Int:
+    function_body
+
+browser lifecycle name() -> Nothing:
+    lifecycle_body
+```
+
+An integer callback has a pure function body and returns the next state. A lifecycle body runs synchronously and may call declared tools. Reaching the end of a lifecycle body completes the hook. In a rendering module, import the declaration and call `name()` to obtain its binding. Use the integer binding with `ui.callback_button` and the lifecycle bindings with `ui.owned_element`. [Typed callbacks and resource ownership](../book/19-browser-views.md#pass-a-browser-callback-and-release-a-resource)
 
 ### Browser state bindings
 

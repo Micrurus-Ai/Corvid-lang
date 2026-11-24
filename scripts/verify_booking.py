@@ -1,5 +1,6 @@
 """Build both booking screens and exercise their shared form through Chromium WebMCP."""
 import argparse
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import shutil
@@ -17,8 +18,59 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "examples/booking"
 MODULE = "https://cdn.jsdelivr.net/npm/cally@0.9.2/dist/cally.js"
 
 
-def trial(cli, channel):
-    with TemporaryDirectory() as tmp, sync_playwright() as playwright:
+def verify_field_lifecycle(cli, channel, work_dir=None):
+    with nullcontext(work_dir) if work_dir else TemporaryDirectory() as tmp:
+        project = Path(tmp) / "booking"
+        shutil.copytree(EXAMPLE, project)
+        subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
+        with serve(cli, project, dict(os.environ)) as url, sync_playwright() as playwright:
+            browser = playwright.chromium.launch(channel=channel)
+            page = browser.new_page()
+            page.route(MODULE, lambda route: route.abort())
+            page.goto(url)
+            page.evaluate("""async () => {
+                const field = document.querySelector('input[name=date]');
+                const calendar = document.querySelector('calendar-date');
+                const binding = field.closest('[data-corvid-bind-field]');
+                const form = field.form;
+                await customElements.whenDefined('corvid-field-binding');
+                binding.remove();
+                customElements.define('calendar-date', class extends HTMLElement { value = ''; });
+                field.value = '2028-06-14';
+                await Promise.resolve();
+                if (calendar.value) throw Error('Detached picker synchronized during upgrade');
+                form.prepend(binding);
+                await Promise.resolve();
+                if (calendar.value !== field.value) throw Error('Mount did not synchronize the picker');
+                form.reset();
+                binding.remove();
+                field.value = '2028-06-15';
+                field.dispatchEvent(new Event('input'));
+                await Promise.resolve();
+                if (calendar.value !== '2028-06-14') throw Error('Detached picker received an update');
+                calendar.value = '2028-06-16';
+                calendar.dispatchEvent(new Event('change'));
+                if (field.value !== '2028-06-15') throw Error('Detached picker changed the field');
+                const nextForm = document.createElement('form');
+                document.body.append(nextForm);
+                nextForm.append(binding);
+                await Promise.resolve();
+                if (calendar.value !== field.value) throw Error('Remount lost the current field value');
+                field.value = '2028-06-17';
+                form.reset();
+                await Promise.resolve();
+                if (calendar.value !== '2028-06-15') throw Error('Previous form still controls the picker');
+                nextForm.reset();
+                await Promise.resolve();
+                if (calendar.value !== field.defaultValue) throw Error('New form reset did not synchronize');
+            }""")
+            browser.close()
+    print("Bound field released its listeners and synchronized after remount.")
+
+
+def trial(cli, channel, work_dir=None):
+    workspace = nullcontext(work_dir) if work_dir else TemporaryDirectory()
+    with workspace as tmp, sync_playwright() as playwright:
         project = Path(tmp) / "booking"
         shutil.copytree(EXAMPLE, project)
         main = project / "src/main.cor"
@@ -89,7 +141,17 @@ def trial(cli, channel):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cli", type=Path)
+    parser.add_argument("cli_path", nargs="?", type=Path)
+    parser.add_argument("--cli", type=Path)
     parser.add_argument("--channel", default="chrome")
+    parser.add_argument("--field-lifecycle-only", action="store_true")
+    parser.add_argument("--work-dir", type=Path, help="create and retain the fixtures in this new directory")
     args = parser.parse_args()
-    trial(args.cli.resolve(), args.channel)
+    cli = args.cli or args.cli_path
+    if cli is None:
+        parser.error("supply the Corvid executable with --cli")
+    if args.work_dir:
+        args.work_dir.mkdir(parents=True)
+    verify_field_lifecycle(cli.resolve(), args.channel, args.work_dir / "lifecycle" if args.work_dir else None)
+    if not args.field_lifecycle_only:
+        trial(cli.resolve(), args.channel, args.work_dir / "pickers" if args.work_dir else None)

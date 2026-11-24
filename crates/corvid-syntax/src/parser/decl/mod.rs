@@ -69,6 +69,9 @@ impl<'a> Parser<'a> {
         }
 
         match self.peek() {
+            TokKind::Ident(word) if word == "browser" && matches!(self.peek_ahead(1), TokKind::Ident(next) if matches!(next.as_str(), "callback" | "lifecycle")) => {
+                self.parse_browser_callback()
+            }
             TokKind::Ident(word) if word == "component" => self.parse_component_decl(),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
             TokKind::Ident(word) if word == "local" => self.parse_local_type(visibility),
@@ -371,7 +374,7 @@ impl<'a> Parser<'a> {
     /// (slice 45r). Same signature surface as an agent minus the
     /// effect row, annotations, and extern ABI: a `fn` is
     /// statically effect-free, so none of those apply.
-    fn parse_fn_decl(
+    pub(super) fn parse_fn_decl(
         &mut self,
         visibility: corvid_ast::Visibility,
     ) -> Result<corvid_ast::FnDecl, ParseError> {

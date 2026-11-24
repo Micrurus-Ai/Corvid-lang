@@ -56,14 +56,14 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
         let contents = fs::read_to_string(stage.path().join(relative))?;
         if !contents
             .lines()
-            .any(|line| line.split_whitespace().next() == Some("component"))
+            .any(|line| matches!(line.split_whitespace().next(), Some("component" | "browser")))
         {
             continue;
         }
         let Ok(tokens) = corvid_syntax::lex(&contents) else {
             continue;
         };
-        let declarations = corvid_syntax::parser::components(&tokens).map_err(|errs| {
+        let (declarations, callbacks) = corvid_syntax::parser::browser_declarations(&tokens).map_err(|errs| {
             let e = &errs[0];
             let line = 1 + contents[..e.span.start]
                 .bytes()
@@ -71,6 +71,12 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
                 .count();
             anyhow::anyhow!("{}:{}: {}", root.join(relative).display(), line, e.kind)
         })?;
+        if relative != Path::new("src/events.cor") {
+            if let Some(span) = callbacks.first() {
+                let line = contents[..span.start].lines().count() + 1;
+                bail!("{}:{line}: declare browser callbacks in src/events.cor", root.join(relative).display());
+            }
+        }
         for component in declarations {
             handlers.push_str(&component.events);
             if relative == Path::new("src/main.cor") {
