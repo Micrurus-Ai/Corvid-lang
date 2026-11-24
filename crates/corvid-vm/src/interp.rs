@@ -1867,7 +1867,7 @@ impl<'ir> Interpreter<'ir> {
                     // A `Secret` argument reaches the implementation as its
                     // text; every record of the call holds `json_args`.
                     let revealed =
-                        secret_tools::revealed_arguments(tool, &json_args, &arg_values, &self.types_by_id);
+                        secret_tools::revealed_arguments(tool, &json_args, &arg_values, &self.types_by_id, span)?;
                     echo_scrub = revealed.clone();
                     let outcome = if let Some((module, member)) = &tool.python {
                         self.runtime

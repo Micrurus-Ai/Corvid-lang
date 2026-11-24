@@ -994,7 +994,8 @@ impl<'a> Checker<'a> {
                 return (**inner).clone();
             }
         }
-        // A `Secret` has no methods, so none can return its text.
+        // A `Secret` has no method that returns its text; the table's
+        // one method on it returns another secret.
         if let Some(ty) = self.refuse_secret_method(&recv_ty, method_name, args) {
             return ty;
         }
@@ -1014,6 +1015,12 @@ impl<'a> Checker<'a> {
                 for a in args {
                     let _ = self.check_expr(a);
                 }
+                return sig.ret;
+            }
+            // Cryptography (B04): an HMAC key is `Bytes` or a `Secret`,
+            // which one table parameter cannot say.
+            if sig.kind.is_hmac() {
+                self.check_hmac_key(&method_name.name, &args[0]);
                 return sig.ret;
             }
             // Sequential signature refinement (45j): `fold`'s
@@ -1084,6 +1091,9 @@ impl<'a> Checker<'a> {
             }
             // Exact decimals (B06): a literal `places` is 0 to 28.
             self.check_decimal_method_arguments(sig.kind, args);
+            if sig.kind == BuiltinMethodKind::SecretDecodeBase64After {
+                self.check_secret_key_prefix(args);
+            }
             return sig.ret;
         }
 

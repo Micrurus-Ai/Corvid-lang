@@ -96,7 +96,7 @@ fn secrets_do_not_add_or_compute() {
 }
 
 #[test]
-fn a_secret_has_no_methods_so_none_returns_its_text() {
+fn no_method_returns_a_secrets_text() {
     for method in ["to_string()", "to_json()", "length()", "to_upper()", "utf8()"] {
         let error = the_error(
             &format!("agent reveal(a: Secret) -> String:\n    x = a.{method}\n    return \"\"\n"),

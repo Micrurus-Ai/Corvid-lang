@@ -8,8 +8,8 @@
 //!   constant-time at run time, are the only ones. Ordering would stop
 //!   at the first differing character; `+` and any mix with `String`
 //!   would turn the text into ordinary text.
-//! - **Methods.** A secret has none: no `to_string`, no `to_json`, no
-//!   method that returns the text.
+//! - **Methods.** None returns the text: no `to_string`, no `to_json`.
+//!   The one method, `decode_base64_after`, returns another secret.
 //! - **Boundaries.** A route's inputs and response, a store field, a
 //!   table column, a prompt's parameters and result, a connector
 //!   operation, `ask` and `choose`, and the `main` agent's signature
@@ -110,11 +110,17 @@ impl<'a> Checker<'a> {
         Some(recovered)
     }
 
-    /// Refuses `secret.method(...)`: a secret has no methods, so none can
-    /// return its text. Returns the recovered result type when the
-    /// receiver is a `Secret`, or `None` to continue ordinary dispatch.
+    /// Refuses `secret.method(...)` unless it is a cryptography method
+    /// of the builtin-method table. The only one, `decode_base64_after`,
+    /// returns another secret, so no method can return the text; the
+    /// methods every type has, such as `to_json`, are refused here too.
+    /// Returns the recovered result type when the call is refused, or
+    /// `None` to continue ordinary dispatch.
     pub(super) fn refuse_secret_method(&mut self, receiver: &Type, method: &Ident, args: &[Expr]) -> Option<Type> {
         if !matches!(receiver.ungrounded().untainted(), Type::Secret) {
+            return None;
+        }
+        if crate::builtin_methods::builtin_method(receiver, &method.name).is_some_and(|sig| sig.kind.is_crypto()) {
             return None;
         }
         self.errors.push(TypeError::new(

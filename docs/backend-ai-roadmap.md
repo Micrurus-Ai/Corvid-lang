@@ -164,7 +164,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 - [x] `Bytes` and hashing on the interpreter: the `corvid-crypto` crate, `Bytes` with constant-time `==` (inside records and lists too), no ordering and no `+`, `utf8()` and `to_utf8()`, hex and base64 conversions through B03's codecs, and SHA-256, SHA-384 and SHA-512. In JSON a `Bytes` value is unpadded base64url text, published with `contentEncoding: base64url`. Native code refuses `Bytes` and names the native slice. [Cryptography](reference/cryptography.md)
 - [x] `Secret` on the interpreter: a type that displays as `<secret>`, compares in constant time, and cannot be converted, mixed with text, encoded as JSON, sent through a route, stored, or passed to or returned from a prompt, `ask`, `choose`, a connector operation or `main`; `secret(name)` in `std/secrets`; a tool taking a `Secret` receives the text while every record of the call holds `<redacted>`, and replay matches the redacted argument; the application contract leaves secret fields out; the invention contract (`corvid tour --topic secrets`). [Secrets](reference/cryptography.md#secrets)
-- [ ] HMAC-SHA256 and HMAC-SHA512 with a `Secret` or `Bytes` key, and the acceptance test: a recorded payment-provider webhook verifies, and a tampered body is rejected.
+- [x] HMAC-SHA256 and HMAC-SHA512 with a `Secret` or `Bytes` key, and the acceptance test: a recorded Stripe webhook and a recorded Standard Webhooks (Svix) webhook verify through the driver, and a changed body byte, timestamp, message id, signature or key is rejected; the trace never holds the key. `secret.decode_base64_after("whsec_")` turns a base64 signing secret into a key that is still a `Secret`. [Cryptography: HMAC](reference/cryptography.md#hmac)
 - [ ] `random_token` returning a `Secret`, `hash_password` with a declared Argon2id cost (`owasp_2023()`), `verify_password`, and the API-key store moved onto `corvid-crypto`.
 - [ ] Ed25519 verification.
 - [ ] Native code for all of the above, with parity tests.
@@ -172,7 +172,9 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] `Upload.bytes()` returns `List<Int>`, which predates `Bytes`. Return `Bytes` instead, with every caller and the contract updated; a behavior change for existing programs, so decide it with the main line.
 - [ ] A form field bound to a `Secret` as a password input that is masked, never echoed and never prefilled, with password-manager hints: the contract leaves secret fields out today; the frontend binding needs a contract marker agreed with the frontend roadmap.
 - [ ] A `Secret` table column, for a value the program must use again: it needs an encrypted column (B09). Until then the checker refuses it and points at `hash_password(...)` for values that are only checked.
-- [ ] Zero a secret's memory when the last reference drops: `corvid_crypto::Secret` holds its text in an `Arc<str>`, freed but not wiped.
+- [ ] Zero a secret's memory when the last reference drops: `corvid_crypto::Secret` holds its bytes in an `Arc<[u8]>`, freed but not wiped.
+- [ ] A reusable webhook verifier for providers (header parsing, a declared timestamp tolerance against the clock, several signatures while a key rolls), with raw request bodies in routes: B16's verified webhooks. The acceptance test parses the headers with string methods.
+- [ ] Pass a key decoded by `decode_base64_after` to a tool: it is bytes, not text, so the call is a run-time error today. Decide a typed form (or a compile-time refusal, which needs the checker to tell decoded keys from text secrets) when an example needs it.
 - [ ] `Bytes` as a B09 table column, owned by the main line with the B06 types: it is JSON-stored today and the checker refuses the column. A BLOB or `bytea` column is the likely mapping.
 
 **B09 typed persistence** (in progress). [Proposal](proposals/typed-persistence.md) · [Reference](reference/tables.md)

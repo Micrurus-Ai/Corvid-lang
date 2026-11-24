@@ -146,12 +146,16 @@ Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` re
 - `Bytes.sha256() -> Bytes`
 - `Bytes.sha384() -> Bytes`
 - `Bytes.sha512() -> Bytes`
+- `Bytes.hmac_sha256(key: Bytes or Secret) -> Bytes`
+- `Bytes.hmac_sha512(key: Bytes or Secret) -> Bytes`
 
-`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
+`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. An HMAC key is `Bytes` or a `Secret`. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
 
 ## Secret
 
-A `Secret` has no methods. `==` and `!=` between two secrets are constant-time; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one. See [Cryptography: secrets](cryptography.md#secrets).
+- `Secret.decode_base64_after(prefix: String) -> Result<Secret, String>`
+
+No method returns a secret's text; the one method returns another secret, the key written in base64 after a literal `prefix` such as `"whsec_"`. `==` and `!=` between two secrets are constant-time, and a secret can key `hmac_sha256` and `hmac_sha512`; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one. See [Cryptography: secrets](cryptography.md#secrets).
 
 ## Bool
 

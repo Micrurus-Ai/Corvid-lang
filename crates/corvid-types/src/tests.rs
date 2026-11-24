@@ -10,6 +10,7 @@ mod currency;
 mod json_forms;
 mod text_methods;
 mod bytes;
+mod hmac;
 mod secrets;
 
 fn check(src: &str) -> Checked {

@@ -105,8 +105,15 @@ pub enum TypeErrorKind {
     /// `Secret` combined with another type.
     SecretOperatorMismatch { left: String, right: String, hint: String },
 
-    /// A method called on a `Secret`, which has none.
+    /// A method called on a `Secret` other than `decode_base64_after`.
     SecretMethod { method: String },
+
+    /// `secret.decode_base64_after(prefix)` with a prefix that is not a
+    /// string literal.
+    SecretKeyPrefixNotLiteral,
+
+    /// An HMAC key that is neither `Bytes` nor a `Secret`.
+    HmacKeyType { method: String, got: String },
 
     /// A `Secret` at a place its text would leave the program: a route,
     /// a store, a prompt, a connector operation or `main`. `at` is empty
@@ -672,6 +679,12 @@ impl TypeErrorKind {
             Self::SecretMethod { method } => {
                 format!("a `Secret` has no method `{method}`: its text can never be read back or turned into other text")
             }
+            Self::SecretKeyPrefixNotLiteral => {
+                "the prefix passed to `decode_base64_after` must be a string literal".into()
+            }
+            Self::HmacKeyType { method, got } => {
+                format!("the key of `{method}` must be `Bytes` or a `Secret`, not `{got}`")
+            }
             Self::SecretAtBoundary { boundary, at, .. } => {
                 format!("{boundary} cannot hold a `Secret`{at}: a secret's text never leaves the program")
             }
@@ -1142,7 +1155,13 @@ impl TypeErrorKind {
             Self::BytesOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::SecretOperatorMismatch { hint, .. } => Some(hint.clone()),
             Self::SecretMethod { .. } => Some(
-                "compare two secrets with `==`, or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
+                "compare two secrets with `==`, key an HMAC with one (`body.utf8().hmac_sha256(key)`), or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
+            ),
+            Self::SecretKeyPrefixNotLiteral => Some(
+                "write the provider's prefix inline, such as `key.decode_base64_after(\"whsec_\")`; a prefix computed at run time could test the secret's text one guess at a time".into(),
+            ),
+            Self::HmacKeyType { .. } => Some(
+                "read a signing key with `secret(name)` from std/secrets, so it never reaches a trace; a key the program holds as bytes, such as `Bytes.from_hex(text)?`, works too".into(),
             ),
             Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
             Self::SecretTableColumn { .. } => Some(

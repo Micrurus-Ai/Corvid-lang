@@ -211,7 +211,7 @@ Non-scope: Confidence only means something when model adapters report calibrated
 
 #### Secrets That Never Reach a Trace, a Prompt or a Log
 
-A `Secret` is sensitive text, such as a webhook signing key, a password or an API token, that the program can use but never reveal. `secret(name)` from `std/secrets` reads one from the environment. Two secrets compare with `==` in constant time, and a secret can be passed to the tool that needs it, alone or inside a record.
+A `Secret` is sensitive text, such as a webhook signing key, a password or an API token, that the program can use but never reveal. `secret(name)` from `std/secrets` reads one from the environment. Two secrets compare with `==` in constant time, a secret keys an HMAC (`body.utf8().hmac_sha256(key)`) without its text becoming a value, and a secret can be passed to the tool that needs it, alone or inside a record.
 
 Every other way the text could leave the program is a compile error that says why: no method returns it (`to_string`, `to_json`), it never mixes with text, it has no JSON form, and no route, store field, table column, prompt, connector operation, `ask`, `choose` or `main` signature may hold it, directly or in a record field. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the trace, approvals, the step debugger, replay and the exports built from the trace. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays although the trace never held the text. The application contract leaves every secret field out, so no client or SDK has one to read.
 
@@ -228,8 +228,8 @@ agent signature(body: String) -> Result<String, String>:
 Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
 Tour: `corvid tour --topic secrets`
 Roadmap: [B04 cryptography, slice 2](../../docs/backend-ai-roadmap.md)
-Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs)
-Non-scope: interpreter tier only until the native cryptography slice; environment-backed secrets only; a tool's own handling of the text it receives is outside the program. Password hashing and HMAC keyed by a `Secret` are later B04 slices, and an encrypted table column is tracked in B09.
+Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs)
+Non-scope: interpreter tier only until the native cryptography slice; environment-backed secrets only; a tool's own handling of the text it receives is outside the program. Password hashing is a later B04 slice, and an encrypted table column is tracked in B09.
 
 ### AI-Native Ergonomics
 

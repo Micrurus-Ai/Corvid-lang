@@ -501,6 +501,16 @@ pub enum BuiltinMethodKind {
     BytesSha384,
     /// `Bytes.sha512() -> Bytes` — the 64-byte digest.
     BytesSha512,
+    /// `Bytes.hmac_sha256(key) -> Bytes` — the 32-byte HMAC-SHA256 tag.
+    /// The key is `Bytes` or a `Secret` (see [`is_hmac_key_type`]).
+    BytesHmacSha256,
+    /// `Bytes.hmac_sha512(key) -> Bytes` — the 64-byte HMAC-SHA512 tag;
+    /// the same keys.
+    BytesHmacSha512,
+    /// `Secret.decode_base64_after(prefix: String) -> Result<Secret,
+    /// String>` — the key written in base64 after a literal prefix, as
+    /// a new secret; the only method on `Secret`, and it returns one.
+    SecretDecodeBase64After,
 }
 
 impl BuiltinMethodKind {
@@ -588,7 +598,7 @@ impl BuiltinMethodKind {
         )
     }
 
-    /// The byte-string and hashing methods.
+    /// The byte-string, hashing, HMAC and secret-key methods.
     pub fn is_crypto(self) -> bool {
         use BuiltinMethodKind::*;
         matches!(
@@ -605,7 +615,15 @@ impl BuiltinMethodKind {
                 | BytesSha256
                 | BytesSha384
                 | BytesSha512
+                | BytesHmacSha256
+                | BytesHmacSha512
+                | SecretDecodeBase64After
         )
+    }
+
+    /// The HMAC methods, whose key is `Bytes` or a `Secret`.
+    pub fn is_hmac(self) -> bool {
+        matches!(self, BuiltinMethodKind::BytesHmacSha256 | BuiltinMethodKind::BytesHmacSha512)
     }
 
     /// The B03 regular-expression methods, whose first argument is a
@@ -622,6 +640,15 @@ impl BuiltinMethodKind {
                 | StringSplitRegex
         )
     }
+}
+
+/// Whether a value of type `ty` can key an HMAC: `Bytes`, or a
+/// `Secret`, which keys it with its bytes without revealing them. The
+/// method table can give a parameter only one type, so the HMAC
+/// entries name `Bytes` and the checker accepts either through this
+/// function.
+pub fn is_hmac_key_type(ty: &Type) -> bool {
+    ty.is_assignable_to(&Type::Bytes) || ty.is_assignable_to(&Type::Secret)
 }
 
 /// The rounding mode a `Decimal` rounding method names:
@@ -886,6 +913,13 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Bytes, "sha256") => sig(BytesSha256, vec![], Type::Bytes),
         (Type::Bytes, "sha384") => sig(BytesSha384, vec![], Type::Bytes),
         (Type::Bytes, "sha512") => sig(BytesSha512, vec![], Type::Bytes),
+        (Type::Bytes, "hmac_sha256") => sig(BytesHmacSha256, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "hmac_sha512") => sig(BytesHmacSha512, vec![Type::Bytes], Type::Bytes),
+        (Type::Secret, "decode_base64_after") => sig(
+            SecretDecodeBase64After,
+            vec![Type::String],
+            Type::Result(Box::new(Type::Secret), Box::new(Type::String)),
+        ),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

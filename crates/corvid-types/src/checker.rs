@@ -921,6 +921,7 @@ mod decl_eval;
 mod decl_extern_c;
 mod decimal;
 mod bytes;
+mod crypto_arguments;
 mod secrets;
 mod currency;
 mod time;

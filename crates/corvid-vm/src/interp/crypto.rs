@@ -1,22 +1,35 @@
-//! Byte strings and hashing on the interpreter tier: the `Bytes`
-//! methods and `String.utf8()`.
+//! Byte strings, hashing and HMAC on the interpreter tier: the `Bytes`
+//! methods, `String.utf8()` and `Secret.decode_base64_after`.
 //!
 //! Every rule is `corvid_crypto`'s, the code the native runtime will
 //! call, so this file only moves values in and out of `Value`. Every
 //! method is pure, so none is traced and all are allowed in
-//! `@deterministic` code. `==` on `Bytes` is not here: `Value`'s
-//! equality calls `corvid_crypto::Bytes::constant_time_eq`, so it is
-//! constant-time inside records and lists too.
+//! `@deterministic` code. An HMAC keyed by a `Secret` hands
+//! `corvid_crypto` the secret itself, never its text. `==` on `Bytes`
+//! is not here: `Value`'s equality calls
+//! `corvid_crypto::Bytes::constant_time_eq`, so it is constant-time
+//! inside records and lists too.
 
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::value::{BoxedValue, Value};
 use corvid_ast::Span;
-use corvid_crypto::Bytes;
+use corvid_crypto::{Bytes, HmacKey};
 use corvid_types::BuiltinMethodKind;
 use std::sync::Arc;
 
-pub(super) fn eval_crypto_method(kind: BuiltinMethodKind, receiver: &Value, span: Span) -> Result<Value, InterpError> {
+pub(super) fn eval_crypto_method(
+    kind: BuiltinMethodKind,
+    receiver: &Value,
+    args: &[Value],
+    span: Span,
+) -> Result<Value, InterpError> {
     use BuiltinMethodKind::*;
+    let internal = |problem: String| InterpError::new(InterpErrorKind::Other(format!("internal: {problem}")), span);
+    let hmac_key = || match args.first() {
+        Some(Value::Bytes(key)) => Ok(HmacKey::Bytes(key)),
+        Some(Value::Secret(key)) => Ok(HmacKey::Secret(key)),
+        other => Err(internal(format!("an HMAC key must be Bytes or a Secret, not {other:?}"))),
+    };
     let text = |value: String| Value::String(Arc::from(value));
     let decoded = |result: Result<Value, String>| match result {
         Ok(value) => Value::ResultOk(BoxedValue::new(value)),
@@ -40,9 +53,12 @@ pub(super) fn eval_crypto_method(kind: BuiltinMethodKind, receiver: &Value, span
         (BytesSha256, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::sha256(b))),
         (BytesSha384, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::sha384(b))),
         (BytesSha512, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::sha512(b))),
-        (other, value) => Err(InterpError::new(
-            InterpErrorKind::Other(format!("internal: `{other:?}` cannot run on {}", value.type_name())),
-            span,
-        )),
+        (BytesHmacSha256, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::hmac_sha256(b, hmac_key()?))),
+        (BytesHmacSha512, Value::Bytes(b)) => Ok(Value::Bytes(corvid_crypto::hmac_sha512(b, hmac_key()?))),
+        (SecretDecodeBase64After, Value::Secret(secret)) => match args.first() {
+            Some(Value::String(prefix)) => Ok(decoded(secret.decode_base64_after(prefix).map(Value::Secret))),
+            other => Err(internal(format!("a key prefix must be a String, not {other:?}"))),
+        },
+        (other, value) => Err(internal(format!("`{other:?}` cannot run on {}", value.type_name()))),
     }
 }

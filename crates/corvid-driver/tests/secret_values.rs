@@ -4,10 +4,12 @@
 //! place and nowhere holds the text; and the trace replays, re-reading
 //! the secret from the environment and matching the redacted argument.
 
-use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime};
+#[path = "support/std_project.rs"]
+mod std_project;
+
+use corvid_driver::run_ir_with_runtime;
 use corvid_runtime::{ProgrammaticApprover, Runtime};
 use corvid_vm::Value;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const SOURCE: &str = "
@@ -25,20 +27,8 @@ agent main() -> Result<String, String>:
 
 const KEY: &str = "whsec_live_51HdEzKpQ7rT";
 
-/// Stage a project whose `src/std/` vendors the modules the source
-/// imports, so `import \"./std/secrets\"` resolves through the normal
-/// module pipeline.
 fn compile(source: &str) -> corvid_ir::IrFile {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(Path::parent).expect("repo root");
-    let project = tempfile::tempdir().expect("tempdir");
-    let std_dir = project.path().join("src").join("std");
-    std::fs::create_dir_all(&std_dir).unwrap();
-    for file in ["effects.cor", "secrets.cor"] {
-        std::fs::copy(repo.join("std").join(file), std_dir.join(file)).unwrap();
-    }
-    let main_path = project.path().join("src").join("main.cor");
-    std::fs::write(&main_path, source).unwrap();
-    compile_to_ir_with_config_at_path(source, &main_path, None).expect("the secrets program compiles")
+    std_project::compile_with_std(source, &["effects.cor", "secrets.cor"])
 }
 
 fn ok_text(value: Value) -> String {

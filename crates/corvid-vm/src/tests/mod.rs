@@ -26,6 +26,7 @@ mod json_forms;
 mod test_runner;
 mod text;
 mod bytes;
+mod hmac;
 mod secrets;
 
 /// Compile source text all the way down to IR. Panics on any frontend

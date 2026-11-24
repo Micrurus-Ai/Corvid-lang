@@ -24,15 +24,26 @@ use corvid_types::Type;
 use std::collections::HashMap;
 
 /// The revealed arguments for a call to `tool`, when one of its
-/// declared parameters holds a `Secret`; `None` otherwise.
+/// declared parameters holds a `Secret`; `None` otherwise. An error when
+/// an argument holds a key made by `decode_base64_after`, which has no
+/// text to reveal.
 pub(super) fn revealed_arguments(
     tool: &IrTool,
     recorded: &[serde_json::Value],
     arg_values: &[Value],
     types_by_id: &HashMap<DefId, &IrType>,
-) -> Option<RevealedToolArguments> {
+    span: Span,
+) -> Result<Option<RevealedToolArguments>, InterpError> {
     let takes_secret = tool.params.iter().any(|param| holds_secret(&param.ty, types_by_id, &mut Vec::new()));
-    takes_secret.then(|| RevealedToolArguments::new(recorded, arg_values.iter().map(tool_argument_json).collect()))
+    if !takes_secret {
+        return Ok(None);
+    }
+    let revealed = arg_values
+        .iter()
+        .map(tool_argument_json)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(format!("tool `{}`: {problem}", tool.name)), span))?;
+    Ok(Some(RevealedToolArguments::new(recorded, revealed)))
 }
 
 /// Whether a value of type `ty` can hold a `Secret`, through type

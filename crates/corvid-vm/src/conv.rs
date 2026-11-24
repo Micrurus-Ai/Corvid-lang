@@ -38,24 +38,45 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
 /// interpreter calls this in one place, when it dispatches a tool whose
 /// declared parameters hold a `Secret`; the trace of that call is built
 /// from [`value_to_json`].
-pub fn tool_argument_json(v: &Value) -> serde_json::Value {
-    to_json(v, SecretForm::Revealed)
+///
+/// A key made by `decode_base64_after` holds bytes, not text, so it has
+/// no form a tool could receive: the call is an error that says so,
+/// rather than the key handed on in some encoding the tool never asked
+/// for.
+pub fn tool_argument_json(v: &Value) -> Result<serde_json::Value, String> {
+    let decoded_key = std::cell::Cell::new(false);
+    let json = to_json(v, SecretForm::Revealed(&decoded_key));
+    if decoded_key.get() {
+        return Err(
+            "a key made by `decode_base64_after` is bytes, not text, so no tool can receive it; pass the secret `secret(name)` read, or use the key only for `hmac_sha256` and `hmac_sha512`"
+                .to_string(),
+        );
+    }
+    Ok(json)
 }
 
 /// How [`to_json`] writes a `Secret`.
 #[derive(Clone, Copy)]
-enum SecretForm {
+enum SecretForm<'a> {
     /// The redaction marker, for every record of the value.
     Redacted,
-    /// The text, for a tool implementation.
-    Revealed,
+    /// The text, for a tool implementation. A decoded key, which has no
+    /// text, is written as the redaction marker and flagged here, so
+    /// [`tool_argument_json`] refuses the call.
+    Revealed(&'a std::cell::Cell<bool>),
 }
 
-fn to_json(v: &Value, secrets: SecretForm) -> serde_json::Value {
+fn to_json(v: &Value, secrets: SecretForm<'_>) -> serde_json::Value {
     match v {
         Value::Secret(secret) => serde_json::Value::String(match secrets {
             SecretForm::Redacted => corvid_runtime::REDACTED_SECRET.to_string(),
-            SecretForm::Revealed => secret.expose_text().to_string(),
+            SecretForm::Revealed(decoded_key) => match secret.expose_text() {
+                Some(text) => text.to_string(),
+                None => {
+                    decoded_key.set(true);
+                    corvid_runtime::REDACTED_SECRET.to_string()
+                }
+            },
         }),
         Value::Int(n) => serde_json::Value::from(*n),
         Value::Float(f) => serde_json::Value::from(*f),

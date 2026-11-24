@@ -4,6 +4,60 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - HMAC and a verified payment webhook (B04, third slice)
+
+`bytes.hmac_sha256(key)` and `bytes.hmac_sha512(key)` return the HMAC
+tag as `Bytes`. They live in `corvid-crypto`'s new `mac.rs` over the
+`hmac` 0.12 and `sha2` 0.10 crates the runtime already uses, and are
+pinned to RFC 4231's test cases 1, 2 and 6. Like every `Bytes` method
+they are pure: allowed in `@deterministic` agents and never traced.
+
+The key is `Bytes` or a `Secret`. The builtin-method table gives a
+parameter one type, so the two HMAC entries name `Bytes` and a new
+`checker/crypto_arguments.rs` accepts either through
+`is_hmac_key_type`, next to the table. Two table entries resolved by
+argument type would have needed the IR lowerer to pick between them
+from checked types, and the call means the same thing with either key.
+The interpreter passes `corvid_crypto::HmacKey::Bytes` or
+`HmacKey::Secret`; a secret's bytes are read only inside
+`corvid-crypto`, so the key never becomes a value. A `String` key is
+refused with a hint to read it with `secret(name)`.
+
+Providers disagree on what the key is. Stripe keys the HMAC with the
+`whsec_...` text as written; Standard Webhooks (Svix and others) with
+the bytes written in base64 after `whsec_`. A program turns the second
+kind into its key with `secret.decode_base64_after("whsec_")`, the one
+method on `Secret`, which returns another `Secret`. Its errors never
+quote the secret, an empty key is an error, and the prefix must be a
+string literal, so the method cannot be used to test a secret's text
+one guess at a time. `corvid_crypto::Secret` now holds bytes and
+remembers whether they are text. A decoded key is not, so
+`expose_text` returns `None`, `tool_argument_json` refuses it, and a
+tool call that would receive one stops the run with an error that
+says so. We considered a separate key type, which would make that a
+compile error, but it would add a second secret type to every
+boundary rule for a case no program has needed; it is a roadmap item.
+`key.without_prefix(...).decode_base64()` (two `Result`s for one
+step), a `Bytes` result (printable) and an HMAC option that decodes
+the key (hidden in every call) were the other alternatives.
+
+The acceptance test, `crates/corvid-driver/tests/webhook_verification.rs`,
+is Corvid source compiled through the driver with `std/secrets`. A
+recorded Stripe request (`Stripe-Signature: t=...,v1=<hex>`, payload
+`timestamp.body`) and a recorded Standard Webhooks request
+(`v1,<base64>`, payload `id.timestamp.body`) verify with `==` on
+`Bytes`; a changed body byte, timestamp, message id, signature or key
+is rejected, and any matching `v1` verifies while a key rolls. The
+expected signatures were computed outside Corvid with Python's `hmac`
+and checked with `openssl dgst`. The trace of the verification holds
+`<redacted>` for the secret read and no record of the HMAC, and the run
+replays. Headers are parsed with `split` in the test program; a
+reusable verifier with a declared timestamp tolerance and raw request
+bodies are B16's.
+
+The driver tests' project staging moved to `tests/support/std_project.rs`,
+shared by the secrets test and this one.
+
 ## 2026-11-24 - Secret values that never reach a trace, a prompt or a log (B04, second slice)
 
 Corvid has a `Secret` type: text such as a webhook signing key, a
