@@ -135,7 +135,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Byte-list encoders and decoders, with B04's byte representation.
 - [ ] Native UUID generation, with native dispatch of the other stdlib tools.
 
-**B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/b06-decimal-and-time.md)
+**B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/decimal-and-time.md)
 
 - [x] Decimal on the interpreter: the `corvid-decimal` crate and the `Decimal` type. Number literals are decimals where a decimal is meant (`price: Decimal = 19.99`, `price * 1.08`) and keep their digits. `parse_decimal`, conversions to and from `Int` and `Float`, exact `+ - * %` and comparisons with `Int`, a compile error for mixing with `Float`, division written with its rounding (`(total / 3).round_half_even(2)`), the six `round_<mode>` methods, `abs`, `scale`, `to_string` and `to_int_truncated`. `Decimal` is refused at tool, prompt, connector, route, store and table boundaries until the JSON slice. [Exact decimals](reference/decimal.md)
 - [x] Duration and Instant on the interpreter: the `corvid-time` crate, exact duration and instant arithmetic to the nanosecond over years 1 to 9999, a compile error for a unit-less number, `whole_<unit>` readings, ISO 8601 and RFC 3339 parsing and formatting, `Instant.from_epoch_milliseconds`, and the traced `time_now` tool. Tools and prompts carry both types as their standard text. [Durations and instants](reference/stdlib/time.md#durations-and-instants)
@@ -197,5 +197,5 @@ Backend and AI semantics are owned here. Changes to shared types, actions or par
 - **B08 with F09.** One package resolution, lock format and type import path for npm packages on the server and in the browser.
 - **B14 with F08.** One typed message and subscription contract for real-time updates.
 - **B01 with all client data.** Browser code decodes the same records with the same errors.
-- **B06 with client forms and display.** From B06's JSON slice, `Decimal`, `Instant`, `Duration`, `TimeZone` and `ZonedTime` reach the browser as typed values. Price inputs validate with the `corvid-decimal` rules compiled to WebAssembly, and times display in the viewer's zone. Agree the client form bindings with frontend development before the JSON slice. [Across the tiers](proposals/b06-decimal-and-time.md#across-the-tiers)
+- **B06 with client forms and display.** From B06's JSON slice, `Decimal`, `Instant`, `Duration`, `TimeZone` and `ZonedTime` reach the browser as typed values. Price inputs validate with the `corvid-decimal` rules compiled to WebAssembly, and times display in the viewer's zone. Agree the client form bindings with frontend development before the JSON slice. [Across the tiers](proposals/decimal-and-time.md#across-the-tiers)
 - **B24, B25, B27 and B28 with the platform plan's proposals F-P1 to F-P4.** The flagship demo, screen state for assistants, agent activity and the timeline inspector each need both halves. [Platform plan](proposals/corvid-platform-plan.md#proposals-for-frontend-development)

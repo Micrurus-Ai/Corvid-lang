@@ -22,7 +22,7 @@ mod decimal;
 mod time;
 mod time_zones;
 mod currency;
-mod b06_json_forms;
+mod json_forms;
 mod test_runner;
 mod text;
 
