@@ -82,6 +82,9 @@ public fn h6(label: String) -> View:
 public fn trusted_markup(html: String) -> View:
     return View(html)
 
+public fn class_group(classes: String, content: List<View>) -> View:
+    return View("<div class=\"" + escaped(classes) + "\">" + children(content) + "</div>")
+
 public fn data_group(name: String, value: String, content: List<View>) -> Result<View, String>:
     if name == "":
         return Err("A data attribute needs a name after data-.")

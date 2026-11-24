@@ -447,7 +447,8 @@ The [trail guide example](../../examples/trail_guide/src/main.cor) combines the 
 - `fn page(title: String, content: List<View>) -> String`
 - `fn page_with_landmarks(language: String, title: String, header: List<View>, content: List<View>, footer: List<View>) -> String` renders `header`, `main` and `footer` as direct children of `body`. Each list renders in order, including an empty list which leaves its landmark empty. The language attribute and document title are HTML-escaped.
 - `fn page_in_language(language: String, title: String, content: List<View>) -> String` renders a document with an escaped `lang` attribute on `html`. Supply a language tag such as `en` or `fr-CA`. The title is escaped and child views appear in order inside `main`.
-- `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String`
+- `fn styled_page(language: String, title: String, trusted_css: String, content: List<View>) -> String` inserts application-authored CSS verbatim in a document-level style element. Place optional CSS `@import` rules before style rules. The browser resolves relative import URLs against the document's base URL. Keep user input out of the stylesheet.
+- `fn class_group(classes: String, content: List<View>) -> View` renders a div with an escaped class attribute and its children in order. Supply space-separated CSS class names. Each wrapper participates in the normal CSS cascade and custom property inheritance.
 - `fn action(label: String, handler: String) -> View`
 - `fn assistant_action(label: String, handler: String, name: String, description: String) -> View`
 - `fn int_state(label: String, initial: Int, controls: List<View>) -> View`

@@ -1,0 +1,59 @@
+import "std:ui" as ui
+
+fn trail_card(theme: String, trail: String, condition: String, note: String) -> ui.View:
+    summary = ui.class_group("trail-summary", [ui.h2(trail), ui.text(condition)])
+    notes = ui.disclosure("Trail note", [ui.text(note)])
+    return ui.class_group("trail-card " + theme, [summary, notes])
+
+fn conditions_page() -> String:
+    css = """@import url("data:text/css,:root{--trail-font:system-ui}") screen;
+body { font-family: var(--trail-font, sans-serif); background: white; color: #18231d }
+.trail-list { display: grid; gap: 1rem }
+.trail-card { container: trail-card / inline-size; --trail-accent: #285e38; padding: 1rem; border: 2px solid var(--trail-accent) }
+.trail-card.river { --trail-accent: #225782 }
+.trail-card h2 { color: var(--trail-accent) }
+.trail-summary { display: flex; flex-direction: column; gap: .5rem }
+.trail-summary > * { margin: 0 }
+.trail-card details { margin-block-start: .75rem }
+.trail-card details[open] > summary { color: var(--trail-accent); font-weight: bold }
+.trail-card summary:focus-visible { outline: 2px solid var(--trail-accent); outline-offset: 2px }
+@media screen {
+    .trail-list { isolation: isolate }
+    .trail-card { position: relative; z-index: 0 }
+    .trail-card:has(details[open]) { z-index: 1 }
+    .trail-card details[open] > p {
+        position: absolute; inset-inline: 0; top: 100%; margin: 0; padding: 1rem;
+        color: CanvasText; background: Canvas; border: 2px solid var(--trail-accent)
+    }
+}
+@container trail-card (min-width: 24rem) {
+    .trail-summary { flex-direction: row; align-items: baseline; justify-content: space-between }
+}
+@media screen and (min-width: 42rem) { .trail-list { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media screen and (prefers-color-scheme: dark) {
+    body { background: #18231d; color: #f2f5f3 }
+    .trail-card { --trail-accent: #9addab }
+    .trail-card.river { --trail-accent: #98cfff }
+}
+@media print {
+    body { color: black }
+    .trail-card, .trail-card.river { --trail-accent: black; break-inside: avoid }
+}"""
+    forest = trail_card("forest", "Forest loop", "Dry underfoot", "Pine needles cover the upper path.")
+    river = trail_card("river", "River walk", "Muddy near the bridge", "Use the boardwalk at the crossing.")
+    return ui.styled_page("en", "Trail conditions", css, [
+        ui.h1("Trail conditions"), ui.class_group("trail-list", [forest, river])
+    ])
+
+test trail_page_places_font_import_before_style_rules:
+    page = conditions_page()
+    assert page.contains("<style>@import url(\"data:text/css,:root{--trail-font:system-ui}\") screen;")
+    assert page.contains("font-family: var(--trail-font, sans-serif)")
+
+test class_group_escapes_classes_and_keeps_child_order:
+    group = ui.class_group("map\" & <trail>", [ui.text("First"), ui.text("Second")])
+    assert group.html == "<div class=\"map&quot; &amp; &lt;trail&gt;\"><p>First</p><p>Second</p></div>"
+
+server trail_conditions:
+    route GET "/" -> html:
+        return conditions_page()

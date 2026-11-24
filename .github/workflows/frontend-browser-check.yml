@@ -1,0 +1,52 @@
+name: Frontend browser check
+run-name: Browser check for ${{ inputs.suite }} at ${{ inputs.revision }}
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full Git commit to build and test
+        required: true
+      suite:
+        description: Browser test suite
+        required: true
+        type: choice
+        options:
+          - trail_conditions
+          - trail_guide
+          - browser_stream
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CORVID_HOME: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install browser test dependencies
+        run: python -m pip install playwright
+      - name: Build Corvid
+        run: cargo build --locked -p corvid-cli --bin corvid
+      - name: Run the selected Edge check
+        env:
+          SUITE: ${{ inputs.suite }}
+        run: |
+          $cli = (Resolve-Path target/debug/corvid.exe).Path
+          switch ($env:SUITE) {
+            'trail_conditions' { python -B scripts/verify_trail_conditions.py --cli $cli --channel msedge }
+            'trail_guide' { python -B scripts/verify_trail_guide.py --cli $cli --channel msedge }
+            'browser_stream' { python -B scripts/verify_browser_stream.py $cli --channel msedge }
+            default { throw 'Unknown browser test suite' }
+          }
+          exit $LASTEXITCODE

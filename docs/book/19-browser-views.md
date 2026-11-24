@@ -27,6 +27,18 @@ To show the tips when the page first loads, use `ui.disclosure_with_initial_stat
 
 `ui.text`, `ui.text_field`, `ui.submit`, `ui.disclosure`, and `ui.page` escape their text arguments for HTML. Pass user input through those functions.
 
+Use `ui.class_group("trail-card river", children)` to give a group of views CSS classes. Pass your application stylesheet to `ui.styled_page(language, title, css, content)`. In the [trail conditions example](../../examples/trail_conditions/src/main.cor), each card sets its own `--trail-accent`. Its heading inherits the value, so the forest and river cards can share a layout and use different colors. A media query puts the same cards side by side at 42rem.
+
+To import optional CSS, put `@import` before the style rules. The trail page embeds a small stylesheet in a data URL so it works offline. Its `screen` import sets `--trail-font` to `system-ui`. In print, or if you remove the import, `var(--trail-font, sans-serif)` selects the fallback font. For a separate stylesheet served by your site, use a rule such as `@import url("/styles/trail-font.css") screen;`.
+
+Each trail card declares `container: trail-card / inline-size`. Inside the card, a flex column stacks the trail name above its condition. The rule `@container trail-card (min-width: 24rem)` switches that column to a row when the card's content area reaches 24rem. This lets a narrow card keep its stacked layout even on a wide screen.
+
+The trail page uses `@media screen and (prefers-color-scheme: dark)` to set a dark background and give each card a lighter accent. The wide grid also uses a screen-only media query, so printed cards form one column at any paper width. The `@media print` rules give both cards black text and borders and use `break-inside: avoid` to keep each trail name with its condition across page breaks.
+
+Tab to **Trail note** to see the focus outline in that card's accent color. Press Space to open the note. The browser sets the disclosure's `open` attribute, so `.trail-card details[open] > summary` makes its label bold and applies the accent. Press Space again to restore the closed style.
+
+On screen, the open note sits below the card without moving its neighbors. The card provides the positioning context for the note, and `.trail-card:has(details[open])` raises the whole card above its closed neighbors. The list uses `isolation: isolate` to keep those stacking levels local. In print, an open note follows its summary in the normal flow.
+
 Use `ui.trusted_markup` when you supply the HTML yourself. For example, keep a fixed heading in a trusted fragment and pass a reader's note as a separate text view. Corvid copies the fragment verbatim, so keep user input out of it. Constructing a `View` directly also treats its `html` field as trusted markup.
 
 ```corvid-fragment
