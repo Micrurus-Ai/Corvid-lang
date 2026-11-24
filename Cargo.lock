@@ -1019,6 +1019,7 @@ dependencies = [
  "corvid-runtime-core",
  "corvid-syntax",
  "corvid-test-paths",
+ "corvid-text",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",

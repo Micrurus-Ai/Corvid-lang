@@ -22,6 +22,31 @@ as `table:<Table>.query` with its SQL and parameters and replays
 without the database. JSON-stored columns cannot be compared; indexes
 and comparisons inside records wait for a later slice.
 
+## 2026-11-24 - B03 UUID generation
+
+`std/uuid` adds `uuid_v4()` and `uuid_v7()`, both returning the
+canonical string `parse_uuid` produces.
+
+Decisions:
+
+- **Tools, not builtins.** Generation draws entropy and version 7 reads
+  the clock, so the generators are tools like `random_int`: traced,
+  replay returns the recorded UUID, and the checker refuses them inside
+  `@deterministic` agents. A replay test pins the substitution.
+- **Version 7 is offered alongside version 4** because it sorts by
+  creation time, which keeps database indexes compact for B09 tables.
+- **The runtime supplies only entropy and the clock.** The bit layout
+  is `corvid-text`'s, tested against the RFC 9562 example, and the
+  dispatcher lives in its own file next to `path`, not in the LLM
+  dispatch file.
+- **Interpreter only for now.** Native binaries do not dispatch any
+  stdlib tool yet; UUID generation follows `random_int` when they do.
+
+Found on the way: `@deterministic` accepted a tool brought in with
+`import ... use`, so `random_int` from the stdlib slipped through. The
+check now resolves imported uses and refuses tools and prompts, fixed
+in its own commit before this one.
+
 ## 2026-11-24 - B03 regular expressions on the interpreter
 
 Five String methods match regular expressions: `contains_regex`,

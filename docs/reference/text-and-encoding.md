@@ -2,7 +2,7 @@
 
 Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Encoding, UUID parsing and regular expressions run on the interpreter. Native code and UUID generation follow. [Proposal](../proposals/b03-text-and-encoding.md)
+Status: B03 in progress. Encoding, UUID parsing and regular expressions run on the interpreter, and so does UUID generation from `std/uuid`. Native code follows. [Proposal](../proposals/b03-text-and-encoding.md)
 
 ## Encoding
 
@@ -63,6 +63,22 @@ agent order_key(raw: String) -> Result<String, String>:
 - `urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6`
 
 It accepts every version and variant, including the nil UUID. Anything else returns an `Err` that quotes the input, such as ``Err("not a UUID: `nope` (expected 32 hex digits, optionally hyphenated 8-4-4-4-12)")``.
+
+### Generating UUIDs
+
+```corvid
+import "std:uuid" use uuid_v7
+
+agent new_order_id() -> String:
+    return uuid_v7()
+```
+
+| Tool | Result |
+| --- | --- |
+| `uuid_v4()` | A random UUID (RFC 9562 version 4). |
+| `uuid_v7()` | A time-ordered UUID (RFC 9562 version 7): the Unix time in milliseconds, then random bits. Later UUIDs sort after earlier ones, which keeps database indexes compact. UUIDs from the same millisecond are ordered randomly. |
+
+Both return the canonical form and use the `uuid_generate` effect. Generation is not pure, so these are tools in `std/uuid` rather than builtin methods: each call is traced, replay returns the recorded UUID, and the compiler refuses them inside `@deterministic` agents. The random bits come from the operating system's entropy source. Native programs cannot call them yet, like the other stdlib tools.
 
 ## Regular expressions
 

@@ -125,7 +125,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Encoding and UUID parsing on the interpreter: base64 (standard and URL-safe), hex and URL-component encoders and decoders, and `parse_uuid`, all pure String methods backed by one `corvid-text` crate. Decoders return `Result` values and never trap. [Text and encoding](reference/text-and-encoding.md)
 - [x] Regular expressions on the interpreter: `contains_regex`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex`, with the pattern and a literal replacement checked at compile time, and the `RegexMatch` record with character positions and capture groups. [Regular expressions](reference/text-and-encoding.md#regular-expressions)
 - [ ] `JsonError` cannot be written in a signature: the resolver does not register it, though the checker knows the name. Register it as `RegexMatch` is. Found during B03; belongs to B01.
-- [ ] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted.
+- [x] UUID generation: `uuid_v4` and `uuid_v7` tools in `std/uuid`, traced and replay-substituted. [Generating UUIDs](reference/text-and-encoding.md#generating-uuids)
 - [ ] Native encoding and UUID parsing, with parity tests.
 - [ ] Native regular expressions, with parity tests.
 - [ ] Patterns built at run time, through a validated pattern value. Deferred until a backend example needs one.

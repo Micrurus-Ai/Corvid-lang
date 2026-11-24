@@ -78,6 +78,9 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "time_monotonic_ms",
     "time_parse_iso",
     "time_format_iso",
+    // std/uuid
+    "uuid_v4",
+    "uuid_v7",
 ];
 
 /// One stdlib-executing-tool call found in the IR.

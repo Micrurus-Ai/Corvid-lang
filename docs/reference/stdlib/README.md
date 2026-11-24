@@ -31,6 +31,7 @@ things, states which in its file header, and appears in this table:
 | `std/rag` | **Executing** | `rag_ingest` / `rag_search` over `[io] root` + optional `[rag]` embedder |
 | `std/time` | **Executing** | clock tools (traced + replay-substituted) |
 | `std/random` | **Executing** | randomness tools (traced + replay-substituted) |
+| `std/uuid` | **Executing** | `uuid_v4` / `uuid_v7` generation tools (traced + replay-substituted); parsing is the builtin `String.parse_uuid()` |
 | `std/agent` | Pure patterns | workflow envelope vocabulary; `assert judged` is the executing judge |
 | `std/ai` | Pure patterns | message/prompt vocabulary; `prompt` + `call_llm` are the executing surface |
 | `std/effects` | Pure vocabulary | the shared effect-metadata types every module imports |

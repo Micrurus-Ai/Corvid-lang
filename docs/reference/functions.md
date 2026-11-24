@@ -402,6 +402,13 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `tool time_parse_iso(text: String) -> Result<Int, String> uses time_wall`
 - `tool time_format_iso(epoch_ms: Int) -> String uses time_wall`
 
+### [std/uuid](../../std/uuid.cor)
+
+- `tool uuid_v4() -> String uses uuid_generate`
+- `tool uuid_v7() -> String uses uuid_generate`
+
+Both return the canonical lowercase hyphenated form. See [Generating UUIDs](text-and-encoding.md#generating-uuids).
+
 ### [std/ui](../../std/ui.cor)
 
 The [trail guide example](../../examples/trail_guide/src/main.cor) combines the static view functions in a server-rendered document.
