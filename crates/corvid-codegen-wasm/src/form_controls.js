@@ -1,4 +1,27 @@
 // This module is loaded by interactive pages, including pages with no Wasm exports.
+for (const element of document.querySelectorAll("time[data-corvid-local-date], data[data-corvid-unit]")) {
+  const language = element.closest("[lang]")?.lang || undefined;
+  try {
+    if (element instanceof HTMLTimeElement) {
+      const iso = element.dateTime;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
+      const date = new Date(iso + "T00:00:00Z");
+      if (date.toISOString().slice(0, 10) !== iso) continue;
+      element.textContent = new Intl.DateTimeFormat(language, {
+        dateStyle: "long", timeZone: "UTC"
+      }).format(date);
+    } else {
+      const format = new Intl.NumberFormat(language, {
+        style: "unit", unit: element.dataset.corvidUnit, unitDisplay: "long"
+      });
+      element.textContent = format.format(BigInt(element.value));
+    }
+  } catch (error) {
+    // Keep the author's fallback for invalid language tags, units or dates.
+    if (!(error instanceof RangeError)) throw error;
+  }
+}
+
 if (!customElements.get("corvid-combobox")) {
   customElements.define("corvid-combobox", class extends HTMLElement {
     #listeners;

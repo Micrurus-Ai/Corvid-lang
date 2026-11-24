@@ -1,0 +1,51 @@
+import "std:ui" as ui
+
+type CalendarLabels:
+    language: String
+    direction: String
+    title: String
+    departure: String
+    stops: String
+    cities: List<String>
+    date: String
+    short_stay: String
+    long_stay: String
+
+fn trip_calendar(labels: CalendarLabels) -> String:
+    styles = """
+    main { max-inline-size: 40rem; margin-inline: auto; padding-inline: 1rem; overflow-wrap: anywhere; }
+    label { display: grid; gap: .25rem; }
+    input { box-sizing: border-box; max-inline-size: 100%; font: inherit; }
+    [aria-selected="true"] { outline: 2px solid currentColor; font-weight: bold; }
+    @media (prefers-reduced-motion: no-preference) {
+        [role="listbox"]:not([hidden]) { animation: reveal .15s ease-out; }
+        @keyframes reveal { from { transform: translateY(.25rem); } }
+    }
+    """
+    departure = ui.localized_date("2028-06-14", labels.date)
+    short_stay = ui.list_item([ui.localized_quantity(2, "day", labels.short_stay)])
+    long_stay = ui.list_item([ui.localized_quantity(1234, "day", labels.long_stay)])
+    stop = ui.required_combobox(labels.stops, "city", "cities", labels.cities)
+    content = [ui.h1(labels.title), ui.h2(labels.departure), ui.paragraph([departure]),
+        ui.unordered_list([short_stay, long_stay]), stop]
+    return ui.localized_page(labels.language, labels.direction, labels.title, styles, content)
+
+fn english_calendar() -> String:
+    return trip_calendar(CalendarLabels("en-US", "ltr", "Trip calendar", "Departure", "Destination",
+        ["Cairo", "Casablanca"], "06/14/2028", "Two days", "1234 days"))
+
+fn arabic_calendar() -> String:
+    return trip_calendar(CalendarLabels("ar-EG", "rtl", "تقويم الرحلة", "المغادرة", "الوجهة",
+        ["القاهرة", "الدار البيضاء"], "١٤/٠٦/٢٠٢٨", "مدة يومين", "١٢٣٤ يومًا"))
+
+test calendars_include_localized_fallbacks_and_document_direction:
+    assert arabic_calendar().contains("<html lang=\"ar-EG\" dir=\"rtl\">")
+    assert arabic_calendar().contains("value=\"2\">مدة يومين</data>")
+    assert english_calendar().contains("datetime=\"2028-06-14\">06/14/2028</time>")
+
+server trip_planner:
+    route GET "/" -> html:
+        return english_calendar()
+
+    route GET "/ar" -> html:
+        return arabic_calendar()

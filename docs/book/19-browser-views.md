@@ -185,6 +185,19 @@ fn trail_page(title: String) -> String:
 
 Pass the document's primary language to `ui.page_in_language`. For example, `"en"` sets `lang="en"` on the root HTML element so readers and speech tools can identify the language of the page.
 
+For an interactive translated screen, choose the labels in Corvid and pass the language and reading direction to `ui.localized_page`. Use logical CSS properties such as `padding-inline` to follow that direction. The event module formats units and calendar dates using the surrounding language. Supply readable fallback text for the initial HTML.
+
+```corvid
+fn departure_summary() -> String:
+    departure = ui.localized_date("2028-06-14", "١٤ يونيو ٢٠٢٨")
+    stay = ui.localized_quantity(2, "day", "يومان")
+    return ui.localized_page("ar-EG", "rtl", "الرحلة", "", [ui.paragraph([departure]), ui.paragraph([stay])])
+```
+
+The [trip calendar](../../examples/trip_calendar/src/main.cor) serves English at `/` and Arabic at `/ar`. Its destination field accepts composition input and keyboard selection. The selected option has a visible outline in forced colors. The list appears without animation when the reader requests reduced motion.
+
+**Device-dependent checks (pending)**. On a device with an Arabic input method, compose a city name, commit it, and select the suggestion. With a screen reader, check pronunciation, the field label, expanded state and selected suggestion in both languages. At native browser zoom of 200% and 400%, check reading order, clipping and keyboard focus. In an OS contrast theme, inspect focus and selection. Record the device, OS, browser, assistive technology, settings and observations. The automated [Edge checks](../../scripts/verify_trip_calendar.py) exercise browser semantics, emulated media preferences, zoomed layout and composition events.
+
 Use `ui.page_with_landmarks` when navigation or footer links belong to the whole document. It places the three lists of views in a page-level header, main region and footer, in that order.
 
 ```corvid-fragment
