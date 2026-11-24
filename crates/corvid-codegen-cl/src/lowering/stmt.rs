@@ -291,8 +291,15 @@ fn lower_stmt(
             // a future analysis extension). Always release the old
             // value at codegen time so the unified pass stays
             // refcount-correct on reassigned refcounted locals.
-            if refcounted && is_reassignment {
-                let old = builder.use_var(var);
+            //
+            // The unified pass releases the old value before lowering
+            // the new one, as its ownership analysis expects. The legacy
+            // path (`CORVID_DUP_DROP_PASS=0`) lowers the new value first:
+            // in `text = text + "t"` the new value reads the old one, and
+            // releasing it first would free the string the read retains.
+            let release_old_first = runtime.dup_drop_enabled;
+            let old = (refcounted && is_reassignment).then(|| builder.use_var(var));
+            if let (Some(old), true) = (old, release_old_first) {
                 emit_release(builder, module, runtime, old);
             }
             let v = lower_expr(
@@ -305,6 +312,9 @@ fn lower_stmt(
                 module,
                 runtime,
             )?;
+            if let (Some(old), false) = (old, release_old_first) {
+                emit_release(builder, module, runtime, old);
+            }
             // The Value flowing into a refcounted
             // binding must be stack-map-declared so Cranelift spills
             // it across safepoints. Cranelift's safepoint pass

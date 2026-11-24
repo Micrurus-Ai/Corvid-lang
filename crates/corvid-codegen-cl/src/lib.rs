@@ -370,3 +370,11 @@ pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool 
     use corvid_types::BuiltinMethodKind::*;
     matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)
 }
+
+/// Whether the unified ownership pass runs: on unless `CORVID_DUP_DROP_PASS`
+/// is `0` or `false`, which selects the legacy ownership path. Lowering and
+/// `corvid run`'s native cache key both read the setting here, so a binary
+/// built under one setting is never reused under the other.
+pub fn dup_drop_pass_enabled() -> bool {
+    std::env::var("CORVID_DUP_DROP_PASS").map(|v| v != "0" && v != "false").unwrap_or(true)
+}
