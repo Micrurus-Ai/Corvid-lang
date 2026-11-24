@@ -136,6 +136,8 @@ pub enum DeclKind {
     Server,
     /// `identity Name:` authenticated-user surface (slice 51g).
     Identity,
+    /// `database name:` where tables live (B09). A `table` is a `Type`.
+    Database,
 }
 
 /// An entry in the file-level symbol table.

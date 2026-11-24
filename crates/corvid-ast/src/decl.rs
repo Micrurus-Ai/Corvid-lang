@@ -20,6 +20,10 @@ pub enum Decl {
     Import(ImportDecl),
     Type(TypeDecl),
     Store(StoreDecl),
+    /// `table Name:` stored record type (B09).
+    Table(TableDecl),
+    /// `database name:` engine, location and tables (B09).
+    Database(DatabaseDecl),
     Tool(ToolDecl),
     Prompt(PromptDecl),
     Agent(AgentDecl),
@@ -56,6 +60,8 @@ impl Decl {
             Decl::Import(d) => d.span,
             Decl::Type(d) => d.span,
             Decl::Store(d) => d.span,
+            Decl::Table(d) => d.record.span,
+            Decl::Database(d) => d.span,
             Decl::Tool(d) => d.span,
             Decl::Prompt(d) => d.span,
             Decl::Agent(d) => d.span,
@@ -1247,6 +1253,61 @@ impl StoreKind {
             Self::Memory => "writes_memory",
         }
     }
+}
+
+/// A stored record type (B09):
+///
+/// ```text
+/// table Shelf:
+///     key shelf: Int
+///     title: String
+/// ```
+///
+/// The table is also the record type `Shelf`: `record` holds the
+/// declared fields followed by the database-maintained `revision:
+/// Int`, so every record mechanism applies to rows unchanged. `key`
+/// marks the primary key; a table without one is a checker error,
+/// because rows could not be saved with a revision check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableDecl {
+    pub record: TypeDecl,
+    /// The field marked `key`, if any.
+    pub key: Option<Ident>,
+}
+
+impl TableDecl {
+    /// The name of the field every row carries for revision checks.
+    pub const REVISION_FIELD: &'static str = "revision";
+
+    pub fn name(&self) -> &Ident {
+        &self.record.name
+    }
+
+    /// The fields the source declares, without `revision`.
+    pub fn declared_fields(&self) -> &[Field] {
+        let fields = &self.record.fields;
+        &fields[..fields.len().saturating_sub(1)]
+    }
+}
+
+/// Where tables live (B09):
+///
+/// ```text
+/// database library:
+///     engine: sqlite
+///     location: env("LIBRARY_DATABASE")
+///     tables: Shelf, Book
+/// ```
+///
+/// Each setting is consequential (which engine, where the data is), so
+/// none has a default: the checker reports each missing one by name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseDecl {
+    pub name: Ident,
+    pub engine: Option<Ident>,
+    pub location: Option<Expr>,
+    pub tables: Vec<Ident>,
+    pub span: Span,
 }
 
 /// A tool declaration:

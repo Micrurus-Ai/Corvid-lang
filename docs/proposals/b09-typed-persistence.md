@@ -40,10 +40,11 @@ agent rename(shelf_id: Int, title: String, seen: Int) -> Result<Shelf, String>:
         Some(shelf) -> store_title(shelf, title, seen)
 
 agent store_title(shelf: Shelf, title: String, seen: Int) -> Result<Shelf, String>:
-    renamed = Shelf { title: title, ..shelf }
-    return match save(renamed, expecting: seen):       # Result<Shelf, SaveConflict<Shelf>>
+    # `seen` is the revision the person was looking at.
+    renamed = Shelf { title: title, revision: seen, ..shelf }
+    return match Shelf.save(renamed):                  # Result<Shelf, Option<Shelf>>
         Ok(saved) -> Ok(saved)
-        Err(conflict) -> Err("someone else changed shelf " + conflict.key.to_string())
+        Err(current) -> Err("someone else changed this shelf")
 
 agent shelves_of(user: String) -> List<Shelf>:
     return Shelf.where(fn (s) -> s.owner == user).order_by(fn (s) -> s.title).take(20)
@@ -52,8 +53,10 @@ agent shelves_of(user: String) -> List<Shelf>:
 ## Decisions
 
 1. **A table is a record type.** `table Shelf:` declares the record
-   `Shelf` and its storage. Every row also has a read-only `revision:
-   Int` that the database advances on each write. Queries return
+   `Shelf` and its storage. Every row also has a `revision: Int`, its
+   last field, which the database advances on each write. A row built
+   in code may leave `revision` out, and then it is `0`, a row never
+   stored. Queries return
    `Shelf` values, so the fields a program reads are checked like any
    record's, and renaming a column reports every query and field read
    that names it.
@@ -68,15 +71,20 @@ agent shelves_of(user: String) -> List<Shelf>:
    tables and no database, is a compile error. Which engine and where
    are consequential (data location, tenancy), so the source states
    them.
-4. **Writes always carry the revision they expect.** `save(row,
-   expecting: revision)` returns `Result<T, SaveConflict<T>>`, where
-   `SaveConflict<T>` has `key`, `expected`, and `current:
-   Option<T>` (`None` when the row was deleted). `insert(row)` returns
-   `Result<T, InsertConflict<T>>` when the key exists. `delete(row,
-   expecting: revision)` follows `save`. There is no unchecked
-   overwrite; a program that wants last-writer-wins reads the current
-   revision and passes it, which is visible in the source.
-5. **Queries are typed functions, not strings.** `T.get(key)`,
+4. **Writes always carry the revision they expect: the row's own.**
+   A row read from the database carries its revision, editing it with
+   `{ title: t, ..shelf }` keeps it, and `Shelf.save(row)` succeeds
+   only if the stored row still has that revision. A program that must
+   check the revision a person saw writes it, `{ revision: seen, ..row
+   }`, so the expectation is visible in the source. `Shelf.save(row)`
+   returns `Result<Shelf, Option<Shelf>>`: `Ok` holds the stored row
+   with its new revision, and `Err` holds the row stored now, or
+   `None` if it was deleted. `Shelf.insert(row)` returns `Result<Shelf,
+   Shelf>`, with the row already stored under that key on `Err`.
+   `Shelf.delete(row)` follows `save`. There is no unchecked
+   overwrite. The operations are methods on the table, like
+   `Shelf.get`, so they add no global names.
+5. **Queries are typed functions, not strings.** `Shelf.get(key)`,
    `T.where(fn (row) -> condition)`, `.order_by(fn (row) -> column)`,
    `.descending()`, `.take(n)` and `.all()`. A condition is a function
    over the row, so `s.owner` is an ordinary checked field read, and
@@ -116,8 +124,8 @@ agent shelves_of(user: String) -> List<Shelf>:
 ## Slices
 
 - [ ] P1. `table` and `database` declarations, the row record with
-  `revision`, `T.get`, `insert`, `save(expecting:)`, `delete`,
-  `SaveConflict<T>` and `InsertConflict<T>`, on SQLite through the
+  `revision`, `Shelf.get`, `Shelf.insert`, `Shelf.save` and
+  `Shelf.delete` with `Result`-typed conflicts, on SQLite through the
   interpreter, with effects and replay. `corvid migrate plan` writes
   the `CREATE TABLE` for new tables.
 - [ ] P2. Typed queries: `where`, `order_by`, `descending`, `take`,
@@ -130,9 +138,15 @@ agent shelves_of(user: String) -> List<Shelf>:
 - [ ] P6. Native target.
 - [ ] P7. Port `examples/reading_list` from hand-written SQL to tables.
 
+## Settled during implementation
+
+- Corvid calls have no named arguments, and adding them would change
+  grammar the frontend shares, so the expected revision travels in the
+  row instead of an `expecting:` argument.
+- Conflicts are ordinary `Result` values holding the stored row, so no
+  new generic conflict type is needed.
+
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.
   The proposal uses words, matching `where` refinements.
-- Whether `Shelf { ..shelf }` should be required for updates, or a
-  dedicated `shelf.with(title: ...)` form is clearer.

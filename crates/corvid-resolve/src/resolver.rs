@@ -255,6 +255,9 @@ impl Resolver {
                     }
                 }
                 Decl::Store(s) => (s.name.name.clone(), DeclKind::Store, s.span),
+                // A table is a record type; the checker knows it is stored.
+                Decl::Table(t) => (t.record.name.name.clone(), DeclKind::Type, t.record.span),
+                Decl::Database(d) => (d.name.name.clone(), DeclKind::Database, d.span),
                 Decl::Tool(t) => (t.name.name.clone(), DeclKind::Tool, t.span),
                 Decl::Prompt(p) => (p.name.name.clone(), DeclKind::Prompt, p.span),
                 Decl::Agent(a) => (a.name.name.clone(), DeclKind::Agent, a.span),
@@ -457,6 +460,27 @@ impl Resolver {
                 }
                 Decl::Type(t) => self.resolve_type_decl(t),
                 Decl::Store(s) => self.resolve_store_decl(s),
+                Decl::Table(t) => {
+                    for field in &t.record.fields {
+                        self.resolve_type_ref(&field.ty);
+                    }
+                }
+                Decl::Database(d) => {
+                    for table in &d.tables {
+                        match self.symbols.lookup(&table.name) {
+                            Some(binding) => {
+                                self.bindings.insert(table.span, binding);
+                            }
+                            None => self.errors.push(ResolveError {
+                                kind: ResolveErrorKind::UndefinedName(table.name.clone()),
+                                span: table.span,
+                            }),
+                        }
+                    }
+                    if let Some(location) = &d.location {
+                        self.resolve_expr(location);
+                    }
+                }
                 Decl::Tool(t) => self.resolve_tool_decl(t),
                 Decl::Prompt(p) => self.resolve_prompt_decl(p),
                 Decl::Agent(a) => self.resolve_agent_decl(a),
@@ -1382,6 +1406,7 @@ fn decl_kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Model => "model",
         DeclKind::Server => "server",
         DeclKind::Identity => "identity",
+        DeclKind::Database => "database",
     }
 }
 

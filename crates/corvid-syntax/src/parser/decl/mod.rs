@@ -29,6 +29,7 @@ mod import;
 mod model;
 mod server_route;
 mod store;
+mod table;
 mod type_field;
 mod local_type;
 
@@ -55,6 +56,7 @@ impl<'a> Parser<'a> {
                 | TokKind::KwFn
                 | TokKind::At => {}
                 TokKind::Ident(word) if word == "choice" || word == "local" => {}
+                TokKind::Ident(word) if word == "table" && self.at_contextual_block_decl("table") => {}
                 other => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
@@ -73,6 +75,8 @@ impl<'a> Parser<'a> {
                 self.parse_browser_callback()
             }
             TokKind::Ident(word) if word == "component" => self.parse_component_decl(),
+            TokKind::Ident(_) if self.at_contextual_block_decl("table") => self.parse_table_decl(visibility).map(Decl::Table),
+            TokKind::Ident(_) if self.at_contextual_block_decl("database") => self.parse_database_decl().map(Decl::Database),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
             TokKind::Ident(word) if word == "local" => self.parse_local_type(visibility),
             TokKind::KwType => self.parse_type_decl(visibility, false).map(Decl::Type),

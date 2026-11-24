@@ -76,6 +76,8 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Import(d) => d.alias.as_ref().map(|a| a.name.as_str()),
         Decl::Type(d) => Some(&d.name.name),
         Decl::Store(d) => Some(&d.name.name),
+        Decl::Table(d) => Some(&d.record.name.name),
+        Decl::Database(d) => Some(&d.name.name),
         Decl::Tool(d) => Some(&d.name.name),
         Decl::Prompt(d) => Some(&d.name.name),
         Decl::Agent(d) => Some(&d.name.name),
@@ -142,6 +144,19 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
         Decl::Store(store) => {
             for field in &store.fields {
                 collect_typeref_dep(&field.ty, resolved, deps);
+            }
+        }
+        Decl::Table(table) => {
+            for field in &table.record.fields {
+                collect_typeref_dep(&field.ty, resolved, deps);
+            }
+        }
+        // A database orders after the tables it holds.
+        Decl::Database(database) => {
+            for table in &database.tables {
+                if let Some(crate::Binding::Decl(id)) = resolved.bindings.get(&table.span) {
+                    deps.insert(*id);
+                }
             }
         }
         Decl::Server(server) => {
