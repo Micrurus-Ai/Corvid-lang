@@ -160,6 +160,16 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
 - [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
 
+**B04 cryptography** (in progress, macOS session). [Proposal](proposals/cryptography.md)
+
+- [ ] `Bytes` and hashing on the interpreter: the `corvid-crypto` crate, `Bytes` with constant-time `==`, `utf8()`, hex and base64 conversions (B03's deferred byte codecs), and SHA-256, SHA-384 and SHA-512.
+- [ ] `Secret` on the interpreter: an opaque type that cannot be printed, converted, encoded, stored or sent to a prompt; `secret(name)` in `std/secrets`; `Secret` tool arguments redacted in traces; the invention contract.
+- [ ] HMAC-SHA256 and HMAC-SHA512 with a `Secret` or `Bytes` key, and the acceptance test: a recorded payment-provider webhook verifies, and a tampered body is rejected.
+- [ ] `random_token` returning a `Secret`, `hash_password` with a declared Argon2id cost (`owasp_2023()`), `verify_password`, and the API-key store moved onto `corvid-crypto`.
+- [ ] Ed25519 verification.
+- [ ] Native code for all of the above, with parity tests.
+- [ ] Ed25519 signing and key storage; raw request bodies for live webhooks (with B16); encryption. Deferred until a design or an example needs them.
+
 **B09 typed persistence** (in progress). [Proposal](proposals/typed-persistence.md) · [Reference](reference/tables.md)
 
 - [x] P1. `table` and `database` declarations, the row record with `revision`, `Shelf.get`, `insert`, `save` and `delete` with `Result`-typed conflicts, on SQLite through the interpreter. Operations use the `db_egress_read` and `db_egress_write` effects, are refused in pure `fn`s and `@deterministic` agents, and share the `std.db` handles, writer lock and replay write quarantine. `corvid migrate plan` writes `CREATE TABLE` for declared tables.
