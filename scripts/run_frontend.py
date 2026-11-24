@@ -199,7 +199,12 @@ def finish(tree, branch, pull):
     if not ancestor(tree, tip, "origin/main"):
         raise RuntimeError("Main verification failed.")
     if remote_tip(tree, branch) == tip:
-        git(tree, "push", f"--force-with-lease=refs/heads/{branch}:{tip}", "origin", f":refs/heads/{branch}")
+        try:
+            git(tree, "push", f"--force-with-lease=refs/heads/{branch}:{tip}", "origin", f":refs/heads/{branch}")
+        except subprocess.CalledProcessError:
+            # GitHub can delete the merged branch between our lookup and leased push.
+            if remote_tip(tree, branch) is not None:
+                raise
     git(tree, "switch", "--detach", "origin/main")
     git(tree, "branch", "-d", branch)
     return True
