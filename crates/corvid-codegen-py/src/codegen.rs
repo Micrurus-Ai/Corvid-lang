@@ -657,6 +657,9 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // typechecker's contracts surface that constraint to
         // user code before the backend gets here.
         T::DbHandle => "object".into(),
+        // B01 — typed JSON methods are interpreter-tier for now; the
+        // Python backend refuses them before a hint is needed.
+        T::JsonError => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

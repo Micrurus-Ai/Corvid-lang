@@ -12,7 +12,7 @@ This chapter weaves together the three executing I/O surfaces shipped
 in Phase 33S + 33R5b:
 
 - **`std/http`** — `http_get` / `http_post_json` (Phase 33S2)
-- **`std/json`** — opaque path + typed-decoder convention (Phase 33R5b)
+- **JSON** — the `std/json` opaque path (Phase 33R5b) and `T.from_json` typed decoding (B01)
 - **`std/db`** — `db_open` / `db_query` / `db_execute` (Phase 33S3)
 
 Each surface ships its own reference doc and structural safety story.
@@ -47,17 +47,12 @@ allowlist exists; the boundary is unified.
 Open `src/main.cor`:
 
 ```corvid
-effect json_decode_eff:
-    reversible: true
-
 type User:
     id: Int
     email: String
 
 import "std:http" use http_get
 import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
-
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
 agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     # 1. HTTP GET. The URL host must appear in `[http] allow`.
@@ -68,12 +63,12 @@ agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     #    like 404 is still `Ok` — inspect `response.status`.)
     response = http_get(url)?
 
-    # 2. Typed-decoder JSON. The `decode_<X>_from_json` name pattern
-    #    + `Result<X, String>` return type together trigger the
-    #    runtime's generic decode path: serde_json::from_str +
-    #    json_to_value against the declared User type. Shape
-    #    mismatches surface as `Result::Err`, never panics.
-    user = decode_user_from_json(response.body)?
+    # 2. Typed JSON. `User.from_json` decodes the body into the
+    #    declared record, or returns a `JsonError` naming the field
+    #    that did not match. `map_err` keeps its message so `?` can
+    #    pass it to the caller. Shape mismatches are Err values,
+    #    never panics.
+    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
 
     # 3. SQLite write. `db_open` resolves the path through the same
     #    `[io] root` boundary the file-I/O tools enforce. `db_execute`
@@ -170,13 +165,13 @@ the typechecker's `List<DbParam>` signature + the runtime's
 `params_from_iter` binding path together prevent SQL interpolation
 structurally, not by escaping.
 
-### Typed-decoder JSON shape safety
+### Typed JSON shape safety
 
 Change the API response (or simulate by editing the URL to point at a
-broken endpoint) so `id` is a string. The typed-decoder dispatch
-returns `Result::Err("JSON shape mismatch in `decode_user_from_json`:
-...")`. The `?` propagates it; the agent returns `Err`. No runtime
-panic.
+broken endpoint) so `id` is a string. `User.from_json` returns `Err`
+with a `JsonError` whose `path` is `id` and whose message begins
+``at `id`: expected Int``. The `?` propagates it; the agent returns `Err`.
+No runtime panic.
 
 ## Step 6 — Replay it
 
@@ -198,8 +193,8 @@ During Substitute-mode replay:
 - `db_query` passes through (reads don't escape the process).
 
 The network and the database are provably untouched during replay. The
-JSON layer runs identically, so the typed-decoder convention produces
-the same `User` value regardless of mode.
+JSON layer runs identically, so `User.from_json` produces the same
+`User` value regardless of mode.
 
 ## Step 7 — Sign it (optional)
 
@@ -228,7 +223,7 @@ signing path that audits the load-bearing claims.
 The three executing surfaces compose:
 
 - HTTP's SSRF + allowlist gates the URL.
-- JSON's typed-decoder converts the response into a typed `User` struct.
+- `User.from_json` converts the response into a typed `User` record.
 - SQLite's parameter-binding writes the row without SQL interpolation.
 - Every executing tool returns `Result` — refusals and I/O failures are
   Err values, and `?` propagation routes them through the standard
@@ -245,8 +240,8 @@ the proof."
 
 - [`stdlib/http.md`](../reference/stdlib/http.md) — SSRF block,
   `[http] allow`, replay quarantine.
-- [`stdlib/json.md`](../reference/stdlib/json.md) — opaque + typed-
-  decoder shapes, parse-safety, field-type-safety.
+- [`stdlib/json.md`](../reference/stdlib/json.md) — opaque and typed
+  JSON, parse-safety, field-type-safety.
 - [`stdlib/db.md`](../reference/stdlib/db.md) — `[io] root` reuse,
   structural parameter-binding-only, write-quarantine on replay.
 - [`core-semantics.md`](../reference/core-semantics.md) — the full

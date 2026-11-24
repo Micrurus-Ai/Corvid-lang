@@ -42,6 +42,15 @@ pub enum ResolveErrorKind {
         field_span: Span,
     },
 
+    /// An `extend T:` method uses a name every type already has
+    /// (`to_json`, `from_json`, `from_json_strict`). The built-in
+    /// would win at every call site, so the declaration is refused
+    /// rather than silently ignored.
+    BuiltinMethodName {
+        type_name: String,
+        method_name: String,
+    },
+
     /// `replay <trace>: when llm("<name>") -> ...` — `<name>`
     /// doesn't match any `prompt` declaration in scope. Either the
     /// prompt doesn't exist, is declared under a different name,
@@ -102,6 +111,10 @@ impl fmt::Display for ResolveErrorKind {
                 f,
                 "method `{method_name}` on type `{type_name}` collides with a field of the same name (declared at [{}..{}])",
                 field_span.start, field_span.end
+            ),
+            Self::BuiltinMethodName { type_name, method_name } => write!(
+                f,
+                "method `{method_name}` on type `{type_name}` would be hidden by the built-in `{method_name}` every type has; choose another name"
             ),
             Self::UnknownReplayPrompt { name } => write!(
                 f,

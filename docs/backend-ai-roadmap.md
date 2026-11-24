@@ -17,7 +17,7 @@ First-pass audit on November 23, 2026, from the standard library, the references
 | --- | --- | --- | --- |
 | HTTP services | FastAPI, Django, Express, NestJS | Typed routes with path, query, form and JSON input, OpenAPI, uploads, server-sent events, sessions and permissions. | No WebSockets, middleware contract, GraphQL or gRPC. |
 | Identity and access | Django auth, Auth.js, Passport | OAuth providers, sessions, roles, tenants, JWT contracts and API keys. | No password hashing or local credential accounts. |
-| Data interchange | pydantic, zod, json, csv, PyYAML | `std:json` parses and reads fields one at a time. A declared tool named `decode_<Type>_from_json` decodes into a record. Routes and prompts decode JSON into records internally. | The decoder is reached through a naming convention, reports string errors without a field path, and has no encoder. The interpreter, the native target and the published OpenAPI contract describe `Option`, `Result` and unknown fields differently. No YAML, TOML, XML or CSV. [JSON module](../std/json.cor) |
+| Data interchange | pydantic, zod, json, csv, PyYAML | `std:json` parses and reads fields one at a time. `T.from_json(text)` decodes into a declared type with errors that name the field, and `value.to_json()` encodes, through the same mapping as HTTP routes and OpenAPI. | Field renaming, decoding imported types and the native target are not done yet. No YAML, TOML, XML or CSV. [JSON module](../std/json.cor) |
 | Outbound HTTP | requests, httpx, fetch, axios | `http_get` and `http_post_json` with retry and timeout envelopes. | No PUT, PATCH or DELETE, custom headers, auth schemes, streaming bodies or multipart. [HTTP module](../std/http.cor) |
 | Persistence | SQLAlchemy, Django ORM, Prisma, Drizzle | SQLite and Postgres through parameterized SQL, migrations, transactions and audit records. | Queries are strings and rows are read with `json_get_*`, so schema changes are not compile errors. No MySQL, Redis or typed query results. [Database module](../std/db.cor) |
 | Text and encoding | re, base64, uuid, urllib | String methods with Unicode semantics. | No regular expressions, base64, hex, URL encoding or UUID generation. |
@@ -64,11 +64,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B01 typed JSON encode and decode** (in progress)
 
 - [x] One public JSON mapping for HTTP. Route bodies, JSON replies, stream chunks and approval results follow the published schema, and invalid bodies return a 400 naming `path`, `expected` and `found`. Single-file services publish schemas for their private route types, nullable fields use the OpenAPI 3.1 form, and the TypeScript client matches the wire shape. The live-contract tests send every accepted shape and validate each reply against the served schema. [JSON bodies and replies](guides/backend.md#json-bodies-and-replies)
-- [ ] `T.from_json(text)` and `value.to_json()` through the same mapping, with an opt-in strict mode for unknown fields.
-- [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first.
-- [ ] Move the `decode_<Type>_from_json` convention to the public mapping.
+- [x] `T.from_json(text)`, `T.from_json_strict(text)` and `value.to_json()` through the same mapping, returning a `JsonError` record with `path`, `expected`, `found` and `message`. Aliases name list and map targets. The checker refuses types without a JSON form, `from_json` refuses `Grounded` data, and `to_json` on `Tainted` data stays tainted. [Typed decoding and encoding](reference/stdlib/json.md#typed-decoding-and-encoding)
+- [ ] Decode types imported from another module with `from_json`.
+- [ ] Field renaming for external key styles such as `userId`. Agree the field syntax with frontend development first. [Proposal](proposals/b01-json-field-keys.md)
+- [x] Retire the `decode_<Type>_from_json` tool convention in favour of `T.from_json`. Declaring such a tool is a compile error naming the replacement, and the book, tour and reference now use `from_json`. [Retired convention](reference/stdlib/json.md#retired-the-decode_type_from_json-tool-convention)
 - [ ] Native target support.
-- [ ] Swift, Kotlin and Python SDK sum types use the wire shape.
+- [ ] Swift, Kotlin and Python SDK sum types use the wire shape, and the SDKs describe `JsonError`.
 
 B01 to B06 are the foundation. Interoperability (B02, B07, B08) and built-in capability (B03 to B06, B09 onward) advance together, so a developer always has a typed path to a capability before Corvid gains a built-in version of it.
 

@@ -96,10 +96,8 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     // two RuntimeChecked properties in its claim manifest:
     // parse-safety (malformed input is recoverable, never
     // panics) and field-type-safety (typed-accessor mismatches
-    // return Err, never coerce or panic). The typed-decoder
-    // convention (`decode_<X>_from_json`) inherits the same
-    // properties because it routes through the same parse +
-    // json_to_value path.
+    // return Err, never coerce or panic). Typed decoding
+    // (`T.from_json`) holds the same two properties.
     "json.parse_safety_no_panic",
     "json.field_type_safety_at_access_boundary",
     "grounded.provenance_required",

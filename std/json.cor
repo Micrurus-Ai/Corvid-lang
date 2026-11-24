@@ -10,12 +10,11 @@
 #      so type mismatches and missing fields surface as
 #      recoverable errors.
 #
-#   2. Typed-decoder convention (lands fully in 33R5b-b) — for
-#      typed APIs where the JSON shape matches a declared
-#      Corvid struct. User code declares a tool with the
-#      target type as its return type; the runtime decodes
-#      via serde + json_to_value against the declared type
-#      table.
+#   2. Typed decoding — for typed APIs where the JSON shape
+#      matches a declared Corvid type. This is not in this
+#      module: every type has `T.from_json(text)` and
+#      `value.to_json()` built in, with no import (see
+#      docs/reference/stdlib/json.md).
 #
 # JSON has no security boundary beyond serde's own validation
 # (no I/O, no network, no filesystem). The structural property

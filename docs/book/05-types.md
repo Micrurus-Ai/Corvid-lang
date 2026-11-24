@@ -457,9 +457,10 @@ refinement whose form doesn't fit the field's type is a compile
 error.
 
 Refinements are enforced where structured data enters the program —
-typed prompt-output decode and the typed-decoder convention. A
-structurally valid but out-of-range value refuses to decode with a
-message naming the field, the value, and the refinement:
+typed prompt-output decode, `T.from_json(text)` and HTTP request
+bodies. A structurally valid but out-of-range value refuses to decode,
+naming the field and the refinement. For prompt output the message
+names the value too:
 
 ```text
 field `age` on `Person`: value 969 violates the declared refinement `between(0, 150)`

@@ -79,7 +79,28 @@ impl JsonDecodeError {
     pub fn to_json(&self) -> J {
         json!({ "path": self.path, "expected": self.expected, "found": self.found })
     }
+
+    /// The Corvid `JsonError` record `T.from_json` returns, with the
+    /// fields the checker types it with.
+    pub fn to_value(&self) -> Value {
+        let message = self.message();
+        let fields = corvid_types::json_error_fields().map(|(name, _)| {
+            let text = match name {
+                "path" => self.path.as_str(),
+                "expected" => self.expected.as_str(),
+                "found" => self.found.as_str(),
+                "message" => message.as_str(),
+                other => unreachable!("JsonError field `{other}` has no runtime value"),
+            };
+            (name.to_string(), Value::String(Arc::from(text)))
+        });
+        Value::Struct(StructValue::new(JSON_ERROR_TYPE_ID, "JsonError", fields))
+    }
 }
+
+/// The type id carried by runtime `JsonError` records. `JsonError` is
+/// compiler-known, so it has no declaration id; this one is reserved.
+pub const JSON_ERROR_TYPE_ID: DefId = DefId(u32::MAX);
 
 impl std::fmt::Display for JsonDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -97,6 +118,31 @@ pub fn decode_public_json(
     unknown_fields: UnknownFields,
 ) -> Result<Value, JsonDecodeError> {
     Decoder { types_by_id, unknown_fields }.decode(json, expected, &mut String::new())
+}
+
+/// Decode JSON `text` into a value of type `expected`: the
+/// `T.from_json(text)` entry point. Text that is not JSON fails at the
+/// root path.
+pub fn decode_public_json_text(
+    text: &str,
+    expected: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+    unknown_fields: UnknownFields,
+) -> Result<Value, JsonDecodeError> {
+    let json: J = serde_json::from_str(text).map_err(|error| {
+        let position = format!("line {}, column {}", error.line(), error.column());
+        let found = match error.classify() {
+            serde_json::error::Category::Eof => format!("text that ends early, at {position}"),
+            _ => format!("text that is not valid JSON at {position}"),
+        };
+        JsonDecodeError::new("", "JSON text", found)
+    })?;
+    decode_public_json(&json, expected, types_by_id, unknown_fields)
+}
+
+/// Encode `value` as compact public JSON text: `value.to_json()`.
+pub fn encode_public_json_text(value: &Value) -> Result<String, String> {
+    encode_public_json(value).map(|json| json.to_string())
 }
 
 /// Encode `value` as public JSON. Values with no public JSON form

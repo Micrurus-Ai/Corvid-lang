@@ -478,6 +478,21 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Partial(inner) => self.check_partial_field(inner, field, span),
+            Type::JsonError => {
+                match crate::builtin_methods::json_error_fields().into_iter().find(|(name, _)| *name == field.name) {
+                    Some((_, ty)) => ty,
+                    None => {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::UnknownField {
+                                struct_name: "JsonError".into(),
+                                field: field.name.clone(),
+                            },
+                            span,
+                        ));
+                        Type::Unknown
+                    }
+                }
+            }
             Type::RouteParams(fields) => {
                 if let Some((_, ty)) = fields.iter().find(|(name, _)| name == &field.name) {
                     ty.clone()
@@ -742,22 +757,13 @@ impl<'a> Checker<'a> {
 fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) -> Type {
     use corvid_ast::TypeRef;
     match tr {
-        TypeRef::Named { name, .. } => match name.name.as_str() {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "String" => Type::String,
-            "Bool" => Type::Bool,
-            "Nothing" => Type::Nothing,
-            "DbHandle" => Type::DbHandle,
-            "TraceId" => Type::TraceId,
-            "JsonValue" => Type::JsonValue,
-            "JsonBuilder" => Type::JsonBuilder,
-            _ => checker
+        TypeRef::Named { name, .. } => Type::compiler_known(&name.name).unwrap_or_else(|| {
+            checker
                 .symbols
                 .lookup_def(&name.name)
                 .map(Type::Struct)
-                .unwrap_or(Type::Unknown),
-        },
+                .unwrap_or(Type::Unknown)
+        }),
         TypeRef::Generic { name, args, .. } if args.len() == 1 => {
             let inner = type_ref_to_type_readonly(&args[0], checker);
             match name.name.as_str() {

@@ -622,31 +622,26 @@ agent roll() -> Int:
     },
     TourTopic {
         name: "json",
-        title: "Executing JSON Surface (Opaque + Typed-Decoder)",
+        title: "Executing JSON Surface (Opaque + Typed)",
         category: "Executing I/O",
-        pitch: "Corvid's std/json tools ship BOTH shapes a v1.0 batteries language needs: an opaque JsonValue + typed accessors for dynamic JSON (LLM responses, polymorphic APIs, debug tooling) AND a typed-decoder convention for typed APIs (declare a struct, declare decode_X_from_json, the runtime decodes generically via serde + json_to_value against the target type). Two RuntimeChecked guarantees hold structurally — parse-safety (malformed input returns Result::Err, never panics) and field-type-safety (typed-accessor mismatches return Result::Err, never coerce or panic). Calls from @deterministic agents are rejected at typecheck; JSON parse/build are deterministic and process-internal so replay-mode dispatch runs identically to live. The tour parses JSON, accesses fields via the opaque path, AND demonstrates the typed-decoder convention by declaring a User struct + decode_user_from_json. NO Python glue required.",
+        pitch: "Corvid ships BOTH shapes a batteries language needs for JSON: an opaque JsonValue + typed accessors from std/json for dynamic JSON (LLM responses, polymorphic APIs, debug tooling) AND typed decoding for typed APIs — `User.from_json(text)` decodes into a declared record through the same public mapping HTTP routes and OpenAPI use, returning a JsonError that names the failing field's path, and `value.to_json()` encodes any value. Two RuntimeChecked guarantees hold structurally — parse-safety (malformed input returns Result::Err, never panics) and field-type-safety (shape mismatches return Result::Err, never coerce or panic). The tour reads a field through the opaque path and decodes the same text into a User record. NO Python glue required.",
         spec: "docs/reference/stdlib/json.md",
-        roadmap: "Phase 33R5b executing JSON surface",
-        test: "crates/corvid-driver/tests/executing_json_through_driver.rs + crates/corvid-runtime/src/json.rs tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_json_*",
-        non_scope: "Opaque + typed-decoder shapes ship; cdylib codegen for JsonValue / JsonBuilder is interpreter-only in 33R5b (the corvid_json_* C-ABI exports already exist; the cdylib wire-up is plumbing for a follow-up slice). No JSON Path / JSONata / JMESPath query language; nested access via json_get_object chains.",
-        source: r#"effect json_decode_eff:
-    reversible: true
-
-type User:
+        roadmap: "Phase 33R5b executing JSON surface + B01 typed JSON",
+        test: "crates/corvid-driver/tests/executing_json_through_driver.rs + crates/corvid-driver/tests/typed_json_e2e.rs + crates/corvid-runtime/src/json.rs tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_does_not_block_executing_json_*",
+        non_scope: "JsonValue / JsonBuilder and the from_json / to_json methods run on the interpreter; the native target does not compile them yet. Decoding a type imported from another module is refused at compile time for now. No JSON Path / JSONata / JMESPath query language; nested access via json_get_object chains.",
+        source: r#"type User:
     id: Int
     email: String
 
 import "./std/json" use json_parse, json_get_int
-
-tool decode_user_from_json(text: String) -> Result<User, String> uses json_decode_eff
 
 agent opaque_path(text: String) -> Result<Int, String>:
     parsed = json_parse(text)?
     id = json_get_int(parsed, "id")?
     return Ok(id)
 
-agent typed_decoder_path(text: String) -> Result<Int, String>:
-    user = decode_user_from_json(text)?
+agent typed_path(text: String) -> Result<Int, String>:
+    user = User.from_json(text).map_err(fn (e) -> e.message)?
     return Ok(user.id)
 "#,
     },

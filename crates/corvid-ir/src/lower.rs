@@ -221,6 +221,21 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// [`Self::remap_struct_type`] applied to every record id inside
+    /// `ty`, for types the runtime walks (the target of a JSON decode).
+    fn remap_struct_type_deep(&self, ty: Type) -> Type {
+        let deep = |inner: Box<Type>| Box::new(self.remap_struct_type_deep(*inner));
+        match ty {
+            Type::Option(inner) => Type::Option(deep(inner)),
+            Type::List(inner) => Type::List(deep(inner)),
+            Type::Tainted(inner) => Type::Tainted(deep(inner)),
+            Type::Grounded(inner) => Type::Grounded(deep(inner)),
+            Type::Map(key, item) => Type::Map(deep(key), deep(item)),
+            Type::Result(ok, err) => Type::Result(deep(ok), deep(err)),
+            other => self.remap_struct_type(other),
+        }
+    }
+
     /// Scan the file's effect declarations for `trust: autonomous_if_confident(T)`
     /// dimension values and populate the confidence_gates table.
     fn populate_confidence_gates(&mut self, file: &File) {
@@ -1529,6 +1544,16 @@ impl<'a> Lowerer<'a> {
                 else_body: Box::new(self.lower_expr(else_body)),
             },
         };
+        // A JSON decode reads its target type from `ty` at run time, so
+        // every record id inside it must key the merged `ir.types` table,
+        // not only the outermost one.
+        let ty = match &kind {
+            IrExprKind::BuiltinMethod {
+                kind: corvid_types::BuiltinMethodKind::JsonDecode | corvid_types::BuiltinMethodKind::JsonDecodeStrict,
+                ..
+            } => self.remap_struct_type_deep(ty),
+            _ => ty,
+        };
         let lowered = IrExpr {
             kind,
             ty: ty.clone(),
@@ -1794,6 +1819,9 @@ impl<'a> Lowerer<'a> {
                     callee_name: callee_name.clone(),
                     args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
                 };
+            }
+            if let Some(rewrite) = self.try_type_method_call(target, field, args) {
+                return rewrite;
             }
             if let Some(rewrite) = self.try_imported_call(callee, field, args) {
                 return rewrite;
@@ -2128,6 +2156,28 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// `Order.from_json(text)`: a method called on a type. The text
+    /// becomes the receiver, and the target type travels in the call's
+    /// checked `Result<T, JsonError>` type.
+    fn try_type_method_call(
+        &self,
+        target: &Expr,
+        field: &Ident,
+        args: &[Expr],
+    ) -> Option<IrExprKind> {
+        let Expr::Ident { name, .. } = target else { return None };
+        let Binding::Decl(id) = self.bindings.get(&name.span)? else { return None };
+        if self.symbols.get(*id).kind != DeclKind::Type || args.len() != 1 {
+            return None;
+        }
+        let sig = corvid_types::type_method(&Type::Unknown, &field.name)?;
+        Some(IrExprKind::BuiltinMethod {
+            kind: sig.kind,
+            receiver: Box::new(self.lower_expr(&args[0])),
+            args: Vec::new(),
+        })
+    }
+
     fn try_grounded_builtin_call(
         &self,
         target: &Expr,
@@ -2249,17 +2299,9 @@ impl<'a> Lowerer<'a> {
 
     fn type_ref_to_type(&self, tr: &TypeRef) -> Type {
         match tr {
-            TypeRef::Named { name, .. } => match name.name.as_str() {
-                "Int" => Type::Int,
-                "Float" => Type::Float,
-                "String" => Type::String,
-                "Bool" => Type::Bool,
-                "Nothing" => Type::Nothing,
-                "DbHandle" => Type::DbHandle,
-                "TraceId" => Type::TraceId,
-                "JsonValue" => Type::JsonValue,
-                "JsonBuilder" => Type::JsonBuilder,
-                _ => match self.symbols.lookup_def(&name.name) {
+            TypeRef::Named { name, .. } => match Type::compiler_known(&name.name) {
+                Some(known) => known,
+                None => match self.symbols.lookup_def(&name.name) {
                     Some(id) => {
                         if self.symbols.get(id).kind == DeclKind::ImportedUse {
                             return self

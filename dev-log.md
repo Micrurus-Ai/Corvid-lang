@@ -4,6 +4,90 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-23 - B01 third increment: retire the `decode_<Type>_from_json` convention
+
+Declaring `tool decode_<X>_from_json(text: String) -> Result<X, String>`
+used to make the interpreter decode JSON in place of calling the tool.
+`T.from_json` now does that job, so the convention is retired rather
+than kept as a second decoder.
+
+Decisions:
+
+- **Retire, don't re-point.** Moving the convention onto the public
+  mapping would have left two spellings of one operation, one of them
+  triggered by a tool's name, which is a hidden behaviour the program
+  never states. One way to decode is easier to learn and cannot drift.
+- **Refuse loudly at compile time.** Without the interception, such a
+  declaration would compile into a tool with no implementation and fail
+  only when called. The checker now refuses it and names the
+  replacement call (`User.from_json(text)`, or an alias for a list
+  target). The refusal matches exactly the shape the runtime used to
+  intercept, so a tool that was never decoded by the runtime is
+  unaffected; a test pins that.
+- **Migration is one line and keeps `?`.**
+  `User.from_json(text).map_err(fn (e) -> e.message)?` works in any
+  agent returning `Result<_, String>`. The book chapter, the tour, the
+  README catalog, the reference pages and the driver tests all use it.
+- **Guarantees unchanged.** `json.parse_safety_no_panic` and
+  `json.field_type_safety_at_access_boundary` keep their ids; their
+  descriptions and test references now cite `from_json`, and
+  `core-semantics.md` was regenerated from the registry.
+
+## 2026-11-23 - B01 second increment: `T.from_json(text)` and `value.to_json()`
+
+Programs can now read and write JSON text through the same public
+mapping that routes use: `Order.from_json(text)` and
+`Order.from_json_strict(text)` return `Result<Order, JsonError>`, and
+every type has `to_json()`.
+
+Decisions, judged on ease and on composing with the moat:
+
+- **Called on the type name.** `Order.from_json(text)` reads like
+  pydantic's `Order.model_validate_json(text)` and needs no import, no
+  tool declaration and no naming convention. Lists and maps are named
+  with an alias (`type Orders = List<Order>`), which already expands
+  everywhere, so no new syntax was needed for top-level collections.
+- **Lenient by default, strict by name.** External APIs add fields
+  without notice, so `from_json` skips undeclared keys and
+  `from_json_strict` refuses them. This is not a consequential policy in
+  the CLAUDE.md sense: the HTTP boundary, where a silent default would
+  matter, is strict and published as `additionalProperties: false`.
+- **A typed error, not a string.** The compiler-known `JsonError`
+  record has `path`, `expected`, `found` and `message`. Its field list
+  is one function (`json_error_fields`) that the checker, the runtime
+  value, the prompt schema, OpenAPI and the TypeScript client all read.
+- **Compile-time refusal over runtime surprise.** The checker walks
+  every record field and variant payload and refuses a type with no
+  JSON form, naming the field (`field Hook.run: a function has no JSON
+  form`). `from_json` refuses `Grounded` data, so JSON text can never
+  fabricate provenance.
+- **Taint survives encoding.** `to_json` on a value containing
+  `Tainted` data returns `Tainted<String>`, so serializing untrusted
+  content and passing it to a dangerous tool is still refused.
+- **Deterministic text.** Object keys are sorted, so equal values encode
+  to equal text and replay comparisons are stable. The methods are
+  pure, so `@deterministic` code may call them.
+- **No silent shadowing.** An `extend` method named `to_json`,
+  `from_json` or `from_json_strict` is a resolve error, because the
+  built-in would win at every call site.
+
+A preceding refactor commit replaced five hand-copied tables of
+compiler-known type names (two in the checker, its read-only resolver,
+the IR lowerer and the ABI emitter) with `Type::compiler_known`, so
+`JsonError` was added in one place. The IR lowerer now remaps record
+ids throughout a decode's target type, because a `from_json` inside an
+imported module would otherwise decode against the wrong record.
+
+Validation: 16 mapping unit tests, 13 end-to-end program tests
+(decode and encode, located errors, strict mode, list and map aliases,
+sum types, scalars, the NaN trap, `@deterministic`, compile-time
+refusals, taint, reserved names), and the existing checker, resolver,
+IR, ABI, prompt-format, built-in method and serve suites.
+
+Not yet: the native target, decoding types imported from another
+module, field renaming, moving `decode_<Type>_from_json` to the public
+mapping, and the Swift, Kotlin and Python SDKs.
+
 ## 2026-11-23 - B01 first increment: routes honour the JSON contract they publish
 
 Starting typed JSON (backend and AI queue B01) surfaced three JSON

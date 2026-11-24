@@ -24,6 +24,11 @@ pub use repl::{RedefinitionResult, ReplResolveSession, ResolvedTurn};
 pub use resolver::{resolve, ReplayPatternBinding, Resolved, RouteLocals};
 pub use scope::{Binding, BuiltIn, DeclEntry, DeclKind, DefId, LocalId, LocalScope, SymbolTable};
 
+/// Methods the type checker's built-in table offers on every type, so
+/// an `extend T:` method may not reuse the name. `corvid-types` tests
+/// that each name here resolves in its table.
+pub const BUILTIN_METHODS_ON_EVERY_TYPE: [&str; 3] = ["to_json", "from_json", "from_json_strict"];
+
 #[cfg(test)]
 mod tests {
     use super::*;

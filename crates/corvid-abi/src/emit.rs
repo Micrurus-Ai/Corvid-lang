@@ -252,22 +252,13 @@ pub fn normalize_source_path(path: &str) -> String {
 
 pub(crate) fn resolve_typeref_to_type(ty: &TypeRef, resolved: &Resolved) -> Type {
     match ty {
-        TypeRef::Named { name, .. } => match name.name.as_str() {
-            "Int" => Type::Int,
-            "Float" => Type::Float,
-            "String" => Type::String,
-            "Bool" => Type::Bool,
-            "Nothing" => Type::Nothing,
-            "TraceId" => Type::TraceId,
-            "DbHandle" => Type::DbHandle,
-            "JsonValue" => Type::JsonValue,
-            "JsonBuilder" => Type::JsonBuilder,
-            other => resolved
+        TypeRef::Named { name, .. } => Type::compiler_known(&name.name).unwrap_or_else(|| {
+            resolved
                 .symbols
-                .lookup_def(other)
+                .lookup_def(&name.name)
                 .map(Type::Struct)
-                .unwrap_or(Type::Unknown),
-        },
+                .unwrap_or(Type::Unknown)
+        }),
         // Qualified types (`alias.TypeName`) parse but don't yet
         // resolve — the cross-file module loader is
         // `lang-cor-imports-basic-resolve`'s job. Emit `Unknown` so

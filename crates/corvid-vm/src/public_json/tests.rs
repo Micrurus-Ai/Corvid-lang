@@ -165,6 +165,36 @@ fn grounded_values_cannot_be_decoded_from_text() {
 }
 
 #[test]
+fn text_that_is_not_json_fails_at_the_root_with_its_position() {
+    let fixture = Fixture::new();
+    let broken = decode_public_json_text("{\"title\": }", &NOTE, &fixture.types(), UnknownFields::Ignore).unwrap_err();
+    assert_eq!(broken, JsonDecodeError::new("", "JSON text", "text that is not valid JSON at line 1, column 11"));
+    let short = decode_public_json_text("[1,", &Type::List(Box::new(Type::Int)), &fixture.types(), UnknownFields::Ignore)
+        .unwrap_err();
+    assert_eq!(short.found, "text that ends early, at line 1, column 3");
+}
+
+#[test]
+fn a_json_error_value_carries_every_checker_declared_field() {
+    let error = JsonDecodeError::new("items[1].quantity", "Int", "a string");
+    let Value::Struct(record) = error.to_value() else { panic!("JsonError must be a record") };
+    assert_eq!(record.type_name(), "JsonError");
+    for (name, _) in corvid_types::json_error_fields() {
+        assert!(record.get_field(name).is_some(), "runtime JsonError lacks `{name}`");
+    }
+    assert_eq!(
+        record.get_field("message"),
+        Some(Value::String(Arc::from("at `items[1].quantity`: expected Int, found a string")))
+    );
+}
+
+#[test]
+fn encoded_text_is_compact_with_sorted_keys() {
+    let value = decode(json!({"title": "a", "tag": "x"}), &NOTE, UnknownFields::Reject).unwrap();
+    assert_eq!(encode_public_json_text(&value).unwrap(), r#"{"tag":"x","title":"a"}"#);
+}
+
+#[test]
 fn values_without_a_json_form_are_reported() {
     assert!(encode_public_json(&Value::Float(f64::NAN)).is_err());
     assert_eq!(encode_public_json(&Value::Nothing), Ok(J::Null));

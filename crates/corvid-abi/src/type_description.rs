@@ -128,6 +128,11 @@ pub fn emit_type_description(
         Type::JsonBuilder => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
         },
+        // B01 — named by its compiler-known name; the OpenAPI and
+        // TypeScript projections describe its fields inline.
+        Type::JsonError => TypeDescription::Struct {
+            name: "JsonError".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI

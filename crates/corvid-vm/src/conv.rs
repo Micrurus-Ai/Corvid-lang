@@ -484,6 +484,7 @@ fn type_label(t: &Type) -> String {
         Type::DbHandle => "DbHandle".into(),
         Type::JsonValue => "JsonValue".into(),
         Type::JsonBuilder => "JsonBuilder".into(),
+        Type::JsonError => "JsonError".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),

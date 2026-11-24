@@ -936,6 +936,10 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Type {
+        // `Order.from_json(text)`: the receiver is a type, not a value.
+        if let Some(ty) = self.check_type_method_call(target, method_name, args, span) {
+            return ty;
+        }
         // 1. Typecheck the receiver and require a struct type.
         let recv_ty = self.check_expr(target);
         if method_name.name == "split_by" {
@@ -1035,6 +1039,11 @@ impl<'a> Checker<'a> {
                 {
                     sig.ret = Type::Result(ok.clone(), ret.clone());
                 }
+            }
+            // Typed JSON (B01): refuse receivers with no JSON form and
+            // keep taint on the encoded text.
+            if sig.kind == BuiltinMethodKind::JsonEncode {
+                sig.ret = self.to_json_result(&recv_ty, span);
             }
             return sig.ret;
         }

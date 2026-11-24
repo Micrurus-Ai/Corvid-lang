@@ -378,6 +378,18 @@ impl Resolver {
             let name = method.name().name.clone();
             let span = method.span();
 
+            // Collision: a method every type already has.
+            if crate::BUILTIN_METHODS_ON_EVERY_TYPE.contains(&name.as_str()) {
+                self.errors.push(ResolveError {
+                    kind: ResolveErrorKind::BuiltinMethodName {
+                        type_name: ext.type_name.name.clone(),
+                        method_name: name,
+                    },
+                    span,
+                });
+                continue;
+            }
+
             // Collision: method vs field on same type.
             if let Some(&field_span) = field_spans.get(name.as_str()) {
                 self.errors.push(ResolveError {

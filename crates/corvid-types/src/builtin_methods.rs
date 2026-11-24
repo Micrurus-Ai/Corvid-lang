@@ -275,6 +275,55 @@ pub enum BuiltinMethodKind {
     UploadContentType,
     /// `Upload<Format>.size() -> Int` — the byte length of the upload.
     UploadSize,
+
+    // ----- typed JSON (B01) ---------------------------------------
+    //
+    // One public JSON mapping (`corvid_vm::public_json`) serves HTTP
+    // bodies, the published OpenAPI schemas and these methods, so a
+    // value a route accepts is a value `from_json` accepts. Decoding
+    // is called on a TYPE (`Order.from_json(text)`); the lowered
+    // receiver is the text and the target type is the call's checked
+    // `Result<T, JsonError>` type. All three are pure, so replay stays
+    // deterministic.
+    /// `T.from_json(text: String) -> Result<T, JsonError>` — keys `T`
+    /// does not declare are skipped, as external APIs add fields.
+    JsonDecode,
+    /// `T.from_json_strict(text: String) -> Result<T, JsonError>` —
+    /// the first undeclared key is an error.
+    JsonDecodeStrict,
+    /// `T.to_json() -> String` — compact JSON text. Traps on a
+    /// non-finite Float, which has no JSON form. A receiver that
+    /// contains `Tainted` data returns `Tainted<String>`.
+    JsonEncode,
+}
+
+/// The fields of the compiler-known `JsonError` record, in display
+/// order. The checker types `error.path` from this list and the
+/// runtime builds `JsonError` values from it.
+pub fn json_error_fields() -> [(&'static str, Type); 4] {
+    [
+        ("path", Type::String),
+        ("expected", Type::String),
+        ("found", Type::String),
+        ("message", Type::String),
+    ]
+}
+
+/// Look up `T.name(...)` where the receiver is the type `target`
+/// itself rather than a value. Only the JSON decoders are type
+/// methods; whether `target` has a JSON form is checked by the caller,
+/// which can see record fields.
+pub fn type_method(target: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    let kind = match name {
+        "from_json" => BuiltinMethodKind::JsonDecode,
+        "from_json_strict" => BuiltinMethodKind::JsonDecodeStrict,
+        _ => return None,
+    };
+    Some(BuiltinMethodSig {
+        kind,
+        params: vec![Type::String],
+        ret: Type::Result(Box::new(target.clone()), Box::new(Type::JsonError)),
+    })
 }
 
 /// A builtin method's checked signature for a CONCRETE receiver
@@ -432,6 +481,11 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
         (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
         (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),
+
+        // Every receiver is offered `to_json`; the checker then
+        // refuses types with no JSON form (it can see record fields,
+        // this table cannot) and marks a Tainted-bearing result.
+        (_, "to_json") => sig(JsonEncode, vec![], Type::String),
 
         _ => None,
     }
