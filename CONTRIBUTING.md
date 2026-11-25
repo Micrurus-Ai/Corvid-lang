@@ -66,7 +66,7 @@ Concrete applications:
 - **No silent `Type::Unknown` when we could infer the real type.** Use `Unknown` only as a deliberate "graceful degradation" choice, not because inference was hard.
 - **No skipped tests.** If you added a feature, you added tests for it. If a test is hard to write, that's the test that proves the code actually works.
 - **No premature transpilation.** Where we can compile natively, we compile natively. Python transpile is a bootstrapping tactic, not a permanent answer.
-- **No "just this once" feature additions.** If it's worth doing, it deserves a dev-log proposal and a pre-phase chat. If it's not worth that, it's not worth doing.
+- **No "just this once" feature additions.** If it's worth doing, it deserves a written proposal and a dev-log entry. If it's not worth that, it's not worth doing.
 - **No commits you don't understand.** Reading code from a collaborator, stop at the first line you can't explain to yourself. Ask. No rubber-stamp reviews.
 
 If you're about to write something and you think "this will do for now" — **stop**. It won't. Do it properly the first time. That's the contract.
@@ -77,7 +77,7 @@ When code doesn't work, say so. When a decision is uncertain, say so. When you d
 
 ### 3. Discipline over speed.
 
-Pre-phase chat before code. Dev-log entry after every session. Tests at every phase boundary. The cadence is non-negotiable. We've already watched other language projects die from "just skip the discussion this time." We don't.
+A written proposal before code. Dev-log entry after every session. Tests at every phase boundary. The cadence is non-negotiable. We've already watched other language projects die from "just skip the discussion this time." We don't.
 
 ### 4. Simplicity over cleverness.
 
@@ -95,7 +95,7 @@ For both Corvid code (what users write) and Rust code (what we write). Names are
 
 Work happens in numbered phases. Every phase:
 
-1. **Pre-phase chat.** Before any code, the person driving the phase writes a short brief: what it does, key concepts, decisions to make, scope, success criteria. The other reviews. Decisions get locked before we type `cargo new`.
+1. **Written scope.** Before any code, whoever drives the phase writes a short proposal in `docs/proposals/`: what it does, key concepts, the decisions and why each was made under the laws in [`AGENTS.md`](AGENTS.md), scope and success criteria. Decisions are made against those laws and recorded, not sent for approval; grammar shared with the frontend is agreed with frontend development first.
 
 2. **Build it.** Tests go in during the build, not after.
 

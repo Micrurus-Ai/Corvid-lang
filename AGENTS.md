@@ -87,7 +87,6 @@ A 3,000-line file that does one thing cleanly is fine. A 400-line grab bag is no
 - One commit per file extraction. No batching.
 - Validation gate between every commit: `cargo check --workspace` + targeted `cargo test -p <crate> --lib` + `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` (must still exit `1` only on the two deliberate fixtures).
 - Push before starting the next extraction.
-- Wait for acknowledgement at slice boundaries in parallel work — no autonomous chaining.
 - Zero semantic changes during a refactor commit. Move code, add `pub use` re-exports to preserve the public API, nothing else. Bugs spotted mid-refactor get a separate branch.
 - Commit message: `refactor(<crate>): extract <responsibility> from <file>` — body names which rubric criterion failed and how the split resolves it.
 
@@ -140,9 +139,16 @@ Before an invention slice is complete, it must include:
 
 Do not ship hidden inventions. If the feature is important enough to make Corvid extraordinary, it is important enough to be discoverable, runnable, and test-backed.
 
-## Pre-phase chat mandatory
+## Decide by these laws, then build
 
-Never start code on a phase or slice until we've chatted and both sides understand the scope. This applies to refactor slices too — a decomposition plan gets agreed before any file moves.
+**Each session makes its own design decisions against the laws in this file and builds them, without sending proposals to the owner for approval.** Set by the CTO 2026-11-24, replacing the earlier rule that required a chat before every phase or slice.
+
+How to apply:
+
+1. **Write the scope down before the code.** For a new phase or a slice with design choices, write the proposal in `docs/proposals/` first: the design in a realistic program, the alternatives considered and why the chosen one wins under these laws, the slices and the non-scope. This applies to refactor slices too: the decomposition plan is written before any file moves. Then build it.
+2. **Record each decision where the next reader looks.** Put the rationale in the proposal and the slice's `dev-log.md` entry, and the slices on the roadmap.
+3. **Grammar shared with the frontend is still agreed with frontend development** before either side implements it, because both sides parse it. Post the proposal, ask the owner to pass it on, and work on something else meanwhile.
+4. **Still ask the owner** before destructive git operations, publishing anything outside the repository, and owner business decisions: hosting, telemetry, billed services, bundled models.
 
 ## Commit at slice boundaries
 
@@ -162,4 +168,4 @@ Doc-and-feature land together. No drift between shipped behavior and the learnin
 
 ## Follow ROADMAP order strictly
 
-Work proceeds in the defined sequence. Never skip ahead or reorder without an explicit pre-phase chat that amends the ROADMAP first.
+Work proceeds in the defined sequence. Never skip ahead or reorder without first writing the amendment into the ROADMAP, with its reason.
