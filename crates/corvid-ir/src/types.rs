@@ -117,6 +117,10 @@ pub struct IrOperation {
     pub url_param: Option<String>,
     /// `response: text` — the body is read as text, not JSON.
     pub response_text: bool,
+    /// `streams:` — how a `Stream<T>` operation's events are framed.
+    pub streams: Option<corvid_ast::StreamFormat>,
+    /// `until "..."` — the event data that ends the stream cleanly.
+    pub stream_until: Option<String>,
     /// `on failure -> Variant`: the error variant every failure becomes.
     pub on_failure: Option<String>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error

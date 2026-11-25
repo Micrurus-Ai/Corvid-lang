@@ -405,6 +405,8 @@ fn connector_replay_runtime(trace_path: &std::path::Path, operation: &str, metho
         base_url: None,
         url_param: Some("url".to_string()),
         response_text: false,
+        streams: None,
+        stream_until: None,
         on_failure: None,
         method: method.to_string(),
         path: String::new(),

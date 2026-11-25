@@ -2943,6 +2943,74 @@ connector jobs:
     assert!(refused.iter().any(|m| m.contains("cannot apply to it")), "{refused:?}");
 }
 
+/// A `Stream<T>` operation declares how its events arrive; nothing else
+/// declares `streams:`; a stream is the whole result and does not combine
+/// with `response: text` or `on failure`; `until` is for server-sent
+/// events; a mock is the `List<T>` of events.
+#[test]
+fn streamed_operations_are_checked() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect read:
+    cost: 1.0
+
+type Delta:
+    text: String
+
+type Problem:
+    | Broken(reason: String)
+
+connector provider:
+    base_url: "https://provider.example"
+    timeout: 10s
+    redirects: never
+    modes: [mock, real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: server_sent_events until \"[DONE]\"\n        mock: [Delta(q)]\n",
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let missing = messages(program("    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        mock: [Delta(q)]\n"));
+    assert!(has(&missing, "declares how events arrive"), "{missing:?}");
+
+    let not_stream = messages(program("    operation one(q: String) -> Delta uses read:\n        GET \"/d\"\n        streams: json_lines\n        mock: Delta(q)\n"));
+    assert!(has(&not_stream, "declares `streams:` but returns `Delta`"), "{not_stream:?}");
+
+    let nested = messages(program("    operation many(q: String) -> List<Stream<Delta>> uses read:\n        GET \"/d\"\n        mock: []\n"));
+    assert!(has(&nested, "never inside another type"), "{nested:?}");
+
+    let with_failure = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Delta(q)]\n",
+    ));
+    assert!(has(&with_failure, "cannot also declare `on failure`"), "{with_failure:?}");
+
+    let until_lines = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines until \"end\"\n        mock: [Delta(q)]\n",
+    ));
+    assert!(has(&until_lines, "an end marker belongs to `server_sent_events`"), "{until_lines:?}");
+
+    let wrong_mock = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        mock: Delta(q)\n",
+    ));
+    assert!(has(&wrong_mock, "the operation's mock is `List<"), "{wrong_mock:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:

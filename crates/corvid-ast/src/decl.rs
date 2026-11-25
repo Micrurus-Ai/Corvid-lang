@@ -519,6 +519,29 @@ impl ConnectorDecl {
     }
 }
 
+/// How a streamed connector response frames its events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamFormat {
+    /// `text/event-stream`: each event's `data:` lines are one JSON value.
+    ServerSentEvents,
+    /// One JSON value per line (NDJSON).
+    JsonLines,
+}
+
+impl StreamFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ServerSentEvents => "server_sent_events",
+            Self::JsonLines => "json_lines",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::ServerSentEvents, Self::JsonLines].into_iter().find(|f| f.as_str() == name)
+    }
+}
+
 /// Which redirects a connector's requests follow. Every policy keeps the
 /// SSRF block, never sends the credential to another origin, and stops
 /// after a fixed number of hops.
@@ -627,6 +650,16 @@ pub struct OperationDecl {
     /// `String`.
     #[serde(default)]
     pub response_text: bool,
+    /// `streams: server_sent_events | json_lines` — how a `Stream<T>`
+    /// operation's response arrives, one event at a time. Required when
+    /// the operation returns a `Stream`, refused otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streams: Option<StreamFormat>,
+    /// `streams: server_sent_events until "[DONE]"` — the event data that
+    /// ends the stream cleanly, for providers that close with a sentinel
+    /// that is not JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_until: Option<String>,
     /// `body <param>` (JSON) or `form <param>` (form-encoded) — the
     /// parameter carrying the request body, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]

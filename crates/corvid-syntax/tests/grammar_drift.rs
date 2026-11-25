@@ -426,6 +426,9 @@ extend Customer:
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
+    operation deltas(input: String) -> Stream<String>:
+        POST "/stream" body input
+        streams: server_sent_events until "[DONE]"
     operation generate(input: String, request_id: String) -> String dangerous:
         POST "/reports" body input
         header "X-Request-Id": request_id
@@ -759,6 +762,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("connector_item", "connector_settings"),
     ("connector_mode", "connector_settings"),
     ("redirect_policy", "connector_settings"),
+    ("stream_format", "connector_settings"),
     ("connector_auth", "connector_settings"),
     ("secret_ref", "connector_settings"),
     ("operation_decl", "connector_settings"),

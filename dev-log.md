@@ -21,6 +21,51 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Streamed connector responses and cancellation (B05, slice 5)
+
+`-> Stream<Delta>` with `streams: server_sent_events` or
+`streams: json_lines` yields one decoded event at a time as the response
+arrives.
+
+**How it runs.** The HTTP client's redirect loop now returns the final
+response unread. `attempt` reads it as text, as before, and the new
+`open_stream` returns it open, with the declared timeout applied to
+opening and retries only before the first byte. `http_events.rs` frames
+the bytes into events: SSE `data:` lines up to a blank line, with
+comments and other fields skipped and an event split across network
+reads buffered until complete, or one JSON value per line.
+`connector_stream.rs` applies the declared timeout to each wait for an
+event. In the interpreter a producer task decodes each event through the
+public JSON mapping. Dropping the stream aborts that task, which drops
+the HTTP response and closes the connection, the mechanism agent streams
+already used.
+
+**Recording.** This follows streamed prompts: the call is recorded when
+the stream opens, and one result, holding the events delivered and how
+the stream ended (`complete`, `error` or `cancelled`), when it ends. A
+`Drop` guard writes the cancelled case. Replay yields the recorded events
+and opens nothing.
+
+**Decisions.** OpenAI-style providers end with `data: [DONE]`, which is
+not JSON. Special-casing it silently would be a hidden default, so
+`until "[DONE]"` declares it. `on failure` does not combine with a stream
+yet, because a mid-stream failure ends it with an error; typed per-event
+failures are on the roadmap. A streamed operation's mock is its
+`List<T>` of events, as a `Response` operation's mock is its body.
+
+**The acceptance item.** "Caller disconnect closes the upstream
+connection" is now proved through `corvid serve`. A route relays a
+connector stream, the client reads one event and disconnects, and the
+provider, behind a local proxy, sees its connection close.
+
+Tests: the framer, five cases; the checker and parser; six end-to-end
+streams, covering SSE with `until` and replay, JSON lines, a non-JSON
+event, a stall failing after the 1s timeout, an early `return` closing
+the upstream connection with a `cancelled` recording, and mock mode; and
+the serve disconnect test.
+
+---
+
 ## 2026-11-25 - Connector breakers count, and an open one is an on failure value (B05)
 
 The main-line session proposed that `on failure` also map an open

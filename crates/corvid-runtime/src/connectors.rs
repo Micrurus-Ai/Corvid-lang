@@ -76,6 +76,11 @@ pub struct ConnectorHttpSpec {
     pub url_param: Option<String>,
     /// `response: text` — the body is passed on as text, not parsed as JSON.
     pub response_text: bool,
+    /// How a streamed operation's events are framed; `None` when the
+    /// operation returns one answer.
+    pub streams: Option<corvid_ast::StreamFormat>,
+    /// The event data that ends a stream cleanly (`until "[DONE]"`).
+    pub stream_until: Option<String>,
     /// `on failure -> Variant`: the error variant every failure becomes,
     /// and whether it carries the reason (one `String` field).
     pub on_failure: Option<(String, bool)>,
@@ -217,6 +222,8 @@ pub fn connector_calls_from_ir(
                     query: op.query.clone(),
                     url_param: op.url_param.clone(),
                     response_text: op.response_text,
+                    streams: op.streams,
+                    stream_until: op.stream_until.clone(),
                     on_failure: op.on_failure.as_ref().map(|variant| {
                         let takes_reason = failure_variant_takes_reason(ir, &tool.return_ty, variant);
                         (variant.clone(), takes_reason)
@@ -607,6 +614,8 @@ mod tests {
             base_url: Some("https://api.github.com".to_string()),
             url_param: None,
             response_text: false,
+            streams: None,
+            stream_until: None,
             on_failure: None,
             method: "GET".to_string(),
             path: "/repos/{owner}/{repo}".to_string(),

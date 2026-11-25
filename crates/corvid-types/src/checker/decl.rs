@@ -595,6 +595,7 @@ impl<'a> Checker<'a> {
             self.check_operation_query_and_headers(decl, op, &param_names);
             self.check_operation_response_shape(decl, op);
             self.check_operation_on_failure(decl, op);
+            self.check_operation_stream(decl, op);
 
             if let Some(secs) = op.timeout_secs {
                 let subject = format!("operation `{}`", op.name.name);
@@ -1715,10 +1716,13 @@ impl<'a> Checker<'a> {
 }
 
 /// What an operation's `mock:` must produce: its return type, with a
-/// `Response<Body>` replaced by its body (inside a `Result` too).
+/// `Response<Body>` replaced by its body (inside a `Result` too) and a
+/// `Stream<T>` by the `List<T>` of events mock mode streams.
 fn mock_payload_type(ret: Type) -> Type {
     match ret {
         Type::Response(body) => *body,
+        // A streamed operation's mock is its events, in order.
+        Type::Stream(event) => Type::List(event),
         Type::Result(ok, err) => match *ok {
             Type::Response(body) => Type::Result(body, err),
             ok => Type::Result(Box::new(ok), err),
@@ -1894,5 +1898,72 @@ impl<'a> Checker<'a> {
                 variant.name
             )));
         }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A streamed operation returns `Stream<T>` as its whole result and
+    /// declares how events are framed; nothing else declares `streams:`.
+    /// Its failures end the stream with an error, so it cannot also read
+    /// text, map failures with `on failure`, or run an `async:` protocol.
+    fn check_operation_stream(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.span,
+            )
+        };
+        let operation = &op.name.name;
+        let ret = self.type_ref_to_type(&op.return_ty);
+        let streams_whole = matches!(ret, Type::Stream(_));
+        let nested = match &ret {
+            Type::Stream(inner) => mentions_stream(inner),
+            other => mentions_stream(other),
+        };
+        if nested {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` returns `{}`; a `Stream` is an operation's whole result, never inside another type",
+                self.json_type_name(&ret)
+            )));
+        }
+        match (streams_whole, op.streams) {
+            (true, None) => self.errors.push(invalid(format!(
+                "operation `{operation}` returns a `Stream`, so it declares how events arrive: `streams: server_sent_events` or `streams: json_lines`"
+            ))),
+            (false, Some(_)) => self.errors.push(invalid(format!(
+                "operation `{operation}` declares `streams:` but returns `{}`, not a `Stream`",
+                self.json_type_name(&ret)
+            ))),
+            _ => {}
+        }
+        if op.streams.is_some() {
+            if op.stream_until.as_deref() == Some("") {
+                self.errors.push(invalid(format!("operation `{operation}` ends its stream `until` an empty event, which every keep-alive would match")));
+            }
+            if op.stream_until.is_some() && op.streams == Some(corvid_ast::StreamFormat::JsonLines) {
+                self.errors.push(invalid(format!(
+                    "operation `{operation}` declares `until` on `json_lines`; an end marker belongs to `server_sent_events`, whose events can carry one"
+                )));
+            }
+            let conflicts = [
+                (op.response_text, "`response: text`"),
+                (op.on_failure.is_some(), "`on failure` (a streamed failure ends the stream with an error)"),
+                (op.protocol.is_some(), "an `async:` protocol"),
+            ];
+            for (present, what) in conflicts {
+                if present {
+                    self.errors.push(invalid(format!("operation `{operation}` streams its response, so it cannot also declare {what}")));
+                }
+            }
+        }
+    }
+}
+
+fn mentions_stream(ty: &Type) -> bool {
+    match ty {
+        Type::Stream(_) => true,
+        Type::List(inner) | Type::Option(inner) | Type::Response(inner) => mentions_stream(inner),
+        Type::Result(a, b) | Type::Map(a, b) => mentions_stream(a) || mentions_stream(b),
+        _ => false,
     }
 }

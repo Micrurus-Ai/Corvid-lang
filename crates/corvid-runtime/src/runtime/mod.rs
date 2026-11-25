@@ -42,6 +42,8 @@ pub use llm_dispatch::is_stdlib_secret_value_tool;
 
 mod builder;
 mod connector_dispatch;
+mod connector_stream;
+pub use connector_stream::ConnectorEventStream;
 mod crypto_tools;
 mod http_trace;
 mod io;

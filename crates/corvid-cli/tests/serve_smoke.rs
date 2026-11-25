@@ -3326,6 +3326,110 @@ fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
     });
 }
 
+/// A route that forwards a connector's stream to its client: when the
+/// client disconnects mid-stream, the server drops the route's stream,
+/// which closes the upstream connection to the provider (B05 slice 5).
+#[test]
+fn a_disconnected_client_closes_the_upstream_stream() {
+    use std::io::{BufRead, BufReader};
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("main.cor");
+    std::fs::write(
+        &src,
+        r#"effect provider_read:
+    cost: $0.0
+
+type Delta:
+    text: String
+
+connector provider:
+    base_url: "http://provider.test"
+    timeout: 30s
+    redirects: never
+    modes: [real]
+    operation deltas(topic: String) -> Stream<Delta> uses provider_read:
+        GET "/deltas/{topic}"
+        streams: server_sent_events
+
+agent relay(topic: String) -> Stream<Delta> uses provider_read:
+    return deltas(topic)
+
+server api:
+    route GET "/relay" -> json Stream<Delta> uses provider_read:
+        return relay("news")
+"#,
+    )
+    .unwrap();
+
+    // The provider, reached through a local proxy: it sends one event and
+    // then holds the connection open.
+    let proxy = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("--mode")
+        .arg("real")
+        .env("CORVID_HTTP_ALLOW", "provider.test")
+        .env("HTTP_PROXY", &proxy_url)
+        .env("http_proxy", &proxy_url)
+        .env("NO_PROXY", "")
+        .env("no_proxy", "")
+        .current_dir(dir.path())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "the server must start");
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    client.write_all(b"GET /relay HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\n\r\n").unwrap();
+
+    proxy.set_nonblocking(false).unwrap();
+    let (upstream, _) = proxy.accept().expect("the provider is called");
+    upstream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut reader = BufReader::new(upstream);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).unwrap();
+    assert!(request_line.starts_with("GET http://provider.test/deltas/news "), "{request_line}");
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+    }
+    let mut upstream = reader.into_inner();
+    upstream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+        .unwrap();
+    let event = b"data: {\"text\":\"first\"}\n\n";
+    upstream.write_all(format!("{:x}\r\n", event.len()).as_bytes()).unwrap();
+    upstream.write_all(event).unwrap();
+    upstream.write_all(b"\r\n").unwrap();
+    upstream.flush().unwrap();
+
+    // The client reads the first relayed event, then disconnects.
+    let mut seen = String::new();
+    let mut buf = [0u8; 1024];
+    while !seen.contains("first") {
+        let n = client.read(&mut buf).expect("the relayed event arrives");
+        assert!(n > 0, "the server closed the client stream early: {seen}");
+        seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+    }
+    drop(client);
+
+    let mut probe = [0u8; 1];
+    match upstream.read(&mut probe) {
+        Ok(0) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("the upstream connection stayed open after the client left: {other:?}"),
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn sigterm_drains_an_inflight_route_before_exiting() {

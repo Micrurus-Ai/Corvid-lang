@@ -549,6 +549,8 @@ impl Runtime {
             base_url: spec.base_url.clone(),
             url_param: None,
             response_text: false,
+            streams: None,
+            stream_until: None,
             on_failure: None,
             method,
             path,
@@ -597,6 +599,8 @@ impl Runtime {
             base_url: spec.base_url.clone(),
             url_param: None,
             response_text: false,
+            streams: None,
+            stream_until: None,
             on_failure: None,
             method: protocol.poll.method.as_str().to_string(),
             // Already bound; no placeholders remain, so no params.

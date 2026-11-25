@@ -126,10 +126,27 @@ pub(super) fn response_value(status: i64, headers: Vec<(String, String)>, body: 
 
 /// In mock mode an operation returning `Response<Body>` declares its
 /// mock as the body (inside `Ok` when the operation returns a
-/// `Result`); it becomes a status-200 response with no headers.
+/// `Result`); it becomes a status-200 response with no headers. A
+/// `Stream<T>` operation declares the `List<T>` of its events.
 pub(super) fn mock_response(value: Value, return_ty: &Type) -> Value {
     match (return_ty, value) {
         (Type::Response(_), body) => response_value(200, Vec::new(), body),
+        // A streamed operation's mock lists its events; mock mode streams
+        // them in order.
+        (Type::Stream(_), Value::List(events)) => {
+            let (sender, stream) = crate::value::StreamValue::channel(
+                super::effect_compose::default_stream_backpressure(),
+            );
+            let events = events.iter_cloned();
+            stream.spawn_producer(async move {
+                for event in events {
+                    if !sender.send(Ok(event)).await {
+                        break;
+                    }
+                }
+            });
+            Value::Stream(stream)
+        }
         (Type::Result(ok, _), Value::ResultOk(body)) if matches!(**ok, Type::Response(_)) => {
             Value::ResultOk(BoxedValue::new(response_value(200, Vec::new(), body.get())))
         }

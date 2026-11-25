@@ -404,6 +404,18 @@ which still stops the program: a denied approval, an exceeded budget,
 and a replay that diverges from its trace. An operation with an `async:` protocol cannot declare it,
 because a protocol fails through its deadline target and circuit breaker.
 
+An operation returning `Stream<T>` declares how its events arrive:
+`streams: server_sent_events` (each event's `data:` lines are one JSON
+value) or `streams: json_lines` (one value per line). Each event decodes
+into `T` as it arrives, and the declared `timeout` bounds opening the
+response and then the wait for each event. `until "[DONE]"` names the
+event data that ends a server-sent stream cleanly, for providers that
+close with a sentinel that is not JSON. A failure ends the stream with an
+error, so a streamed operation declares no `on failure`, `response: text`
+or `async:`. Its mock is the `List<T>` of its events. A stream the
+program stops reading closes the upstream connection, and the trace
+records the events delivered, marked `cancelled`.
+
 `HEAD` and `OPTIONS` are connector methods; a route never declares them,
 because `corvid serve` answers `HEAD` from the route's `GET` and
 `OPTIONS` from its routes and CORS policy. An operation returning
@@ -423,6 +435,7 @@ connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
                     | operation_decl
 connector_mode    ::= 'mock' | 'replay' | 'real'
 redirect_policy   ::= 'never' | 'same_host' | 'allowed_hosts'
+stream_format     ::= 'server_sent_events' | 'json_lines'
 connector_auth    ::= 'bearer' '(' secret_ref ')'
                     | 'header' '(' STRING_LITERAL ',' secret_ref ')'
                     | 'basic' '(' secret_ref ',' secret_ref ')'
@@ -434,6 +447,7 @@ operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEW
                     | 'timeout' ':' INT 's' NEWLINE
                     | 'header' STRING_LITERAL ':' (IDENT | STRING_LITERAL) NEWLINE
                     | 'response' ':' 'text' NEWLINE
+                    | 'streams' ':' stream_format ('until' STRING_LITERAL)? NEWLINE
                     | 'on' 'failure' '->' IDENT NEWLINE
                     | 'async' ':' INDENT protocol_item+ DEDENT
 protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE

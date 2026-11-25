@@ -3874,6 +3874,25 @@ fn parses_an_any_host_connector() {
 }
 
 #[test]
+fn parses_a_streamed_operation_and_its_end_marker() {
+    let src = "connector provider:
+    base_url: \"https://p.example\"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation deltas(q: String) -> Stream<Delta>:
+        POST \"/v1/complete\" body q
+        streams: server_sent_events until \"[DONE]\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.operations[0].streams, Some(corvid_ast::StreamFormat::ServerSentEvents));
+    assert_eq!(c.operations[0].stream_until.as_deref(), Some("[DONE]"));
+    let (_, errors) = parse_file_errs(&src.replace("server_sent_events until \"[DONE]\"", "websockets"));
+    assert!(format!("{:?}", errors.first().map(|e| &e.kind)).contains("`server_sent_events` or `json_lines`"), "{errors:?}");
+}
+
+#[test]
 fn parses_connector_with_config_and_operations() {
     let src = "connector github:
     timeout: 10s

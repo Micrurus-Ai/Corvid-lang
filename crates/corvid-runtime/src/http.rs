@@ -136,6 +136,17 @@ pub struct HttpResponse {
     pub elapsed_ms: u64,
 }
 
+/// A response opened for streaming: its status and headers, and the
+/// body still to read. Dropping it closes the connection.
+pub struct OpenedStream {
+    pub status: u16,
+    pub headers: Vec<HttpHeader>,
+    pub response: reqwest::Response,
+    /// The request's declared timeout, which bounds the wait for each
+    /// event once the stream is open.
+    pub timeout: Duration,
+}
+
 /// How one hop of one attempt ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpExchangeOutcome {
@@ -358,6 +369,75 @@ impl HttpClient {
         Ok((response, record))
     }
 
+    /// Open a response to read as a stream: send the request and follow
+    /// redirects as [`Self::send_observed`] does, under the request's
+    /// timeout for opening, and return it unread. Retries happen only
+    /// before the first byte, so no event is ever delivered twice. The
+    /// exchange is recorded when the response opens, with the body
+    /// size unknown (0); reading it is the caller's.
+    pub async fn open_stream(
+        &self,
+        request: &HttpRequest,
+        observe: HttpExchangeObserver<'_>,
+    ) -> Result<OpenedStream, RuntimeError> {
+        if self.quarantined {
+            return Err(RuntimeError::QuarantineViolation {
+                surface: "http".to_string(),
+                detail: format!(
+                    "blocked an unrecorded streamed {} call to `{}` during replay-mode quarantine",
+                    request.method, request.url
+                ),
+            });
+        }
+        let attempts_allowed = request.retry.max_retries.saturating_add(1);
+        let mut last_error = None;
+        for attempt in 1..=attempts_allowed {
+            let in_flight = std::sync::Mutex::new(HopInFlight {
+                hop: 0,
+                url: request.url.clone(),
+                headers: request.headers.clone(),
+                body: request.body.clone(),
+                started: Instant::now(),
+            });
+            let exchange = ExchangeRecorder { request, attempt, observe, in_flight: &in_flight };
+            let timeout = Duration::from_millis(request.timeout_ms);
+            match tokio::time::timeout(timeout, self.follow_redirects(request, &exchange)).await {
+                Ok(Ok((response, headers))) => {
+                    let status = response.status().as_u16();
+                    if request.retry.retry_on_5xx && status >= 500 && attempt < attempts_allowed {
+                        exchange.finish(Some(status), &headers, 0, HttpExchangeOutcome::Response, None);
+                        last_error = Some(format!("HTTP {status}"));
+                        continue;
+                    }
+                    exchange.finish(Some(status), &headers, 0, HttpExchangeOutcome::Response, None);
+                    return Ok(OpenedStream { status, headers, response, timeout });
+                }
+                Ok(Err(failure)) if failure.retryable && attempt < attempts_allowed => {
+                    last_error = Some(failure.message);
+                }
+                Ok(Err(failure)) => return Err(failure.into_error()),
+                Err(_) => {
+                    let message = format!(
+                        "{} `{}` did not open within its declared timeout of {}",
+                        request.method,
+                        request.url,
+                        describe_timeout(request.timeout_ms)
+                    );
+                    exchange.timed_out(&message);
+                    if attempt < attempts_allowed {
+                        last_error = Some(message);
+                    } else {
+                        return Err(AttemptFailure::transient(message).into_error());
+                    }
+                }
+            }
+        }
+        Err(RuntimeError::ToolFailed {
+            tool: "std.http".to_string(),
+            message: last_error.unwrap_or_else(|| "HTTP request failed".to_string()),
+        })
+    }
+
     /// One attempt, bounded as a whole by the request's timeout:
     /// connecting, every redirect hop, and reading the full body.
     async fn attempt(
@@ -377,7 +457,22 @@ impl HttpClient {
             started: Instant::now(),
         });
         let exchange = ExchangeRecorder { request, attempt, observe, in_flight: &in_flight };
-        match tokio::time::timeout(timeout, self.follow_redirects(request, &exchange)).await {
+        let read = async {
+            let (response, received_headers) = self.follow_redirects(request, &exchange).await?;
+            let status = response.status().as_u16();
+            match response.text().await {
+                Ok(text) => {
+                    exchange.finish(Some(status), &received_headers, text.len() as u64, HttpExchangeOutcome::Response, None);
+                    Ok((status, received_headers, text))
+                }
+                Err(err) => {
+                    let failure = AttemptFailure::transient(format!("failed to read HTTP response body: {err}"));
+                    exchange.finish(Some(status), &received_headers, 0, HttpExchangeOutcome::TransportError, Some(&failure.message));
+                    Err(failure)
+                }
+            }
+        };
+        match tokio::time::timeout(timeout, read).await {
             Ok(result) => result,
             Err(_) => {
                 let message = format!(
@@ -392,11 +487,15 @@ impl HttpClient {
         }
     }
 
+    /// Send the request and follow redirects under its policy, returning
+    /// the final response still unread, with its headers. Every hop but
+    /// the last is recorded here; the caller records the last once it
+    /// knows how much body it read.
     async fn follow_redirects(
         &self,
         request: &HttpRequest,
         exchange: &ExchangeRecorder<'_>,
-    ) -> Result<(u16, Vec<HttpHeader>, String), AttemptFailure> {
+    ) -> Result<(reqwest::Response, Vec<HttpHeader>), AttemptFailure> {
         let method = request.method.parse::<reqwest::Method>().map_err(|err| {
             AttemptFailure::refused(format!("invalid HTTP method `{}`: {err}", request.method))
         })?;
@@ -428,18 +527,7 @@ impl HttpClient {
             let location = redirect_location(&response);
             let Some(location) = location.filter(|_| request.redirects != RedirectPolicy::Never)
             else {
-                let text = match response.text().await {
-                    Ok(text) => text,
-                    Err(err) => {
-                        let failure = AttemptFailure::transient(format!(
-                            "failed to read HTTP response body: {err}"
-                        ));
-                        exchange.finish(Some(status), &received_headers, 0, HttpExchangeOutcome::TransportError, Some(&failure.message));
-                        return Err(failure);
-                    }
-                };
-                exchange.finish(Some(status), &received_headers, text.len() as u64, HttpExchangeOutcome::Response, None);
-                return Ok((status, received_headers, text));
+                return Ok((response, received_headers));
             };
             // Every refusal below is recorded against the hop whose
             // response led to it.

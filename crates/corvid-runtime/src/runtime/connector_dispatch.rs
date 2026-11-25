@@ -195,7 +195,7 @@ impl Runtime {
     /// Uses wall-clock time — only real-mode dispatch reaches here, and
     /// real mode is never replayed, so this introduces no replay
     /// nondeterminism.
-    fn check_connector_rate_limit(
+    pub(super) fn check_connector_rate_limit(
         &self,
         connector: &str,
         limit: u64,

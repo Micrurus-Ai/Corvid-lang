@@ -997,6 +997,8 @@ mod tests {
             base_url: Some("https://api.ups.com".to_string()),
             url_param: None,
             response_text: false,
+            streams: None,
+            stream_until: None,
             on_failure: None,
             method: "POST".to_string(),
             path: "/ship".to_string(),

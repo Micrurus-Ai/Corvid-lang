@@ -430,6 +430,8 @@ impl<'a> Parser<'a> {
         let mut timeout_secs: Option<u64> = None;
         let mut headers = Vec::new();
         let mut response_text = false;
+        let mut streams: Option<corvid_ast::StreamFormat> = None;
+        let mut stream_until: Option<String> = None;
         let mut on_failure: Option<Ident> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
@@ -473,6 +475,31 @@ impl<'a> Parser<'a> {
                     return Err(duplicate_connector_key("response", key_span));
                 }
                 response_text = true;
+                self.expect_newline()?;
+                continue;
+            }
+            if self.peek_ident_is("streams") {
+                let key_span = self.peek_span();
+                self.bump(); // streams
+                self.expect(TokKind::Colon, "`:` after `streams`")?;
+                let (format, format_span) = self.expect_ident()?;
+                let Some(parsed) = corvid_ast::StreamFormat::from_name(&format) else {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`streams: {format}`"),
+                            expected: "`server_sent_events` or `json_lines`".into(),
+                        },
+                        span: format_span,
+                    });
+                };
+                if streams.is_some() {
+                    return Err(duplicate_connector_key("streams", key_span));
+                }
+                streams = Some(parsed);
+                if self.peek_ident_is("until") {
+                    self.bump(); // until
+                    stream_until = Some(self.expect_string_literal("the event data that ends the stream, such as `until \"[DONE]\"`")?.0);
+                }
                 self.expect_newline()?;
                 continue;
             }
@@ -538,6 +565,8 @@ impl<'a> Parser<'a> {
             path,
             url_param,
             response_text,
+            streams,
+            stream_until,
             body,
             query,
             headers,

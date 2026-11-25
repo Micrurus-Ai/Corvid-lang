@@ -863,6 +863,17 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             push_indent(indent + 2, out);
             out.push_str("response: text\n");
         }
+        if let Some(format) = op.streams {
+            push_indent(indent + 2, out);
+            match &op.stream_until {
+                Some(until) => out.push_str(&format!("streams: {} until {}\n", format.as_str(), render_string_literal(until))),
+                None => out.push_str(&format!("streams: {}\n", format.as_str())),
+            }
+        }
+        if let Some(variant) = &op.on_failure {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("on failure -> {}\n", variant.name));
+        }
         for header in &op.headers {
             push_indent(indent + 2, out);
             let value = match &header.value {

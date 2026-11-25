@@ -358,6 +358,9 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                 })?;
+                if let (Some(_), Type::Stream(event_ty)) = (op.streams, result_decode_ty) {
+                    return self.open_connector_stream(callee_name, wire_args, event_ty, span).await;
+                }
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
@@ -515,6 +518,45 @@ impl<'ir> Interpreter<'ir> {
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         self.decode_connector_result(callee_name, on_failure, result, result_decode_ty, span)
+    }
+
+    /// A streamed connector call: open the runtime's event stream and
+    /// decode each event into `T` as it arrives, through the public JSON
+    /// mapping. Dropping the returned stream aborts the producer, which
+    /// drops the HTTP response and closes the upstream connection.
+    async fn open_connector_stream(
+        &self,
+        callee_name: &str,
+        wire_args: Vec<serde_json::Value>,
+        event_ty: &Type,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let events = self
+            .runtime
+            .call_connector_stream(callee_name, wire_args)
+            .await
+            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        let (sender, stream) = crate::value::StreamValue::channel(effect_compose::default_stream_backpressure());
+        let types: std::sync::Arc<Vec<IrType>> = std::sync::Arc::new(self.ir.types.clone());
+        let event_ty = event_ty.clone();
+        let name = callee_name.to_string();
+        stream.spawn_producer(async move {
+            let types_by_id: HashMap<DefId, &IrType> = types.iter().map(|t| (t.id, t)).collect();
+            let mut events = events;
+            while let Some(item) = futures::StreamExt::next(&mut events).await {
+                let next = match item {
+                    Ok(json) => connector_json::connector_result(json, &event_ty, &types_by_id).map_err(|e| {
+                        InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)
+                    }),
+                    Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
+                };
+                let failed = next.is_err();
+                if !sender.send(next).await || failed {
+                    break;
+                }
+            }
+        });
+        Ok(Value::Stream(stream))
     }
 
     /// Read a connector result through the public JSON mapping; a
