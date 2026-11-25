@@ -58,25 +58,21 @@ impl<'a> Checker<'a> {
         self.check_column_history(table);
         self.check_unique_rules(table);
 
-        let databases: Vec<&DatabaseDecl> = self
-            .file
-            .decls
-            .iter()
-            .filter_map(|decl| match decl {
-                Decl::Database(db) if db.tables.iter().any(|t| t.name == name) => Some(db),
-                _ => None,
-            })
-            .collect();
-        match databases.as_slice() {
-            [] => self.errors.push(TypeError::new(TypeErrorKind::TableOutsideDatabase { table: name }, span)),
-            [_] => {}
-            [first, second, ..] => self.errors.push(TypeError::new(
-                TypeErrorKind::TableInTwoDatabases {
+        match crate::table_ops::table_placement(self.file, &name) {
+            crate::table_ops::TablePlacement::In(_) | crate::table_ops::TablePlacement::NotATable => {}
+            crate::table_ops::TablePlacement::NoDatabase => {
+                self.errors.push(TypeError::new(TypeErrorKind::TableOutsideDatabase { table: name }, span))
+            }
+            crate::table_ops::TablePlacement::Ambiguous(databases) => self.errors.push(TypeError::new(
+                TypeErrorKind::TableDatabaseAmbiguous {
                     table: name,
-                    first: first.name.name.clone(),
-                    second: second.name.name.clone(),
+                    databases: quoted(&databases.iter().map(|db| db.name.name.as_str()).collect::<Vec<_>>()),
                 },
-                second.span,
+                span,
+            )),
+            crate::table_ops::TablePlacement::UnknownDatabase(named) => self.errors.push(TypeError::new(
+                TypeErrorKind::TableDatabaseUnknown { table: name, database: named.name.clone() },
+                named.span,
             )),
         }
     }
@@ -192,24 +188,6 @@ impl<'a> Checker<'a> {
             ));
         }
         self.check_database_connection(database);
-        if database.tables.is_empty() {
-            self.errors.push(TypeError::new(
-                TypeErrorKind::DatabaseSettingRequired {
-                    database: name.clone(),
-                    setting: "tables".into(),
-                    allowed: "the `table` declarations it holds".into(),
-                },
-                span,
-            ));
-        }
-        for table in &database.tables {
-            if self.table_named(table).is_none() {
-                self.errors.push(TypeError::new(
-                    TypeErrorKind::DatabaseTableNotATable { database: name.clone(), name: table.name.clone() },
-                    table.span,
-                ));
-            }
-        }
     }
 
     /// `atomic:` (B09 P7a). The body is checked as any block, then
@@ -409,13 +387,6 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-    }
-
-    fn table_named(&self, name: &Ident) -> Option<&'a TableDecl> {
-        self.file.decls.iter().find_map(|decl| match decl {
-            Decl::Table(table) if table.name().name == name.name => Some(table),
-            _ => None,
-        })
     }
 
     /// `Shelf.get(key)`, `Shelf.insert(row)`, `Shelf.save(row)` or
@@ -706,7 +677,6 @@ mod tests {
 database library:
     engine: sqlite
     location: env(\"LIBRARY_DATABASE\")
-    tables: Shelf
 
 table Shelf:
     key shelf: Int
@@ -744,7 +714,7 @@ agent seen(shelf: Shelf) -> Int:
 
     #[test]
     fn every_consequential_setting_must_be_stated() {
-        let errors = messages("database library:\n    tables: Shelf\n\ntable Shelf:\n    title: String\n");
+        let errors = messages("database library:\n    tls: required\n\ntable Shelf:\n    title: String\n");
         assert!(errors.iter().any(|m| m.contains("does not say `engine`")), "{errors:#?}");
         assert!(errors.iter().any(|m| m.contains("does not say `location`")), "{errors:#?}");
         assert!(errors.iter().any(|m| m.contains("declares no key field")), "{errors:#?}");
@@ -753,14 +723,14 @@ agent seen(shelf: Shelf) -> Int:
     #[test]
     fn a_table_must_live_in_exactly_one_running_database() {
         let outside = messages("table Shelf:\n    key shelf: Int\n");
-        assert!(outside.iter().any(|m| m.contains("not listed in any `database` block")), "{outside:#?}");
-        let planned = messages("database library:\n    engine: mysql\n    location: \"x\"\n    tables: Shelf\n\ntable Shelf:\n    key shelf: Int\n");
+        assert!(outside.iter().any(|m| m.contains("has no database: this module declares none")), "{outside:#?}");
+        let planned = messages("database library:\n    engine: mysql\n    location: \"x\"\n\ntable Shelf:\n    key shelf: Int\n");
         assert!(planned.iter().any(|m| m.contains("names engine `mysql`")), "{planned:#?}");
     }
 
     #[test]
     fn revision_is_reserved_and_pure_code_cannot_touch_tables() {
-        let reserved = check("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    revision: Int\n");
+        let reserved = check("database d:\n    engine: sqlite\n    location: \"x\"\n\ntable T:\n    key id: Int\n    revision: Int\n");
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
@@ -768,14 +738,14 @@ agent seen(shelf: Shelf) -> Int:
 
     #[test]
     fn a_key_of_several_fields_is_read_with_one_value_each() {
-        let table = "database d:\n    engine: sqlite\n    location: \"x\"\n    tables: Edit\n\ntable Edit:\n    key proposal: String\n    key shelf: Int\n    title: String\n";
+        let table = "database d:\n    engine: sqlite\n    location: \"x\"\n\ntable Edit:\n    key proposal: String\n    key shelf: Int\n    title: String\n";
         let ok = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p, 1)\n"));
         assert!(ok.is_empty(), "{ok:#?}");
         let one = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p)\n"));
         assert!(one.iter().any(|m| m.contains("Edit.get")), "{one:#?}");
         let swapped = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(1, p)\n"));
         assert!(swapped.iter().any(|m| m.contains("argument to `Edit.get`")), "{swapped:#?}");
-        let bad = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    key score: Float\n");
+        let bad = messages("database d:\n    engine: sqlite\n    location: \"x\"\n\ntable T:\n    key id: Int\n    key score: Float\n");
         assert!(bad.iter().any(|m| m.contains("the key `score`")), "{bad:#?}");
     }
 
@@ -801,14 +771,34 @@ agent seen(shelf: Shelf) -> Int:
     #[test]
     fn an_atomic_block_writes_to_one_database() {
         let errors = messages(
-            "database a:\n    engine: sqlite\n    location: \"a\"\n    tables: T\n\ndatabase b:\n    engine: sqlite\n    location: \"b\"\n    tables: U\n\ntable T:\n    key id: Int\n\ntable U:\n    key id: Int\n\nagent q() -> String:\n    atomic:\n        t = T.get(1)\n        u = U.get(1)\n    return \"x\"\n",
+            "database a:\n    engine: sqlite\n    location: \"a\"\n\ndatabase b:\n    engine: sqlite\n    location: \"b\"\n\ntable T in a:\n    key id: Int\n\ntable U in b:\n    key id: Int\n\nagent q() -> String:\n    atomic:\n        t = T.get(1)\n        u = U.get(1)\n    return \"x\"\n",
         );
         assert!(errors.iter().any(|m| m.contains("a transaction cannot span databases")), "{errors:#?}");
     }
 
+    /// B09 P11: a table lives in its module's one database, names another
+    /// with `in`, and must name one when the module declares several.
+    #[test]
+    fn a_table_says_where_it_lives() {
+        let one = messages("database d:\n    engine: sqlite\n    location: \"x\"\n\ntable T:\n    key id: Int\n\nagent q() -> Option<T>:\n    return T.get(1)\n");
+        assert!(one.is_empty(), "a module's one database holds its tables: {one:#?}");
+        let two = "database a:\n    engine: sqlite\n    location: \"a\"\n\ndatabase b:\n    engine: sqlite\n    location: \"b\"\n\n";
+        let named = messages(&format!("{two}table T in b:\n    key id: Int\n"));
+        assert!(named.is_empty(), "{named:#?}");
+        let ambiguous = messages(&format!("{two}table T:\n    key id: Int\n"));
+        assert!(ambiguous.iter().any(|m| m.contains("does not say which database holds it, and this module declares `a`, `b`")), "{ambiguous:#?}");
+        // An `in` naming no declared database is refused by name.
+        let tokens = corvid_syntax::lex(&format!("{two}table T in c:\n    key id: Int\n")).expect("lex");
+        let resolved = corvid_resolve::resolve(&corvid_syntax::parse_file(&tokens).0);
+        assert!(resolved.errors.iter().any(|e| format!("{:?}", e.kind).contains("\"c\"")), "{:?}", resolved.errors);
+        let listed = corvid_syntax::lex("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n").map(|tokens| corvid_syntax::parse_file(&tokens).1);
+        let listed = listed.expect("lexes");
+        assert!(listed.iter().any(|e| format!("{e:?}").contains("a table to say where it lives instead")), "{listed:?}");
+    }
+
     #[test]
     fn a_postgres_connection_is_read_from_the_environment_and_its_tls_stated() {
-        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n{settings}\n    tables: T\n\ntable T:\n    key id: Int\n"));
+        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n{settings}\n\ntable T:\n    key id: Int\n"));
         assert!(block("    location: env(\"DATABASE_URL\")\n    tls: required\n    connections: 10").is_empty());
         assert!(block("    location: env(\"DATABASE_URL\")\n    tls: disabled\n    connections: 1").is_empty());
         let literal = block("    location: \"postgres://user:secret@db/app\"\n    tls: required\n    connections: 10");
@@ -817,7 +807,7 @@ agent seen(shelf: Shelf) -> Int:
         assert!(silent.iter().any(|m| m.contains("does not say `tls`")), "{silent:#?}");
         let unknown = block("    location: env(\"DATABASE_URL\")\n    tls: maybe");
         assert!(unknown.iter().any(|m| m.contains("`required` or `disabled`")), "{unknown:#?}");
-        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tls: required\n    tables: T\n\ntable T:\n    key id: Int\n");
+        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tls: required\n\ntable T:\n    key id: Int\n");
         assert!(file.iter().any(|m| m.contains("no connection to encrypt")), "{file:#?}");
     }
 
@@ -825,19 +815,19 @@ agent seen(shelf: Shelf) -> Int:
     /// availability decision, so it is declared, never defaulted.
     #[test]
     fn a_postgres_pool_size_is_declared_and_bounded() {
-        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n    location: env(\"DATABASE_URL\")\n    tls: required\n{settings}    tables: T\n\ntable T:\n    key id: Int\n"));
+        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n    location: env(\"DATABASE_URL\")\n    tls: required\n{settings}\ntable T:\n    key id: Int\n"));
         let silent = block("");
         assert!(silent.iter().any(|m| m.contains("does not say `connections`") && m.contains("from 1 to 1000")), "{silent:#?}");
         let none = block("    connections: 0\n");
         assert!(none.iter().any(|m| m.contains("is 0; it is from 1 to 1000")), "{none:#?}");
-        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    connections: 4\n    tables: T\n\ntable T:\n    key id: Int\n");
+        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    connections: 4\n\ntable T:\n    key id: Int\n");
         assert!(file.iter().any(|m| m.contains("queues its writers")), "{file:#?}");
     }
 
     #[test]
     fn column_history_names_each_stored_column_once() {
         let table = |body: &str| {
-            messages(&format!("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n{body}\n"))
+            messages(&format!("database d:\n    engine: sqlite\n    location: \"x\"\n\ntable T:\n    key id: Int\n{body}\n"))
         };
         assert!(table("    title: String renamed from name\n    retired: Bool\n    retired legacy, old_note").is_empty());
         let declared = table("    title: String renamed from id");
@@ -884,7 +874,7 @@ agent every() -> List<Shelf>:
     #[test]
     fn a_json_column_cannot_be_compared() {
         let errors = messages(
-            "database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    tags: List<String>\n\nagent q(tags: List<String>) -> List<T>:\n    return T.where(fn (t) -> t.tags == tags)\n",
+            "database d:\n    engine: sqlite\n    location: \"x\"\n\ntable T:\n    key id: Int\n    tags: List<String>\n\nagent q(tags: List<String>) -> List<T>:\n    return T.where(fn (t) -> t.tags == tags)\n",
         );
         assert!(errors.iter().any(|m| m.contains("stored as JSON")), "{errors:#?}");
     }

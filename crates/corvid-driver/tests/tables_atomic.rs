@@ -18,7 +18,6 @@ fn program(settings: &str) -> String {
         r#"
 database library:
 {settings}
-    tables: Shelf, Ledger
 
 table Shelf:
     key shelf: Int

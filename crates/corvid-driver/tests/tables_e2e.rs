@@ -16,7 +16,6 @@ fn program(settings: &str) -> String {
         r#"
 database library:
 {settings}
-    tables: Shelf
 
 table Shelf:
     key shelf: Int

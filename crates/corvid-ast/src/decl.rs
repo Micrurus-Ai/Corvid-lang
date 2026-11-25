@@ -1415,6 +1415,11 @@ impl StoreKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableDecl {
     pub record: TypeDecl,
+    /// `table Shelf in library:`: the database that holds its rows. Left
+    /// out, the table lives in its module's one `database` block (B09
+    /// P11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<Ident>,
     /// The fields marked `key`, in declaration order.
     pub keys: Vec<Ident>,
     /// `title: String renamed from name`: columns whose stored name
@@ -1477,7 +1482,6 @@ pub struct DatabaseDecl {
     /// holds at most, with the span of the count. Required for Postgres,
     /// refused for SQLite.
     pub connections: Option<(i64, Span)>,
-    pub tables: Vec<Ident>,
     pub span: Span,
 }
 

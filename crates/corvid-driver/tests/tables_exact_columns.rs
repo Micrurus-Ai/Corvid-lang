@@ -19,7 +19,6 @@ fn program(settings: &str) -> String {
         r#"
 database ledger:
 {settings}
-    tables: Invoice
 
 table Invoice:
     key number: Int
@@ -145,7 +144,6 @@ const TABLE: &str = r#"
 database ledger:
     engine: sqlite
     location: "ledger.sqlite"
-    tables: Invoice
 
 table Invoice:
     key number: Int

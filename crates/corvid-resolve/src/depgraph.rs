@@ -150,15 +150,15 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
             for field in &table.record.fields {
                 collect_typeref_dep(&field.ty, resolved, deps);
             }
-        }
-        // A database orders after the tables it holds.
-        Decl::Database(database) => {
-            for table in &database.tables {
-                if let Some(crate::Binding::Decl(id)) = resolved.bindings.get(&table.span) {
+            if let Some(database) = &table.database {
+                if let Some(crate::Binding::Decl(id)) = resolved.bindings.get(&database.span) {
                     deps.insert(*id);
                 }
             }
         }
+        // A database declares no dependencies; a table that names its
+        // database with `in` orders after it (handled with the table).
+        Decl::Database(_) => {}
         Decl::Server(server) => {
             for route in &server.routes {
                 for param in &route.path_params {

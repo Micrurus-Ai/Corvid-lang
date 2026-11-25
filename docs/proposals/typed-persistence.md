@@ -26,7 +26,6 @@ the executing database tools support SQLite only.
 database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")
-    tables: Shelf, Book
 
 table Shelf:
     key shelf: Int
@@ -184,7 +183,6 @@ database library:
     location: env("LIBRARY_DATABASE_URL")
     tls: required
     connections: 10
-    tables: Shelf
 ```
 
 - **A declared, bounded pool.** Until this slice every non-atomic
@@ -449,6 +447,71 @@ Decisions:
   beside `Changed(current)`, would make the two `save` cases separate
   arms. It changes every table's `save` type, so it is a decision of its
   own rather than part of this slice.
+
+## One database, many modules (P11)
+
+An application has one database and many modules: shelves, reviews,
+extraction jobs, members. Today a `database` block lists its tables, and
+it may list only the tables of its own module, because tables are
+private to the module that declares them. So either every table and
+every agent that touches one sits in a single module, or two modules
+each declare the same database file, which the reading list had to do
+and which leaves `corvid migrate` and `atomic:` blocks seeing two
+databases where there is one. Neither works at the scale of many teams.
+
+**Decision: the table says where it lives, and the database is shared
+by import.**
+
+```corvid
+# storage.cor
+public database library:
+    engine: postgres
+    location: env("LIBRARY_DATABASE_URL")
+    tls: required
+    connections: 10
+
+# shelves.cor
+import "./storage" use library
+
+table StoredShelf in library:
+    key shelf: Int
+    title: String
+```
+
+- **A module with one `database` block needs nothing on its tables**:
+  they live in it. That is nearly every small program, so the common
+  case is the shortest.
+- **A table names its database with `in`** when the database is
+  imported, or when its module declares more than one.
+- **`tables:` is removed.** Listing a table in the database and naming
+  the database on the table would be two ways to say one thing, and the
+  list is the one that cannot reach another module's private tables.
+  Writing it is a compile error that says the table now says where it
+  lives.
+- **A database is one thing however many modules use it.** Its identity
+  is the module that declares it and its name, so an `atomic:` block may
+  write tables from several modules in it, and `corvid migrate` plans
+  every table from every module in the program that lives in it, in one
+  history.
+- **Tables stay private.** Sharing the database shares where rows live,
+  not access to them; another module still reaches rows only through an
+  agent the table's module exports.
+
+Simpler alternatives considered:
+
+- **Let `tables:` name imported tables.** That needs tables to be public,
+  which gives every importer direct access to the rows and loses the
+  "data through declared agents" boundary that actions and assistants
+  rely on.
+- **Implicit placement everywhere.** A module that imports a database and
+  declares none could put its tables there silently, but with two
+  imported databases a table's home would depend on import order.
+  Naming it with `in` is four characters and never ambiguous.
+
+Slices: P11a, `in` and placement within one module, with `tables:`
+removed and every program and document moved over. P11b, a `public
+database` imported by other modules, with the checker, IR, `atomic:` and
+`corvid migrate` treating it as one database across the program.
 
 ## Open questions for review
 

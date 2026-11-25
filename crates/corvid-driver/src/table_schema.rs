@@ -46,7 +46,15 @@ pub fn declared_databases(source: &str, source_path: &Path) -> Result<Vec<Declar
                 name: db.name.name.clone(),
                 engine: TableEngine::from_declaration(&db.engine.as_ref()?.name, db.tls.as_ref().map(|t| t.name.as_str()), declared_connections(db))?,
                 location: db.location.clone()?,
-                tables: db.tables.iter().map(|t| t.name.clone()).collect(),
+                tables: file
+                    .decls
+                    .iter()
+                    .filter_map(|decl| match decl {
+                        Decl::Table(table) => Some(table.name().name.clone()),
+                        _ => None,
+                    })
+                    .filter(|table| corvid_types::table_ops::table_database(&file, table).is_some_and(|home| home.name.name == db.name.name))
+                    .collect(),
             })
         })
         .collect())
@@ -69,10 +77,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
             let record = ir.types.iter().find(|ty| ty.name == table.name().name)?;
             // The checker proved the table lives in exactly one database
             // whose engine and settings are stated.
-            let database = file.decls.iter().find_map(|decl| match decl {
-                Decl::Database(db) if db.tables.iter().any(|t| t.name == record.name) => Some(db),
-                _ => None,
-            })?;
+            let database = corvid_types::table_ops::table_database(&file, &record.name)?;
             let engine = TableEngine::from_declaration(
                 &database.engine.as_ref()?.name,
                 database.tls.as_ref().map(|tls| tls.name.as_str()),

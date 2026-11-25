@@ -12,17 +12,29 @@ use corvid_ast::{
 };
 
 impl<'a> Parser<'a> {
-    /// Whether the next tokens start `<word> <Name>:`.
+    /// Whether the next tokens start `<word> <Name>:`, or, for a table,
+    /// `table <Name> in <database>:`.
     pub(super) fn at_contextual_block_decl(&self, word: &str) -> bool {
-        matches!(self.peek(), TokKind::Ident(w) if w == word)
-            && matches!(self.peek_ahead(1), TokKind::Ident(_))
-            && matches!(self.peek_ahead(2), TokKind::Colon)
+        let named = matches!(self.peek(), TokKind::Ident(w) if w == word) && matches!(self.peek_ahead(1), TokKind::Ident(_));
+        let placed = word == "table"
+            && matches!(self.peek_ahead(2), TokKind::KwIn)
+            && matches!(self.peek_ahead(3), TokKind::Ident(_))
+            && matches!(self.peek_ahead(4), TokKind::Colon);
+        named && (matches!(self.peek_ahead(2), TokKind::Colon) || placed)
     }
 
     pub(super) fn parse_table_decl(&mut self, visibility: Visibility) -> Result<TableDecl, ParseError> {
         let start = self.peek_span();
         self.bump(); // table
         let (name, name_span) = self.expect_ident()?;
+        // `in library` names the database that holds the rows.
+        let database = if matches!(self.peek(), TokKind::KwIn) {
+            self.bump();
+            let (database, span) = self.expect_ident()?;
+            Some(Ident::new(database, span))
+        } else {
+            None
+        };
         self.expect(TokKind::Colon, "`:` after table name")?;
         self.expect_newline()?;
         self.expect_block_start()?;
@@ -111,7 +123,7 @@ impl<'a> Parser<'a> {
             visibility,
             span: start.merge(end),
         };
-        Ok(TableDecl { record, keys, renamed, retired, unique })
+        Ok(TableDecl { record, database, keys, renamed, retired, unique })
     }
 
     /// A table field, optionally followed by `renamed from <old name>`.
@@ -165,13 +177,12 @@ impl<'a> Parser<'a> {
         let mut location = None;
         let mut tls = None;
         let mut connections = None;
-        let mut tables = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
             }
-            if let Err(e) = self.parse_database_setting(&mut engine, &mut location, &mut tls, &mut connections, &mut tables) {
+            if let Err(e) = self.parse_database_setting(&mut engine, &mut location, &mut tls, &mut connections) {
                 self.errors.push(e);
                 self.sync_to_statement_boundary();
             }
@@ -180,7 +191,7 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), TokKind::Dedent) {
             self.bump();
         }
-        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, tables, span: start.merge(end) })
+        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, span: start.merge(end) })
     }
 
     fn parse_database_setting(
@@ -189,7 +200,6 @@ impl<'a> Parser<'a> {
         location: &mut Option<DatabaseLocation>,
         tls: &mut Option<Ident>,
         connections: &mut Option<(i64, corvid_ast::Span)>,
-        tables: &mut Vec<Ident>,
     ) -> Result<(), ParseError> {
         let (setting, setting_span) = self.expect_ident()?;
         self.expect(TokKind::Colon, "`:` after a database setting")?;
@@ -221,19 +231,21 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            "tables" => loop {
-                let (table, span) = self.expect_ident()?;
-                tables.push(Ident::new(table, span));
-                if !matches!(self.peek(), TokKind::Comma) {
-                    break;
-                }
-                self.bump();
-            },
+            // B09 P11: a table says which database holds it.
+            "tables" => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "database setting `tables`".into(),
+                        expected: "a table to say where it lives instead: a module's tables live in its one database, and `table Shelf in library:` names another".into(),
+                    },
+                    span: setting_span,
+                })
+            }
             other => {
                 return Err(ParseError {
                     kind: ParseErrorKind::UnexpectedToken {
                         got: format!("database setting `{other}`"),
-                        expected: "`engine`, `location`, `tls`, `connections` or `tables`".into(),
+                        expected: "`engine`, `location`, `tls` or `connections`".into(),
                     },
                     span: setting_span,
                 })

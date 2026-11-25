@@ -464,20 +464,20 @@ impl Resolver {
                     for field in &t.record.fields {
                         self.resolve_type_ref(&field.ty);
                     }
-                }
-                Decl::Database(d) => {
-                    for table in &d.tables {
-                        match self.symbols.lookup(&table.name) {
+                    // `in library` names a database declared in this module.
+                    if let Some(database) = &t.database {
+                        match self.symbols.lookup(&database.name) {
                             Some(binding) => {
-                                self.bindings.insert(table.span, binding);
+                                self.bindings.insert(database.span, binding);
                             }
                             None => self.errors.push(ResolveError {
-                                kind: ResolveErrorKind::UndefinedName(table.name.clone()),
-                                span: table.span,
+                                kind: ResolveErrorKind::UndefinedName(database.name.clone()),
+                                span: database.span,
                             }),
                         }
                     }
                 }
+                Decl::Database(_) => {}
                 Decl::Tool(t) => self.resolve_tool_decl(t),
                 Decl::Prompt(p) => self.resolve_prompt_decl(p),
                 Decl::Agent(a) => self.resolve_agent_decl(a),

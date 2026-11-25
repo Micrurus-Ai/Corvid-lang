@@ -66,7 +66,6 @@ type Signed:
 database shop:
     engine: sqlite
     location: \"shop.sqlite\"
-    tables: Product
 
 table Product:
     key id: String

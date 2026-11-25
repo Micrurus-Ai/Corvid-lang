@@ -1626,7 +1626,6 @@ tool notify(name: String) -> String uses paid_notice
 database site:
     engine: sqlite
     location: \"site.sqlite\"
-    tables: Member
 
 table Member:
     key id: Int

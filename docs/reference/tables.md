@@ -9,7 +9,6 @@ every read of it at compile time. SQL text never appears in source.
 database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")
-    tables: Shelf
 
 table Shelf:
     key shelf: Int
@@ -59,10 +58,37 @@ has no defaults:
 | `engine:` | `sqlite` or `postgres`. `mysql` is refused with a pointer to its roadmap slice until it runs. |
 | `location:` | For SQLite, a path, `"library.sqlite"`, or `env("NAME")`, the environment variable that holds the path; a path is opened relative to the directory the program runs in. For Postgres, `env("NAME")` holding the connection string. |
 | `tls:` | Postgres only: `required` or `disabled`. |
-| `tables:` | The tables it holds, separated by commas. |
+| `connections:` | Postgres only: how many connections the program may open, from 1 to 1000. |
 
 Leaving out a setting is a compile error that names it and its allowed
-values. Every table must be listed in exactly one `database` block.
+values.
+
+A table lives in its module's `database` block, so most tables say
+nothing about where they live. When a module declares more than one
+database, each table names its own with `in`:
+
+```corvid
+database orders:
+    engine: postgres
+    location: env("ORDERS_DATABASE_URL")
+    tls: required
+    connections: 10
+
+database analytics:
+    engine: sqlite
+    location: "analytics.sqlite"
+
+table Order in orders:
+    key id: Int
+    total: Decimal
+
+table PageView in analytics:
+    key id: Int
+    path: String
+```
+
+A table without `in` in a module with several databases is a compile
+error that names them, and so is a table in a module with none.
 
 ### Postgres
 
@@ -72,7 +98,6 @@ database library:
     location: env("LIBRARY_DATABASE_URL")
     tls: required
     connections: 10
-    tables: Shelf
 ```
 
 A Postgres `location` is the environment variable that holds the

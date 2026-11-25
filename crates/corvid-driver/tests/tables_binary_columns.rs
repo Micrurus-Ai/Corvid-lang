@@ -17,7 +17,6 @@ fn program(settings: &str) -> String {
         r#"
 database keys:
 {settings}
-    tables: ApiKey
 
 table ApiKey:
     key name: String

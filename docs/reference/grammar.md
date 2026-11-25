@@ -126,11 +126,12 @@ type_alias_body   ::= type_ref
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
 
 # B09: a stored record type and the database that holds it.
-# `table`, `database`, `key`, `engine`, `location`, `tables`, `env`,
-# `renamed`, `from`, `retired` and `unique` are contextual: they stay
-# ordinary identifiers elsewhere, and a field may be named `retired` or
-# `unique`.
-table_decl        ::= 'table' IDENT ':' INDENT (table_field | table_retired | table_unique)+ DEDENT
+# `table`, `database`, `key`, `engine`, `location`, `tls`, `connections`,
+# `env`, `renamed`, `from`, `retired` and `unique` are contextual: they
+# stay ordinary identifiers elsewhere, and a field may be named `retired`
+# or `unique`. `in` names the database a table lives in; without it, the
+# table lives in its module's one `database` block.
+table_decl        ::= 'table' IDENT ('in' IDENT)? ':' INDENT (table_field | table_retired | table_unique)+ DEDENT
 table_field       ::= 'key'? IDENT ':' type_ref ('renamed' 'from' IDENT)? NEWLINE
 table_retired     ::= 'retired' IDENT (',' IDENT)* NEWLINE
 table_unique      ::= 'unique' IDENT (',' IDENT)* NEWLINE
@@ -138,7 +139,7 @@ database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
 database_setting  ::= 'engine' ':' IDENT NEWLINE
                     | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
                     | 'tls' ':' IDENT NEWLINE                       # `required` or `disabled`; Postgres only
-                    | 'tables' ':' IDENT (',' IDENT)* NEWLINE
+                    | 'connections' ':' INT NEWLINE                 # 1 to 1000; Postgres only
 ```
 
 ## Type references

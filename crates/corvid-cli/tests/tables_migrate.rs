@@ -61,7 +61,6 @@ fn source(settings: &str, fields: &str, main: &str) -> String {
         r#"
 database library:
 {settings}
-    tables: Shelf
 
 table Shelf:
     key shelf: Int
@@ -185,7 +184,6 @@ import "./labels" use Label
 database library:
     engine: sqlite
     location: "library.sqlite"
-    tables: Shelf
 
 table Shelf:
     key shelf: Int
@@ -215,7 +213,7 @@ fn indexes_follow_the_queries() {
         std::fs::write(
             root.join("src/main.cor"),
             format!(
-                "database work:\n    engine: sqlite\n    location: \"jobs.sqlite\"\n    tables: Job\n\ntable Job:\n    key job: Int\n    owner: String\n    paused: Bool\n    budget: Int\n\nagent latest(owner: String) -> List<Job>:\n{query}\n\nagent main() -> Int:\n    return 0\n"
+                "database work:\n    engine: sqlite\n    location: \"jobs.sqlite\"\n\ntable Job:\n    key job: Int\n    owner: String\n    paused: Bool\n    budget: Int\n\nagent latest(owner: String) -> List<Job>:\n{query}\n\nagent main() -> Int:\n    return 0\n"
             ),
         )
         .unwrap()
@@ -266,7 +264,7 @@ fn a_unique_line_is_planned_and_refused_over_repeated_rows() {
     let write = |extra: &str| {
         std::fs::write(
             root.join("src/main.cor"),
-            format!("database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n    tables: Member\n\ntable Member:\n    key id: Int\n    email: String\n{extra}\nagent main() -> Int:\n    a = Member.insert(Member(1, \"ana@example.com\"))\n    b = Member.insert(Member(2, \"ana@example.com\"))\n    return 0\n"),
+            format!("database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n\ntable Member:\n    key id: Int\n    email: String\n{extra}\nagent main() -> Int:\n    a = Member.insert(Member(1, \"ana@example.com\"))\n    b = Member.insert(Member(2, \"ana@example.com\"))\n    return 0\n"),
         )
         .unwrap()
     };
@@ -299,7 +297,6 @@ fn a_decimal_column_is_planned_applied_and_queried_by_value() {
         r#"database ledger:
     engine: sqlite
     location: "ledger.sqlite"
-    tables: Price
 
 table Price:
     key item: String

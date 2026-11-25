@@ -16,7 +16,6 @@ fn program(settings: &str) -> String {
         r#"
 database library:
 {settings}
-    tables: Book
 
 table Book:
     key id: Int

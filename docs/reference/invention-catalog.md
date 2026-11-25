@@ -1010,7 +1010,6 @@ the code, and none goes stale.
 database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")
-    tables: Shelf
 
 table Shelf:
     key shelf: Int

@@ -385,10 +385,54 @@ pub fn called_agent<'a>(
 
 /// The `database` block that lists `table`.
 pub fn table_database<'a>(file: &'a File, table: &str) -> Option<&'a DatabaseDecl> {
-    file.decls.iter().find_map(|decl| match decl {
-        Decl::Database(db) if db.tables.iter().any(|t| t.name == table) => Some(db),
+    match table_placement(file, table) {
+        TablePlacement::In(database) => Some(database),
         _ => None,
-    })
+    }
+}
+
+/// Where a table's rows live (B09 P11): the database its `in` clause
+/// names, or else its module's one `database` block. The checker reports
+/// every case but the first, and every other layer reads the placement
+/// through [`table_database`], so they never disagree.
+pub enum TablePlacement<'a> {
+    In(&'a DatabaseDecl),
+    /// No `in` clause, and the module declares no database.
+    NoDatabase,
+    /// No `in` clause, and the module declares several.
+    Ambiguous(Vec<&'a DatabaseDecl>),
+    /// The `in` clause names something that is not a database here.
+    UnknownDatabase(&'a corvid_ast::Ident),
+    /// There is no table by that name.
+    NotATable,
+}
+
+pub fn table_placement<'a>(file: &'a File, table: &str) -> TablePlacement<'a> {
+    let Some(decl) = file.decls.iter().find_map(|decl| match decl {
+        Decl::Table(t) if t.name().name == table => Some(t),
+        _ => None,
+    }) else {
+        return TablePlacement::NotATable;
+    };
+    let databases: Vec<&DatabaseDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Database(db) => Some(db),
+            _ => None,
+        })
+        .collect();
+    match &decl.database {
+        Some(named) => match databases.iter().find(|db| db.name.name == named.name) {
+            Some(db) => TablePlacement::In(db),
+            None => TablePlacement::UnknownDatabase(named),
+        },
+        None => match databases.as_slice() {
+            [] => TablePlacement::NoDatabase,
+            [only] => TablePlacement::In(only),
+            _ => TablePlacement::Ambiguous(databases),
+        },
+    }
 }
 
 /// The table declared at `span`, if the type there is a table.

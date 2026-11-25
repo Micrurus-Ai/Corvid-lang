@@ -18,7 +18,6 @@ fn program(settings: &str) -> String {
         r#"
 database site:
 {settings}
-    tables: Member, Page
 
 table Member:
     key id: Int
@@ -90,7 +89,7 @@ async fn unique_rules_turn_repeated_values_into_typed_conflicts() {
 }
 
 fn errors(table: &str) -> String {
-    let source = format!("database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n    tables: Member\n\n{table}\nagent main() -> Int:\n    return 0\n");
+    let source = format!("database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n\n{table}\nagent main() -> Int:\n    return 0\n");
     match compile_to_ir(&source) {
         Ok(_) => panic!("must be refused:\n{source}"),
         Err(errors) => format!("{errors:#?}"),
@@ -114,6 +113,6 @@ fn a_unique_line_names_real_comparable_columns_once() {
 
 #[test]
 fn a_field_may_still_be_named_unique() {
-    let source = "database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n    tables: Flag\n\ntable Flag:\n    key id: Int\n    unique: Bool\n\nagent main() -> Int:\n    return 0\n";
+    let source = "database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n\ntable Flag:\n    key id: Int\n    unique: Bool\n\nagent main() -> Int:\n    return 0\n";
     compile_to_ir(source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
 }

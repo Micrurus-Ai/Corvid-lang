@@ -459,6 +459,36 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - A table says where it lives (B09 P11a)
+
+A `database` block listed its tables with `tables:`, and since tables are
+private to their module it could list only its own module's. So one
+application with one database had to keep every table, and every agent
+that touches one, in a single module, or declare the same database file
+twice, as the reading list did. P11 lets many modules share one
+database. P11a is its first half: the table, not the database, says
+where it lives. A module's tables live in its one `database` block, so
+nearly every program writes nothing. `table Shelf in library:` names the
+database when a module declares several, and P11b will use the same
+clause for a database imported from another module.
+
+`tables:` is removed rather than kept beside `in`. Two spellings for
+where a table lives would break "one obvious way", and the list form is
+the one that cannot reach another module's tables. Writing it is a parse
+error whose message says the table now says where it lives. Placement
+is decided by one function, `table_ops::table_placement`, which reports
+every case: the database named, none in the module, several and no
+`in`, an `in` that names nothing, or not a table at all. The checker,
+IR lowering and the driver's schema builder all read it, and the
+driver's own copy of the lookup is gone. The resolver binds the `in`
+name, and the dependency graph now orders a table after its database
+rather than a database after its tables. A `table Name in db:` is
+recognised as a declaration at the top level, as `table Name:` was.
+Every test program and document lost its `tables:` line. The two-
+database atomic test now names its tables' databases.
+
+---
+
 ## 2026-11-25 - Exhaustiveness sees nested patterns
 
 The checker counted a constructor arm toward exhaustiveness only when

@@ -696,7 +696,6 @@ agent typed_path(text: String) -> Result<Int, String>:
         source: r#"database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")
-    tables: Shelf
 
 table Shelf:
     key shelf: Int

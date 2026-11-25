@@ -453,8 +453,10 @@ pub enum TypeErrorKind {
     TableNotPublic { table: String },
     /// B09 — a table no `database` block lists.
     TableOutsideDatabase { table: String },
-    /// B09 — a table two `database` blocks list.
-    TableInTwoDatabases { table: String, first: String, second: String },
+    /// B09 P11 — a table without `in` in a module with several databases.
+    TableDatabaseAmbiguous { table: String, databases: String },
+    /// B09 P11 — `in` names something that is not a database here.
+    TableDatabaseUnknown { table: String, database: String },
     /// B09 P10 — a `unique` line that names a missing, repeated or
     /// JSON-stored column, or restates the key or another line.
     TableUniqueRule { table: String, message: String },
@@ -466,8 +468,6 @@ pub enum TypeErrorKind {
     DatabaseSettingInvalid { database: String, setting: String, message: String },
     /// B09 — an engine the runtime cannot run yet, or does not know.
     DatabaseEngineUnavailable { database: String, engine: String, available: String },
-    /// B09 — a `database` block lists a name that is not a table.
-    DatabaseTableNotATable { database: String, name: String },
 
     /// A `route:` arm inside a prompt points at a name that is not a
     /// `model` declaration. The runtime can only dispatch to models,
@@ -963,10 +963,13 @@ impl TypeErrorKind {
                 format!("table `{table}` is `public`, but tables are private to the module that declares them")
             }
             Self::TableOutsideDatabase { table } => {
-                format!("table `{table}` is not listed in any `database` block, so nothing says where its rows live")
+                format!("table `{table}` has no database: this module declares none, so nothing says where its rows live")
             }
-            Self::TableInTwoDatabases { table, first, second } => {
-                format!("table `{table}` is listed in both database `{first}` and database `{second}`")
+            Self::TableDatabaseAmbiguous { table, databases } => {
+                format!("table `{table}` does not say which database holds it, and this module declares {databases}")
+            }
+            Self::TableDatabaseUnknown { table, database } => {
+                format!("table `{table}` is `in {database}`, but no `database {database}` is declared here")
             }
             Self::TableUniqueRule { table, message } => format!("a `unique` line in table `{table}` cannot hold: {message}"),
             Self::TableOrderUnordered { column, type_name } => {
@@ -980,9 +983,6 @@ impl TypeErrorKind {
             }
             Self::DatabaseEngineUnavailable { database, engine, available } => {
                 format!("database `{database}` names engine `{engine}`; the engines that run today are {available}")
-            }
-            Self::DatabaseTableNotATable { database, name } => {
-                format!("database `{database}` lists `{name}`, which is not a table")
             }
 
             Self::InvalidCustomDimension { dimension, message } => {
@@ -1417,9 +1417,10 @@ impl TypeErrorKind {
                 "remove `public`; another module reaches the rows through an agent this module exports".into(),
             ),
             Self::TableOutsideDatabase { .. } => Some(
-                "add the table to `tables:` in the `database` block that holds it".into(),
+                "declare a `database` block in this module, and its tables live there".into(),
             ),
-            Self::TableInTwoDatabases { .. } => Some("list each table in exactly one `database` block".into()),
+            Self::TableDatabaseAmbiguous { .. } => Some("write `table Name in <database>:` with one of them".into()),
+            Self::TableDatabaseUnknown { .. } => Some("declare the database in this module, or name one that is".into()),
             Self::TableUniqueRule { .. } => Some(
                 "write `unique email` for one column, or `unique tenant, slug` for columns that must not repeat together".into(),
             ),
@@ -1436,7 +1437,6 @@ impl TypeErrorKind {
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
             ),
-            Self::DatabaseTableNotATable { .. } => Some("`tables:` names `table` declarations".into()),
             Self::RefinementInvalid { .. } => Some(
                 "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"
                     .into(),

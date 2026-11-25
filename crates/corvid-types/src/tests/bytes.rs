@@ -123,7 +123,6 @@ fn a_table_column_of_bytes_is_accepted() {
         "database files:
     engine: sqlite
     location: \"files.sqlite\"
-    tables: Upload
 
 table Upload:
     key id: String

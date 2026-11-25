@@ -17,7 +17,6 @@ fn program(settings: &str) -> String {
         r#"
 database reviews:
 {settings}
-    tables: Edit
 
 table Edit:
     key proposal: String
