@@ -8235,6 +8235,8 @@ A table field may be a `Decimal`, `Duration`, `Instant`, `ZonedTime`, `TimeZone`
 
 Add `unique email` (or `unique tenant, slug` for a pair) to a table so no two rows share the value. A repeated value is an ordinary conflict: `insert` returns `Err(holder)`, the row that has it, and a `save` that would take another row's value writes nothing and returns `Err(Some(holder))`. A missing value never conflicts. Adding the line over rows that already repeat makes `corvid migrate up` fail by name. [Unique values](docs/reference/tables.md#unique-values)
 
+A `match` is complete when its arms cover every value at any depth: `Err(Some(reason))` and `Err(None)` together cover `Err(_)`, and `Saved(Some(n))` with `Saved(None)` covers `Saved`, so you never need a second nested `match` to satisfy the checker. Literal patterns such as `Some(0)` never cover a number; add `Some(_)` or a binding.
+
 A Postgres `database` block declares `connections: 10`, how many connections the program may open. Operations and `atomic:` blocks share that pool and wait their turn when it is full, so a burst of agents queues instead of exhausting the database. Leaving it out is a compile error, because the right number depends on your database plan.
 
 A `@budget` agent may loop over a query that ends in `take(n)` with a literal `n`: the loop is charged `n` times its body, so `for m in Member.all().take(3):` has a checked cost. Without `take` the budget check warns that the cost cannot be proven.

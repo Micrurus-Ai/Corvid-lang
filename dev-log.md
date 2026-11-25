@@ -459,6 +459,33 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Exhaustiveness sees nested patterns
+
+The checker counted a constructor arm toward exhaustiveness only when
+every one of its argument patterns matched anything. So `Err(Some(x))`
+and `Err(None)` together were refused as missing `Err(_)`, and so were
+`Saved(Some(n))` with `Saved(None)` in a sum type, and `Flags { enabled:
+true, .. }` with `Flags { enabled: false, .. }`. Programs had to nest a
+second `match` to say what one match says, and the unique-values test
+hit it. In a language whose failures are typed values, that papercut
+falls on exactly the code that handles them.
+
+Coverage is now decided by the standard pattern-matrix walk, in
+`checker/match_coverage.rs`. Each arm is a row and each value still to
+match is a column. The rows are specialised by every constructor of the
+first column's type (`Some`/`None`, `Ok`/`Err`, `true`/`false`, a sum
+type's variants, or a record's one constructor), and every constructor
+must be covered. A type with unboundedly many values, a number or text,
+is covered only by a pattern that matches anything, so literals still
+never make a match exhaustive, and guarded arms still never count. The
+existing per-type messages still name what is missing. Tests cover four
+complete nested matches and three incomplete ones, including `Some(0)`
+with `None` over an `Option<Int>`. The interpreter runs such matches
+correctly. Native code refuses a nested variant pattern by name, which
+is recorded as its own item.
+
+---
+
 ## 2026-11-25 - A declared connection pool for Postgres tables
 
 Postgres tables had two scale problems. Every non-atomic operation went

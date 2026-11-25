@@ -5893,6 +5893,74 @@ agent main(s: Status) -> String:
     assert!(full.errors.is_empty(), "exhaustive match should pass, got {:?}", full.errors);
 }
 
+/// Nested patterns cover their constructor together: `Err(Some(x))` and
+/// `Err(None)` cover `Err(_)`, at any depth and inside sum variants and
+/// records, while a match still missing a nested case is refused.
+#[test]
+fn nested_patterns_cover_their_constructor_together() {
+    let non_exhaustive = |c: &crate::Checked| c.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::NonExhaustiveMatch { .. }));
+    let complete = [
+        "agent f(r: Result<Int, Option<String>>) -> String:
+    return match r:
+        Ok(_) -> \"ok\"
+        Err(Some(reason)) -> reason
+        Err(None) -> \"gone\"
+",
+        "agent f(o: Option<Option<Bool>>) -> Int:
+    return match o:
+        Some(Some(true)) -> 1
+        Some(Some(false)) -> 2
+        Some(None) -> 3
+        None -> 4
+",
+        "type Outcome:
+    | Saved(count: Option<Int>)
+    | Refused
+
+agent f(o: Outcome) -> Int:
+    return match o:
+        Saved(Some(n)) -> n
+        Saved(None) -> 0
+        Refused -> 0 - 1
+",
+        "type Flags:
+    enabled: Bool
+    label: String
+
+agent f(flags: Flags) -> String:
+    return match flags:
+        Flags { enabled: true, .. } -> \"on\"
+        Flags { enabled: false, label } -> label
+",
+    ];
+    for source in complete {
+        let c = check(source);
+        assert!(!non_exhaustive(&c), "should be exhaustive:\n{source}\n{:?}", c.errors);
+    }
+    let incomplete = [
+        "agent f(o: Option<Option<Int>>) -> Int:
+    return match o:
+        Some(Some(n)) -> n
+        None -> 0
+",
+        "agent f(r: Result<Int, Option<String>>) -> String:
+    return match r:
+        Ok(_) -> \"ok\"
+        Err(Some(reason)) -> reason
+",
+        // Literals never cover a number, nested or not.
+        "agent f(o: Option<Int>) -> Int:
+    return match o:
+        Some(0) -> 0
+        None -> 1
+",
+    ];
+    for source in incomplete {
+        let c = check(source);
+        assert!(non_exhaustive(&c), "should be refused:\n{source}\n{:?}", c.errors);
+    }
+}
+
 /// Slice 45i — Option/Result exhaustiveness + guarded arms never
 /// count toward coverage.
 #[test]

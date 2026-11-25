@@ -930,6 +930,7 @@ mod lambda_check;
 mod fn_check;
 mod struct_literal_check;
 mod match_check;
+mod match_coverage;
 mod expr;
 mod import_call;
 mod json_methods;

@@ -321,6 +321,13 @@ impl<'a> Checker<'a> {
         {
             return;
         }
+        // Covered at any depth: `Err(Some(x))` and `Err(None)` cover
+        // `Err(_)`. The per-type reasons below then only name what is
+        // missing.
+        let rows: Vec<Vec<&Pattern>> = arms.iter().filter(|a| a.guard.is_none()).map(|a| vec![&a.pattern]).collect();
+        if self.rows_cover(&rows, std::slice::from_ref(scrut_ty)) {
+            return;
+        }
         let missing: Option<String> = match scrut_ty {
             Type::Struct(owner) => {
                 let Some(ty_decl) = self.types_by_id.get(owner).copied() else {
