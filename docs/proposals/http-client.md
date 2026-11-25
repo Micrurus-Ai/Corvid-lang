@@ -120,7 +120,9 @@ Request bodies are encoded, and response bodies decoded, through `corvid-public-
 
 ### Responses with status and headers
 
-Most operations want the body. When a program needs the status or a header (an `ETag`, `Location`, a rate-limit header), it declares `-> Response<T>`, a standard type with `status: Int`, `headers: List<HttpHeader>`, `header(name) -> Option<String>` and `body: T`. A program that does not ask for headers does not receive them. Response headers named `Set-Cookie`, or any header a connector's `auth:` echoes, are recorded as `<redacted>`.
+Most operations want the body. When a program needs the status or a header (an `ETag`, `Location`, a rate-limit header), it declares `-> Response<T>`. A program that does not ask for headers does not receive them.
+
+As built (slice 3c): `Response<T>` is read with methods, `r.status()`, `r.body()` and `r.header("ETag")` (an `Option<String>`, the first match, compared without case), the way `Upload` is read with `filename()` and `size()`; one accessor style for compiler-known values beats a second, field style. `Set-Cookie` is not recorded as `<redacted>` but never passed on at all: a connector is not a browser session, and a value the program can read is a value the trace must record for replay. An operation returns a `Response` whole or as its `Result`'s success type; it cannot be a record field, a route, tool or prompt type, JSON, or in `main`'s signature, because it describes one call, not data. In mock mode the `mock:` is the body, answered with status 200 and no headers, so mock mode needs no constructor. A route never declares `HEAD` or `OPTIONS`, which the server answers itself.
 
 ### Streaming
 

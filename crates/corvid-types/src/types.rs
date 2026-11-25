@@ -122,6 +122,13 @@ pub enum Type {
     /// HTTP-boundary type — codegen backends refuse to lower it.
     Page(Box<Type>),
 
+    /// Compiler-known `Response<Body>` (B05): a connector response with
+    /// its status and headers. Returned only by a connector operation
+    /// that declares it; read with `status()`, `body()` and
+    /// `header(name)`. It has no JSON form and never crosses a route,
+    /// prompt, store or table boundary.
+    Response(Box<Type>),
+
     /// Compiler-known `TraceId` — an opaque handle to a recorded
     /// JSONL trace, used as the subject of a `replay <expr>:`
     /// expression. String literals coerce to `TraceId` inside a
@@ -309,6 +316,7 @@ impl Type {
             Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
             Type::Upload(inner) => format!("Upload<{}>", inner.display_name()),
             Type::Page(inner) => format!("Page<{}>", inner.display_name()),
+            Type::Response(inner) => format!("Response<{}>", inner.display_name()),
             Type::TraceId => "TraceId".into(),
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),
@@ -352,6 +360,28 @@ impl Type {
     /// taking one. A declared record holding a `Secret` field is not
     /// seen here, because its fields live in its declaration; callers
     /// that can see declarations walk the fields too.
+    /// Whether a `Response` appears anywhere inside this type.
+    pub fn mentions_response(&self) -> bool {
+        match self {
+            Type::Response(_) => true,
+            Type::List(inner)
+            | Type::Stream(inner)
+            | Type::Option(inner)
+            | Type::Grounded(inner)
+            | Type::Tainted(inner)
+            | Type::Partial(inner)
+            | Type::ResumeToken(inner)
+            | Type::Upload(inner)
+            | Type::Page(inner)
+            | Type::Weak(inner, _) => inner.mentions_response(),
+            Type::Map(a, b) | Type::Result(a, b) => a.mentions_response() || b.mentions_response(),
+            Type::Function { params, ret, .. } => {
+                ret.mentions_response() || params.iter().any(Type::mentions_response)
+            }
+            _ => false,
+        }
+    }
+
     pub fn mentions_secret(&self) -> bool {
         match self {
             Type::Secret => true,
@@ -364,6 +394,7 @@ impl Type {
             | Type::ResumeToken(inner)
             | Type::Upload(inner)
             | Type::Page(inner)
+            | Type::Response(inner)
             | Type::Weak(inner, _) => inner.mentions_secret(),
             Type::Map(a, b) | Type::Result(a, b) => a.mentions_secret() || b.mentions_secret(),
             Type::Function { params, ret, .. } => ret.mentions_secret() || params.iter().any(Type::mentions_secret),

@@ -156,6 +156,21 @@ impl Runtime {
                     ),
                 })?
             };
+            // A `Response<Body>` operation also gets the status and the
+            // response headers. `Set-Cookie` is never passed on: a
+            // connector is not a browser session, and a session cookie
+            // must not reach the program, the trace or a replay.
+            let body = if spec.returns_response {
+                let headers: Vec<serde_json::Value> = response
+                    .headers
+                    .iter()
+                    .filter(|h| !matches!(h.name.to_ascii_lowercase().as_str(), "set-cookie" | "set-cookie2"))
+                    .map(|h| serde_json::json!([h.name.to_ascii_lowercase(), h.value]))
+                    .collect();
+                serde_json::json!({ "status": response.status, "headers": headers, "body": body })
+            } else {
+                body
+            };
             if spec.returns_result {
                 Ok((serde_json::json!({ "tag": "ok", "ok": body }), meta))
             } else {

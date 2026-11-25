@@ -445,6 +445,14 @@ pub enum HttpMethod {
     Put,
     Patch,
     Delete,
+    /// A connector operation that reads a resource's status and headers
+    /// without its body. A route never declares it: `corvid serve`
+    /// answers `HEAD` from the route's `GET`.
+    Head,
+    /// A connector operation that asks what a resource allows. A route
+    /// never declares it: the server answers `OPTIONS` from its routes
+    /// and CORS policy.
+    Options,
 }
 
 /// A protocol-typed connector (slice 52g): a declarative, zero-glue
@@ -1022,6 +1030,8 @@ impl HttpMethod {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::Head => "HEAD",
+            Self::Options => "OPTIONS",
         }
     }
 }

@@ -93,6 +93,10 @@ pub struct ConnectorHttpSpec {
     /// a mapped status becomes `Err(Variant)`; when false the body
     /// decodes directly and a non-2xx is a transport failure.
     pub returns_result: bool,
+    /// Whether the operation returns `Response<Body>` (alone or as a
+    /// `Result`'s success): the answer then carries the status and the
+    /// response headers as well as the body.
+    pub returns_response: bool,
     /// Retry attempts (reliability). `None` = no retry.
     pub retry: Option<u64>,
     /// Client-side rate limit `(limit, window_secs)`.
@@ -223,6 +227,11 @@ pub fn connector_calls_from_ir(
                         .map(|m| (m.status, m.variant.clone()))
                         .collect(),
                     returns_result: matches!(tool.return_ty, corvid_types::Type::Result(_, _)),
+                    returns_response: match &tool.return_ty {
+                        corvid_types::Type::Response(_) => true,
+                        corvid_types::Type::Result(ok, _) => matches!(**ok, corvid_types::Type::Response(_)),
+                        _ => false,
+                    },
                     retry: connector.retry,
                     rate_limit: connector.rate_limit.map(|r| (r.limit, r.window_secs)),
                     circuit_breaker: connector.circuit_breaker,
@@ -547,6 +556,7 @@ mod tests {
             }),
             error_map: vec![],
             returns_result: false,
+            returns_response: false,
             retry: None,
             rate_limit: None,
             circuit_breaker: None,

@@ -277,6 +277,10 @@ impl<'a> Checker<'a> {
                 "an upload has no JSON form",
                 "read it with `text()` or `bytes()` first",
             )),
+            Type::Response(_) => Err(NoForm::new(
+                "a connector response has no JSON form",
+                "encode its `body()`, or the `status()` and headers you need",
+            )),
             Type::DbHandle => Err(NoForm::new("a database handle has no JSON form", "encode the rows you read")),
             Type::JsonBuilder => Err(NoForm::new(
                 "a JSON builder has no JSON form",

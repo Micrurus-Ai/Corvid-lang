@@ -110,6 +110,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         // at `cl_type_for` with the interpreter/serve-tier diagnostic.
         Type::Upload(inner) => format!("Upload_{}", mangle_type_name(inner)),
         Type::Page(inner) => format!("Page_{}", mangle_type_name(inner)),
+        Type::Response(inner) => format!("Response_{}", mangle_type_name(inner)),
         Type::RouteParams(_) => "RouteParams".into(),
         Type::Unknown => "Unknown".into(),
     }
@@ -637,6 +638,10 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // them. False routes any program mentioning them away from the
         // native backend, mirroring `DbHandle`.
         Type::Upload(_) | Type::Page(_) => false,
+        // B05 — a connector `Response` comes from a connector call, which
+        // runs on the interpreter until native dispatch of runtime-owned
+        // calls lands.
+        Type::Response(_) => false,
         Type::Function { .. } => crate::native_callback_type(ty),
         Type::Nothing
         | Type::RouteParams(_)

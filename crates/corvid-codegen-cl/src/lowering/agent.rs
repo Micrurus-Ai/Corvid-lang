@@ -480,6 +480,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,
         )),
+        Type::Response(_) => Err(CodegenError::not_supported(
+            "`Response<Body>` - a connector response comes from a connector call, which runs on the interpreter until native dispatch of runtime-owned calls lands; `corvid run` picks the interpreter for it.",
+            span,
+        )),
         Type::Page(_) => Err(CodegenError::not_supported(
             "`Page<Item>` - cursor pagination is an HTTP-boundary type served by `corvid serve`, not the native backend; the application contract describes the surface. Use the interpreter/serve tier until native pagination lowering lands.",
             span,

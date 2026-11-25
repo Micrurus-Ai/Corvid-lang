@@ -186,6 +186,9 @@ pub fn emit_type_description(
         Type::Upload(_) => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
         },
+        // The checker keeps a connector `Response` off every exported
+        // signature; were one described, its body is the data it carries.
+        Type::Response(inner) => emit_type_description(inner, resolved, names),
         Type::Page(inner) => TypeDescription::List {
             list: AbiListType {
                 element: Box::new(emit_type_description(inner, resolved, names)),

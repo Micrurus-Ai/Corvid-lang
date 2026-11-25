@@ -528,6 +528,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
                 span,
             ))
         }
+        Type::Response(_) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - a connector response never crosses the command-line boundary; return its `body()` or `status()`",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Upload(_) | Type::Page(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - uploads and pagination are HTTP-boundary types served by `corvid serve`, not the native command-line boundary; the application contract describes the surface. Use the interpreter/serve tier.",

@@ -608,6 +608,7 @@ fn type_label(t: &Type) -> String {
         Type::ResumeToken(inner) => format!("ResumeToken<{}>", type_label(inner)),
         Type::Upload(inner) => format!("Upload<{}>", type_label(inner)),
         Type::Page(inner) => format!("Page<{}>", type_label(inner)),
+        Type::Response(inner) => format!("Response<{}>", type_label(inner)),
         Type::TraceId => "TraceId".into(),
         Type::DbHandle => "DbHandle".into(),
         Type::JsonValue => "JsonValue".into(),

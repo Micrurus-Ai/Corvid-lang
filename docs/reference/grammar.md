@@ -320,7 +320,7 @@ approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
                     | 'expires_ms' ':' INT | 'max_cost_usd' ':' '$' (FLOAT | INT)
                     | 'irreversible' ':' ('true' | 'false')
 
-http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
 
 schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
                       '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE
@@ -381,6 +381,12 @@ operation cannot set `Authorization`, `Proxy-Authorization`, `Cookie`,
 `Host`, `Content-Type`, `Content-Length` or `Transfer-Encoding`, the
 header its connector's `auth:` uses, or its protocol's idempotency
 header, and sets each header at most once.
+
+`HEAD` and `OPTIONS` are connector methods; a route never declares them,
+because `corvid serve` answers `HEAD` from the route's `GET` and
+`OPTIONS` from its routes and CORS policy. An operation returning
+`Response<Body>` also gets the status and response headers; a `HEAD`
+operation returns `Response<Nothing>`. See [`Response`](functions.md#response).
 
 ```ebnf
 connector_decl    ::= 'connector' IDENT ':' INDENT connector_item+ DEDENT

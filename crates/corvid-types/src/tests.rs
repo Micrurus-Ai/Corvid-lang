@@ -2655,6 +2655,110 @@ connector svc:
     assert!(has(&wrong, "is not a valid HTTP header name"), "{wrong:?}");
 }
 
+/// A connector `Response` is the caller's value: an operation returns it
+/// whole or inside `Ok`, a helper agent can take it, and its accessors
+/// are typed. It never sits inside another type, in a record, at a route
+/// or a tool, or in `main`'s signature. A `HEAD` operation returns
+/// `Response<Nothing>`, a mock is the body, and a route never declares
+/// `HEAD` or `OPTIONS`.
+#[test]
+fn connector_responses_are_checked() {
+    let program = |extra: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Charge:
+    id: String
+
+type ChargeError:
+    | Missing
+
+connector payments:
+    base_url: "https://api.payments.example"
+    timeout: 10s
+    redirects: never
+    modes: [mock, real]
+    operation charge(id: String) -> Response<Charge> uses http_read:
+        GET "/v1/charges/{{id}}"
+        mock: Charge(id)
+    operation maybe(id: String) -> Result<Response<Charge>, ChargeError> uses http_read:
+        GET "/v1/charges/{{id}}"
+        on status 404 -> Missing
+        mock: Ok(Charge(id))
+    operation exists(id: String) -> Response<Nothing> uses http_read:
+        HEAD "/v1/charges/{{id}}"
+        mock: nothing
+{extra}
+agent etag_of(r: Response<Charge>) -> String:
+    return match r.header("ETag"):
+        Some(tag) -> tag
+        None -> ""
+
+agent main() -> Int uses http_read:
+    r = charge("ch_1")
+    id: String = r.body().id
+    tag: String = etag_of(r)
+    return r.status()
+"#
+        )
+    };
+    let errors = |src: String| -> Vec<String> {
+        check(&src).errors.iter().map(|e| format!("{:?}", e.kind)).collect()
+    };
+    let has = |e: &[String], needle: &str| e.iter().any(|x| x.contains(needle));
+
+    let fine = errors(program(""));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let nested = errors(program(
+        r#"    operation all(id: String) -> List<Response<Charge>> uses http_read:
+        GET "/v1/all"
+        mock: []
+"#,
+    ));
+    assert!(has(&nested, "never inside another type"), "{nested:?}");
+
+    let head = errors(program(
+        r#"    operation peek(id: String) -> Response<Charge> uses http_read:
+        HEAD "/v1/charges/{{id}}"
+        mock: Charge(id)
+"#,
+    ));
+    assert!(has(&head, "returns `Response<Nothing>`"), "{head:?}");
+
+    let wrong_mock = errors(program(
+        r#"    operation other(id: String) -> Response<Charge> uses http_read:
+        GET "/v1/other"
+        mock: "not a charge"
+"#,
+    ));
+    assert!(has(&wrong_mock, "the operation's mock is `"), "{wrong_mock:?}");
+
+    let in_record = errors(program("type Saved:\n    answer: Response<Charge>\n"));
+    assert!(has(&in_record, "a field of `Saved`"), "{in_record:?}");
+
+    let in_tool = errors(program("tool keep(r: Response<Charge>) -> Bool\n"));
+    assert!(has(&in_tool, "a tool's signature"), "{in_tool:?}");
+
+    let route = errors(program(
+        r#"server api:
+    route HEAD "/status" -> json String:
+        return "ok"
+    route GET "/charge" -> json Response<Charge> uses http_read:
+        return charge("ch_1")
+"#,
+    ));
+    assert!(has(&route, "RouteMethodAnsweredByServer"), "{route:?}");
+    assert!(has(&route, "a route's inputs or response"), "{route:?}");
+
+    let to_json = errors(program(
+        "agent dump() -> String uses http_read:\n    return charge(\"ch_1\").to_json()\n",
+    ));
+    assert!(has(&to_json, "a connector response has no JSON form"), "{to_json:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:
