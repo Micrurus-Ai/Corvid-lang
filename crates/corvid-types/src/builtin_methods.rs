@@ -794,6 +794,30 @@ pub fn json_error_fields() -> [(&'static str, Type); 4] {
 /// compiler-known, so it has no declaration id; this one is reserved.
 pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX);
 
+/// Every type id reserved for a compiler-known record, by name. A new
+/// compiler-known record takes the next free id below these and joins
+/// this list; the test beside it fails if two share an id, which would
+/// make the interpreter mistake one record for the other.
+pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 3] = [
+    ("JsonError", JSON_ERROR_TYPE_ID),
+    ("RegexMatch", REGEX_MATCH_TYPE_ID),
+    ("Response", RESPONSE_TYPE_ID),
+];
+
+#[cfg(test)]
+mod reserved_type_id_tests {
+    use super::RESERVED_TYPE_IDS;
+
+    #[test]
+    fn every_reserved_type_id_is_distinct() {
+        for (i, (name, id)) in RESERVED_TYPE_IDS.iter().enumerate() {
+            for (other, other_id) in &RESERVED_TYPE_IDS[i + 1..] {
+                assert_ne!(id, other_id, "`{name}` and `{other}` share the reserved type id {id:?}");
+            }
+        }
+    }
+}
+
 /// Look up `T.name(...)` where the receiver is the type `target`
 /// itself rather than a value. Only the JSON decoders are type
 /// methods; whether `target` has a JSON form is checked by the caller,
