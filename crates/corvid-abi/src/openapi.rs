@@ -19,11 +19,16 @@ use crate::app_contract::{
 use serde_json::{json, Map, Value};
 
 /// Project the application contract to an OpenAPI 3.1 document.
+/// The JSON Schema of each contract type, by name: the `components`
+/// `schemas` of the OpenAPI document. Public so the backend's own
+/// tooling can describe types it does not publish (the connector wire
+/// shapes) with exactly the schemas published types get.
+pub fn component_schemas(types: &[ContractType]) -> Map<String, Value> {
+    types.iter().map(|ty| (ty.name.clone(), schema_for_type(ty))).collect()
+}
+
 pub fn emit_openapi(contract: &ApplicationContract) -> Value {
-    let mut schemas = Map::new();
-    for ty in &contract.types {
-        schemas.insert(ty.name.clone(), schema_for_type(ty));
-    }
+    let schemas = component_schemas(&contract.types);
 
     let mut paths = Map::new();
     for route in &contract.routes {
@@ -539,6 +544,7 @@ mod tests {
             prompts: vec![],
             identities: vec![],
             connectors: vec![],
+            connector_wire: Default::default(),
         }
     }
 

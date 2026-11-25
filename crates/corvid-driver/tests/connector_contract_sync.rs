@@ -1,10 +1,14 @@
-//! The Application Contract and the runtime describe a connector's
-//! request the same way (B05 slice 3d). The contract names each
-//! operation's body and query types and describes them in `types`; the
-//! OpenAPI document built from it gives their JSON Schema. This test runs
-//! a real connector call, captures what the provider received, and checks
-//! it against that schema, so the contract, the generated clients that
-//! read it, and the runtime cannot drift apart unnoticed.
+//! The compiler and the runtime describe a connector's request the same
+//! way (B05 slice 3d). The contract's `connector_wire` names each
+//! operation's body and query types and describes them with the JSON
+//! Schema published types get (`openapi::component_schemas`). This test
+//! runs a real connector call, captures what the provider received, and
+//! checks it against that schema, so the description and the runtime
+//! cannot drift apart unnoticed.
+//!
+//! The wire shapes are backend detail: the published contract
+//! (`/.well-known/corvid`) and OpenAPI document (`/openapi.json`) never
+//! carry a type that only a connector uses.
 
 use corvid_driver::{compile_to_application_contract_with_config, compile_to_ir_with_config_at_path, run_ir_with_runtime};
 use corvid_runtime::{HttpClient, HttpEgressPolicy, Runtime};
@@ -150,21 +154,23 @@ async fn what_a_connector_sends_matches_the_contract_schema() {
     let main_path = dir.path().join("main.cor");
     std::fs::write(&main_path, SOURCE).unwrap();
 
-    // The contract names the operation's body and query types and
-    // describes them, though none is public.
+    // The wire description names the operation's body and query types and
+    // describes every type they reach.
     let contract = compile_to_application_contract_with_config(SOURCE, "main.cor", "test", None)
         .expect("contract builds");
-    let operation = &contract.connectors[0].operations[0];
+    let wire = &contract.connector_wire;
+    let operation = &wire.operations[0];
+    assert_eq!((operation.connector.as_str(), operation.operation.as_str()), ("shop", "place"));
     assert_eq!(operation.body_type.as_deref(), Some("NewOrder"));
     assert_eq!(operation.body_encoding.as_deref(), Some("json"));
     assert_eq!(operation.query_type.as_deref(), Some("OrderFilter"));
     assert_eq!(operation.response_type, "Order");
     assert_eq!(operation.headers, vec!["X-Request-Id".to_string()]);
     for name in ["NewOrder", "Address", "Priority", "OrderFilter", "Order"] {
-        assert!(contract.types.iter().any(|t| t.name == name), "`{name}` is described in the contract");
+        assert!(wire.types.iter().any(|t| t.name == name), "`{name}` is in the wire description");
     }
-    let openapi = corvid_abi::openapi::emit_openapi(&contract);
-    let components = &openapi["components"]["schemas"];
+    let components = J::Object(corvid_abi::openapi::component_schemas(&wire.types));
+    let components = &components;
 
     // The runtime sends a real request.
     let ir = compile_to_ir_with_config_at_path(SOURCE, &main_path, None).expect("compiles");
@@ -203,4 +209,20 @@ async fn what_a_connector_sends_matches_the_contract_schema() {
     let mut drifted = body.clone();
     drifted["note"] = json!({ "tag": "none" });
     assert!(conforms(&drifted, &json!({ "$ref": "#/components/schemas/NewOrder" }), components, "$").is_err());
+}
+
+/// A private type that only a connector uses never reaches what `corvid
+/// serve` publishes: neither the contract at `/.well-known/corvid` nor
+/// the OpenAPI document at `/openapi.json`.
+#[test]
+fn a_connector_only_type_is_absent_from_the_published_contract() {
+    let contract = compile_to_application_contract_with_config(SOURCE, "main.cor", "test", None)
+        .expect("contract builds");
+    let published = serde_json::to_string(&contract).unwrap();
+    let openapi = corvid_abi::openapi::emit_openapi(&contract).to_string();
+    for name in ["NewOrder", "Address", "Priority", "OrderFilter", "gift_note", "postcode"] {
+        assert!(!published.contains(name), "`{name}` leaked into the published contract");
+        assert!(!openapi.contains(name), "`{name}` leaked into the OpenAPI document");
+    }
+    assert!(!contract.connector_wire.types.is_empty(), "the backend still has the wire shapes in process");
 }

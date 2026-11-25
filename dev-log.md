@@ -13,6 +13,34 @@ the required arguments. [Design](docs/proposals/frontend-web-starter.md)
 
 ---
 
+## 2026-11-25 - Connector wire shapes stay out of the published contract (B05, slice 3d fix)
+
+Slice 3d put every type a connector sends or reads into the contract's
+public `types`, private ones included. The main-line session pointed out
+that `corvid serve` publishes the contract at `/.well-known/corvid` and
+the OpenAPI document at `/openapi.json`, which clients, generated SDKs
+and assistants read. That made a private record, such as a payment
+provider's request, public by default, against "nothing is exposed by
+default".
+
+The description moves to `ApplicationContract::connector_wire`, a field
+marked `#[serde(skip)]`, so no serialized copy can carry it. In-process
+tooling and tests read it. `openapi::component_schemas`, now public,
+gives its types the same JSON Schema published types get, so the sync
+test still validates the provider's received body against one schema
+path. A new test asserts that no connector-only type or field name
+appears in the published contract or OpenAPI document. The
+operation-level type names were removed from the published connector
+entries too, since they name private types.
+
+Left open, now on the roadmap: the published connector entries still
+carry the base URL, paths, effects and slice 1's `timeout` and
+`redirects`, a 52g-3d choice to advertise integrations. Whether a
+deployment publishes its outbound integrations at all is a consequential
+privacy decision that may need a source declaration.
+
+---
+
 ## 2026-11-25 - Connector bodies in the Application Contract (B05, slice 3d)
 
 The main-line session asked, when 3a changed how connector bodies are
