@@ -9,6 +9,8 @@ description = "Pipeline orchestrator for the Corvid compiler."
 python = ["corvid-runtime/python"]
 
 [dependencies]
+# Ed25519 verification goes through corvid-crypto's strict check.
+corvid-crypto = { workspace = true }
 fd-lock = "4.0.4"
 corvid-ast = { workspace = true }
 corvid-syntax = { workspace = true }
