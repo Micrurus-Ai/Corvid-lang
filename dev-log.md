@@ -4,6 +4,38 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - The complete HTTP client is decided (B05)
+
+B05 completes the `connector` declaration instead of adding a second
+HTTP client ([proposal](docs/proposals/http-client.md)). A connector
+already fixes its host in source, attaches credentials by secret name
+without recording them, and maps statuses to typed errors. What it
+lacked is what B05 adds: a declared `timeout:` and `redirects:` policy
+with no default (today every request silently gets 30 seconds and up to
+10 redirects), every method, headers, query records, bodies through
+B01's public JSON mapping rather than the trace envelope, `Response<T>`,
+streaming both ways, multipart, a record of every attempt, and
+cancellation that closes the upstream connection.
+
+Decided by the laws in `AGENTS.md`, as the user directed:
+
+- No frontend agreement: only backend code writes connectors.
+- `http_get` and `http_post_json` are replaced by a dynamic-host
+  connector, because "one obvious way" rules out a second request path
+  and the tools' hidden timeout and redirect limit break "no hidden
+  defaults". They are a documented invention (catalog entry, tour, book
+  chapter 18, three guarantee IDs), so slice 1 migrates every one of
+  those surfaces.
+- Native code waits for the shared native-dispatch decision that native
+  `Secret` also waits on.
+
+The main-line session reviewed the proposal and asked for one wire
+description of connector bodies: slice 3 adds body types to the
+Application Contract from the same schema code routes use, with a test
+that the runtime's encoding matches it.
+
+---
+
 ## 2026-11-24 - `corvid migrate` compiles a program the way `corvid check` does
 
 Porting the reading list onto tables found that `corvid migrate plan`

@@ -213,9 +213,9 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
 
-**B05 complete HTTP client** (proposal awaiting agreement, macOS session). [Proposal](proposals/http-client.md)
+**B05 complete HTTP client** (in progress, macOS session). [Proposal](proposals/http-client.md)
 
-- [ ] Agree the proposal, including its three open questions: frontend agreement for the new connector items, retiring `http_get` and `http_post_json`, and native dispatch.
+- [x] Agree the proposal: no frontend agreement needed, `http_get` and `http_post_json` replaced by a dynamic-host connector, native code after the shared native-dispatch decision. [Decisions](proposals/http-client.md#decisions)
 - [ ] 1. Declared `timeout:` and `redirects:` on every connector, startup refusal of a connector host outside `[http] allow`, `HEAD` and `OPTIONS`.
 - [ ] 2. An `HttpExchange` record for every attempt, with credentials redacted, replayed exactly.
 - [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`; the contract and the generated clients describe connector bodies from the same schema, with a test that the runtime's encoding matches it.

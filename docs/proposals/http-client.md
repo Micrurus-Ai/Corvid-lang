@@ -1,6 +1,6 @@
 # Proposal: the complete HTTP client (B05)
 
-Status: **proposed, awaiting agreement.** No code before agreement ([pre-phase chat](../../AGENTS.md#pre-phase-chat-mandatory)).
+Status: **accepted 2026-11-25, in progress.** Decided by the macOS session under the design laws in `AGENTS.md`, as the user directed; the reasons are under [Decisions](#decisions). Slices are tracked under "Task progress" in [the backend and AI roadmap](../backend-ai-roadmap.md).
 Owner: backend and AI development, macOS session ([parallel backend sessions](../internals/parallel-backend-sessions.md)). It adds connector grammar, which only backend code writes; whether that needs frontend agreement is open question 1.
 
 ## Problem
@@ -198,7 +198,17 @@ Each slice ships with interpreter tests, its reference page and roadmap checklis
 - Response caching (B44), verified incoming webhooks (B16), WebSocket clients (B14).
 - Recovery syntax at the call site (`try ... else`, B12). Failures here are the existing connector failures and typed `Result` errors.
 
-## Open questions
+## Decisions
+
+Recorded 2026-11-25. The user directed the sessions to decide by the laws in `AGENTS.md` rather than ask for approval.
+
+1. **No frontend agreement is needed.** Only backend code writes a `connector`, so its items are not grammar shared with the frontend. `HEAD` and `OPTIONS` extend the method rule routes also use; routes are backend declarations too, and the main-line session confirmed the change is safe for B10, whose action endpoints use `POST`.
+2. **`http_get` and `http_post_json` are replaced by a dynamic-host connector (option A).** "One obvious way" rules out keeping a second request path, and "no hidden defaults" rules out keeping it as it is. Option B would also mean building headers, auth, typed bodies and streaming twice. The replacement and the migration of every surface that names the tools (invention entry, tour, book chapter 18, reference pages, guarantees, skills audit, Python codegen scan, tests) land in slice 1, with a `learnings.md` entry.
+3. **B05 ships on the interpreter first; slice 6 (native code) stays open.** Native dispatch of runtime-owned tools through the runtime's recording is shared architecture that native `Secret`, native UUID and the B06 boundary types also wait on. It is decided as its own task, not inside B05, so the five interpreter slices are designed to reuse the same runtime code natively.
+
+## Questions that were open
+
+All three are settled under [Decisions](#decisions).
 
 1. **Frontend agreement.** The new connector items (`timeout:`, `redirects:`, `header`, `query`, `multipart`, `streams:`) are grammar, but only backend code writes connectors. Does Codex need to agree them, or only the `HEAD` and `OPTIONS` change to the method rule routes share?
 2. **The dynamic-URL tools.** Replace `http_get` and `http_post_json` with a dynamic-host connector, migrating the invention entry, tour, book chapter, guarantees and tests (A, recommended)? Or keep them with required `timeout` and `redirects` arguments (B)?
