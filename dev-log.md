@@ -554,6 +554,21 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Native nested patterns were already there (B09)
+
+The B09 item for native nested patterns was stale. Running
+`match r: Err(Some(reason)) -> ...` with `--target native` compiles and
+gives the interpreter's answers: the native matcher has recursed into
+payloads since the list `first` and `last` slice (ef8292bf). The program
+the item was written from was refused for its arm body, `"ok " +
+n.to_string()`, because `Int.to_string()` is interpreter-only, which
+the roadmap already lists. Nothing in the compiler changed. A parity
+test now covers a nested `Option` inside a `Result` error, an
+`Option<Option<Int>>`, and a sum variant inside a `Result`, so the
+claim is held by a test instead of by memory.
+
+---
+
 ## 2026-11-25 - The shared-actions example returns its conflict (B09 Conflict-3)
 
 The B10 proposal's `move_card` example declared a `MoveRefused` sum type

@@ -403,3 +403,18 @@ fn composed_collection_guard_and_index() {
 fn composed_contextual_float() {
     assert_parity_bool_without_tools(include_str!("contextual_float.cor"), true);
 }
+
+/// A pattern inside a pattern compiles natively: `Err(Some(reason))`
+/// beside `Err(None)`, `Some(Some(n))` beside `Some(None)`, and a sum
+/// variant inside a `Result`, each arm reading the bound payload.
+#[test]
+fn nested_patterns_match_their_payloads_natively() {
+    assert_parity_bool_without_tools(
+        "type Outcome:\n    | Saved\n    | Moved(to: String)\n\n\
+agent failure(r: Result<Int, Option<String>>) -> String:\n    return match r:\n        Ok(n) -> \"ok\"\n        Err(Some(reason)) -> \"failed: \" + reason\n        Err(None) -> \"failed quietly\"\n\n\
+agent depth(v: Option<Option<Int>>) -> Int:\n    return match v:\n        Some(Some(n)) -> n\n        Some(None) -> 0 - 1\n        None -> 0 - 2\n\n\
+agent placed(r: Result<Outcome, String>) -> String:\n    return match r:\n        Ok(Moved(to)) -> \"moved to \" + to\n        Ok(Saved) -> \"saved\"\n        Err(reason) -> reason\n\n\
+agent main() -> Bool:\n    texts = failure(Ok(3)) == \"ok\" and failure(Err(Some(\"late\"))) == \"failed: late\" and failure(Err(None)) == \"failed quietly\"\n    depths = depth(Some(Some(7))) == 7 and depth(Some(None)) == 0 - 1 and depth(None) == 0 - 2\n    places = placed(Ok(Moved(\"Done\"))) == \"moved to Done\" and placed(Ok(Saved)) == \"saved\" and placed(Err(\"no\")) == \"no\"\n    return texts and depths and places\n",
+        true,
+    );
+}
