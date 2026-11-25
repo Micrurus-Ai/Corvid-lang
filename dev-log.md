@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-3 WebSocket transport
+
+The RT-3 transport now decodes page requests, forwards revisioned rows, releases unsubscribed handles and refreshes active queries on authority changes. Each open goes through serve's existing GET permission check. The upgrade refuses service until the live declaration, session notifications and committed stream are connected. The CLI smoke check exercises this boundary with the booking example. F08 reconnect acceptance remains pending. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
+
 ### Live subscriptions protocol agreement
 
 The frontend and backend now share a proposed implementation target for live declarations, ordered snapshots, committed changes and reconnect. Transport and grammar can start in parallel. [Protocol and ownership](docs/proposals/real-time.md#frontend-agreement-and-wire-protocol)

@@ -2,6 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+- [ ] RT-3 live subscription transport. The socket and frame lifecycle are implemented. Connect the permission-bearing RT-1 declarations and RT-2 committed streams, then verify revocation and reconnect through a running app. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
+
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
 
 F17 compares windowed lists and tables through one shared browser workflow so that input, navigation and streaming costs are comparable across implementations. The [frontend checklist](docs/frontend-roadmap.md#running-the-frontend-loop) tracks host verification.

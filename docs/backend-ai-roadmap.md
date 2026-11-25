@@ -239,6 +239,8 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 - [ ] RT-1. `live` declarations: parse, check and contract entry (this session).
 - [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
 - [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
+  - [x] Implement the upgrade checks, typed frames, per-page handle lifecycle, authority-change processing and heartbeat.
+  - [ ] Connect the real declaration, permission check, session-change publisher and filtered stream. Prove a denied subscription, revocation, a missed commit in the reconnect snapshot and the following live edit through serve.
 - [ ] RT-4. Typed subscriptions in the generated TypeScript client and the Corvid browser binding (Codex, F08).
 - [ ] RT-5. Action calls over the live connection, after B10 (Codex).
 - [ ] RT-6. Several server processes share commits through Postgres `LISTEN`/`NOTIFY` (this session).

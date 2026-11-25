@@ -282,6 +282,54 @@ impl Drop for ServedApp {
 }
 
 #[test]
+fn live_upgrade_requires_origin_protocol_and_runtime() {
+    use std::io::{BufRead, BufReader};
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let address = format!("127.0.0.1:{port}");
+    let child = Command::new(corvid_bin())
+        .args([
+            "serve",
+            "examples/booking/src/main.cor",
+            "--listen",
+            &address,
+        ])
+        .current_dir(repo_root())
+        .spawn()
+        .unwrap();
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port));
+    let local = format!("http://{address}");
+    for (origin, protocol, expected) in [
+        ("https://other.example", "corvid.live.v1", 403),
+        (&local, "other", 400),
+        (&local, "corvid.live.v1", 503),
+    ] {
+        let mut socket = TcpStream::connect(&address).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            socket,
+            "GET /.well-known/corvid/live HTTP/1.1\r\nHost: {address}\r\n\
+            Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: {origin}\r\n\
+            Sec-WebSocket-Protocol: {protocol}\r\n\r\n"
+        )
+        .unwrap();
+        let mut status = String::new();
+        BufReader::new(socket).read_line(&mut status).unwrap();
+        assert!(
+            status.starts_with(&format!("HTTP/1.1 {expected} ")),
+            "{status}"
+        );
+    }
+}
+
+#[test]
 fn reference_apps_serve_their_schema_route() {
     // (app dir, port, a substring the `/schema` JSON must contain)
     let apps = [

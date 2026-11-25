@@ -66,6 +66,7 @@ use corvid_vm::{
 use libloading::{Library, Symbol};
 
 mod browser_asset;
+mod live;
 use browser_asset::browser_asset;
 
 use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
@@ -101,6 +102,8 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    live_provider: Option<Arc<dyn live::Provider>>,
+    live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
@@ -389,6 +392,9 @@ pub(crate) fn cmd_serve(
         compiled_assets.push(("events.js", mime, bytes));
     }
     let state = Arc::new(ServeState {
+        // RT-1 and RT-2 supply the permission-bearing declaration and stream.
+        live_provider: None,
+        live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,
         rag_embedder,
@@ -437,6 +443,7 @@ pub(crate) fn cmd_serve(
         // (slice 51r): the Application Contract at the well-known path
         // and a standard OpenAPI 3.1 document.
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route(live::PATH, on(MethodFilter::GET, live::upgrade))
         .route("/.well-known/corvid/stream.js", on(MethodFilter::GET, || async {
             ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
                 include_str!("serve_cmd/stream.js"))
@@ -479,6 +486,9 @@ pub(crate) fn cmd_serve(
                 .unwrap_or_default();
             if route.method == HttpMethod::Get && route.path == "/.well-known/corvid/stream.js" {
                 anyhow::bail!("route path `{}` is reserved for the browser streaming module", route.path);
+            }
+            if route.method == HttpMethod::Get && route.path == live::PATH {
+                anyhow::bail!("route path `{}` is reserved for live subscriptions", route.path);
             }
             let meta = Arc::new(RouteMeta {
                 form_encoded: route.form_encoded,
@@ -645,9 +655,15 @@ pub(crate) fn cmd_serve(
             outcome = &mut server => return outcome.context("serve"),
             signal = shutdown_signal() => signal.context("listen for shutdown signal")?,
         }
+        state_for_banner.live_shutdown.send_replace(true);
         let _ = shutdown.send(());
         eprintln!("corvid serve: draining active requests");
-        match tokio::time::timeout(std::time::Duration::from_secs(30), server).await {
+        let drain = async {
+            let result = server.await;
+            state_for_banner.live_shutdown.closed().await;
+            result
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(30), drain).await {
             Ok(outcome) => outcome.context("drain server"),
             Err(_) => {
                 eprintln!("corvid serve: 30-second drain deadline expired");

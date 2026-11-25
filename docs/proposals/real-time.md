@@ -119,6 +119,24 @@ Use the existing server session and route permission rules. Match the browser or
 
 RT-1 supplies the contract entry and the runtime open/close handle described above. RT-2 supplies committed, filtered changes. RT-3 and RT-4 use those interfaces. RT-5 reuses B10's action contract when available. F08/F18 acceptance exercises a missed edit in the new snapshot and a subsequent live edit over the same subscription.
 
+### RT-3 integration boundary
+
+The serve transport owns the page socket, ids, heartbeat and handle lifetimes.
+Opening a path needs the RT-1 declaration and its route permission. RT-2 must
+return the initial ordered rows and a filtered change stream at the same
+commit boundary. Dropping the stream releases the subscription. Session
+invalidation must wake an idle socket, and an authority change must invalidate
+pending rows before delivery. Until serve has those interfaces it refuses the
+upgrade. A synthetic table source would not exercise that boundary.
+
+The serve adapter calls `Provider::resolve` for the bound query and its
+route policy, then passes the verified route actor to `Query::open`.
+`Provider::observe_session` must validate the existing session and publish
+role changes, expiry and logout even while the socket is idle. RT-2 owns
+coalescing and replacement snapshots. The transport polls the handles
+directly so a slow socket does not accumulate a second queue of changes.
+[Adapter interface](../../crates/corvid-cli/src/serve_cmd/live/source.rs)
+
 ## Non-scope
 
 - `take(n)` in a `live` query. Keeping a moving top-N correct needs the rows just outside the window; a later slice.
