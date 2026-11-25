@@ -20,7 +20,7 @@ The table below is the execution order for the browser frontend. The detailed de
 
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
-Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. These tasks can proceed while F08 waits for B14. Final application acceptance includes F08 so the collaborative workspace still exercises reconnect and resubscription.
+Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. These tasks can proceed while F08 waits for B14. Commerce and offline-editor acceptance can start before F08 merges. Final acceptance requires the merged F08 subscription contract and a passing collaborative-workspace reconnect and resubscription check.
 
 | ID | Deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
@@ -41,7 +41,7 @@ Offline edits can synchronize through ordinary request/response routes. Server r
 | F15 | AI-operable custom applications | F06 | A developer exposes selected client actions and typed context on an unfamiliar component. A compatible assistant discovers and invokes the same behavior as a person. Test disabled and stale actions, revocation at the established server boundary, and operation without an assistant. Keep backend and AI grammar with Claude Code. |
 | F16 | Developer tools and component distribution | F04, F09, F14 | From a clean project, scaffold, preview, rebuild, debug a source-mapped failure, test and reuse a component package from a separate app. Cover editor completion, component navigation, dependency locking, CSS/assets, browser constraints and migration diagnostics. |
 | F17 | Performance and cross-browser regression coverage | F05, F06, F14 | Measure startup bytes, cold and warm loads, input latency, frame time and memory on large lists, repeated navigation and streaming updates. Verify windowed rendering of long lists and tables preserves keyboard access and scroll position. Compare equivalent production behavior against TypeScript. Establish reproducible budgets and run representative workflows on Chromium, Firefox and WebKit. |
-| F18 | Independent application acceptance | F08, F11, F12, F13, F15, F16, F17 | Build a responsive commerce flow, offline creative editor and streaming collaborative workspace from ordinary projects, including large and empty states, failures and recovery. An independent developer builds a novel component using only public docs and reports remaining blockers. Record what passed and any platform limits. |
+| F18 | Independent application acceptance | F11, F12, F13, F15, F16, F17 | Build a responsive commerce flow, offline creative editor and streaming collaborative workspace from ordinary projects, including large and empty states, failures and recovery. An independent developer builds a novel component using only public docs and reports remaining blockers. Record what passed and any platform limits. Complete F18 only after F08 merges and the collaborative workspace reconnects and resumes its subscription. |
 
 ### Running the frontend loop
 
