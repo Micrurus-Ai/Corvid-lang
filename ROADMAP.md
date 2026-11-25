@@ -2,6 +2,15 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+- [ ] RT-4 / F08. SDK frame handling has focused client tests. Generate typed
+  subscriptions and bind component lifetimes once RT-1 supplies the public row
+  schema and ordered key. Verify a missed commit and a subsequent live edit
+  against RT-2 and RT-3 before closing the F08 and F18 reconnect gates.
+  [Contract dependency](docs/proposals/real-time.md#rt-4-client-implementation-boundary)
+- [ ] Verify full-width integer table keys across RT-2, RT-3 and both clients.
+  The SDK rejects JSON number keys outside JavaScript's safe integer range.
+  Agree a lossless key representation before accepting those subscriptions.
+
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
 
 F17 compares windowed lists and tables through one shared browser workflow so that input, navigation and streaming costs are comparable across implementations. The [frontend checklist](docs/frontend-roadmap.md#running-the-frontend-loop) tracks host verification.

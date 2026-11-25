@@ -4,6 +4,13 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ### Live subscriptions protocol agreement
 
+RT-4 SDK work exercises PR 46's snapshot, ordered change, unsubscribe and
+forbidden frames through the public TypeScript client. The client compares
+decimal revisions as strings and reconciles each subscription independently.
+The tests use injected frames. Generated methods, the Corvid binding and
+committed-stream verification await the backend inputs recorded in the
+[client implementation boundary](docs/proposals/real-time.md#rt-4-client-implementation-boundary).
+
 The frontend and backend now share a proposed implementation target for live declarations, ordered snapshots, committed changes and reconnect. Transport and grammar can start in parallel. [Protocol and ownership](docs/proposals/real-time.md#frontend-agreement-and-wire-protocol)
 
 ### F16 web starter and installed component tooling

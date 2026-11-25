@@ -11,6 +11,7 @@
 
 export { CorvidClient, type CorvidClientOptions } from "./transport.js";
 export { CorvidError } from "./errors.js";
+export type { LiveObserver } from "./live-connection.js";
 export {
   type AgentEvent,
   type AgentStream,

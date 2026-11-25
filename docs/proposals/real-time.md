@@ -130,6 +130,39 @@ Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route para
 1. **Path parameters are read as `path.board`**, as a route reads them. A subscription handler receives the same path record as a route handler.
 2. **Typed path placeholders, agreed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. The generated client takes its parameter types from the contract. A client subscribing to board 7 sends the concrete path `/boards/7/cards`.
 
+## RT-4 client implementation boundary
+
+The SDK can reconcile the public JSON rows in a snapshot using the ordered key
+fields from the table declaration. For example, an Edit keyed by proposal and
+shelf needs both fields even when two proposals contain the same shelf number.
+Retain the row object when its key and decimal revision match. A replacement
+snapshot determines the entire order and removes absent rows. The browser can
+then reuse unaffected component state. This adds no assistant access.
+
+At revision 6681008c, `ContractLive` provides the path, typed parameters,
+row type name and policy. The contract emitter collects record schemas from
+`Decl::Type`; a table is a `Decl::Table`. The backend contract needs to
+publish the live row's public field schema and ordered key fields. Guessing an
+id, using the first field, or asking the application author to repeat the key
+would disconnect the client from the declaration. Generated methods and
+`ui.live(board_app.cards, board)` depend on that input. PR 46 sends a public
+JSON row and a decimal revision, without a separate key. RT-2 owns delivery
+from committed writes. Integration requires both a fresh snapshot containing
+a missed edit and a later committed edit on the same subscription.
+
+Run the independent SDK checks from the repository root with TypeScript and
+Node installed:
+
+```sh
+tsc -p sdk/typescript/client --noEmit false --outDir sdk/typescript/client/target
+node --test --test-isolation=none sdk/typescript/client/test/live.mjs
+```
+
+Inspect the public contract with
+`corvid contract app sdk/typescript/client/test/boards.cor --out -`. Its
+`Card` table has the composite key `board, card`. Keep F08 and F18 open until
+the generated subscription and component binding pass against a committed stream.
+
 ## Non-scope
 
 - `take(n)` in a `live` query. Keeping a moving top-N correct needs the rows just outside the window; a later slice.

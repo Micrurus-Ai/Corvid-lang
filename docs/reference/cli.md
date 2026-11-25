@@ -6,6 +6,24 @@
 canonical help output lives in `corvid --help`; this page is the
 overview.
 
+## Live client transport
+
+The TypeScript SDK provides
+`CorvidClient.subscribe<Row>(path, keyFields, observer): () => void` for client
+bindings. The binding supplies the concrete encoded path and the ordered names
+of the table's key fields. String keys and exactly representable safe integer
+keys are supported. An inexact numeric key terminates delivery. The browser
+uses its session cookie on the WebSocket connection. HTTP request headers in
+the client options apply only to fetch requests.
+
+`LiveObserver<Row>.rows(rows)` receives a complete ordered list after a
+snapshot or change. Rows with the same key and revision keep their identity.
+`LiveObserver<Row>.error(error)` signals terminal failure. Clear the displayed
+result on error. A scoped denial yields a `CorvidError` with status 403 and
+body code `forbidden`. Session invalidation ends every subscription on the
+connection. Call the returned function when the owner unmounts. Multiple
+calls are safe. Generated live methods and the Corvid binding remain pending.
+
 ## Project commands
 
 ```sh

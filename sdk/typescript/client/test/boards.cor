@@ -1,0 +1,20 @@
+identity users:
+    provider google
+    provisioning:
+        first_login: invited
+        tenant: fixed("public")
+    roles:
+        board_member: "board.view"
+
+database boards:
+    engine: sqlite
+    location: "boards.sqlite"
+
+table Card:
+    key board: String
+    key card: Int
+    title: String
+
+server board_app:
+    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+        return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
