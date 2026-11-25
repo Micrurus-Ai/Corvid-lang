@@ -339,6 +339,35 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Unique values in tables (B09 P10)
+
+A table can now say that no two rows share a value: `unique email`, or
+`unique tenant, slug` for "unique within a tenant". It is one line form,
+like `retired`, for one column or several. Marking fields individually
+would leave a reader unsure whether several marks mean "each" or
+"together".
+
+Each rule is a unique index the planner manages beside the derived
+ones. SQLite cannot add a constraint to a stored table, but it can add a
+unique index. Over rows that already repeat, `migrate up` fails and
+names the index, and the test checks it. A repeated value is a typed
+conflict through the existing result types. `insert` already returns the
+stored row on a conflict, and now that is the row holding the value. A
+`save` that would take another row's value writes nothing and returns
+`Err(Some(holder))`, which the caller tells apart from a stale write by
+the holder's key. The check is part of the `UPDATE` (`AND NOT EXISTS` a
+holder), because on Postgres a unique-violation error inside an
+`atomic:` block would end its transaction. Both engines pass the same
+test: a single-column rule, an optional column whose missing values
+never conflict, a two-column rule and a stale save.
+
+Writing the test found a checker gap, recorded on the roadmap:
+`Err(Some(x))` and `Err(None)` are not recognised as covering `Err(_)`.
+A distinct conflict variant for writes is recorded as its own decision,
+since it would change every table's `save` type.
+
+---
+
 ## 2026-11-25 - Indexes follow the queries (B09 P9)
 
 The reading list's port to tables left a full scan where the

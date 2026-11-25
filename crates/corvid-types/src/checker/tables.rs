@@ -56,6 +56,7 @@ impl<'a> Checker<'a> {
         }
         self.check_field_refinements(&table.record);
         self.check_column_history(table);
+        self.check_unique_rules(table);
 
         let databases: Vec<&DatabaseDecl> = self
             .file
@@ -105,6 +106,52 @@ impl<'a> Checker<'a> {
                 TypeErrorKind::TableColumnHistoryConflict { table: table.name().name.clone(), message },
                 span,
             ));
+        }
+    }
+
+    /// Each `unique` line names columns of the table that the database can
+    /// compare, once each, and says something the key does not already.
+    fn check_unique_rules(&mut self, table: &TableDecl) {
+        use crate::table_columns::{column_kind, ColumnKind};
+        let mut seen: Vec<Vec<&str>> = Vec::new();
+        for rule in &table.unique {
+            let mut columns: Vec<&str> = Vec::new();
+            for column in rule {
+                let problem = match table.declared_fields().iter().find(|f| f.name.name == column.name) {
+                    None => Some(format!("`{}` is not a column of the table", column.name)),
+                    Some(field) if column_kind(&self.type_ref_to_type(&field.ty)).0 == ColumnKind::Json => {
+                        Some(format!("`{}` is stored as JSON, so the database cannot compare it", column.name))
+                    }
+                    Some(_) if columns.contains(&column.name.as_str()) => Some(format!("`{}` is named twice", column.name)),
+                    Some(_) => None,
+                };
+                match problem {
+                    Some(message) => self.errors.push(TypeError::new(
+                        TypeErrorKind::TableUniqueRule { table: table.name().name.clone(), message },
+                        column.span,
+                    )),
+                    None => columns.push(&column.name),
+                }
+            }
+            let mut sorted = columns.clone();
+            sorted.sort_unstable();
+            let mut key: Vec<&str> = table.keys.iter().map(|k| k.name.as_str()).collect();
+            key.sort_unstable();
+            let span = rule.first().map(|c| c.span).unwrap_or(table.record.span);
+            let message = if sorted == key {
+                Some("the key's columns are already unique".to_string())
+            } else if seen.contains(&sorted) {
+                Some("the same columns are already unique on another line".to_string())
+            } else {
+                None
+            };
+            match message {
+                Some(message) => self.errors.push(TypeError::new(
+                    TypeErrorKind::TableUniqueRule { table: table.name().name.clone(), message },
+                    span,
+                )),
+                None => seen.push(sorted),
+            }
         }
     }
 

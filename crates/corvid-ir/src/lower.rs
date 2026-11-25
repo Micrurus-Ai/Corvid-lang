@@ -2364,6 +2364,7 @@ impl<'a> Lowerer<'a> {
             name: table.name().name.clone(),
             keys: table.keys.iter().map(|key| key.name.clone()).collect(),
             columns: table.record.fields.iter().map(|f| f.name.name.clone()).collect(),
+            unique: table.unique.iter().map(|rule| rule.iter().map(|c| c.name.clone()).collect()).collect(),
             database: ir_database(database)?,
         })
     }

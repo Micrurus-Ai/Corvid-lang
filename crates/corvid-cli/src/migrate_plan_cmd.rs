@@ -272,6 +272,7 @@ mod tests {
             renamed: Vec::new(),
             retired: Vec::new(),
             engine: corvid_runtime::tables::TableEngine::Sqlite,
+            unique: Vec::new(),
             indexes: Vec::new(),
         }
     }

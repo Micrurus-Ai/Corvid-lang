@@ -21,7 +21,9 @@ pub struct TableSchema {
     pub retired: Vec<String>,
     /// The engine its database runs on.
     pub engine: TableEngine,
-    /// The indexes its queries need (B09 P9), derived from the program.
+    /// Each `unique` rule's columns (B09 P10).
+    pub unique: Vec<Vec<String>>,
+    /// The indexes its queries and `unique` rules need (B09 P9, P10).
     pub indexes: Vec<super::TableIndex>,
 }
 

@@ -455,6 +455,9 @@ pub enum TypeErrorKind {
     TableOutsideDatabase { table: String },
     /// B09 — a table two `database` blocks list.
     TableInTwoDatabases { table: String, first: String, second: String },
+    /// B09 P10 — a `unique` line that names a missing, repeated or
+    /// JSON-stored column, or restates the key or another line.
+    TableUniqueRule { table: String, message: String },
     /// B09 P8a — `order_by` on a column whose type has no order.
     TableOrderUnordered { column: String, type_name: String },
     /// B09 — a `database` block omits a setting that has no default.
@@ -965,6 +968,7 @@ impl TypeErrorKind {
             Self::TableInTwoDatabases { table, first, second } => {
                 format!("table `{table}` is listed in both database `{first}` and database `{second}`")
             }
+            Self::TableUniqueRule { table, message } => format!("a `unique` line in table `{table}` cannot hold: {message}"),
             Self::TableOrderUnordered { column, type_name } => {
                 format!("`order_by` reads column `{column}`, a `{type_name}`, which has no order")
             }
@@ -1416,6 +1420,9 @@ impl TypeErrorKind {
                 "add the table to `tables:` in the `database` block that holds it".into(),
             ),
             Self::TableInTwoDatabases { .. } => Some("list each table in exactly one `database` block".into()),
+            Self::TableUniqueRule { .. } => Some(
+                "write `unique email` for one column, or `unique tenant, slug` for columns that must not repeat together".into(),
+            ),
             Self::TableOrderUnordered { type_name, .. } if type_name == "ZonedTime" => {
                 Some("order by an `Instant` column instead: two zoned times in different zones can be the same instant".into())
             }

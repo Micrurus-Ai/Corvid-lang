@@ -84,6 +84,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
                 renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
                 retired: table.retired.iter().map(|name| name.name.clone()).collect(),
                 engine,
+                unique: table.unique.iter().map(|rule| rule.iter().map(|c| c.name.clone()).collect()).collect(),
                 indexes: Vec::new(),
             })
         })
@@ -93,7 +94,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
     for schema in &mut schemas {
         let own: Vec<QueryShape> = shapes.iter().filter(|(table, _)| *table == schema.name).map(|(_, shape)| shape.clone()).collect();
         let columns: Vec<String> = schema.columns.iter().map(|(name, _)| name.clone()).collect();
-        match derive_indexes(&schema.name, &schema.keys, &columns, &own) {
+        match derive_indexes(&schema.name, &schema.keys, &schema.unique, &columns, &own) {
             Ok(indexes) => schema.indexes = indexes,
             Err(message) => problems.push(Diagnostic { origin: None, span: corvid_ast::Span::new(0, 0), message, hint: None }),
         }

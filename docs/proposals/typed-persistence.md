@@ -405,9 +405,36 @@ Decisions:
   compiler indexed; a new screen that needs a new lookup gets its index
   from the agent it calls, in the same migration.
 
-Not yet: unique constraints (a uniqueness rule is a correctness
-decision, not an index, and needs its own conflict value), and using an
-index for `starts_with`.
+Not yet: using an index for `starts_with`.
+
+## Unique values (P10)
+
+`unique email` and `unique tenant, slug` are lines in the table, like
+`retired`: one form for a rule over one column or several, because a
+multi-tenant application needs "unique within a tenant" as often as
+"unique". Each line is one rule; marking several fields would leave a
+reader guessing whether they are unique alone or together.
+
+Decisions:
+
+- **A unique index per rule** (`Table_unique_columns`), managed with the
+  derived indexes. SQLite cannot add a constraint to a stored table, but
+  it can add a unique index, so the same migration adds a rule to a table
+  on either engine. Over rows that already repeat, `migrate up` fails by
+  name: the planner never picks which row survives.
+- **The conflict is a value, through the existing types.** `insert`'s
+  `Err` already holds "the row already stored" and now holds the row with
+  the value. A `save` blocked by another row's value writes nothing and
+  returns `Err(Some(holder))`; the caller tells it from a stale write by
+  the holder's key. The `UPDATE` carries the check (`AND NOT EXISTS` a
+  holder) so the conflict is never a database error, which on Postgres
+  would end an `atomic:` block's transaction. A true race between two
+  writers is still refused by the index, as a loud error.
+- **A missing value never conflicts**, as in a unique index.
+- **Open question:** a distinct conflict value, such as `Taken(holder)`
+  beside `Changed(current)`, would make the two `save` cases separate
+  arms. It changes every table's `save` type, so it is a decision of its
+  own rather than part of this slice.
 
 ## Open questions for review
 

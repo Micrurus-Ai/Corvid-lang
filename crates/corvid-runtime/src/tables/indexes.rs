@@ -25,24 +25,33 @@ pub struct QueryShape {
     pub order: Option<String>,
 }
 
-/// An index a table's queries need.
+/// An index a table's queries need, or one of its `unique` rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableIndex {
     pub name: String,
     pub columns: Vec<String>,
     /// The agents whose queries it serves.
     pub agents: Vec<String>,
+    /// Whether it enforces a `unique` rule.
+    pub unique: bool,
 }
 
 /// The longest identifier Postgres keeps; a longer one is cut short, and
 /// a cut name would never match the planned one again.
 const MAX_NAME: usize = 63;
 
-/// The indexes `table`'s queries need. `columns` is the table's columns in
-/// declaration order. A query the key already serves, in whole or as a
-/// leading part, needs none, and an index whose columns lead another's is
-/// served by that one.
-pub fn derive_indexes(table: &str, keys: &[String], columns: &[String], shapes: &[QueryShape]) -> Result<Vec<TableIndex>, String> {
+/// The indexes `table` needs: one unique index per `unique` rule, then
+/// one for each query. `columns` is the table's columns in declaration
+/// order. A query the key or a unique index already serves, in whole or as
+/// a leading part, needs none, and an index whose columns lead another's
+/// is served by that one.
+pub fn derive_indexes(
+    table: &str,
+    keys: &[String],
+    unique: &[Vec<String>],
+    columns: &[String],
+    shapes: &[QueryShape],
+) -> Result<Vec<TableIndex>, String> {
     let position = |column: &String| columns.iter().position(|c| c == column).unwrap_or(usize::MAX);
     let mut wanted: Vec<(Vec<String>, Vec<String>)> = Vec::new();
     for shape in shapes {
@@ -54,7 +63,7 @@ pub fn derive_indexes(table: &str, keys: &[String], columns: &[String], shapes: 
                 index.push(last.clone());
             }
         }
-        if index.is_empty() || leads(&index, keys) {
+        if index.is_empty() || leads(&index, keys) || unique.iter().any(|rule| leads(&index, rule)) {
             continue;
         }
         match wanted.iter_mut().find(|(columns, _)| *columns == index) {
@@ -85,9 +94,12 @@ pub fn derive_indexes(table: &str, keys: &[String], columns: &[String], shapes: 
         .map(|(columns, mut agents)| {
             agents.sort();
             agents.dedup();
-            Ok(TableIndex { name: index_name(table, &columns)?, columns, agents })
+            Ok(TableIndex { name: index_name(table, "by", &columns)?, columns, agents, unique: false })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    for rule in unique {
+        indexes.push(TableIndex { name: index_name(table, "unique", rule)?, columns: rule.clone(), agents: Vec::new(), unique: true });
+    }
     indexes.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(indexes)
 }
@@ -97,23 +109,30 @@ fn leads(prefix: &[String], of: &[String]) -> bool {
     prefix.len() <= of.len() && of[..prefix.len()] == *prefix
 }
 
-/// The start of every index name Corvid makes for `table`. The planner
-/// drops only indexes whose names start with it.
+/// The start of every lookup index name Corvid makes for `table`. The
+/// planner drops only indexes whose names start with it or with
+/// [`unique_prefix`].
 pub fn managed_prefix(table: &str) -> String {
     format!("{table}_by_")
 }
 
-/// `Table_by_owner_job`, or, past Postgres's 63-byte limit, the table and
-/// a stable digest of the columns.
-fn index_name(table: &str, columns: &[String]) -> Result<String, String> {
-    let readable = format!("{}{}", managed_prefix(table), columns.join("_"));
+/// The start of every unique index name Corvid makes for `table`.
+pub fn unique_prefix(table: &str) -> String {
+    format!("{table}_unique_")
+}
+
+/// `Table_by_owner_job` or `Table_unique_email`, or, past Postgres's
+/// 63-byte limit, the prefix and a stable digest of the columns.
+fn index_name(table: &str, kind: &str, columns: &[String]) -> Result<String, String> {
+    let prefix = format!("{table}_{kind}_");
+    let readable = format!("{prefix}{}", columns.join("_"));
     if readable.len() <= MAX_NAME {
         return Ok(readable);
     }
     let digest = columns.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, column| {
         column.bytes().chain(std::iter::once(0)).fold(hash, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
     });
-    let short = format!("{}{digest:016x}", managed_prefix(table));
+    let short = format!("{prefix}{digest:016x}");
     if short.len() <= MAX_NAME {
         Ok(short)
     } else {
@@ -128,22 +147,24 @@ fn index_name(table: &str, columns: &[String]) -> Result<String, String> {
 /// comment the migration shows: indexes Corvid made that no query needs
 /// are dropped, and missing ones are created.
 pub fn plan_index_changes(table: &TableSchema, stored: &[String]) -> Vec<(String, String)> {
-    let prefix = managed_prefix(&table.name);
+    let (lookup, unique) = (managed_prefix(&table.name), unique_prefix(&table.name));
     let mut statements = Vec::new();
-    for name in stored.iter().filter(|name| name.starts_with(&prefix)) {
+    for name in stored.iter().filter(|name| name.starts_with(&lookup) || name.starts_with(&unique)) {
         if !table.indexes.iter().any(|index| &index.name == name) {
             statements.push((
-                format!("`{}`: drop index `{name}`, which no query needs any more", table.name),
+                format!("`{}`: drop index `{name}`, which no query or `unique` line needs any more", table.name),
                 format!("DROP INDEX IF EXISTS {};", quote(name)),
             ));
         }
     }
     for index in table.indexes.iter().filter(|index| !stored.contains(&index.name)) {
         let columns = index.columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
-        statements.push((
-            format!("`{}`: index ({}) for the queries in {}", table.name, index.columns.join(", "), agents_list(&index.agents)),
-            format!("CREATE INDEX IF NOT EXISTS {} ON {} ({columns});", quote(&index.name), quote(&table.name)),
-        ));
+        let (comment, create) = if index.unique {
+            (format!("`{}`: no two rows share ({})", table.name, index.columns.join(", ")), "CREATE UNIQUE INDEX")
+        } else {
+            (format!("`{}`: index ({}) for the queries in {}", table.name, index.columns.join(", "), agents_list(&index.agents)), "CREATE INDEX")
+        };
+        statements.push((comment, format!("{create} IF NOT EXISTS {} ON {} ({columns});", quote(&index.name), quote(&table.name))));
     }
     statements
 }
@@ -167,7 +188,7 @@ mod tests {
     const COLUMNS: &[&str] = &["job", "owner", "paused", "budget", "revision"];
 
     fn derived(shapes: &[QueryShape]) -> Vec<(String, Vec<String>, Vec<String>)> {
-        derive_indexes("Job", &strings(&["job"]), &strings(COLUMNS), shapes)
+        derive_indexes("Job", &strings(&["job"]), &[], &strings(COLUMNS), shapes)
             .unwrap()
             .into_iter()
             .map(|i| (i.name, i.columns, i.agents))
@@ -199,12 +220,20 @@ mod tests {
     }
 
     #[test]
+    fn a_unique_rule_is_a_unique_index_that_also_serves_lookups() {
+        let rule = vec![strings(&["owner", "budget"])];
+        let indexes = derive_indexes("Job", &strings(&["job"]), &rule, &strings(COLUMNS), &[shape("mine", &["owner"], None, None)]).unwrap();
+        assert_eq!(indexes.len(), 1, "{indexes:?}");
+        assert_eq!((indexes[0].name.as_str(), indexes[0].unique), ("Job_unique_owner_budget", true));
+    }
+
+    #[test]
     fn long_names_stay_within_postgres_limits_and_are_stable() {
         let long = "a_column_with_a_name_long_enough_to_push_past_the_limit";
         let columns = strings(&["job", long, "other_long_column_name"]);
         let shapes = [shape("q", &[long, "other_long_column_name"], None, None)];
-        let first = derive_indexes("Job", &strings(&["job"]), &columns, &shapes).unwrap();
-        let again = derive_indexes("Job", &strings(&["job"]), &columns, &shapes).unwrap();
+        let first = derive_indexes("Job", &strings(&["job"]), &[], &columns, &shapes).unwrap();
+        let again = derive_indexes("Job", &strings(&["job"]), &[], &columns, &shapes).unwrap();
         assert!(first[0].name.len() <= MAX_NAME && first[0].name.starts_with("Job_by_"), "{}", first[0].name);
         assert_eq!(first, again);
     }

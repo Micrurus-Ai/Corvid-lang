@@ -254,6 +254,39 @@ fn indexes_follow_the_queries() {
     assert!(plan().contains("already match every declared table"));
 }
 
+/// A `unique` line is planned as a unique index, and adding one to a
+/// table whose rows already repeat the value fails `migrate up` by name
+/// rather than picking a row to keep (B09 P10).
+#[test]
+fn a_unique_line_is_planned_and_refused_over_repeated_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "site.sqlite".into() };
+    let write = |extra: &str| {
+        std::fs::write(
+            root.join("src/main.cor"),
+            format!("database site:\n    engine: sqlite\n    location: \"site.sqlite\"\n    tables: Member\n\ntable Member:\n    key id: Int\n    email: String\n{extra}\nagent main() -> Int:\n    a = Member.insert(Member(1, \"ana@example.com\"))\n    b = Member.insert(Member(2, \"ana@example.com\"))\n    return 0\n"),
+        )
+        .unwrap()
+    };
+    let up = || corvid(&["migrate", "up", "--dir", "migrations", "--database", "site.sqlite"], root, &engine);
+    write("");
+    ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    ok(&up());
+    ok(&corvid(&["run", "--target", "interp", "src/main.cor"], root, &engine));
+
+    write("    unique email\n");
+    ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    let path = std::fs::read_dir(root.join("migrations")).unwrap().map(|e| e.unwrap().path()).find(|p| p.to_string_lossy().contains("002")).unwrap();
+    let sql = std::fs::read_to_string(path).unwrap();
+    assert!(sql.contains("CREATE UNIQUE INDEX IF NOT EXISTS \"Member_unique_email\" ON \"Member\" (\"email\");"), "{sql}");
+    let failed = up();
+    assert!(!failed.status.success(), "a unique index over repeated rows must not apply");
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("UNIQUE"), "{stderr}");
+}
+
 /// A decimal column goes from declaration to a running query through the
 /// CLI: the planner writes its collation, `migrate up` creates the table
 /// on a connection that knows it, and `corvid run` compares by value.

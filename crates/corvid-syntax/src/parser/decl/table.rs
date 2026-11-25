@@ -31,6 +31,7 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         let mut renamed = Vec::new();
         let mut retired = Vec::new();
+        let mut unique = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -46,6 +47,23 @@ impl<'a> Parser<'a> {
                 if let Err(e) = self.parse_retired_columns(&mut retired) {
                     self.errors.push(e);
                     self.sync_to_statement_boundary();
+                }
+                continue;
+            }
+            // `unique email` or `unique tenant, slug`: columns no two rows
+            // may share. Like `retired`, it is a field name when `:`
+            // follows it.
+            if matches!(self.peek(), TokKind::Ident(w) if w == "unique")
+                && matches!(self.peek_ahead(1), TokKind::Ident(_))
+            {
+                self.bump();
+                let mut columns = Vec::new();
+                match self.parse_retired_columns(&mut columns) {
+                    Ok(()) => unique.push(columns),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
                 }
                 continue;
             }
@@ -93,7 +111,7 @@ impl<'a> Parser<'a> {
             visibility,
             span: start.merge(end),
         };
-        Ok(TableDecl { record, keys, renamed, retired })
+        Ok(TableDecl { record, keys, renamed, retired, unique })
     }
 
     /// A table field, optionally followed by `renamed from <old name>`.
@@ -122,7 +140,7 @@ impl<'a> Parser<'a> {
         Ok(field)
     }
 
-    /// The column names after `retired`, separated by commas.
+    /// The column names after `retired` or `unique`, separated by commas.
     fn parse_retired_columns(&mut self, retired: &mut Vec<Ident>) -> Result<(), ParseError> {
         loop {
             let (name, span) = self.expect_ident()?;

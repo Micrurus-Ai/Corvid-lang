@@ -320,7 +320,9 @@ memory prefs:
 table Shelf:
     key shelf: Int
     title: String renamed from name
+    owner: String
     retired legacy, old_note
+    unique owner, title
 
 agent rename(shelf: Shelf) -> String:
     atomic:
@@ -705,6 +707,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("table_decl", "tables_and_databases"),
     ("table_field", "tables_and_databases"),
     ("table_retired", "tables_and_databases"),
+    ("table_unique", "tables_and_databases"),
     ("atomic_stmt", "tables_and_databases"),
     ("database_decl", "tables_and_databases"),
     ("database_setting", "tables_and_databases"),

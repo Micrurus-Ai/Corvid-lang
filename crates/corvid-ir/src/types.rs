@@ -1221,6 +1221,8 @@ pub struct IrTable {
     pub keys: Vec<String>,
     /// Column names in declaration order, with `revision` last.
     pub columns: Vec<String>,
+    /// Each `unique` rule's columns (B09 P10).
+    pub unique: Vec<Vec<String>>,
     pub database: IrDatabase,
 }
 

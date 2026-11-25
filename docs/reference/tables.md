@@ -209,6 +209,39 @@ note.
 
 A query uses `db_egress_read`, like `Shelf.get`, so pure `fn`s and
 `@deterministic` agents cannot run one.
+## Unique values
+
+A `unique` line names columns no two rows may share: `unique email` for
+one column, `unique tenant, slug` for columns that must not repeat
+together, so two tenants can each have a page called `home`. Each line
+is its own rule.
+
+```corvid
+table Member:
+    key id: Int
+    email: String
+    nickname: Option<String>
+    unique email
+    unique nickname
+```
+
+A write that would repeat a value is a conflict, returned as a value
+like any other:
+
+| Call | When another row holds the value |
+| --- | --- |
+| `Member.insert(row)` | `Err(holder)`: the row that has it, as for a repeated key. |
+| `Member.save(row)` | `Err(Some(holder))`, and nothing is written. If `holder`'s key is the row's own, the row changed since it was read; otherwise `holder` is the row that has the value. |
+
+A missing value never conflicts, so many members may have no nickname.
+Each rule is a unique index that `corvid migrate plan` creates and drops
+with the line (`Member_unique_email`), and it also serves lookups by those
+columns. Adding a `unique` line to a table whose rows already repeat the
+value makes `corvid migrate up` fail and name the index, rather than
+choose which row to keep: change or remove the repeated rows first. The
+key's columns are unique already, so a line that restates them is a
+compile error, as is one naming a JSON-stored column.
+
 ## Indexes
 
 You never write an index. A table is private to its module, so the

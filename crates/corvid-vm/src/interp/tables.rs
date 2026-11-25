@@ -359,6 +359,7 @@ fn table_target<'t>(
         keys: &table.keys,
         columns: &table.columns,
         kinds,
+        unique: &table.unique,
         location: &table.database.location,
         engine,
         transaction,

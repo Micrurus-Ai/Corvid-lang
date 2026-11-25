@@ -31,7 +31,7 @@ mod recorded;
 mod schema;
 mod transaction;
 pub use dialect::TableEngine;
-pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, QueryShape, TableIndex};
+pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_prefix, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
 pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
@@ -53,6 +53,8 @@ pub struct TableRef<'a> {
     pub columns: &'a [String],
     /// How each column is stored, in [`Self::columns`] order.
     pub kinds: &'a [ColumnKind],
+    /// Each `unique` rule's columns (B09 P10).
+    pub unique: &'a [Vec<String>],
     pub location: &'a DatabaseLocation,
     pub engine: TableEngine,
     /// The `atomic:` block this operation runs inside, if any.
@@ -164,10 +166,14 @@ impl Runtime {
             values.push(DbValue::Integer(1));
             return Ok(Ok(values));
         }
-        let existing = self.select_row(table, key).await?.ok_or_else(|| {
-            RuntimeError::Other(format!("table `{}`: an insert conflicted with a row that is gone", table.name))
-        })?;
-        Ok(Err(existing))
+        if let Some(existing) = self.select_row(table, key.clone()).await? {
+            return Ok(Err(existing));
+        }
+        // Not the key: another row holds a `unique` value.
+        match self.unique_holder(table, &values).await? {
+            Some(holder) => Ok(Err(holder)),
+            None => Err(RuntimeError::Other(format!("table `{}`: an insert conflicted with a row that is gone", table.name))),
+        }
     }
 
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
@@ -192,8 +198,16 @@ impl Runtime {
         let revision_mark = table.engine.count_mark(values.len() + 1);
         let revision_column = quote(corvid_ast::TableDecl::REVISION_FIELD);
         let set = if assignments.is_empty() { String::new() } else { format!("{assignments}, ") };
+        // A write that would give the row another row's `unique` values
+        // changes nothing, so it can be reported as a value instead of a
+        // database error that would end an `atomic:` block's transaction.
+        let unique_free: String = table
+            .unique
+            .iter()
+            .map(|rule| format!(" AND NOT EXISTS ({})", unique_holder_sql(table, rule, &mut |c| mark(column_index(table, c)))))
+            .collect();
         let sql = format!(
-            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {matches_key} AND {revision_column} = {revision_mark}",
+            "UPDATE {} SET {set}{revision_column} = {revision_column} + 1 WHERE {matches_key} AND {revision_column} = {revision_mark}{unique_free}",
             quote(table.name),
         );
         let mut params = values.clone();
@@ -203,7 +217,35 @@ impl Runtime {
             values.push(DbValue::Integer(revision + 1));
             return Ok(Ok(values));
         }
-        Ok(Err(self.select_row(table, key).await?))
+        let current = self.select_row(table, key.clone()).await?;
+        // Still at the revision this write saw: what blocked it is the row
+        // holding one of its `unique` values.
+        if let Some(stored) = &current {
+            if revision_of(table, stored)? == revision {
+                if let Some(holder) = self.unique_holder(table, &values).await? {
+                    return Ok(Err(Some(holder)));
+                }
+            }
+        }
+        Ok(Err(current))
+    }
+
+    /// Another row (not the one with `key`) holding all of some `unique`
+    /// rule's values in `values`, the row's columns without its revision.
+    async fn unique_holder(&self, table: &TableRef<'_>, values: &[DbValue]) -> Result<Option<Row>, RuntimeError> {
+        for rule in table.unique {
+            let mut params = Vec::new();
+            let mut mark_of = |column: &str| {
+                let index = column_index(table, column);
+                params.push(values[index].clone());
+                table.engine.mark(params.len(), table.kinds[index], &values[index])
+            };
+            let sql = unique_holder_sql(table, rule, &mut mark_of).replacen("SELECT 1 ", &format!("SELECT {} ", table.engine.select_list(table)), 1);
+            if let Some(holder) = self.table_select(table, &sql, &params).await?.into_iter().next() {
+                return Ok(Some(holder));
+            }
+        }
+        Ok(None)
     }
 
     /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Err` with
@@ -236,6 +278,29 @@ impl Runtime {
         );
         Ok(self.table_select(table, &sql, &key).await?.into_iter().next())
     }
+}
+
+/// `SELECT 1 FROM Table AS holder WHERE` each of `rule`'s columns equals
+/// the value `mark` binds, and the key is not the row's own: another row
+/// holding the rule's values. A missing value never matches, so rows
+/// missing one of a rule's values never conflict, as in a unique index.
+fn unique_holder_sql(table: &TableRef<'_>, rule: &[String], mark: &mut dyn FnMut(&str) -> String) -> String {
+    let equal = rule
+        .iter()
+        .map(|column| format!("\"holder\".{} = {}", quote(column), mark(column)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let own_key = table
+        .keys
+        .iter()
+        .map(|column| format!("\"holder\".{} = {}", quote(column), mark(column)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    format!("SELECT 1 FROM {} AS \"holder\" WHERE {equal} AND NOT ({own_key})", quote(table.name))
+}
+
+fn column_index(table: &TableRef<'_>, column: &str) -> usize {
+    table.columns.iter().position(|c| c == column).expect("a unique or key column is one of the table's columns")
 }
 
 /// A result row's cells in [`TableRef::columns`] order.

@@ -1372,6 +1372,9 @@ pub struct TableDecl {
     /// Dropping a column loses its data, so the planner drops only the
     /// columns named here (B09 P3).
     pub retired: Vec<Ident>,
+    /// `unique email` or `unique tenant, slug`: columns no two rows may
+    /// share, alone or together (B09 P10). Each line is one rule.
+    pub unique: Vec<Vec<Ident>>,
 }
 
 /// One `renamed from` clause: the declared field and the name its

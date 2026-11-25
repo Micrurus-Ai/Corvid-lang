@@ -77,10 +77,17 @@ impl TestDatabase {
         }
     }
 
-    /// Create the tables `source` declares.
+    /// Create the tables `source` declares, with the indexes a migration
+    /// would give them, `unique` rules included.
     pub async fn create_tables(&self, source: &str) {
         let schemas = corvid_driver::table_schemas(source, std::path::Path::new("program.cor")).unwrap_or_else(|e| panic!("must compile: {e:#?}"));
-        let sql = schemas.iter().map(|table| create_table_sql_on(table, self.engine())).collect::<Vec<_>>().join("\n");
+        let mut sql = schemas.iter().map(|table| create_table_sql_on(table, self.engine())).collect::<Vec<_>>().join("\n");
+        for table in &schemas {
+            for (_, statement) in corvid_runtime::tables::plan_index_changes(table, &[]) {
+                sql.push_str(&statement);
+                sql.push('\n');
+            }
+        }
         match self {
             TestDatabase::Sqlite { path, .. } => {
                 let connection = rusqlite::Connection::open(path).expect("open");
