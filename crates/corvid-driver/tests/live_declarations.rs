@@ -1,0 +1,112 @@
+//! B14 RT-1 — `live` declarations. A `live` names a table query; a
+//! subscriber receives the matching rows, then each committed change.
+//! These pin the declaration: it parses beside routes, its body must be
+//! one query of the table it delivers, the contract lists it by name
+//! with its row type and permission, and `corvid serve` refuses to start
+//! a program with one until the WebSocket transport (RT-3) serves it.
+
+use corvid_driver::{
+    check_contract_closure, compile_to_application_contract_with_config, compile_to_ir, RuntimeCapabilities,
+};
+
+const BOARD: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        board_member: "board.view"
+
+database boards:
+    engine: sqlite
+    location: "boards.sqlite"
+
+table Card:
+    key card: Int
+    board: String
+    column: String
+    title: String
+"#;
+
+fn program(server: &str) -> String {
+    format!("{BOARD}\n{server}")
+}
+
+fn errors(server: &str) -> Vec<String> {
+    match compile_to_ir(&program(server)) {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors.into_iter().map(|e| e.message).collect(),
+    }
+}
+
+const LIVE: &str = r#"server board_app:
+    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+        return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
+
+    route GET "/boards/{board}/cards" -> json List<Card>:
+        return Card.where(fn (c) -> c.board == path.board)
+"#;
+
+#[test]
+fn a_live_declaration_checks_beside_a_route_on_the_same_path() {
+    let found = errors(LIVE);
+    assert!(found.is_empty(), "{found:#?}");
+}
+
+#[test]
+fn the_contract_lists_a_live_by_name_apart_from_the_routes() {
+    let contract = compile_to_application_contract_with_config(&program(LIVE), "app.cor", "test", None)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+    assert_eq!(contract.live.len(), 1);
+    let live = &contract.live[0];
+    assert_eq!(live.name, "cards");
+    assert_eq!(live.path, "/boards/{board}/cards");
+    assert_eq!(live.row_type, "Card");
+    assert_eq!(live.path_params[0].name, "board");
+    assert_eq!(live.policy.as_ref().map(|p| p.permissions.clone()), Some(vec!["board.view".to_string()]));
+    assert_eq!(contract.routes.len(), 1, "only the GET route is an HTTP route");
+}
+
+#[test]
+fn serve_refuses_to_start_a_live_until_the_transport_serves_it() {
+    let ir = compile_to_ir(&program(LIVE)).unwrap_or_else(|errors| panic!("{errors:#?}"));
+    let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
+    assert_eq!(gaps.len(), 1, "{gaps:#?}");
+    assert!(gaps[0].message().contains("live /boards/{board}/cards needs live subscriptions over the WebSocket transport"));
+    let mut transport = RuntimeCapabilities::interpreter_tier();
+    transport.live_subscriptions = true;
+    assert!(check_contract_closure(&ir, transport).is_empty());
+}
+
+#[test]
+fn a_live_body_is_one_query_of_the_table_it_delivers() {
+    let not_a_query = errors("server board_app:\n    live \"/cards\" -> Card:\n        cards = Card.all()\n        return cards\n");
+    assert!(not_a_query.iter().any(|m| m.contains("must be one `return` of a table query")), "{not_a_query:#?}");
+
+    let other_table = errors(
+        "table Note:\n    key id: Int\n    text: String\n\nserver board_app:\n    live \"/cards\" -> Card:\n        return Note.all()\n",
+    );
+    assert!(!other_table.is_empty(), "{other_table:#?}");
+
+    let not_a_table = errors("type Draft:\n    title: String\n\nserver board_app:\n    live \"/drafts\" -> Draft:\n        return []\n");
+    assert!(not_a_table.iter().any(|m| m.contains("delivers `Draft`, which is not a table")), "{not_a_table:#?}");
+
+    let take = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all().take(10)\n");
+    assert!(take.iter().any(|m| m.contains("uses `take`")), "{take:#?}");
+}
+
+#[test]
+fn two_lives_in_a_server_need_different_names() {
+    let found = errors(
+        "server board_app:\n    live \"/boards/{board}/cards\" -> Card:\n        return Card.where(fn (c) -> c.board == path.board)\n\n    live \"/archive/cards\" -> Card:\n        return Card.all()\n",
+    );
+    assert!(found.iter().any(|m| m.contains("is named `cards`, the same as another `live`")), "{found:#?}");
+    let unnamed = errors("server board_app:\n    live \"/{board}\" -> Card:\n        return Card.all()\n");
+    assert!(unnamed.iter().any(|m| m.contains("has no fixed path segment")), "{unnamed:#?}");
+}
+
+#[test]
+fn live_stays_an_ordinary_name_outside_a_server() {
+    let found = errors("agent count(live: Int) -> Int:\n    return live + 1\n");
+    assert!(found.is_empty(), "{found:#?}");
+}

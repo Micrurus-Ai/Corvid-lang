@@ -245,7 +245,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 Order amendment: B14 starts before B10 and B11 finish, because frontend F08 waits on it and B14 needs only B01. The `live` declaration is a read and B14's action calls over the socket (RT-5) wait for B10, so nothing in B10 changes.
 
 - [x] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
-- [ ] RT-1. `live` declarations: parse, check and contract entry (this session).
+- [x] RT-1. `live` declarations: parsed beside `route` (a route whose response kind is `Live`, so `path`, `actor` and `requires` are the route machinery's), checked to be one `return` of a query on the delivered table without `take`, named by the last fixed path segment and unique per server, listed in the contract under `live`, lowered to a `__live__<path>` snapshot agent, and refused at serve start until RT-3 (`E5204`). [What RT-3 runs](proposals/real-time.md#built-in-rt-1-and-two-points-to-agree)
+- [ ] Typed path placeholders for `route` and `live`, `"/boards/{board: Int}/cards"`, so `path.board` can be an `Int`. Frontend agreed to the shared syntax and contract mapping on 2026-11-25. Implementation remains open.
 - [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
 - [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
 - [ ] RT-4. Typed subscriptions in the generated TypeScript client and the Corvid browser binding (Codex, F08).

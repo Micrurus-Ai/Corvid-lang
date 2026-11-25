@@ -152,7 +152,13 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_server(&mut self, server: &ServerDecl) {
         let mut seen = HashSet::new();
+        let mut live_names = HashSet::new();
         for route in &server.routes {
+            if route.is_live() {
+                self.check_http_route(server, route);
+                self.check_live(route, &mut live_names);
+                continue;
+            }
             let key = (route.method, route.path.clone());
             if !seen.insert(key) {
                 self.errors.push(TypeError::new(
@@ -184,6 +190,62 @@ impl<'a> Checker<'a> {
                 ));
             }
             self.check_http_route(server, route);
+        }
+    }
+
+    /// A `live` declaration (B14): its body is one `return` of a table
+    /// query on the row type it delivers, without `take`, and its name,
+    /// the path's last fixed segment, is unique in the server. The body
+    /// is otherwise checked as a GET route's is, so `path`, `actor` and
+    /// `requires` mean what they mean on a route.
+    fn check_live(&mut self, route: &corvid_ast::HttpRouteDecl, names: &mut HashSet<String>) {
+        let invalid = |checker: &mut Self, problem: String| {
+            checker.errors.push(TypeError::new(
+                TypeErrorKind::LiveDeclarationInvalid { path: route.path.clone(), problem },
+                route.span,
+            ));
+        };
+        match route.live_name() {
+            None => invalid(self, "has no fixed path segment to name it by; end the path with one, as in `/boards/{board}/cards`".into()),
+            Some(name) if !names.insert(name.to_string()) => {
+                invalid(self, format!("is named `{name}`, the same as another `live` in this server; give one a different last path segment"))
+            }
+            Some(_) => {}
+        }
+        let row_name = match route.response.live_row() {
+            Some(corvid_ast::TypeRef::Named { name, .. }) => name.name.clone(),
+            _ => {
+                invalid(self, "must deliver a table's rows, as in `-> Card`".into());
+                return;
+            }
+        };
+        let is_table = self.file.decls.iter().any(|decl| matches!(decl, corvid_ast::Decl::Table(t) if t.name().name == row_name));
+        if !is_table {
+            invalid(self, format!("delivers `{row_name}`, which is not a table; a `live` delivers the rows of a `table` declaration"));
+            return;
+        }
+        let returned = match route.body.stmts.as_slice() {
+            [corvid_ast::Stmt::Return { value: Some(value), .. }] => value,
+            _ => {
+                invalid(self, "must be one `return` of a table query".into());
+                return;
+            }
+        };
+        let query = match returned {
+            corvid_ast::Expr::Call { callee, args, .. } => {
+                crate::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings)
+            }
+            _ => None,
+        };
+        let Some(query) = query else {
+            invalid(self, "must return a table query, such as `Card.where(fn (c) -> ...)` or `Card.all()`".into());
+            return;
+        };
+        if query.table.name().name != row_name {
+            invalid(self, format!("delivers `{row_name}` but queries `{}`", query.table.name().name));
+        }
+        if query.take.is_some() {
+            invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
         }
     }
 

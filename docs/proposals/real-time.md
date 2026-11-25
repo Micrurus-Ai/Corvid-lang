@@ -27,8 +27,8 @@ table Card:
     title: String where len_between(1, 120)
 
 server board_app:
-    live "/boards/{board}/cards" -> Card requires permission("board.view"):
-        return Card.where(fn (c) -> c.board == board).order_by(fn (c) -> c.card)
+    live "/boards/{board: Int}/cards" -> Card requires permission("board.view"):
+        return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
 ```
 
 `live` is one new word, written beside `route` in a `server` block. It has a path with parameters, the row type it delivers, the same `requires` clause routes use, and a body that returns one table query. The query uses the same `where` and `order_by` forms the database already runs.
@@ -118,6 +118,17 @@ An added or updated row carries its zero-based destination index in the ordered 
 Use the existing server session and route permission rules. Match the browser origin at upgrade and check permission and row visibility on the server. On session change, stop delivery before reevaluation; discard queued data that is no longer authorized. A denied subscription or revoked permission gets an id-scoped `error` frame with code `forbidden` and closes that subscription. Unrelated authorized subscriptions can continue. An invalid frame closes the connection with 1002, an invalidated session with 1008, and a normal shutdown with 1000. The server sends a WebSocket Ping after 30 idle seconds and closes an unresponsive connection after another 30 seconds without a Pong. The browser handles Pong at the transport layer.
 
 RT-1 supplies the contract entry and the runtime open/close handle described above. RT-2 supplies committed, filtered changes. RT-3 and RT-4 use those interfaces. RT-5 reuses B10's action contract when available. F08/F18 acceptance exercises a missed edit in the new snapshot and a subsequent live edit over the same subscription.
+
+## Built in RT-1, and two points to agree
+
+RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. `corvid serve` refuses to start a program that declares one (`E5204`, `live /boards/{board}/cards needs live subscriptions over the WebSocket transport`) until RT-3 sets `RuntimeCapabilities::live_subscriptions`.
+
+**The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
+
+Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route parameter record and the declared parameter type. The example above shows the agreed syntax; typed placeholders still require implementation.
+
+1. **Path parameters are read as `path.board`**, as a route reads them. A subscription handler receives the same path record as a route handler.
+2. **Typed path placeholders, agreed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. The generated client takes its parameter types from the contract. A client subscribing to board 7 sends the concrete path `/boards/7/cards`.
 
 ## Non-scope
 

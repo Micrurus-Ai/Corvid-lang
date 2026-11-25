@@ -486,6 +486,8 @@ server api:
     @upload(max_mb: 2, retention_days: 1, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json HealthStatus:
         return HealthStatus(true)
+    live "/boards/{board}/cards" -> HealthStatus requires permission("status.read"):
+        return HealthStatus.all()
 
 schedule "0 9 * * *" zone "UTC" -> daily_summary()
 "#,
@@ -752,6 +754,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("server_decl", "server_and_schedule"),
     ("route_decl", "server_and_schedule"),
     ("route_query", "server_and_schedule"),
+    ("live_decl", "server_and_schedule"),
     ("approval_arg", "server_and_schedule"),
     ("approval_annotation", "server_and_schedule"),
     ("upload_arg", "server_and_schedule"),

@@ -155,7 +155,12 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            match self.parse_http_route_decl(upload, approval) {
+            let parsed = if self.peek_ident_is("live") {
+                self.parse_live_decl()
+            } else {
+                self.parse_http_route_decl(upload, approval)
+            };
+            match parsed {
                 Ok(route) => routes.push(route),
                 Err(e) => {
                     self.errors.push(e);
@@ -172,6 +177,57 @@ impl<'a> Parser<'a> {
         Ok(ServerDecl {
             name: Ident::new(name, name_span),
             routes,
+            span: start.merge(end),
+        })
+    }
+
+    /// `live "/boards/{board}/cards" -> Card requires permission("board.view"):`
+    /// (B14). `live` is contextual, so it stays an ordinary name
+    /// elsewhere. It is held as a GET route whose response is the
+    /// snapshot, `List<Card>`, so path parameters, `actor` and the
+    /// `requires` policy work as a route's do.
+    fn parse_live_decl(&mut self) -> Result<HttpRouteDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // live
+        let path_span = self.peek_span();
+        let path = match self.peek().clone() {
+            TokKind::StringLit(path) => {
+                self.bump();
+                path
+            }
+            other => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(&other),
+                        expected: "a live path string literal".into(),
+                    },
+                    span: path_span,
+                });
+            }
+        };
+        let path_params = parse_route_path_params(&path, path_span);
+        self.expect(TokKind::Arrow, "`->` before the row type a `live` declaration delivers")?;
+        let row = self.parse_type_ref()?;
+        let row_span = row.span();
+        let snapshot = TypeRef::Generic { name: Ident::new("List", row_span), args: vec![row], span: row_span };
+        let policy = self.parse_route_policy()?;
+        self.expect(TokKind::Colon, "`:` after a `live` declaration")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let end = body.span;
+        Ok(HttpRouteDecl {
+            method: HttpMethod::Get,
+            path,
+            path_params,
+            query_ty: None,
+            body_ty: None,
+            form_encoded: false,
+            upload: None,
+            approval: None,
+            response: RouteResponse { kind: RouteResponseKind::Live, span: row_span, ty: snapshot },
+            effect_row: Default::default(),
+            policy,
+            body,
             span: start.merge(end),
         })
     }

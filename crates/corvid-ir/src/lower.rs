@@ -113,6 +113,13 @@ const SYNTHETIC_ROUTE_AGENT_DEF_ID_BASE: u32 = 0x4000_0000;
 /// The stable name of the synthetic handler agent for a route (slice
 /// 52a): `__route__<METHOD>__<mangled-path>`. Deterministic so the
 /// route and its handler agent agree without threading extra state.
+/// The stable name of the synthetic agent that computes a `live`
+/// declaration's snapshot (B14): `__live__<mangled-path>`.
+pub fn synthetic_live_agent_name(path: &str) -> String {
+    let mangled: String = path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    format!("__live__{mangled}")
+}
+
 pub fn synthetic_route_agent_name(method: corvid_ast::HttpMethod, path: &str) -> String {
     let mangled: String = path
         .chars()
@@ -661,7 +668,13 @@ impl<'a> Lowerer<'a> {
                 .map(|e| e.name.name.clone())
                 .collect(),
             body: self.lower_block(&r.body),
-            handler_agent: synthetic_route_agent_name(r.method, &r.path),
+            // A `live` declaration's handler computes its snapshot. It is
+            // named apart from a GET route, which may share its path.
+            handler_agent: if r.is_live() {
+                synthetic_live_agent_name(&r.path)
+            } else {
+                synthetic_route_agent_name(r.method, &r.path)
+            },
             upload_policy: r.upload.clone(),
             approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
