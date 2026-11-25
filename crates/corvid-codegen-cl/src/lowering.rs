@@ -321,12 +321,17 @@ pub fn lower_file(
         // Windows, which would otherwise regress every tool-free
         // `corvid run` invocation.
         let uses_runtime = ir_uses_runtime(ir);
+        // A program with connectors embeds their dispatch specs, the
+        // projection the interpreter's runtime gets, and installs them
+        // before the runtime is built (native dispatch N1).
+        let connector_specs = corvid_runtime::connectors::connector_calls_json(ir);
         emit_entry_main(
             module,
             entry_agent,
             entry_func_id,
             &runtime,
-            uses_runtime,
+            uses_runtime || connector_specs.is_some(),
+            connector_specs.as_deref(),
         )?;
     }
 

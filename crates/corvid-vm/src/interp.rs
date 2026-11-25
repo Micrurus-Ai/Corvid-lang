@@ -397,16 +397,12 @@ impl<'ir> Interpreter<'ir> {
         // effects / outcome — NEVER the arguments or the response
         // payload. Emitted as a host event, which replay classifies as
         // dispatch metadata and skips, so it never perturbs replay.
-        let outcome = if outcome_result.is_ok() { "ok" } else { "error" };
-        self.runtime.emit_host_event(
-            "connector.invocation",
-            serde_json::json!({
-                "connector": connector.name,
-                "operation": op.name,
-                "mode": mode.as_str(),
-                "effects": tool.effect_names,
-                "outcome": outcome,
-            }),
+        self.runtime.record_connector_invocation(
+            &connector.name,
+            &op.name,
+            mode,
+            &tool.effect_names,
+            outcome_result.is_ok(),
         );
         outcome_result
     }

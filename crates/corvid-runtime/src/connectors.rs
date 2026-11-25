@@ -21,7 +21,7 @@ use base64::Engine;
 use std::collections::BTreeMap;
 
 /// How an operation encodes its request body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorBodyEncoding {
     Json,
     Form,
@@ -33,14 +33,14 @@ pub enum ConnectorBodyEncoding {
 
 /// The request body binding of an operation: which parameter supplies
 /// the body, and how it is encoded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConnectorBodySpec {
     pub param: String,
     pub encoding: ConnectorBodyEncoding,
 }
 
 /// Where an operation header's value comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorHeaderValue {
     /// The named `String` parameter's value on this call.
     Param(String),
@@ -50,7 +50,7 @@ pub enum ConnectorHeaderValue {
 
 /// How a connector authenticates — every credential is the NAME of a
 /// secret, resolved to a value only at dispatch and never held here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorAuthSpec {
     Bearer {
         secret: String,
@@ -67,7 +67,7 @@ pub enum ConnectorAuthSpec {
 
 /// One connector operation's real-mode HTTP dispatch spec, derived from
 /// the IR at runtime-build time and keyed by the operation's tool name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConnectorHttpSpec {
     pub connector: String,
     pub operation: String,
@@ -142,6 +142,9 @@ pub struct ConnectorHttpSpec {
     /// the protocol declared, so the request builder stays the single
     /// place a connector request is assembled.
     pub extra_headers: Vec<(String, String)>,
+    /// The operation's declared effects, named in the
+    /// `connector.invocation` record of each call.
+    pub effects: Vec<String>,
 }
 
 /// A recoverable failure while building a connector request — surfaced
@@ -187,6 +190,23 @@ impl ConnectorRequestError {
     }
 }
 
+/// The specs [`connector_calls_from_ir`] derives, as the JSON a native
+/// binary embeds and installs at startup; `None` when the program
+/// declares no connectors. One projection serves both tiers.
+pub fn connector_calls_json(ir: &corvid_ir::IrFile) -> Option<String> {
+    let specs = connector_calls_from_ir(ir);
+    if specs.is_empty() {
+        return None;
+    }
+    let ordered: std::collections::BTreeMap<_, _> = specs.into_iter().collect();
+    Some(serde_json::to_string(&ordered).expect("connector specs serialize"))
+}
+
+/// Read back [`connector_calls_json`].
+pub fn connector_calls_from_json(text: &str) -> Result<std::collections::HashMap<String, ConnectorHttpSpec>, String> {
+    serde_json::from_str(text).map_err(|e| format!("the embedded connector specs do not read back: {e}"))
+}
+
 /// Derive the real-mode dispatch specs for every connector operation in
 /// a lowered file, keyed by the operation's tool name. This is the
 /// single projection from IR to dispatch spec — the driver installs the
@@ -210,6 +230,7 @@ pub fn connector_calls_from_ir(
                 op.name.clone(),
                 ConnectorHttpSpec {
                     extra_headers: Vec::new(),
+                    effects: tool.effect_names.clone(),
                     connector: connector.name.clone(),
                     operation: op.name.clone(),
                     base_url: connector.base_url.clone(),
@@ -747,6 +768,7 @@ mod tests {
     fn spec() -> ConnectorHttpSpec {
         ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: "github".to_string(),
             operation: "get_repo".to_string(),
             base_url: Some("https://api.github.com".to_string()),

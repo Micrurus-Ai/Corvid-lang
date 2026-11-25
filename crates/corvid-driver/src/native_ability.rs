@@ -35,6 +35,9 @@ pub enum NotNativeReason {
     ToolCall {
         name: String,
     },
+    /// `--mode mock` on a program with connectors: a mock payload is a
+    /// Corvid expression the interpreter evaluates.
+    ConnectorMockMode,
     /// A connector operation that native code cannot call yet; the
     /// reason names what (native dispatch N1 covers JSON-shaped calls).
     ConnectorNotNative {
@@ -90,6 +93,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::PythonImport { module } => write!(
                 f,
                 "program imports Python module `{module}` - native Python FFI is not implemented yet"
+            ),
+            Self::ConnectorMockMode => write!(
+                f,
+                "connectors run in `mock` mode, whose payloads are Corvid expressions the interpreter evaluates"
             ),
             Self::ConnectorNotNative { operation, reason } => write!(
                 f,
@@ -196,6 +203,8 @@ fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext
     let tool = context.tools.iter().find(|t| t.id == tool_id)?;
     let problem = if connector.circuit_breaker.is_some() {
         Some("belongs to a connector with a `circuit_breaker`, whose count spans one interpreter run")
+    } else if op.protocol.is_some() {
+        Some("runs a provider protocol, whose durable lifecycle the interpreter drives")
     } else if op.streams.is_some() {
         Some("streams its response")
     } else if tool.return_ty.mentions_response() {
@@ -302,9 +311,10 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
             scan_block(body, current_return_ty, context)
         }
         IrStmt::Approve { args, .. } => {
-            // `approve` compiles to a no-op in generated native code.
-            // Still walk the arg expressions so any tool/prompt call
-            // buried in an approve arg is reported.
+            // Native `approve` calls the runtime's approval gate
+            // (`corvid_approve_sync`), as the interpreter does. Walk the
+            // arg expressions so any tool/prompt call buried in an
+            // approve arg is reported.
             for a in args {
                 scan_expr(a, current_return_ty, context)?;
             }

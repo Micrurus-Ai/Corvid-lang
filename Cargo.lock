@@ -921,6 +921,7 @@ dependencies = [
  "corvid-resolve",
  "corvid-runtime",
  "corvid-syntax",
+ "corvid-test-paths",
  "corvid-time",
  "corvid-trace-schema",
  "corvid-types",

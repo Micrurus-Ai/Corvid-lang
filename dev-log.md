@@ -21,6 +21,57 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Connector calls in native code (B05 slice 7, native dispatch N1)
+
+A program that calls a connector now compiles to native code in `real`
+and `replay` modes. The generated code encodes each argument as public
+JSON and calls one export, `corvid_runtime_call`, which runs
+`Runtime::call_tool`, the function the interpreter calls, and decodes
+the answer into the declared type. Recording, replay, redaction, the
+HTTP policy, timeouts, redirects, `HttpExchange` records and `on
+failure` are therefore the runtime's, for both tiers: nothing was
+copied into generated code. The binary embeds the connector specs from
+the same IR projection the interpreter's runtime gets, reads its mode
+from `CORVID_CONNECTOR_MODE` and its allowlist from `CORVID_HTTP_ALLOW`,
+and refuses to start without a mode. `corvid run` runs the connector
+startup check before launching it and sets both.
+
+**The parity test compares whole runs.** It runs one program on both
+tiers against the same provider, then compares every recorded event
+after the header, with times and the run id removed. That found the one
+difference: the interpreter wrote the `connector.invocation` audit
+record in its tool arm, so a native run lacked it. The record is now
+built by `Runtime::record_connector_invocation`, which both tiers call,
+so it cannot drift.
+
+**A protocol operation stays on the interpreter.** The interpreter runs
+an operation with a verified provider protocol through
+`call_protocol_operation`, the durable lifecycle; sending it through
+`call_tool` would make a one-shot request. `native_ability` now says so,
+as it does for a `circuit_breaker` (its count is per interpreter run,
+and a server-wide breaker needs a declared reset policy, now on the
+roadmap), streams, `Response`, files and mock mode.
+
+**Replay on the other tier is not part of N1.** The proposal said a
+native recording would replay on the interpreter and the reverse. Replay
+refuses a trace written by the other tier (`CrossTierReplayUnsupported`)
+for every kind of event: prompt calls, user tools, approvals and seeds
+as well as connectors. N1 proves connector runs record the same events;
+lifting that refusal needs the same proof for the rest, so it is slice
+N5. The tests prove each tier replays its own recording without the
+provider. The proposal and roadmap are corrected.
+
+**Tests.** `corvid-driver/tests/native_connectors.rs`: the same value
+and run on both tiers, own-tier replay with the provider gone, and the
+refusals; `corvid-cli/tests/native_connectors_run.rs`: `corvid run
+--target native --mode real` sends the request under the project's
+`[http] allow`, and refuses a host outside it. Both link against the
+release `corvid-test-tools` staticlib, as the codegen native tests do,
+because a stale debug runtime library otherwise links without the new
+exports.
+
+---
+
 ## 2026-11-25 - File bodies and multipart for connectors (B05, slice 6)
 
 `body file` with an `Upload` or `Bytes` parameter sends the file as the

@@ -108,6 +108,7 @@ pub unsafe extern "C" fn corvid_runtime_call(
     let answer = match answer {
         Ok(answer) => answer,
         Err(err) => {
+            runtime.record_connector_call(&name, false);
             crate::ffi_bridge::panic_if_replay_runtime_error(&format!("corvid: `{name}`"), &err);
             eprintln!("corvid: `{name}`: {err}");
             std::process::exit(1);
@@ -126,11 +127,13 @@ pub unsafe extern "C" fn corvid_runtime_call(
                     .unwrap_or_else(|e| panic!("internal error: `{name}`'s failure value does not decode: {}", e.message()))
             }
             None => {
+                runtime.record_connector_call(&name, false);
                 eprintln!("corvid: connector `{name}`: the response does not match the declared type {}", error.message());
                 std::process::exit(1);
             }
         },
     };
+    runtime.record_connector_call(&name, true);
     unsafe { payload.write(decoded.bits) };
     RESULT_TAG_OK
 }

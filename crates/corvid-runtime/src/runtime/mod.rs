@@ -462,6 +462,41 @@ impl Runtime {
             payload,
         });
     }
+
+    /// Record the `connector.invocation` evidence of one connector call:
+    /// the connector, operation, mode, declared effects and whether the
+    /// call returned a value, never its arguments or payload. Both tiers
+    /// call this after each connector call, so the record is the same
+    /// whichever tier ran it.
+    pub fn record_connector_invocation(
+        &self,
+        connector: &str,
+        operation: &str,
+        mode: corvid_ast::ConnectorMode,
+        effects: &[String],
+        ok: bool,
+    ) {
+        self.emit_host_event(
+            "connector.invocation",
+            serde_json::json!({
+                "connector": connector,
+                "operation": operation,
+                "mode": mode.as_str(),
+                "effects": effects,
+                "outcome": if ok { "ok" } else { "error" },
+            }),
+        );
+    }
+
+    /// Record the `connector.invocation` evidence of a call to connector
+    /// operation `name` in the selected mode, from its installed spec.
+    /// Native code records through this; it does nothing for a name that
+    /// is not a connector operation.
+    pub(crate) fn record_connector_call(&self, name: &str, ok: bool) {
+        if let (Some(spec), Some(mode)) = (self.connector_calls.get(name), self.connector_mode) {
+            self.record_connector_invocation(&spec.connector, &spec.operation, mode, &spec.effects, ok);
+        }
+    }
 }
 
 #[cfg(test)]

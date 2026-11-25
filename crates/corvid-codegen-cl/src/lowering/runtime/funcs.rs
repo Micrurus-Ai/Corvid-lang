@@ -112,6 +112,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub invoke_tool_string: FuncId,
     pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
+    /// `corvid_register_connectors(specs)`: install the embedded
+    /// connector specs before `corvid_runtime_init`.
+    pub register_connectors: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,

@@ -544,6 +544,7 @@ impl Runtime {
     ) -> ConnectorHttpSpec {
         ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),
@@ -594,6 +595,7 @@ impl Runtime {
         })?;
         Ok(ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),

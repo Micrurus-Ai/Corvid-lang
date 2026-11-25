@@ -148,7 +148,64 @@ pub(super) fn build_corvid_runtime() -> Runtime {
         }
     }
 
+    b = install_connectors(b);
     b.build()
+}
+
+/// The connector specs the compiled program embeds, installed by its
+/// `main` through [`corvid_register_connectors`] before the runtime is
+/// built.
+static REGISTERED_CONNECTORS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Install the connector specs a native program embeds (native dispatch
+/// N1). Called by the generated `main` before `corvid_runtime_init`.
+///
+/// # Safety
+/// `specs` must be a live Corvid string holding the JSON the compiler
+/// wrote with `connectors::connector_calls_json`.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_register_connectors(specs: crate::abi::CorvidString) {
+    let text = unsafe { specs.as_str() }.to_string();
+    let _ = REGISTERED_CONNECTORS.set(text);
+}
+
+/// Install the embedded connectors on `b`, with the mode and HTTP policy
+/// the environment names. A program with connectors refuses to start
+/// without a mode, and in `real` mode without an `[http] allow` list,
+/// as the interpreter does: neither is ever picked for the program.
+fn install_connectors(mut b: crate::runtime::RuntimeBuilder) -> crate::runtime::RuntimeBuilder {
+    let Some(text) = REGISTERED_CONNECTORS.get() else { return b };
+    let specs = crate::connectors::connector_calls_from_json(text).unwrap_or_else(|reason| {
+        panic!("internal compiler error: {reason}")
+    });
+    let refuse = |message: String| -> ! {
+        eprintln!("{message}");
+        std::process::exit(1);
+    };
+    let mode = match std::env::var("CORVID_CONNECTOR_MODE") {
+        Ok(name) => corvid_ast::ConnectorMode::from_name(name.trim()).unwrap_or_else(|| {
+            refuse(format!("corvid: CORVID_CONNECTOR_MODE is `{name}`; it is one of `mock`, `replay` or `real`"))
+        }),
+        Err(_) => refuse(
+            "corvid: this program calls connectors, so it needs a mode: set CORVID_CONNECTOR_MODE to `real` or `replay` (there is no default)"
+                .to_string(),
+        ),
+    };
+    if mode == corvid_ast::ConnectorMode::Mock {
+        refuse("corvid: mock mode evaluates Corvid mock payloads; run this program with `corvid run --mode mock` on the interpreter".to_string());
+    }
+    let policy = std::env::var("CORVID_HTTP_ALLOW")
+        .ok()
+        .and_then(|text| crate::http::HttpEgressPolicy::from_allow_list(&text));
+    match policy {
+        Some(policy) => b = b.http_policy(policy),
+        None if mode == corvid_ast::ConnectorMode::Real => refuse(
+            "corvid: this program calls connectors in `real` mode, so it needs the hosts it may reach: set CORVID_HTTP_ALLOW to a comma-separated host list"
+                .to_string(),
+        ),
+        None => {}
+    }
+    b.connector_mode(Some(mode)).connector_calls(specs)
 }
 
 pub(super) fn build_embedded_corvid_runtime() -> Runtime {
@@ -225,6 +282,7 @@ pub(super) fn build_embedded_corvid_runtime() -> Runtime {
         }
     }
 
+    b = install_connectors(b);
     b.build()
 }
 

@@ -424,6 +424,7 @@ fn connector_replay_runtime(trace_path: &std::path::Path, operation: &str, metho
         timeout_secs: Some(10),
         redirects: Some(corvid_runtime::http::RedirectPolicy::Never),
         extra_headers: Vec::new(),
+        effects: Vec::new(),
     };
     Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))

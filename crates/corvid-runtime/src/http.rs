@@ -854,6 +854,19 @@ impl HttpEgressPolicy {
         Self { allow }
     }
 
+    /// The policy a `CORVID_HTTP_ALLOW` value names: a comma-separated
+    /// host list. `None` when it names no host, so the caller falls back
+    /// to `corvid.toml` or the fail-closed default. The one parser both
+    /// `corvid run` and a native binary use.
+    pub fn from_allow_list(text: &str) -> Option<Self> {
+        let hosts: Vec<String> = text
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        (!hosts.is_empty()).then(|| Self::new(Some(&hosts)))
+    }
+
     /// Empty policy — no `[http] allow` configured. Every
     /// `check` call returns the missing-config error.
     pub fn unset() -> Self {

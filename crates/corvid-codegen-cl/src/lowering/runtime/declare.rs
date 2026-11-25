@@ -531,6 +531,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare runtime_init: {e}"), Span::new(0, 0))
         })?;
 
+    let mut register_connectors_sig = module.make_signature();
+    register_connectors_sig.params.push(AbiParam::new(I64));
+    let register_connectors_id = module
+        .declare_function("corvid_register_connectors", Linkage::Import, &register_connectors_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare register_connectors: {e}"), Span::new(0, 0)))?;
+
     let runtime_shutdown_sig = module.make_signature();
     let runtime_shutdown_id = module
         .declare_function(
@@ -1358,6 +1364,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         invoke_tool_string: invoke_tool_string_id,
         invoke_tool_struct: invoke_tool_struct_id,
         runtime_init: runtime_init_id,
+        register_connectors: register_connectors_id,
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
         sleep_ms: sleep_ms_id,

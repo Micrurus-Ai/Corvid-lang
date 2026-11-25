@@ -586,6 +586,11 @@ pub enum ConnectorMode {
 }
 
 impl ConnectorMode {
+    /// The mode a `--mode` flag or `CORVID_CONNECTOR_MODE` names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Mock, Self::Replay, Self::Real].into_iter().find(|m| m.as_str() == name)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Mock => "mock",
