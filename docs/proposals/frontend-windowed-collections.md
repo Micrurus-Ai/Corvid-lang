@@ -24,4 +24,4 @@ Run on an idle host, on loopback, headless at 960 × 720 CSS pixels and device s
 | Working-set growth | 128 MiB | Largest sampled process-tree resident set after load, keyboard movement, navigation or shipment above the blank page. Includes Playwright and shared pages counted by each process. |
 | Mounted rows | 16 | Maximum observed in each trial, including overscan and a pinned focused row. |
 
-Timing and memory ceilings apply to the median of four trials for each engine, implementation and view. The row cap applies to every trial. These are regression targets pending host validation. Compare the printed medians for the paired implementations and keep the individual samples for diagnosis.
+Timing and memory ceilings apply to the median of four trials for each engine, implementation and view. The row cap applies to every trial. Both implementations met these ceilings in both views on Chromium, Firefox and WebKit. [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45585464423) Compare the printed medians for the paired implementations and keep the individual samples for diagnosis.
