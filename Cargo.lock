@@ -626,6 +626,7 @@ version = "0.0.1"
 dependencies = [
  "base64",
  "corvid-ast",
+ "corvid-crypto",
  "corvid-guarantees",
  "corvid-ir",
  "corvid-prompt-format",
@@ -727,6 +728,7 @@ dependencies = [
  "corvid-ast",
  "corvid-bind",
  "corvid-connector-runtime",
+ "corvid-crypto",
  "corvid-differential-verify",
  "corvid-driver",
  "corvid-guarantees",
