@@ -10,6 +10,7 @@ overview.
 
 ```sh
 corvid new <name>                       # scaffold a new project
+corvid new <name> --web                 # scaffold a page, GET / route and rendering test
 corvid init                             # add corvid.toml to existing dir
 corvid build <file>                     # compile to target (default native)
 corvid build <file> --target=wasm       # WASM target

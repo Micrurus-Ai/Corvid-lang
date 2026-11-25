@@ -23,7 +23,7 @@ mod import_integrity;
 mod package_conflicts;
 mod package_cache;
 mod package_lock;
-pub use package_lock::locked_artifact_paths;
+pub use package_lock::{installed_component_source, locked_artifact_paths};
 mod package_manifest;
 mod package_metadata;
 mod package_policy;

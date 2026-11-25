@@ -16,13 +16,22 @@ pub(crate) struct ImportedSymbol {
     pub hover: Option<lsp_types::Hover>,
 }
 
-pub(crate) fn local_module_source<'a>(
+pub(crate) fn imported_module_source<'a>(
     documents: &'a std::collections::HashMap<Url, String>,
     importer: &Url,
-    module: &str,
+    import: &corvid_ast::ImportDecl,
 ) -> Option<(Url, std::borrow::Cow<'a, str>)> {
     use std::borrow::Cow;
-    let path = corvid_resolve::resolve_import_path(&importer.to_file_path().ok()?, module);
+    let importer_path = importer.to_file_path().ok()?;
+    match import.source {
+        corvid_ast::ImportSource::PackageCorvid => {
+            let (path, text) = corvid_driver::installed_component_source(&importer_path, &import.module)?;
+            return Some((Url::from_file_path(path).ok()?, Cow::Owned(text)));
+        }
+        corvid_ast::ImportSource::Corvid => {}
+        _ => return None,
+    }
+    let path = corvid_resolve::resolve_import_path(&importer_path, &import.module);
     let uri = Url::from_file_path(&path).ok()?;
     if let Some(text) = documents.get(&uri) {
         return Some((uri, Cow::Borrowed(text)));
@@ -44,7 +53,6 @@ pub(crate) fn imported_symbol_at(
     source: &str,
     position: Position,
 ) -> Option<ImportedSymbol> {
-    use corvid_ast::ImportSource;
     use corvid_syntax::TokKind;
     let offset = lsp_position_to_byte(source, position);
     let tokens = lex(source).ok()?;
@@ -67,9 +75,6 @@ pub(crate) fn imported_symbol_at(
     };
     for decl in &file.decls {
         let Decl::Import(import) = decl else { continue };
-        if import.source != ImportSource::Corvid {
-            continue;
-        }
         let selective = import.use_items.iter().find(|item| {
             let local = item.alias.as_ref().unwrap_or(&item.name);
             token.span == item.name.span
@@ -88,7 +93,7 @@ pub(crate) fn imported_symbol_at(
         } else {
             continue;
         };
-        let (target_uri, text) = local_module_source(documents, uri, &import.module)?;
+        let (target_uri, text) = imported_module_source(documents, uri, import)?;
         let target = text.as_ref();
         let (file, _) = parse_file(&lex(target).ok()?);
         let resolved = resolve(&file);

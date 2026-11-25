@@ -2,6 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+- [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
+
 F17 compares windowed lists and tables through one shared browser workflow so that input, navigation and streaming costs are comparable across implementations. The [frontend checklist](docs/frontend-roadmap.md#running-the-frontend-loop) tracks host verification.
 
 Backend and AI implementation follows the [ordered backend and AI queue](docs/backend-ai-roadmap.md#ordered-tasks). Its target is parity with what developers build in Python and TypeScript, through built-in capability and typed interoperability together.

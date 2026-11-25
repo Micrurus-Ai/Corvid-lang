@@ -1,0 +1,11 @@
+import "std:ui" as ui
+
+fn welcome_page() -> String:
+    return ui.page("Welcome", [ui.text("Hello, Corvid!")])
+
+server site:
+    route GET "/" -> html:
+        return welcome_page()
+
+test welcome_message:
+    assert welcome_page().contains("Hello, Corvid!")

@@ -19,7 +19,7 @@ def package(cli, project, destination):
         archive.extractall(destination, filter="data")
 
 
-def verify(cli, channel):
+def verify(cli, channel, engines=("chromium", "firefox", "webkit")):
     with TemporaryDirectory() as tmp, ExitStack() as servers:
         root = Path(tmp)
         subprocess.run([cli, "new", "storefront"], cwd=root, check=True)
@@ -48,7 +48,7 @@ def verify(cli, channel):
         urls = [servers.enter_context(serve(cli, root / variant, os.environ.copy()))
                 for variant in ("broken", "fixed")]
         with sync_playwright() as playwright:
-            for engine in ("chromium", "firefox", "webkit"):
+            for engine in engines:
                 browser = getattr(playwright, engine).launch(channel=channel if engine == "chromium" else None)
                 try:
                     page = browser.new_page()

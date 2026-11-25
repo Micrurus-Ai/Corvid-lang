@@ -4,6 +4,8 @@ When a connector call needs more than the body, declare `-> Response<Charge>`: r
 
 Give a connector operation a query with `GET "/v1/charges" query filter`, where `filter` is a record parameter: each field becomes `name=value`, a `None` field is left out, and a `List` field repeats its name (`status=paid&status=refunded`). Fields must be flat: numbers, text, `Bool`, decimals, times, or an `Option` or `List` of one. Add request headers with `header "X-Request-Id": request_id` (a `String` parameter) or `header "Accept": "application/json"`. `Authorization`, cookies and the headers Corvid sets itself cannot be set this way; the compiler says which declaration owns each one. [Connector grammar](docs/reference/grammar.md#connector-declarations)
 
+Start a browser project with `corvid new palette --web`. The starter's rendering test and GET route call the same page function. In a consuming app, complete a component through its module alias and follow the definition into the locked source, even offline. [Browser views](docs/book/19-browser-views.md#preview-your-first-web-project)
+
 The windowed inventory example keeps a native link for the focused bin even when scrolling moves it outside the visible window. Use the same fixed row height for layout, range calculations and keyboard movement. [Browser guide](docs/book/19-browser-views.md#window-a-long-inventory)
 
 Use `tabindex="-1"` on the scrolling viewport when the active row link already provides the collection's Tab stop.
