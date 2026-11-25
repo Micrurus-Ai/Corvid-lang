@@ -1,6 +1,6 @@
 # Refinements hold for every value (B09)
 
-**Status:** Refine-1 and Refine-2 shipped: the interpreter and native code check every refined value, with one message.
+**Status:** shipped. The interpreter and native code check every refined value with one message (Refine-1, Refine-2), and `@budget` reads a `take` bound from a refinement (Refine-3).
 **Owner:** backend (Claude Code). It changes no grammar.
 **Roadmap:** [B09](../backend-ai-roadmap.md), the item "refinements hold for every value", which the refined-`take` bound waits on.
 
@@ -78,7 +78,7 @@ agent limited(requested: Int) -> Search:
 
 - [x] Refine-1. The interpreter: compile errors for constant values in constructors and record literals; run-time checks at constructors, record literals, record updates and field assignments; table rows checked when read.
 - [x] Refine-2. Native code: the same checks and message, held by parity tests.
-- [ ] Refine-3. The refined-`take` bound: `take(search.limit)` charges `@budget` the refinement's maximum.
+- [x] Refine-3. The refined-`take` bound: `take(search.limit)` charges `@budget` the refinement's maximum.
 
 ## Non-scope
 

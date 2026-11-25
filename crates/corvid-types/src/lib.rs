@@ -34,7 +34,7 @@ pub use determinism::{
     KNOWN_NONDETERMINISTIC_BUILTINS,
 };
 pub use effects::{
-    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost,
+    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost, compute_worst_case_cost_with_types,
     render_cost_tree, AgentEffectSummary, ComposedProfile, ConstraintViolation, CostEstimate,
     CostNodeKind, CostTreeNode, CostWarning, CostWarningKind, EffectProfile, EffectRegistry,
     ProvenanceViolation,

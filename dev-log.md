@@ -861,6 +861,25 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - A refined field bounds a query loop (B09 Refine-3)
+
+`@budget` could bound a loop over a table query only when it ended in a
+literal `take(3)`. With every refined value now holding its refinement on
+both tiers, `take(search.limit)` with `limit: Int where between(1, 50)` is
+a real bound of fifty, so the cost analysis charges the body fifty times
+instead of warning. The analysis ran on the AST alone; it now receives the
+checker's type of every expression
+(`compute_worst_case_cost_with_types`), finds `search`'s record, and reads
+the field's `between` maximum. A `len_between` refinement or an unrefined
+count gives no bound, and a negative maximum bounds the rows at zero.
+
+Found on the way: the REPL's cost report called the untyped analysis, so
+it would have shown a refined `take` as unbounded while `@budget` charged
+fifty; it now type-checks the turn and reads the same types, so the two
+agree.
+
+---
+
 ## 2026-11-25 - A native build refuses by name, before linking
 
 Making `native` the default build target exposed a gap the Mac session

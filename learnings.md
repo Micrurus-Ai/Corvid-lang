@@ -8269,6 +8269,8 @@ A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a t
 
 Declare a live list with `live "/boards/{board}/cards" -> Card` in a `server` block, its body one query: `return Card.where(fn (c) -> c.board == path.board)`. It checks and appears in the contract now; `corvid serve` refuses to start it until the WebSocket transport lands. [Real-time connections](docs/proposals/real-time.md)
 
+`@budget` bounds a loop over `Member.all().take(search.limit)` by `limit`'s `between` maximum, so a refined count is as good as a literal one. [Tables](docs/reference/tables.md)
+
 Refined values are checked in native code too, with the interpreter's message, so a program that builds refined records from computed values compiles with `corvid build`.
 
 A field refinement holds for every value: `Person(969, "Ada")` against `age: Int where between(0, 150)` is a compile error, and a computed out-of-range age stops the run where the record is built or the field assigned, naming the field, the refinement and the value. Check an untrusted number before building the record. [Field refinements](docs/book/05-types.md#field-refinements)
