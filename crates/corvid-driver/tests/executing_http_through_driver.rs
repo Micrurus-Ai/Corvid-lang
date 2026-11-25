@@ -59,12 +59,10 @@ fn stage_project(dir: &Path, corvid_toml_body: &str, main_source: &str) -> std::
 /// policy sees a public-looking host (SSRF passes), the
 /// allowlist gate accepts `api.example.com`, and the actual TCP
 /// connection terminates at `wiremock::MockServer` on loopback.
-fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::Client {
+fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::ClientBuilder {
     let addr: std::net::SocketAddr = *server.address();
     reqwest::Client::builder()
         .resolve(host, addr)
-        .build()
-        .expect("reqwest client with .resolve override should build")
 }
 
 /// 33S2b load-bearing acceptance — compile + run a real Corvid
@@ -108,7 +106,7 @@ agent main() -> Result<Int, String>:
         .expect("real corvid program should compile");
 
     let policy = HttpEgressPolicy::new(Some(&["api.example.com".to_string()]));
-    let client = HttpClient::with_reqwest_client(loopback_resolving_client(
+    let client = HttpClient::with_reqwest_builder(loopback_resolving_client(
         "api.example.com",
         &server,
     ));

@@ -362,15 +362,27 @@ A connector groups HTTP operations under a base URL. Declare the modes
 callers may use in `modes`. Credentials refer to named secrets. A request
 can send one operation parameter as a JSON body or a form.
 
+Every connector declares `timeout:` (1 to 3600 seconds, from connecting to
+the last byte of the response) and `redirects:`; omitting either is a
+compile error. `never` treats a 3xx as the answer, `same_host` follows only
+to the same scheme, host and port, and `allowed_hosts` follows to any host
+in `[http] allow`. Every policy stops after 10 hops, never sends the
+credential to another origin, and refuses a 301, 302 or 303 that would turn
+a request other than `GET` or `HEAD` into a `GET`. An operation may declare
+its own `timeout:`, which replaces the connector's for that operation.
+
 ```ebnf
 connector_decl    ::= 'connector' IDENT ':' INDENT connector_item+ DEDENT
 connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
                     | 'auth' ':' connector_auth NEWLINE
+                    | 'timeout' ':' INT 's' NEWLINE
+                    | 'redirects' ':' redirect_policy NEWLINE
                     | ('retry' | 'circuit_breaker') ':' INT NEWLINE
                     | 'rate_limit' ':' INT 'per' INT 's'? NEWLINE
                     | 'modes' ':' '[' (connector_mode (',' connector_mode)* ','?)? ']' NEWLINE
                     | operation_decl
 connector_mode    ::= 'mock' | 'replay' | 'real'
+redirect_policy   ::= 'never' | 'same_host' | 'allowed_hosts'
 connector_auth    ::= 'bearer' '(' secret_ref ')'
                     | 'header' '(' STRING_LITERAL ',' secret_ref ')'
                     | 'basic' '(' secret_ref ',' secret_ref ')'
@@ -379,6 +391,7 @@ operation_decl    ::= 'operation' IDENT params '->' type_ref 'dangerous'? uses_c
                       INDENT http_method STRING_LITERAL (('body' | 'form') IDENT)? NEWLINE
                       operation_item* DEDENT
 operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEWLINE
+                    | 'timeout' ':' INT 's' NEWLINE
                     | 'async' ':' INDENT protocol_item+ DEDENT
 protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE
                     | ('initial' | 'deadline_target') ':' IDENT NEWLINE

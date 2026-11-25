@@ -298,9 +298,11 @@ pub(crate) fn cmd_serve(
     // Contract Closure honest for connector-using routes.
     if !ir.connectors.is_empty() {
         let secret_present = |name: &str| runtime.secret_present(name);
+        let egress_refusal = |url: &str| runtime.egress_refusal(url);
         let ctx = corvid_driver::ConnectorRuntimeContext {
             selected_mode: runtime.connector_mode(),
             egress_configured: runtime.egress_configured(),
+            egress_refusal: &egress_refusal,
             replay_source_present: runtime.has_replay_source(),
             secret_present: &secret_present,
             executable_modes: &[

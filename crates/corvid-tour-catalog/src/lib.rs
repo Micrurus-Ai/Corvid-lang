@@ -925,6 +925,8 @@ type GithubError:
     | RateLimited
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     retry: 3
@@ -958,6 +960,8 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]

@@ -557,6 +557,8 @@ impl Runtime {
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,
+            timeout_secs: spec.timeout_secs,
+            redirects: spec.redirects,
         }
     }
 
@@ -600,6 +602,8 @@ impl Runtime {
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,
+            timeout_secs: spec.timeout_secs,
+            redirects: spec.redirects,
         })
     }
 

@@ -16,7 +16,7 @@
 //! the header).
 
 use crate::errors::RuntimeError;
-use crate::http::HttpRequest;
+use crate::http::{HttpRequest, RedirectPolicy};
 use base64::Engine;
 use std::collections::BTreeMap;
 
@@ -93,6 +93,13 @@ pub struct ConnectorHttpSpec {
     /// the next tick, but N consecutive failures trip the breaker and
     /// fail the protocol rather than polling a broken provider forever.
     pub circuit_breaker: Option<u64>,
+    /// The operation's declared timeout in seconds (its own `timeout:`,
+    /// or the connector's). Always present for a checked program; a spec
+    /// without one is refused at send time rather than given a default.
+    pub timeout_secs: Option<u64>,
+    /// The connector's declared `redirects:` policy, present for every
+    /// checked program as `timeout_secs` is.
+    pub redirects: Option<RedirectPolicy>,
     /// Extra headers attached to THIS request, on top of the connector's
     /// declared auth. The verified-protocol dispatcher uses this to carry
     /// the intent key on a submit (and only on a submit) via the header
@@ -109,6 +116,10 @@ pub enum ConnectorRequestError {
     MissingSecret { operation: String, secret: String },
     MissingArgument { operation: String, param: String },
     BadArgument { operation: String, param: String },
+    /// The spec carries no declared `timeout:` or `redirects:`. Only IR
+    /// from unchecked source can get here; the request is refused rather
+    /// than sent under a policy nobody chose.
+    UndeclaredPolicy { operation: String, item: &'static str },
 }
 
 impl ConnectorRequestError {
@@ -124,6 +135,13 @@ impl ConnectorRequestError {
             Self::BadArgument { operation, param } => (
                 operation,
                 format!("argument for `{param}` is not a usable path/body value"),
+            ),
+            Self::UndeclaredPolicy { operation, item } => (
+                operation,
+                format!(
+                    "the connector declares no `{item}`, so the request is not sent; \
+                     the checker requires `{item}` on every connector"
+                ),
             ),
         };
         RuntimeError::ToolFailed {
@@ -179,6 +197,8 @@ pub fn connector_calls_from_ir(
                     retry: connector.retry,
                     rate_limit: connector.rate_limit.map(|r| (r.limit, r.window_secs)),
                     circuit_breaker: connector.circuit_breaker,
+                    timeout_secs: op.timeout_secs,
+                    redirects: connector.redirects,
                 },
             );
         }
@@ -228,55 +248,49 @@ pub fn build_connector_request(
     let filled_path = fill_path(&spec.path, &by_name, &spec.operation)?;
     let url = format!("{}{}", spec.base_url.trim_end_matches('/'), filled_path);
 
-    // Body: the named parameter, JSON- or form-encoded.
-    let (method_default_body, mut request) = match &spec.body {
-        Some(body) => {
-            let value = by_name
-                .get(body.param.as_str())
-                .copied()
-                .ok_or_else(|| ConnectorRequestError::MissingArgument {
-                    operation: spec.operation.clone(),
-                    param: body.param.clone(),
-                })?;
-            match body.encoding {
-                ConnectorBodyEncoding::Json => {
-                    let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
-                    (true, HttpRequest::post_json(url.clone(), json))
-                }
-                ConnectorBodyEncoding::Form => {
-                    let form = encode_form(value);
-                    let req = HttpRequest {
-                        method: spec.method.clone(),
-                        url: url.clone(),
-                        headers: vec![crate::http::HttpHeader {
-                            name: "content-type".to_string(),
-                            value: "application/x-www-form-urlencoded".to_string(),
-                        }],
-                        body: Some(form),
-                        timeout_ms: 30_000,
-                        retry: retry_policy(spec),
-                        effect_tag: Some("connector.request".to_string()),
-                    };
-                    (true, req)
-                }
-            }
-        }
-        None => (false, HttpRequest::get(url.clone())),
-    };
+    let timeout_secs = spec.timeout_secs.ok_or_else(|| ConnectorRequestError::UndeclaredPolicy {
+        operation: spec.operation.clone(),
+        item: "timeout:",
+    })?;
+    let redirects = spec.redirects.ok_or_else(|| ConnectorRequestError::UndeclaredPolicy {
+        operation: spec.operation.clone(),
+        item: "redirects:",
+    })?;
+    let mut request = HttpRequest::new(
+        spec.method.clone(),
+        url,
+        std::time::Duration::from_secs(timeout_secs),
+        redirects,
+    )
+    .retry(retry_policy(spec))
+    .effect_tag("connector.request");
 
-    // `post_json`/`get` set a default method; override with the
-    // operation's declared verb so `PUT`/`PATCH`/`DELETE` bodies work.
-    request.method = spec.method.clone();
-    request.effect_tag = Some("connector.request".to_string());
-    if !method_default_body {
-        request.retry = retry_policy(spec);
+    // Body: the named parameter, JSON- or form-encoded.
+    if let Some(body) = &spec.body {
+        let value = by_name
+            .get(body.param.as_str())
+            .copied()
+            .ok_or_else(|| ConnectorRequestError::MissingArgument {
+                operation: spec.operation.clone(),
+                param: body.param.clone(),
+            })?;
+        request = match body.encoding {
+            ConnectorBodyEncoding::Json => {
+                let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+                request.json_body(json)
+            }
+            ConnectorBodyEncoding::Form => {
+                request.body("application/x-www-form-urlencoded", encode_form(value))
+            }
+        };
     }
 
     // Auth header from the resolved credential — the ONLY place the
-    // secret value appears.
+    // secret value appears. It is marked as the credential, so it is
+    // never sent to another origin and never enters a fingerprint.
     if let Some(auth) = &spec.auth {
         let header = build_auth_header(auth, &spec.operation, resolve_secret)?;
-        request = request.header(header.0, header.1);
+        request = request.credential_header(header.0, header.1);
     }
 
     // Request-specific headers (the protocol's idempotency key on a
@@ -437,6 +451,8 @@ mod tests {
             retry: None,
             rate_limit: None,
             circuit_breaker: None,
+            timeout_secs: Some(10),
+            redirects: Some(crate::http::RedirectPolicy::Never),
         }
     }
 
@@ -469,6 +485,56 @@ mod tests {
         // never the request headers.)
         assert!(!req.url.contains("super-secret"));
         assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn the_request_carries_the_declared_timeout_and_redirect_policy() {
+        let mut declared = spec();
+        declared.timeout_secs = Some(45);
+        declared.redirects = Some(RedirectPolicy::SameHost);
+        let req = build_connector_request(&declared, &[json!("o"), json!("r")], &|_| {
+            Some("tok".to_string())
+        })
+        .expect("build");
+        assert_eq!(req.timeout_ms, 45_000);
+        assert_eq!(req.redirects, RedirectPolicy::SameHost);
+    }
+
+    /// A custom auth header is marked as the credential, so a redirect
+    /// to another origin drops it the way it drops `Authorization`.
+    #[test]
+    fn a_custom_auth_header_is_marked_as_the_credential() {
+        let mut keyed = spec();
+        keyed.auth = Some(ConnectorAuthSpec::Header {
+            name: "X-Api-Key".to_string(),
+            secret: "KEY".to_string(),
+        });
+        let req = build_connector_request(&keyed, &[json!("o"), json!("r")], &|_| {
+            Some("key-value".to_string())
+        })
+        .expect("build");
+        assert_eq!(req.credential_headers, vec!["x-api-key".to_string()]);
+    }
+
+    /// IR from unchecked source could lack a declared policy; the request
+    /// is refused rather than sent under a timeout nobody chose.
+    #[test]
+    fn a_spec_without_a_declared_policy_is_refused() {
+        let mut undeclared = spec();
+        undeclared.timeout_secs = None;
+        let err = build_connector_request(&undeclared, &[json!("o"), json!("r")], &|_| {
+            Some("tok".to_string())
+        })
+        .expect_err("no timeout declared");
+        assert!(err.into_runtime_error().to_string().contains("declares no `timeout:`"));
+
+        let mut undeclared = spec();
+        undeclared.redirects = None;
+        let err = build_connector_request(&undeclared, &[json!("o"), json!("r")], &|_| {
+            Some("tok".to_string())
+        })
+        .expect_err("no redirect policy declared");
+        assert!(err.into_runtime_error().to_string().contains("declares no `redirects:`"));
     }
 
     #[test]

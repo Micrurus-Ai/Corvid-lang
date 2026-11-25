@@ -2607,6 +2607,8 @@ effect http_read:
     cost: $0.0
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2674,6 +2676,8 @@ effect http_read:
     cost: $0.0
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2708,6 +2712,54 @@ server repo_api:
         stderr.to_lowercase().contains("mode"),
         "the refusal must name the missing mode decision; got: {stderr}"
     );
+}
+
+/// In real mode a connector whose own host is not in `[http] allow` is
+/// refused at startup, naming the connector and its URL, instead of
+/// binding and failing at the first request.
+#[test]
+fn serve_refuses_a_real_connector_whose_host_is_not_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Repo:
+    name: String
+
+effect http_read:
+    cost: $0.0
+
+connector github:
+    base_url: "https://api.github.com"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation get_repo(owner: String, repo: String) -> Repo uses http_read:
+        GET "/repos/{owner}/{repo}"
+
+server repo_api:
+    route GET "/repo" -> json Repo uses http_read:
+        return get_repo("micrurus", "corvid")
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let out = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg("127.0.0.1:8291")
+        .arg("--mode")
+        .arg("real")
+        .env("CORVID_HTTP_ALLOW", "other.example.com")
+        .current_dir(repo_root())
+        .output()
+        .expect("run corvid serve");
+    assert!(
+        !out.status.success(),
+        "a real connector whose host is not allowed must refuse to start"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Connector host not allowed"), "{stderr}");
+    assert!(stderr.contains("connector `github`"), "{stderr}");
+    assert!(stderr.contains("https://api.github.com"), "{stderr}");
 }
 
 /// The Phase 52 continuous reference application, served end to end.

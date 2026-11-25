@@ -744,6 +744,8 @@ path.
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    timeout: 10s
+    redirects: never
     retry: 3
     rate_limit: 60 per 60s
     circuit_breaker: 5
@@ -766,6 +768,11 @@ composes make this different from a client library:
    `corvid run --mode`. Omitting `modes` is a compile error, and selecting a mode
    the connector doesn't allow (or one the runtime can't execute) refuses at
    startup — a program can never reach a real provider by silence.
+   The same holds for how long a request may take and where it may be
+   redirected: `timeout: <n>s` and `redirects: never | same_host |
+   allowed_hosts` are required, a redirect never carries the credential to
+   another origin, and in `real` mode a connector whose host is not in
+   `[http] allow` refuses at startup.
 3. **The same unchanged file runs three ways.** `mock` evaluates the compiled
    `mock:` payload; `real` makes the HTTP request; `replay` serves a recorded
    interaction and never falls through to a real call (the credential is absent

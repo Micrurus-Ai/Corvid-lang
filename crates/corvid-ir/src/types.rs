@@ -60,6 +60,13 @@ pub struct IrConnector {
     pub rate_limit: Option<IrRateLimit>,
     /// Circuit-breaker consecutive-failure threshold (slice 52g-4).
     pub circuit_breaker: Option<u64>,
+    /// The connector's declared `timeout:` in seconds. Always present in
+    /// a checked program (the checker requires it); `None` only in IR
+    /// built from unchecked source, which the runtime refuses to send.
+    pub timeout_secs: Option<u64>,
+    /// The connector's declared `redirects:` policy. Present in every
+    /// checked program, as `timeout_secs` is.
+    pub redirects: Option<corvid_ast::RedirectPolicy>,
     /// The execution modes this connector is allowed to run in (slice
     /// 52g-3b). Never empty (the checker rejects an undeclared set).
     /// The deployment selects exactly one at start.
@@ -102,6 +109,9 @@ pub struct IrOperation {
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
+    /// This operation's timeout in seconds: its own `timeout:` when it
+    /// declares one, otherwise the connector's.
+    pub timeout_secs: Option<u64>,
     /// The `mock:` payload expression, lowered (slice 52g-3b). In
     /// `mock` mode the runtime evaluates this to produce the operation
     /// response. `None` when the connector's allowed modes exclude

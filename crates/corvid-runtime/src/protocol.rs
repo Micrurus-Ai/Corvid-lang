@@ -1004,6 +1004,8 @@ mod tests {
             retry: None,
             rate_limit: None,
             circuit_breaker: None,
+            timeout_secs: Some(10),
+            redirects: Some(crate::http::RedirectPolicy::Never),
         };
         let encoded = provider_canonical_encoding(&base);
         assert!(

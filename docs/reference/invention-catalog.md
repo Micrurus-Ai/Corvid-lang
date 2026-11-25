@@ -909,12 +909,14 @@ Non-scope: The login/session and route-authorization runtime is complete; durabl
 
 #### Protocol-Typed Connectors
 
-Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
+Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. How long a request may take and where a redirect may send it are declared the same way: `timeout:` and `redirects:` are required, and a redirect never carries the credential to another origin. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
 
 ```corvid
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    timeout: 10s                          # omit → compile error; no default
+    redirects: never                      # never | same_host | allowed_hosts
     rate_limit: 60 per 60s
     modes: [mock, replay, real]           # omit → compile error; no default
     operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:

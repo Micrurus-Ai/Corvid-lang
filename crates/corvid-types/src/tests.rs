@@ -1625,6 +1625,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: \"https://api.github.com\"
     modes: [real]
     operation push_repo(owner: String) -> Repo dangerous uses http_write:
@@ -1658,6 +1660,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: \"https://api.github.com\"
     retry: 3
     modes: [real]
@@ -1702,6 +1706,8 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
     base_url: \"https://api.example.com\"
     modes: [real]
     operation submit_job(order: String) -> Job dangerous uses http_write:
@@ -2289,6 +2295,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2305,6 +2313,8 @@ agent fetch(owner: String, repo: String) -> Repo uses http_read:
 
 const VERIFIED_PROVIDER_PROTOCOL: &str = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     retry: 3
     modes: [real]
@@ -2379,6 +2389,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2415,6 +2427,8 @@ type NewIssue:
     title: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2445,6 +2459,8 @@ type NewIssue:
     title: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2474,6 +2490,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2491,6 +2509,63 @@ connector github:
     );
 }
 
+/// How long a request may take and where a redirect may send it are
+/// declared, never defaulted: omitting either names the decision and its
+/// values, and a timeout must be between 1 and 3600 seconds.
+#[test]
+fn connector_timeout_and_redirect_policy_are_required() {
+    let connector = |items: &str, operation_item: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+connector svc:
+    base_url: "https://svc.example.com"
+{items}    modes: [real]
+    operation ping() -> String uses http_read:
+        GET "/ping"
+{operation_item}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |messages: &[String], needle: &str| messages.iter().any(|m| m.contains(needle));
+
+    let declared = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    assert!(declared.is_empty(), "{declared:?}");
+
+    let no_timeout = messages(connector("    redirects: never\n", ""));
+    assert!(has(&no_timeout, "must declare `timeout: <n>s`"), "{no_timeout:?}");
+    assert!(has(&no_timeout, "There is no default timeout"), "{no_timeout:?}");
+
+    let no_redirects = messages(connector("    timeout: 10s\n", ""));
+    assert!(
+        has(&no_redirects, "must declare `redirects:` — `never`")
+            && has(&no_redirects, "`same_host`")
+            && has(&no_redirects, "`allowed_hosts`"),
+        "{no_redirects:?}"
+    );
+
+    let zero = messages(connector("    timeout: 0s\n    redirects: never\n", ""));
+    assert!(has(&zero, "`timeout: 0s`"), "{zero:?}");
+
+    let too_long = messages(connector(
+        "    timeout: 10s\n    redirects: never\n",
+        "        timeout: 7200s\n",
+    ));
+    assert!(has(&too_long, "operation `ping` declares `timeout: 7200s`"), "{too_long:?}");
+    assert!(has(&too_long, "durable job"), "{too_long:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:
@@ -2503,6 +2578,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2529,6 +2606,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2552,6 +2631,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2583,6 +2664,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2607,6 +2690,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2639,6 +2724,8 @@ type GithubError:
     | NotFound
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2672,6 +2759,8 @@ type GithubError:
     | RateLimited
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]

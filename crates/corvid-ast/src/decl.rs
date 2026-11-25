@@ -473,6 +473,17 @@ pub struct ConnectorDecl {
     /// `circuit_breaker: N` — trip after N consecutive failures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<u64>,
+    /// `timeout: <n>s` — how long one request may take, from connecting
+    /// to the last byte of the response. Required: there is no default
+    /// timeout, so omitting it is a compile error. An operation may
+    /// override it with its own `timeout:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    /// `redirects: never | same_host | allowed_hosts` — which redirects
+    /// a request follows. Required, like `timeout`: where a request may
+    /// be sent next is a security decision, never a default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirects: Option<RedirectPolicy>,
     /// `modes: [mock, replay, real]` — the execution modes this
     /// connector is ALLOWED to run in (slice 52g-3b). There is no
     /// default: a connector must declare its allowed modes, and the
@@ -485,6 +496,46 @@ pub struct ConnectorDecl {
     #[serde(default)]
     pub visibility: Visibility,
     pub span: Span,
+}
+
+impl ConnectorDecl {
+    /// The timeout one of this connector's operations runs under: the
+    /// operation's own `timeout:` when it declares one, otherwise the
+    /// connector's. The one place the rule lives; IR lowering and the
+    /// Application Contract both call it.
+    pub fn operation_timeout_secs(&self, operation: &OperationDecl) -> Option<u64> {
+        operation.timeout_secs.or(self.timeout_secs)
+    }
+}
+
+/// Which redirects a connector's requests follow. Every policy keeps the
+/// SSRF block, never sends the credential to another origin, and stops
+/// after a fixed number of hops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedirectPolicy {
+    /// A 3xx response is the provider's answer; nothing is followed.
+    Never,
+    /// Follow a redirect only to the request's own scheme, host and port.
+    SameHost,
+    /// Follow a redirect to any host the project's `[http] allow` permits.
+    AllowedHosts,
+}
+
+impl RedirectPolicy {
+    pub const ALL: [RedirectPolicy; 3] = [Self::Never, Self::SameHost, Self::AllowedHosts];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::SameHost => "same_host",
+            Self::AllowedHosts => "allowed_hosts",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|policy| policy.as_str() == name)
+    }
 }
 
 /// An execution mode a connector is allowed to run in (slice 52g-3b).
@@ -563,6 +614,10 @@ pub struct OperationDecl {
     /// error variant instead of the success return.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_map: Vec<StatusErrorMapping>,
+    /// `timeout: <n>s` on the operation — overrides the connector's
+    /// timeout for this operation only (a slow upload, a long report).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     /// `mock: <expr>` — the payload this operation returns in `mock`
     /// mode (slice 52g-3b). The expression must produce the operation's
     /// return type. When `mock` is one of the connector's allowed

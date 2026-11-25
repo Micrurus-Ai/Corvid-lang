@@ -490,9 +490,10 @@ impl<'a> Lowerer<'a> {
                         variant: m.variant.name.clone(),
                     })
                     .collect(),
-                  mock: op.mock.as_ref().map(|e| self.lower_expr(e)),
-                  protocol: op.protocol.clone(),
-                  span: op.span,
+                timeout_secs: c.operation_timeout_secs(op),
+                mock: op.mock.as_ref().map(|e| self.lower_expr(e)),
+                protocol: op.protocol.clone(),
+                span: op.span,
             });
         }
         IrConnector {
@@ -505,6 +506,8 @@ impl<'a> Lowerer<'a> {
                 window_secs: r.window_secs,
             }),
             circuit_breaker: c.circuit_breaker,
+            timeout_secs: c.timeout_secs,
+            redirects: c.redirects,
             modes: c.modes.clone(),
             operations,
             span: c.span,

@@ -392,9 +392,11 @@ fn run_via_interpreter_tier(
     // widen `executable_modes`.
     {
         let secret_present = |name: &str| rt.secret_present(name);
+        let egress_refusal = |url: &str| rt.egress_refusal(url);
         let ctx = crate::connector_startup::ConnectorRuntimeContext {
             selected_mode: rt.connector_mode(),
             egress_configured: rt.egress_configured(),
+            egress_refusal: &egress_refusal,
             replay_source_present: rt.has_replay_source(),
             secret_present: &secret_present,
             executable_modes: &[
@@ -623,6 +625,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, real]

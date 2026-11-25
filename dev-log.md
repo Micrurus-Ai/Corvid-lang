@@ -4,6 +4,61 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Connectors declare their timeout and redirect policy (B05, first slice)
+
+Every request a connector sent used a 30-second timeout and followed up
+to 10 redirects, and neither appeared in the source. Both are now
+declared, and omitting either is a compile error naming the values:
+`timeout: <n>s` on the connector (an operation may override it) and
+`redirects: never | same_host | allowed_hosts`.
+
+**Corvid follows redirects itself.** reqwest's redirect policy is set
+per client, not per request, so it could not apply a different policy to
+each connector. It also strips `Authorization` on a cross-host hop, but
+not a connector's own `header("X-Api-Key", ...)` credential. The
+transport now builds every client with automatic redirects off and
+follows them in one loop. That loop applies the request's policy, checks
+`allowed_hosts` hops against the same egress policy as the first request,
+drops every credential header when the origin changes, refuses a 301, 302
+or 303 that would turn a `POST` into a body-less `GET`, and stops after 10
+hops. The timeout covers the whole attempt, redirects and body included.
+`HttpRequest::new` takes the timeout and policy as arguments, so no Rust
+caller can build a request without them either.
+
+**Startup refuses a host that is not allowed.** In `real` mode a
+connector whose `base_url` fails the project's HTTP policy now stops
+`corvid run` and `corvid serve` before binding, naming the connector, the
+URL and the reason. The check is the same `HttpEgressPolicy::check` every
+request runs.
+
+**One rule for the effective timeout.** IR lowering and the Application
+Contract both read the AST, so the rule "the operation's timeout wins
+over the connector's" is one method, `ConnectorDecl::operation_timeout_secs`,
+called by both. The contract now lists `redirects` per connector and
+`timeout_secs` per operation.
+
+**Order change.** `HEAD` and the replacement of `http_get` and
+`http_post_json` were planned for this slice. Both need `Response<T>`,
+since a `HEAD` response has no body and the tools return a status, so
+they move after slice 3. The two tools keep their 30-second timeout and
+redirects to allowed hosts, now written at their one call site instead
+of as a client-wide default.
+
+About 60 connector sources in tests, the tour and `examples/orders_api`
+gained the two lines. The test transport helpers now pass a
+`reqwest::ClientBuilder`, so a test client can never follow redirects
+behind the runtime's back.
+
+Tests: the parser and checker for the new items; the transport for each
+policy, a cross-origin hop dropping both credential headers, a refused
+`POST` to `GET`, a 307 keeping its body, the hop limit, a slow body
+timing out, and a fingerprint that never depends on a key; the request
+builder; the startup refusal, as a unit test and through `corvid serve`;
+the contract; and three end-to-end programs against a mock provider
+(an operation timeout, `never`, `same_host`).
+
+---
+
 ## 2026-11-25 - The complete HTTP client is decided (B05)
 
 B05 completes the `connector` declaration instead of adding a second

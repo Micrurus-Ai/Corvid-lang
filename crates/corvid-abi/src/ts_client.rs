@@ -556,6 +556,8 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]

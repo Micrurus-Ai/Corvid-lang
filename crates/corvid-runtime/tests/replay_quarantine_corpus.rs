@@ -100,7 +100,12 @@ async fn replay_quarantines_http_client_send() {
     let trace_path = write_minimal_trace(dir.path());
     let runtime = build_substitute_replay_runtime(&trace_path);
 
-    let req = HttpRequest::get("https://example.invalid/should-not-reach");
+    let req = HttpRequest::new(
+        "GET",
+        "https://example.invalid/should-not-reach",
+        std::time::Duration::from_secs(5),
+        corvid_runtime::http::RedirectPolicy::Never,
+    );
     let err = runtime.http().send(&req).await.expect_err("must refuse");
     match err {
         RuntimeError::QuarantineViolation { surface, detail } => {

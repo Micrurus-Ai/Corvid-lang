@@ -17,10 +17,12 @@ async fn http_request_emits_trace_events() {
         .build();
 
     let response = r
-        .http_request(crate::http::HttpRequest::get(format!(
-            "{}/status",
-            server.uri()
-        )))
+        .http_request(crate::http::HttpRequest::new(
+            "GET",
+            format!("{}/status", server.uri()),
+            std::time::Duration::from_secs(5),
+            crate::http::RedirectPolicy::Never,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status, 200);

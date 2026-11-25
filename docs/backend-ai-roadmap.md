@@ -216,12 +216,13 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B05 complete HTTP client** (in progress, macOS session). [Proposal](proposals/http-client.md)
 
 - [x] Agree the proposal: no frontend agreement needed, `http_get` and `http_post_json` replaced by a dynamic-host connector, native code after the shared native-dispatch decision. [Decisions](proposals/http-client.md#decisions)
-- [ ] 1. Declared `timeout:` and `redirects:` on every connector, startup refusal of a connector host outside `[http] allow`, `HEAD` and `OPTIONS`.
+- [x] 1. Declared `timeout:` and `redirects:` on every connector (omitting either is a compile error), per-operation `timeout:`, redirects followed by Corvid under the declared policy with the credential kept to its origin and a `POST` never turned into a `GET`, startup refusal of a connector host outside `[http] allow`, both values in the contract. [Proposal](proposals/http-client.md#slices)
 - [ ] 2. An `HttpExchange` record for every attempt, with credentials redacted, replayed exactly.
-- [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`; the contract and the generated clients describe connector bodies from the same schema, with a test that the runtime's encoding matches it.
-- [ ] 4. Streamed responses, cancellation, and caller disconnect closing the upstream connection.
-- [ ] 5. Streamed request bodies and multipart upload.
-- [ ] 6. Native code, after the native-dispatch decision.
+- [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`, `HEAD` and `OPTIONS`; the contract and the generated clients describe connector bodies from the same schema, with a test that the runtime's encoding matches it.
+- [ ] 4. A dynamic-host connector replaces `http_get` and `http_post_json`, with every surface that names them. Until then the two tools keep a 30-second timeout and redirects to allowed hosts, written at their call site.
+- [ ] 5. Streamed responses, cancellation, and caller disconnect closing the upstream connection.
+- [ ] 6. Streamed request bodies and multipart upload.
+- [ ] 7. Native code, after the native-dispatch decision.
 
 **Test infrastructure**
 

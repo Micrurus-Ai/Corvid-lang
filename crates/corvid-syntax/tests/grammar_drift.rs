@@ -419,11 +419,14 @@ extend Customer:
     (
         "connector_settings",
         r#"connector reports:
+    timeout: 10s
+    redirects: never
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
     operation generate(input: String) -> String dangerous:
         POST "/reports" body input
+        timeout: 30s
         async:
             statuses: [queued, completed, failed]
             initial: queued
@@ -750,6 +753,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("connector_decl", "connector_settings"),
     ("connector_item", "connector_settings"),
     ("connector_mode", "connector_settings"),
+    ("redirect_policy", "connector_settings"),
     ("connector_auth", "connector_settings"),
     ("secret_ref", "connector_settings"),
     ("operation_decl", "connector_settings"),

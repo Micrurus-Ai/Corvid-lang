@@ -282,6 +282,16 @@ impl Runtime {
         self.http_policy.is_configured()
     }
 
+    /// Why the project's HTTP policy refuses `url`, or `None` when it is
+    /// allowed. The same check every outbound request runs; the
+    /// connector startup check asks it once per connector `base_url`.
+    pub fn egress_refusal(&self, url: &str) -> Option<String> {
+        self.http_policy.check(url).err().map(|err| match err {
+            RuntimeError::ToolFailed { message, .. } => message,
+            other => other.to_string(),
+        })
+    }
+
     /// Whether a named secret resolves right now (slice 52g-3c). Used by
     /// the connector startup check to validate that a `real`-mode
     /// connector's `secret(...)` references are satisfiable before the

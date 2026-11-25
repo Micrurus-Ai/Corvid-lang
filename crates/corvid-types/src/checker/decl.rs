@@ -517,6 +517,28 @@ impl<'a> Checker<'a> {
         }
         let mock_allowed = decl.modes.contains(&ConnectorMode::Mock);
 
+        // How long a request may take and where a redirect may send it
+        // are consequential choices with more than one reasonable answer,
+        // so the source declares both; silence is a compile error naming
+        // the decision and its values, never a default.
+        match decl.timeout_secs {
+            None => self.errors.push(invalid(
+                "a connector must declare `timeout: <n>s`, the longest one request may take from connecting to the last byte of the response (for example `timeout: 10s`). There is no default timeout; an operation may override it with its own `timeout:`".into(),
+                decl.span,
+            )),
+            Some(secs) => {
+                if let Some(message) = connector_timeout_problem("the connector", secs) {
+                    self.errors.push(invalid(message, decl.span));
+                }
+            }
+        }
+        if decl.redirects.is_none() {
+            self.errors.push(invalid(
+                "a connector must declare `redirects:` — `never` (a 3xx is the answer), `same_host` (follow only to the same scheme, host and port), or `allowed_hosts` (follow to any host in `[http] allow`). There is no default: where a request may be sent next is a security decision".into(),
+                decl.span,
+            ));
+        }
+
         // Each operation: a unique name, a path that starts with `/`, and
         // `{placeholders}` that name declared parameters.
         let mut seen = HashSet::new();
@@ -557,6 +579,13 @@ impl<'a> Checker<'a> {
                         ),
                         op.span,
                     ));
+                }
+            }
+
+            if let Some(secs) = op.timeout_secs {
+                let subject = format!("operation `{}`", op.name.name);
+                if let Some(message) = connector_timeout_problem(&subject, secs) {
+                    self.errors.push(invalid(message, op.span));
                 }
             }
 
@@ -1460,4 +1489,24 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(else_body, name, spans);
         }
     }
+}
+
+/// The longest timeout a connector or operation may declare: one hour.
+/// A longer wait is durable work (a job or a provider protocol), not one
+/// request.
+pub(crate) const MAX_CONNECTOR_TIMEOUT_SECS: u64 = 3600;
+
+/// Why a declared connector or operation timeout is unusable, if it is.
+fn connector_timeout_problem(subject: &str, secs: u64) -> Option<String> {
+    if secs == 0 {
+        return Some(format!(
+            "{subject} declares `timeout: 0s`, which would fail every request; give a positive number of seconds"
+        ));
+    }
+    if secs > MAX_CONNECTOR_TIMEOUT_SECS {
+        return Some(format!(
+            "{subject} declares `timeout: {secs}s`, longer than the {MAX_CONNECTOR_TIMEOUT_SECS}s limit for one request; work that takes longer belongs in a durable job or an `async:` provider protocol"
+        ));
+    }
+    None
 }

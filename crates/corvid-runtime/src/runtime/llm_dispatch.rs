@@ -685,19 +685,27 @@ impl Runtime {
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
-        use crate::http::HttpRequest;
+        use crate::http::{HttpRequest, RedirectPolicy};
         let url = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
             tool: name.into(),
             message: "expected a String URL".into(),
         })?;
+        // These two tools predate declared HTTP policy and have always
+        // used a 30-second timeout and followed redirects to allowed
+        // hosts. They are replaced by a dynamic-host connector, which
+        // declares both, in the HTTP client's fourth slice; until then
+        // their limits are written here, at the one place they apply.
+        let request = |method: &str| {
+            HttpRequest::new(method, url, std::time::Duration::from_secs(30), RedirectPolicy::AllowedHosts)
+        };
         let request = match name {
-            "http_get" => HttpRequest::get(url.to_string()),
+            "http_get" => request("GET"),
             "http_post_json" => {
                 let body = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
                     tool: name.into(),
                     message: "expected a String JSON body".into(),
                 })?;
-                HttpRequest::post_json(url.to_string(), body.to_string())
+                request("POST").json_body(body)
             }
             other => return Err(RuntimeError::UnknownTool(other.to_string())),
         };

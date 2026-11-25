@@ -183,12 +183,15 @@ Connectors run only on the interpreter today, for the same reason native `Secret
 
 Each slice ships with interpreter tests, its reference page and roadmap checklist, and `dev-log.md` and `learnings.md` entries.
 
-1. **Declared timeouts and redirects.** `timeout:` and `redirects:` are required on every connector, with per-operation `timeout:`; the runtime builds one client per policy; a cross-host redirect never carries the credential, and a `POST` turned into a `GET` is refused; startup refuses a connector whose host is not allowed; `HEAD` and `OPTIONS`; `timeout` and `redirects` in the contract. Existing connectors migrate. The dynamic-URL tools are replaced or reworked (question 2), with every doc, tour, guarantee and test that names them, and a `learnings.md` entry.
+1. **Declared timeouts and redirects.** `timeout:` and `redirects:` are required on every connector, with per-operation `timeout:`. Corvid follows redirects itself, so the declared policy, the egress check and the credential rule apply to every hop: a cross-origin redirect never carries the credential (including a custom auth header), a `POST` turned into a `GET` is refused, and every policy stops after 10 hops. Startup refuses a connector whose host is not allowed. `timeout` and `redirects` are in the contract. Existing connectors migrate.
 2. **Each request recorded.** `HttpExchange` events for every attempt, with credentials, `Secret` headers and `Set-Cookie` redacted; replay tests over retries and redirects; a test that a key never reaches the trace file.
-3. **Typed requests and responses.** Bodies and responses through B01's public mapping with field-path errors; `query` records; `header` items, including from a `Secret`; `Response<T>`.
-4. **Streamed responses and cancellation.** `Stream<T>` with `server_sent_events` and `json_lines`, per-event timeouts, and the caller-disconnect acceptance test through `corvid serve`.
-5. **Streamed request bodies and multipart.** `Upload` and `Bytes` bodies sent without buffering, `Stream<T>` bodies, and `multipart` records.
-6. **Native code.** After open question 3 is decided.
+3. **Typed requests and responses.** Bodies and responses through B01's public mapping with field-path errors; `query` records; `header` items, including from a `Secret`; `Response<T>`; `HEAD` (returning `Response<Nothing>`) and `OPTIONS`.
+4. **One way to make a request.** The dynamic-host connector replaces `http_get` and `http_post_json`, with every doc, tour, guarantee and test that names them, and a `learnings.md` entry. It needs `Response<T>` from slice 3, because the tools return a status.
+5. **Streamed responses and cancellation.** `Stream<T>` with `server_sent_events` and `json_lines`, per-event timeouts, and the caller-disconnect acceptance test through `corvid serve`.
+6. **Streamed request bodies and multipart.** `Upload` and `Bytes` bodies sent without buffering, `Stream<T>` bodies, and `multipart` records.
+7. **Native code.** After the shared native-dispatch decision.
+
+Order note: `HEAD` and the tool replacement were first planned for slice 1. Both depend on `Response<T>` (a `HEAD` response has no body, and the tools return a status), so they moved after it. Until slice 4 lands, `http_get` and `http_post_json` keep their 30-second timeout and redirects to allowed hosts, now written at their one call site in `corvid-runtime` rather than as a client-wide default.
 
 ## Not in scope
 
@@ -203,7 +206,7 @@ Each slice ships with interpreter tests, its reference page and roadmap checklis
 Recorded 2026-11-25. The user directed the sessions to decide by the laws in `AGENTS.md` rather than ask for approval.
 
 1. **No frontend agreement is needed.** Only backend code writes a `connector`, so its items are not grammar shared with the frontend. `HEAD` and `OPTIONS` extend the method rule routes also use; routes are backend declarations too, and the main-line session confirmed the change is safe for B10, whose action endpoints use `POST`.
-2. **`http_get` and `http_post_json` are replaced by a dynamic-host connector (option A).** "One obvious way" rules out keeping a second request path, and "no hidden defaults" rules out keeping it as it is. Option B would also mean building headers, auth, typed bodies and streaming twice. The replacement and the migration of every surface that names the tools (invention entry, tour, book chapter 18, reference pages, guarantees, skills audit, Python codegen scan, tests) land in slice 1, with a `learnings.md` entry.
+2. **`http_get` and `http_post_json` are replaced by a dynamic-host connector (option A).** "One obvious way" rules out keeping a second request path, and "no hidden defaults" rules out keeping it as it is. Option B would also mean building headers, auth, typed bodies and streaming twice. The replacement and the migration of every surface that names the tools (invention entry, tour, book chapter 18, reference pages, guarantees, skills audit, Python codegen scan, tests) land together in slice 4, with a `learnings.md` entry.
 3. **B05 ships on the interpreter first; slice 6 (native code) stays open.** Native dispatch of runtime-owned tools through the runtime's recording is shared architecture that native `Secret`, native UUID and the B06 boundary types also wait on. It is decided as its own task, not inside B05, so the five interpreter slices are designed to reuse the same runtime code natively.
 
 ## Questions that were open

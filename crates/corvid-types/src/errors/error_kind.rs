@@ -1525,7 +1525,7 @@ impl TypeErrorKind {
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),
             Self::ConnectorConfigInvalid { .. } => Some(
-                "`base_url` must be an absolute `http(s)://` URL; each operation path must start with `/` and its `{placeholders}` must name declared parameters; reliability values (`retry`, `rate_limit`, `circuit_breaker`) must be non-zero.".into(),
+                "`base_url` must be an absolute `http(s)://` URL; `timeout: <n>s` (1 to 3600) and `redirects: never | same_host | allowed_hosts` are required; each operation path must start with `/` and its `{placeholders}` must name declared parameters; reliability values (`retry`, `rate_limit`, `circuit_breaker`) must be non-zero.".into(),
             ),
         }
     }

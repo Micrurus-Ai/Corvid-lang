@@ -1425,6 +1425,8 @@ test lookup_trace from_trace "traces/lookup.jsonl":
     fn renders_and_reparses_verified_provider_protocols() {
         let source = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
