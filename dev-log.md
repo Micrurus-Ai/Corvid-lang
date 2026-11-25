@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Live subscriptions protocol agreement
+
+The frontend and backend now share a proposed implementation target for live declarations, ordered snapshots, committed changes and reconnect. Transport and grammar can start in parallel. [Protocol and ownership](docs/proposals/real-time.md#frontend-agreement-and-wire-protocol)
+
 ### F16 web starter and installed component tooling
 
 The web starter uses the usual manifest and a server-rendered Corvid page
