@@ -831,6 +831,13 @@ impl<'ir> Interpreter<'ir> {
                             }
                             None => rhs,
                         };
+                        if let Some(declared) = self
+                            .types_by_id
+                            .get(&sv.type_id())
+                            .and_then(|record| record.fields.iter().find(|f| f.name == *field))
+                        {
+                            crate::interp::hold_refinement(sv.type_name(), declared, &new_v, *span)?;
+                        }
                         sv.set_field(field.clone(), new_v);
                     }
                     // Map store (45g): m[k] = v inserts or updates;

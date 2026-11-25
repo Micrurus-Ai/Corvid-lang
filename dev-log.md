@@ -599,6 +599,32 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Refinements hold for every value on the interpreter (B09 Refine-1)
+
+A field refinement was checked only where values entered from outside,
+so `Search("dune", 500)` ran and no reader of a `Search` could rely on
+`limit <= 50`. Now a constant out of range in a constructor, a variant
+constructor or a record literal is `RefinementOutOfRange`, and a
+computed value is checked by the interpreter at constructors, record
+literals, `{ ..base }` updates and field assignments (compound ones
+too), stopping the run with `` `Search.limit` must be between(1, 50),
+but this value is 500 ``. A table row is checked when read, so a row
+written outside the program is refused instead of handed on.
+
+Every check calls `conv::refinement_breach`, the rule decoding already
+used, so a refinement means one thing at every boundary. Native code
+does not check yet. Rather than let the tiers disagree, the native
+ability scan routes a program that gives a refined field a computed
+value to the interpreter and names the field; a literal, proven by the
+checker, stays native. That routing goes when Refine-2 adds the native
+check. Variant payloads take no refinements in the grammar, so the
+variant constructor's check guards nothing yet and costs nothing.
+
+Also removed: the `malformed` helper in `tables/recorded.rs`, left
+unused by Conflict-2's rename to `malformed_outcome`.
+
+---
+
 ## 2026-11-25 - Native nested patterns were already there (B09)
 
 The B09 item for native nested patterns was stale. Running

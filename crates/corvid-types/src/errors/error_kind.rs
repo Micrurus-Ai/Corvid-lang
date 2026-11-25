@@ -6,6 +6,10 @@ pub enum TypeErrorKind {
     /// (slice 45i).
     NonExhaustiveMatch { missing: String },
 
+    /// A constant given to a refined field breaks its refinement:
+    /// `Search("dune", 500)` where `limit: Int where between(1, 50)`.
+    RefinementOutOfRange { type_name: String, field: String, refinement: String, value: String },
+
     /// A pattern names a conflict case the matched value can never be:
     /// `Err(Changed(_))` on an `insert`, which only returns `Taken`.
     ImpossibleConflictCase { case: String, possible: String },
@@ -612,6 +616,9 @@ impl TypeErrorKind {
             Self::NonExhaustiveMatch { missing } => {
                 format!("non-exhaustive match: missing {missing}")
             }
+            Self::RefinementOutOfRange { type_name, field, refinement, value } => {
+                format!("`{type_name}.{field}` must be {refinement}, but this value is {value}")
+            }
             Self::ImpossibleConflictCase { case, possible } => {
                 format!("this conflict is never `{case}`: it can only be {possible}")
             }
@@ -1144,6 +1151,9 @@ impl TypeErrorKind {
         match self {
             Self::NonExhaustiveMatch { .. } => Some(
                 "add the missing arm(s), or a final `_ -> ...` catch-all".into(),
+            ),
+            Self::RefinementOutOfRange { .. } => Some(
+                "use a value the refinement admits; every value of a refined field holds its refinement, however it is built".into(),
             ),
             Self::ImpossibleConflictCase { .. } => Some(
                 "remove the arm: each table write returns only the conflicts it can produce".into(),

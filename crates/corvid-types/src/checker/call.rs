@@ -1229,6 +1229,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = variant.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {
@@ -1292,6 +1293,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = ty_decl.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {
