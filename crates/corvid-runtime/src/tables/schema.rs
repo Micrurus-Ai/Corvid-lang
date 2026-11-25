@@ -58,7 +58,18 @@ fn create_table_named_on(table: &TableSchema, name: &str, engine: TableEngine) -
     } else {
         String::new()
     };
-    format!("CREATE TABLE {} (\n{columns}{constraint}\n);\n", quote(name))
+    // Postgres declares money and time columns with domains, created
+    // first and only once each.
+    let mut domains = Vec::new();
+    for (_, ty) in &table.columns {
+        if let Some(definition) = engine.domain_definition(column_kind(ty).0) {
+            if !domains.contains(&definition) {
+                domains.push(definition);
+            }
+        }
+    }
+    let domains: String = domains.into_iter().map(|d| d + "\n").collect();
+    format!("{domains}CREATE TABLE {} (\n{columns}{constraint}\n);\n", quote(name))
 }
 
 /// `name` as a quoted SQL identifier.

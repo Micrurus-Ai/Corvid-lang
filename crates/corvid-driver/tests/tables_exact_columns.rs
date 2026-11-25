@@ -1,4 +1,5 @@
-//! B09 P8a — money and time as table columns on SQLite. Each type is
+//! B09 P8a and P8b — money and time as table columns on SQLite and,
+//! when `CORVID_TEST_POSTGRES_URL` is set, on Postgres. Each type is
 //! stored in a column the database compares exactly as Corvid does:
 //! decimals and durations by value (so `10 == 10.0` and `9.50` sorts
 //! before `10.0`), instants in time order across fraction lengths, and
@@ -104,14 +105,15 @@ const EXPECTED: &str = "+1+2+3+4+5 | 4,3, | 1, | 5,2,1,4,3, | 2,1,3, | 1,5,2,4,3
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn money_and_time_columns_compare_and_read_back_exactly() {
-    let database = TestDatabase::sqlite();
-    let source = program(&database.settings());
-    database.create_tables(&source).await;
-    let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
-    let runtime = Runtime::builder().build();
-    let out = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect("program runs");
-    assert_eq!(out, Value::String(EXPECTED.into()));
-    database.finish().await;
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        let out = run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect("program runs");
+        assert_eq!(out, Value::String(EXPECTED.into()), "on {}", database.label());
+        database.finish().await;
+    }
 }
 
 #[test]
@@ -163,24 +165,22 @@ fn ordering_by_a_type_without_an_order_or_by_json_is_refused() {
 }
 
 #[test]
-fn money_and_time_columns_wait_for_their_postgres_types() {
-    let source = r#"
-database ledger:
-    engine: postgres
-    location: env("LEDGER_URL")
-    tls: required
-    tables: Invoice
-
-table Invoice:
-    key number: Int
-    total: Decimal
-    lines: List<Decimal>
-
-agent main() -> Int:
-    return 0
-"#;
-    let refused = errors(source);
-    assert!(refused.contains("column `total` of table `Invoice` is a `Decimal`, which a Postgres table cannot store yet"), "{refused}");
-    // A decimal inside a JSON-stored column is its exact text on any engine.
-    assert!(!refused.contains("`lines`"), "{refused}");
+fn postgres_declares_each_type_with_a_domain_created_first() {
+    let source = program("    engine: postgres\n    location: env(\"LEDGER_URL\")\n    tls: required");
+    let schemas = corvid_driver::table_schemas(&source, std::path::Path::new("ledger.cor")).expect("compiles");
+    let sql = corvid_runtime::tables::create_table_sql_on(&schemas[0], schemas[0].engine);
+    for (domain, base) in [
+        ("corvid_decimal", "numeric"),
+        ("corvid_duration", "numeric(39, 0)"),
+        ("corvid_instant", "text COLLATE \"C\" CHECK"),
+        ("corvid_currency", "text COLLATE \"C\""),
+        ("corvid_zoned_time", "text COLLATE \"C\""),
+    ] {
+        let create = format!("CREATE DOMAIN {domain} AS {base}");
+        assert!(sql.contains(&create), "missing {create} in {sql}");
+        assert_eq!(sql.matches(&format!("CREATE DOMAIN {domain} ")).count(), 1, "{sql}");
+        assert!(sql.find(&create) < sql.find("CREATE TABLE"), "{sql}");
+    }
+    assert!(sql.contains("\"total\" corvid_decimal NOT NULL"), "{sql}");
+    assert!(sql.contains("\"signed\" corvid_zoned_time,"), "{sql}");
 }

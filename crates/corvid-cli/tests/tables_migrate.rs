@@ -142,6 +142,23 @@ fn lifecycle(engine: &Engine) {
     write("    name: Int renamed from title\n    note: Option<String>\n    count: Option<Float>\n    retired legacy", "    return \"x\"");
     let stderr = refused(&plan());
     assert!(stderr.contains("`name` changes from `String` to `Int`"), "on {on}: {stderr}");
+
+    // A money column is added (on Postgres, its domain first), filled, and
+    // compared by value, and the planner then reads the stored column
+    // back as the same type.
+    let priced = "    name: String renamed from title\n    note: Option<String>\n    count: Option<Float>\n    price: Option<Decimal>\n    retired legacy";
+    let fill = "    stored: Decimal = 10.0\n    ten: Decimal = 10\n    for row in Shelf.all():\n        saved = Shelf.save(Shelf { price: Some(stored), ..row })\n    out = \"\"\n    for row in Shelf.where(fn (s) -> s.price == Some(ten)):\n        out = out + row.name + \" \" + row.price.unwrap_or(ten).to_string()\n    return out";
+    write(priced, fill);
+    ok(&plan());
+    let added = std::fs::read_to_string(root.join("migrations/004_change_shelf.sql")).expect("change written");
+    let expected = match engine {
+        Engine::Sqlite { .. } => "ADD COLUMN \"price\" DECIMAL TEXT COLLATE corvid_decimal",
+        Engine::Postgres { .. } => "CREATE DOMAIN corvid_decimal AS numeric",
+    };
+    assert!(added.contains(expected), "on {on}: {added}");
+    up();
+    assert_eq!(run().trim(), "\"Reading 10.0\"", "on {on}");
+    assert!(ok(&plan()).contains("already match every declared table"), "on {on}");
 }
 
 #[test]

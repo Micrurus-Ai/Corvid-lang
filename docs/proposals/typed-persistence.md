@@ -272,7 +272,7 @@ agent large_recent(since: Instant) -> List<Invoice>:
 | Type | Stored on SQLite as | Compared by |
 | --- | --- | --- |
 | `Decimal` | its exact text, such as `19.90` | value, through the `corvid_decimal` collation: `10 == 10.0`, and `9.50` sorts before `10.0` |
-| `Duration` | its ISO 8601 text, such as `PT1H30M` | value, through the `corvid_duration` collation |
+| `Duration` | its count of nanoseconds, such as `5400000000000` for an hour and a half | value, through the `corvid_duration` collation |
 | `Instant` | UTC RFC 3339 text with all nine fractional digits, such as `2026-03-29T01:30:00.000000000Z` | text, which is time order: the year always has four digits in Corvid's range |
 | `ZonedTime` | the instant's text and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | equality only, as in Corvid: same instant and zone |
 | `TimeZone`, `Currency`, `Locale` | their canonical names (`Europe/Berlin`, `EUR`, `en-GB`) | equality only |
@@ -307,12 +307,24 @@ Decisions, and the simpler alternatives considered:
 - **These types inside a JSON-stored column are allowed too.** A record
   or list field is stored as its public JSON text, which writes each of
   these types exactly; the database never compares inside it.
-- **Postgres comes in a second slice.** Postgres identifies a column by
-  its type as well, and `numeric` would hold decimals exactly, but
-  telling an `Instant` text column from a `String` one needs a domain
-  type per Corvid type, created by the migration that first needs it.
-  Until that lands, these columns on a Postgres database are a compile
-  error naming the slice, so a program never stores them a weaker way.
+- **Postgres declares each type with a domain (P8b).** Postgres
+  identifies a column by its type too, so each Corvid type gets a domain:
+  `corvid_decimal AS numeric`, `corvid_duration AS numeric(39, 0)`, and
+  byte-ordered (`COLLATE "C"`) text domains for the rest, the instant's
+  with a `CHECK` on its fixed-width form. The planner reads a column's
+  domain before its base type. Each domain is created by a `DO` block
+  that does nothing when it exists, written before the first table or
+  column that needs it, so migrations stay re-runnable on a scratch
+  database and need no ordering between tables.
+- **A duration is its nanosecond count on both engines.** P8a first
+  stored ISO 8601 text, which SQLite's collation could compare but
+  Postgres cannot: it has no comparison by value for text. One encoding
+  on both engines keeps the interpreter engine-blind, so the count of
+  nanoseconds replaced the ISO text before any database held one.
+- **`ORDER BY` names its table.** The select list reads money and time
+  columns as text, and Postgres resolves a bare `ORDER BY` name to the
+  output column first, so the first Postgres run sorted `9.50` after
+  `10.0`. Every ordering column is now written `"Table"."column"`.
 - **Across the tiers:** the backend knows the exact value, so a form
   field bound to one of these columns, an assistant's tool input and the
   stored row all carry the same exact text, which is already the JSON
@@ -321,7 +333,7 @@ Decisions, and the simpler alternatives considered:
   time as exactly as one a person triggers.
 
 Slices: P8a, SQLite. P8b, Postgres through domains. P8c, `Bytes` as a
-binary column.
+binary column. All three are done.
 
 **`Bytes` columns (P8c).** A `Bytes` field is a `BLOB` on SQLite and a
 `bytea` on Postgres. Both store the bytes themselves and compare them

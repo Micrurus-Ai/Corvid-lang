@@ -49,9 +49,12 @@ impl TableEngine {
     pub fn mark(self, n: usize, kind: ColumnKind, value: &DbValue) -> String {
         match self {
             Self::Sqlite => format!("?{n}"),
-            // JSON travels as text and is cast in SQL, because the
-            // client's binary `jsonb` encoding is not text.
-            Self::Postgres { .. } if kind == ColumnKind::Json => format!("(${n}::text)::jsonb"),
+            // JSON, money and time travel as text and are cast in SQL to
+            // the column's type, because the client's binary encodings of
+            // `jsonb`, `numeric` and the domains are not text.
+            Self::Postgres { .. } if kind == ColumnKind::Json || kind.is_exact_text() => {
+                format!("(${n}::text)::{}", postgres_type(kind))
+            }
             Self::Postgres { .. } => {
                 let kind = match (kind, value) {
                     (ColumnKind::Integer, DbValue::Float(_)) => ColumnKind::Real,
@@ -118,14 +121,17 @@ impl TableEngine {
     }
 
     /// The column list a `SELECT` reads, in [`TableRef::columns`]
-    /// order. Postgres reads `JSONB` columns as text.
+    /// order. Postgres reads `JSONB` and the money and time domains as
+    /// text, which is how the interpreter reads them on every engine.
     pub fn select_list(self, table: &TableRef<'_>) -> String {
         table
             .columns
             .iter()
             .zip(table.kinds)
             .map(|(column, kind)| match (self.is_postgres(), kind) {
-                (true, ColumnKind::Json) => format!("{}::text AS {}", quote(column), quote(column)),
+                (true, kind) if *kind == ColumnKind::Json || kind.is_exact_text() => {
+                    format!("{}::text AS {}", quote(column), quote(column))
+                }
                 _ => quote(column),
             })
             .collect::<Vec<_>>()
@@ -154,6 +160,22 @@ impl TableEngine {
         }
     }
 
+    /// The statement that creates the Postgres domain a column of `kind`
+    /// is declared with (B09 P8b), or `None` on SQLite and for kinds
+    /// Postgres stores in one of its own types. It does nothing when the
+    /// domain already exists, so every table and migration that needs one
+    /// can begin with it.
+    pub fn domain_definition(self, kind: ColumnKind) -> Option<String> {
+        if !self.is_postgres() {
+            return None;
+        }
+        let base = postgres_domain_base(kind)?;
+        Some(format!(
+            "DO $$ BEGIN CREATE DOMAIN {} AS {base}; EXCEPTION WHEN duplicate_object THEN NULL; END $$;",
+            postgres_type(kind)
+        ))
+    }
+
     /// Whether a column's type or nullability changes by rebuilding the
     /// table (SQLite, which cannot alter a column) or in place.
     pub fn rebuilds_to_alter(self) -> bool {
@@ -169,10 +191,8 @@ fn postgres_type(kind: ColumnKind) -> &'static str {
         ColumnKind::Boolean => "boolean",
         ColumnKind::Json => "jsonb",
         ColumnKind::Bytes => "bytea",
-        // B09 P8b gives each a Postgres type that compares it exactly; the
-        // checker refuses these columns on Postgres until then, and these
-        // names, which no Postgres database defines yet, keep any other
-        // route loud.
+        // B09 P8b — a domain each, so the stored schema says which Corvid
+        // type a column holds; see `postgres_domain_base`.
         ColumnKind::Decimal => "corvid_decimal",
         ColumnKind::Duration => "corvid_duration",
         ColumnKind::Instant => "corvid_instant",
@@ -181,4 +201,21 @@ fn postgres_type(kind: ColumnKind) -> &'static str {
         ColumnKind::Currency => "corvid_currency",
         ColumnKind::Locale => "corvid_locale",
     }
+}
+
+/// What each money and time domain is on Postgres. A decimal is
+/// `numeric`, exact at any scale and compared by value; a duration is its
+/// count of nanoseconds, which needs 39 digits. The text forms compare in
+/// byte order (`COLLATE "C"`), so a locale's rules never reorder an
+/// instant's fixed-width text, and an instant must have that form.
+fn postgres_domain_base(kind: ColumnKind) -> Option<&'static str> {
+    Some(match kind {
+        ColumnKind::Decimal => "numeric",
+        ColumnKind::Duration => "numeric(39, 0)",
+        ColumnKind::Instant => {
+            r#"text COLLATE "C" CHECK (VALUE ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}Z$')"#
+        }
+        ColumnKind::ZonedTime | ColumnKind::TimeZone | ColumnKind::Currency | ColumnKind::Locale => r#"text COLLATE "C""#,
+        _ => return None,
+    })
 }
