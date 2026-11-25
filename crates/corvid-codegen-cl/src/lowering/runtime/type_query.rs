@@ -656,10 +656,6 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // them. False routes any program mentioning them away from the
         // native backend, mirroring `DbHandle`.
         Type::Upload(_) | Type::Page(_) => false,
-        // B05 — a connector `Response` comes from a connector call, which
-        // runs on the interpreter until native dispatch of runtime-owned
-        // calls lands.
-        Type::Response(_) => false,
         // A conflict comes from a table write, which runs on the
         // interpreter until tables compile natively (B09 P6).
         Type::Conflict(_, _) => false,

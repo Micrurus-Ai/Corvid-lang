@@ -38,16 +38,6 @@ pub(crate) fn represent_responses_as_records(ir: &mut IrFile) {
     }
 }
 
-/// Whether `id` names a record this rewrite declared.
-pub fn is_response_record(id: DefId) -> bool {
-    RESPONSE_RECORD_IDS.contains(&id.0)
-}
-
-/// The index of `name` in the record's fields.
-pub fn response_field_index(name: &str) -> usize {
-    RESPONSE_FIELDS.iter().position(|field| *field == name).expect("a Response field")
-}
-
 fn record_id(index: usize) -> DefId {
     let id = RESPONSE_RECORD_IDS.start + u32::try_from(index).expect("fewer body types than the band holds");
     assert!(RESPONSE_RECORD_IDS.contains(&id), "more distinct Response body types than the reserved band holds");
@@ -81,7 +71,6 @@ mod tests {
         let names: Vec<&str> = record.fields.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, RESPONSE_FIELDS);
         assert_eq!(record.fields[2].ty, Type::String);
-        assert!(is_response_record(record.id));
-        assert_eq!(response_field_index("body"), 2);
+        assert!(RESPONSE_RECORD_IDS.contains(&record.id.0));
     }
 }
