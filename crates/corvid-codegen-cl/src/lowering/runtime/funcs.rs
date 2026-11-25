@@ -128,6 +128,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub int_to_string: FuncId,
     pub float_to_string: FuncId,
     pub bool_to_string: FuncId,
+    /// `corvid_response_header(headers, name) -> Option<String>`:
+    /// `response.header(name)` (native dispatch N4).
+    pub response_header: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,

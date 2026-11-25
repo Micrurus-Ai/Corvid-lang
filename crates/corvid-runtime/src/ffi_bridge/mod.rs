@@ -47,6 +47,7 @@ use std::path::PathBuf;
 mod equality;
 mod number_text;
 mod secret_object;
+mod response_exports;
 mod approval_exports;
 mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.

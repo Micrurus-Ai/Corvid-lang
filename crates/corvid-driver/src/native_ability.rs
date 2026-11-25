@@ -225,8 +225,6 @@ fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext
         Some("runs a provider protocol, whose durable lifecycle the interpreter drives")
     } else if op.streams.is_some() {
         Some("streams its response")
-    } else if tool.return_ty.mentions_response() {
-        Some("returns a `Response`")
     } else if tool.params.iter().any(|p| matches!(p.ty, Type::Bytes | Type::Upload(_)))
         || op.body.as_ref().is_some_and(|b| b.encoding == corvid_ast::BodyEncoding::Multipart)
     {
@@ -454,6 +452,18 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
         } => scan_expr(receiver, current_return_ty, context),
+        // Native dispatch N4 — a `Response`'s accessors.
+        IrExprKind::BuiltinMethod {
+            kind:
+                corvid_types::BuiltinMethodKind::ResponseStatus
+                | corvid_types::BuiltinMethodKind::ResponseBody
+                | corvid_types::BuiltinMethodKind::ResponseHeader,
+            receiver,
+            args,
+        } => {
+            scan_expr(receiver, current_return_ty, context)?;
+            args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_string_map(&receiver.ty) && matches!(kind,
                 corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues |

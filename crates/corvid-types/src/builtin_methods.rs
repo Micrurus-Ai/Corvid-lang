@@ -811,9 +811,23 @@ pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 4] = [
     ("Conflict", CONFLICT_TYPE_ID),
 ];
 
+/// The ids native code gives the record it holds a `Response<Body>`
+/// as, one per distinct body type (native dispatch N4). The band sits
+/// below the reserved ids above and far above any id the resolver
+/// assigns, which counts up from zero.
+pub const RESPONSE_RECORD_IDS: std::ops::Range<u32> = (u32::MAX - 4 - 65_536)..(u32::MAX - 4);
+
 #[cfg(test)]
 mod reserved_type_id_tests {
-    use super::RESERVED_TYPE_IDS;
+    use super::{RESERVED_TYPE_IDS, RESPONSE_RECORD_IDS};
+
+    #[test]
+    fn the_response_record_band_holds_no_reserved_id() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert!(!RESPONSE_RECORD_IDS.contains(&id.0), "`{name}`'s id {id:?} is inside the Response record band");
+        }
+        assert!(RESPONSE_RECORD_IDS.start > 1 << 24, "the band must sit far above resolver-assigned ids");
+    }
 
     #[test]
     fn every_reserved_type_id_is_distinct() {

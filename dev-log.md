@@ -25,6 +25,52 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Connector responses in native code (native dispatch N4)
+
+A connector operation that returns `Response<Body>`, or
+`Result<Response<Body>, E>`, now runs in native code, so a client that
+reads a status code or an `ETag` builds into a native binary. Native code
+holds each `Response<Body>` as a record of `RESPONSE_FIELDS`, the record
+the interpreter builds, with one declaration per body type because
+native records have fixed field types. The code generator rewrites the
+type before ownership analysis, as it does for `JsonError`, so reference
+counting and `Result` payloads apply unchanged. The record ids come from
+a reserved band, `RESPONSE_RECORD_IDS`, which a test keeps clear of the
+other reserved ids. `status()` and `body()` lower as field reads;
+`header(name)` is one runtime call into `connectors::response_header`,
+which the interpreter now calls too, so both tiers find the same header.
+
+**Simpler options considered.** One record with an untyped body would
+need no per-body declarations, but its type information could not say
+whether the body is reference counted, so the body could never be freed.
+Rewriting the accessors into field reads in the IR would need a second,
+mutable expression walk; lowering them as methods uses the convention
+ownership analysis already understands.
+
+**Found, all fixed.**
+- Records of the same name defined the same native symbols. They now
+  carry the record's id; this went in its own commit.
+- The embedded connector specs were projected from the rewritten IR, so
+  a `Response` operation's spec said it returned no response and the
+  runtime answered with the bare body. They are now projected from the
+  program as checked.
+- The JSON-form check asked the lowering question about a `Result`.
+- `Nothing` had no JSON form.
+- `to_string()` on the scalars had no native form, which led to the
+  number-text fix.
+
+**Tests.** The native response test checks:
+- the status;
+- a header read without regard to case, and an absent header;
+- `Set-Cookie` never reaching the program or the trace;
+- a mapped 404 through `Result`;
+- a `HEAD` request's `Response<Nothing>`;
+- the same recorded run as the interpreter;
+- native replay;
+- balanced allocations.
+
+---
+
 ## 2026-11-25 - Numbers read the same on both tiers
 
 Found while building native `Response` (N4): `Int.to_string()`,

@@ -587,6 +587,9 @@ pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
         Type::Tainted(inner) => is_refcounted_type_for(inner, question),
         // Native code represents JsonError as a record of strings.
         Type::JsonError => question == NativeTypeQuestion::Program,
+        // Native dispatch N4 — `compile_to_object` rewrites each
+        // `Response<Body>` as a record (see `response_record`).
+        Type::Response(_) => question == NativeTypeQuestion::Program,
         _ => false,
     }
 }
@@ -626,6 +629,9 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // mentioning these types to the interpreter.
         Type::JsonValue => false,
         Type::JsonBuilder => false,
+        // Native dispatch N4 — rewritten as a record before lowering,
+        // native wherever its body is.
+        Type::Response(body) => question == NativeTypeQuestion::Program && is_native_value_type_for(body, question),
         // `compile_to_object` rewrites `JsonError` as an ordinary
         // record before lowering, so lowering never sees it.
         Type::JsonError => question == NativeTypeQuestion::Program,
@@ -698,7 +704,8 @@ mod tests {
 
     /// The two questions answer alike except where a type changes
     /// between the checked program and lowering: `JsonError` becomes a
-    /// record, and `TraceId` waits on native replay. A new difference has
+    /// record, so does `Response<Body>`, and `TraceId` waits on native
+    /// replay. A new difference has
     /// to be added here on purpose.
     #[test]
     fn the_two_native_type_questions_differ_only_where_they_must() {
@@ -731,6 +738,10 @@ mod tests {
         assert!(is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Program));
         assert!(!is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Lowering));
         assert!(is_refcounted_type_for(&Type::JsonError, NativeTypeQuestion::Program));
+        let response = Type::Response(Box::new(Type::String));
+        assert!(is_native_value_type_for(&response, NativeTypeQuestion::Program));
+        assert!(!is_native_value_type_for(&response, NativeTypeQuestion::Lowering));
+        assert!(is_refcounted_type_for(&response, NativeTypeQuestion::Program));
         assert!(!is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Program));
         assert!(is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Lowering));
         // The differences reach inside containers too.

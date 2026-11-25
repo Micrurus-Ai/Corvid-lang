@@ -1,6 +1,6 @@
 # Proposal: native dispatch of runtime-owned calls
 
-Status: **decided 2026-11-25; N1, N2 and N3 built 2026-11-25, N4 and N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
+Status: **decided 2026-11-25; N1 to N4 built 2026-11-25, N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
 
 ## Problem
 
@@ -105,6 +105,24 @@ The checker's refusals are unchanged, so a native program can do with a secret e
 
 **Across the tiers.** Backend: a webhook receiver or a login service that holds keys as `Secret` can be built as a native binary without giving up redaction. Frontend: nothing changes; a route still cannot carry a secret. AI: the trace holds `<redacted>` on both tiers, so an assistant reading a run never sees a key.
 
+## N4: `Response<T>` in native code
+
+**The representation.** Native code holds a `Response<Body>` as an ordinary record with the fields `RESPONSE_FIELDS` names, in that order: `status: Int`, `headers: List<List<String>>` (name and value pairs) and `body: Body`. That is the record the interpreter builds. Each distinct body type gets its own record declaration, because native records have fixed field types. The code generator rewrites `Response<Body>` into that record before ownership analysis, as it already does for `JsonError`, so reference counting, list and option slots and `Result` payloads apply unchanged. Each record takes an id from a reserved band, `RESPONSE_RECORD_IDS` in `corvid-types`, which a test keeps apart from the other reserved ids and from declared ids.
+
+**Where one comes from.** A connector operation returning `Response<Body>`, or `Result<Response<Body>, E>`, runs through `corvid_runtime_call`, whose answer is `{"status", "headers", "body"}`. The runtime call's decoder builds the record from that answer with the declared body type, through the shared public decoder.
+
+**The accessors.**
+- `r.status()` and `r.body()` read the record's fields, borrowing the receiver as every native method does.
+- `r.header(name)` is one runtime call returning `Option<String>`. It uses `connectors::response_header`, the lookup the interpreter now calls too: case-insensitive, and the first header with that name wins.
+
+**Unchanged.** The checker still keeps a `Response` where the call is made: it cannot be stored in a record, returned from a route or tool, or turned into JSON. Mock mode stays on the interpreter.
+
+**Simpler options considered.**
+- *A single record with an untyped body slot:* fewer declarations, but the record's type information could not say whether the body is reference counted, so the body could never be released.
+- *Rewriting the accessors into field reads in the IR:* that needs a second, mutable expression walk. Lowering them as methods reuses the method calling convention ownership analysis already understands.
+
+**Across the tiers.** Backend: a client that reads `ETag` or a status code builds into a native binary. Frontend: nothing changes. AI: the recorded run is the same on both tiers.
+
 ## Not in scope
 
 - `Stream<T>` connector operations in native code. Native code has no streams yet (`StreamLoweringNotImplemented`), for any source.
@@ -131,3 +149,13 @@ The checker's refusals are unchanged, so a native program can do with a secret e
 - Found while building it: importing `std/secrets` for `secret_read` brings in `secret`, whose signature holds a `Secret`, and the native check refused every program that declared a `Secret` anywhere. A tool's signature now counts only when the tool is called; records, agents and prompts still count wherever they are declared.
 - Found by the replay test: serde_json read a recorded `Float` back with its fast, inexact parser, so a replayed `random_float` could differ in the last digit and replay reported a divergence. The workspace enables `float_roundtrip` (separate commit, with a trace-schema test).
 - Tests: `crates/corvid-driver/tests/native_runtime_tools.rs` calls every tool the list names (and fails if one is added without a call), compares fixed answers and the recorded calls on both tiers, checks `secret_read`'s recorded result is redacted, and replays each tier's recording exactly.
+
+## As built (N4)
+
+- `corvid-codegen-cl/src/response_record.rs` rewrites each `Response<Body>` into its record after the `JsonError` rewrite, through `Type::replace_within`, a new mutable twin of `Type::mentions`. `corvid_response_header` in `ffi_bridge/response_exports.rs` answers `header(name)`.
+- Found while building it, each fixed:
+  - *Duplicate symbols.* A record's native symbols were named after the record alone, so two records sharing a name failed to build. They now carry the record's id (its own commit).
+  - *Spec projected too late.* The embedded connector specs were projected after the rewrite, so a `Response` operation's spec lost `returns_response`. `compile_to_object` now projects them from the program as checked.
+  - *Wrong question for a `Result`.* The JSON-form check asked whether a `Result` is native with the lowering question, before the rewrite; it now asks the program question.
+  - *`Nothing` had no JSON form.* The decoder already read it as `null`; now the check agrees.
+  - *`to_string()` and floats.* `Int`, `Float` and `Bool` `to_string()` had no native form, and native code wrote floats with `%.17g`; see the dev-log entry "Numbers read the same on both tiers".

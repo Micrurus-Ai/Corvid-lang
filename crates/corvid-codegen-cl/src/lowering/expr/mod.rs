@@ -299,6 +299,43 @@ pub(super) fn lower_expr(
                 receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
         }
+        // Native dispatch N4 — a `Response` is a record (see
+        // `response_record`): `status()` and `body()` are field reads,
+        // lowered as one so they own and release exactly as a field
+        // read does, and `header(name)` asks the runtime.
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ResponseStatus | corvid_types::BuiltinMethodKind::ResponseBody),
+            receiver,
+            ..
+        } => {
+            let field = if *kind == corvid_types::BuiltinMethodKind::ResponseStatus { "status" } else { "body" };
+            let read = IrExpr {
+                kind: IrExprKind::FieldAccess { target: receiver.clone(), field: field.to_string() },
+                ty: expr.ty.clone(),
+                span: expr.span,
+            };
+            lower_expr(builder, &read, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ResponseHeader, receiver, args } => {
+            let (offset, _) = record_field(runtime, &receiver.ty, "headers", expr.span)?;
+            let (record, record_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let headers = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+            let (name, name_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let lookup = module.declare_func_in_func(runtime.response_header, builder.func);
+            let call = builder.ins().call(lookup, &[headers, name]);
+            let found = builder.inst_results(call)[0];
+            if !name_borrowed {
+                emit_release(builder, module, runtime, name);
+            }
+            if !record_borrowed {
+                emit_release(builder, module, runtime, record);
+            }
+            Ok(found)
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
             // An HMAC keyed by a `Secret` calls the entry point that opens
             // the runtime's secret object (N3b).

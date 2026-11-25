@@ -775,18 +775,26 @@ pub(super) fn eval_builtin_method(
                 }
             };
             let headers = response_field(&recv, "headers", span)?;
-            let found = match &headers {
-                Value::List(pairs) => pairs.iter_cloned().into_iter().find_map(|pair| match pair {
-                    Value::List(pair) => match pair.iter_cloned().as_slice() {
-                        [Value::String(name), value @ Value::String(_)] if name.as_ref() == wanted => {
-                            Some(value.clone())
-                        }
+            // The lookup native code answers with too.
+            let pairs: Vec<(std::sync::Arc<str>, std::sync::Arc<str>)> = match &headers {
+                Value::List(pairs) => pairs
+                    .iter_cloned()
+                    .into_iter()
+                    .filter_map(|pair| match pair {
+                        Value::List(pair) => match pair.iter_cloned().as_slice() {
+                            [Value::String(name), Value::String(value)] => Some((name.clone(), value.clone())),
+                            _ => None,
+                        },
                         _ => None,
-                    },
-                    _ => None,
-                }),
-                _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
             };
+            let found = corvid_runtime::connectors::response_header(
+                pairs.iter().map(|(name, value)| (name.as_ref(), value.as_ref())),
+                &wanted,
+            )
+            .map(|value| Value::String(std::sync::Arc::from(value)));
             Ok(match found {
                 Some(value) => Value::OptionSome(crate::value::BoxedValue::new(value)),
                 None => Value::OptionNone,
