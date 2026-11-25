@@ -259,6 +259,15 @@ fn seed_actor_headers(
     ]
 }
 
+/// A port no other process is listening on, chosen by the operating
+/// system. Every served app in these tests takes one, so tests running
+/// in parallel never share a port: two tests that both used a fixed
+/// port (8196, 8198, 8204 to 8207 were each used twice) could reach
+/// each other's server and fail at random.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+}
+
 /// Poll `/healthz` until it answers 200 or the deadline passes.
 fn wait_until_ready(port: u16) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -283,16 +292,17 @@ impl Drop for ServedApp {
 
 #[test]
 fn reference_apps_serve_their_schema_route() {
-    // (app dir, port, a substring the `/schema` JSON must contain)
+    // (app dir, a substring the `/schema` JSON must contain)
     let apps = [
-        ("personal_executive_agent", 8190u16, "personal_executive_agent"),
-        ("personal_knowledge_agent", 8191, "personal_knowledge_agent"),
-        ("finance_operations_agent", 8192, "finance_operations_agent"),
-        ("customer_support_agent", 8193, "customer_support_agent"),
-        ("code_maintenance_agent", 8194, "code_maintenance_agent"),
+        ("personal_executive_agent", "personal_executive_agent"),
+        ("personal_knowledge_agent", "personal_knowledge_agent"),
+        ("finance_operations_agent", "finance_operations_agent"),
+        ("customer_support_agent", "customer_support_agent"),
+        ("code_maintenance_agent", "code_maintenance_agent"),
     ];
 
-    for (app, port, needle) in apps {
+    for (app, needle) in apps {
+        let port = free_port();
         let main = repo_root()
             .join("examples")
             .join("backend")
@@ -347,8 +357,6 @@ fn reference_apps_serve_their_schema_route() {
 ///
 /// Hermetic: spawns `corvid serve` on a minimal handcrafted source so
 /// the test is not coupled to any specific reference app's body type.
-/// Uses port `8195` so it can't collide with the 5-app smoke above
-/// (ports `8190..=8194`).
 #[test]
 fn approval_gated_post_answers_202_and_admin_endpoint_lists_the_pending_id() {
     let dir = tempfile::tempdir().unwrap();
@@ -381,7 +389,7 @@ server test_serve_5_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8195;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
@@ -489,8 +497,6 @@ server test_serve_5_api:
 /// Hermetic: same minimal handcrafted source as the
 /// `E0-serve-5` test but with a more interesting receipt return
 /// so the re-execution result is observable from the response.
-/// Uses port `8196` so it can't collide with the 5-app smoke
-/// (8190-8194) or the serve-5 test (8195).
 #[test]
 fn approval_transition_endpoints_approve_re_executes_and_deny_drops_pending() {
     let dir = tempfile::tempdir().unwrap();
@@ -525,7 +531,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     );
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8196;
+    let port = free_port();
     // 52f-4b: approvals are now decided by a VERIFIED reviewer. Seed a
     // reviewer session (holding `approvals.decide`) into the durable
     // store the server opens.
@@ -743,8 +749,6 @@ fn build_serve_tools_fixture() -> PathBuf {
 /// `from corvid_runtime import tool` import resolves to the local
 /// `corvid_runtime` package without requiring a global pip install.
 ///
-/// Port `8198` so it can't collide with the other serve tests
-/// (8190-8197).
 #[test]
 fn serve_autoloads_tools_py_and_dispatches_approval_gated_tool_through_python() {
     let dir = tempfile::tempdir().unwrap();
@@ -804,7 +808,7 @@ async def echo_string(value: str) -> str:
         python_path.display()
     );
 
-    let port: u16 = 8198;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
@@ -902,8 +906,6 @@ async def echo_string(value: str) -> str:
 /// during `cargo test`, so we get the autodetect-via-workspace
 /// path covered.
 ///
-/// Port `8200` so it can't collide with the other serve tests
-/// (8190-8199).
 #[test]
 fn serve_autoloads_tools_py_via_bundled_corvid_runtime_without_pythonpath() {
     let dir = tempfile::tempdir().unwrap();
@@ -950,7 +952,7 @@ async def echo_string(value: str) -> str:
 "#;
     std::fs::write(project_root.join("tools.py"), tools_py).unwrap();
 
-    let port: u16 = 8200;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
@@ -1047,8 +1049,6 @@ async def echo_string(value: str) -> str:
 /// `/approve` POST in step 2 answers 500 (not 200) and this test
 /// fails loudly.
 ///
-/// Port `8197` so it can't collide with the other serve tests
-/// (8190-8196).
 #[test]
 fn serve_with_tools_cdylib_dispatches_approval_gated_tool_through_fixture() {
     let cdylib_path = build_serve_tools_fixture();
@@ -1094,7 +1094,7 @@ server test_serve_q1a_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8197;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
@@ -1212,8 +1212,6 @@ server test_serve_q1a_api:
 /// primitive (the `ProgrammaticApprover::always_yes` bypass runtime
 /// is local to each approve_approval call and never escapes).
 ///
-/// Port `8199` so it can't collide with the other serve tests
-/// (8190-8198).
 #[test]
 fn serve_approval_is_preserved_when_handler_errors_and_terminates_only_on_deny() {
     // We re-use the cdylib fixture (echo_string) — but the Corvid
@@ -1251,7 +1249,7 @@ server test_serve_q2_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8199;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
@@ -1424,8 +1422,6 @@ server test_serve_q2_api:
 /// it after the server becomes ready. No HTTP requests needed —
 /// the assertion is purely on the printed banner.
 ///
-/// Port `8201` so it can't collide with the other serve tests
-/// (8190-8200).
 #[test]
 fn serve_startup_banner_distinguishes_routes_with_and_without_approve() {
     let dir = tempfile::tempdir().unwrap();
@@ -1463,7 +1459,7 @@ server test_serve_q9_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8201;
+    let port = free_port();
     let data_dir = dir.path().join("state");
     let mut child = Command::new(corvid_bin())
         .arg("serve")
@@ -1562,8 +1558,6 @@ server test_serve_q9_api:
 /// message ("no handler registered for tool ...") WITHOUT any
 /// `[<digits>..<digits>]` span-range prefix.
 ///
-/// Port `8202` so it can't collide with the other serve tests
-/// (8190-8201).
 #[test]
 fn serve_500_response_strips_ir_byte_span_prefix_from_detail() {
     let dir = tempfile::tempdir().unwrap();
@@ -1595,7 +1589,7 @@ server test_serve_q10_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8202;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -1694,7 +1688,7 @@ server secure_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8203;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -1751,7 +1745,7 @@ server ticker_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8204;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -1850,7 +1844,7 @@ server import_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8205;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -1929,7 +1923,7 @@ server up_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8207;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2017,7 +2011,7 @@ server items_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8206;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2088,7 +2082,7 @@ server ping_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8204;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2188,7 +2182,7 @@ server durable_api:
 "#;
     std::fs::write(&src_path, format!("{IDENTITY_WITH_REVIEWER}{source}")).unwrap();
 
-    let port: u16 = 8205;
+    let port = free_port();
     let reviewer = seed_reviewer_headers(&data_dir);
     let requester = seed_requester_headers(&data_dir);
 
@@ -2322,7 +2316,7 @@ server admin_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8206;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2456,7 +2450,7 @@ server adversary_api:
 "#);
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8207;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve").arg(&src_path).arg("--listen").arg(format!("127.0.0.1:{port}"))
         .envs(reviewer_serve_env(&data_dir))
@@ -2591,8 +2585,6 @@ server adversary_api:
 /// could advertise a connector a route could never reach — the gap the
 /// 52h audit found. This is the forcing-function test: it exercises a
 /// route calling a `mock`-mode connector end to end over HTTP.
-///
-/// Port 8196 (the hermetic tests own 8195+).
 #[test]
 fn a_served_route_executes_a_mock_mode_connector() {
     let dir = tempfile::tempdir().unwrap();
@@ -2625,7 +2617,7 @@ server repo_api:
 "#;
     std::fs::write(&src_path, source).unwrap();
 
-    let port: u16 = 8196;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
@@ -2699,7 +2691,7 @@ server repo_api:
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
-        .arg("127.0.0.1:8197")
+        .arg(format!("127.0.0.1:{}", free_port()))
         .current_dir(repo_root())
         .output()
         .expect("run corvid serve");
@@ -2745,7 +2737,7 @@ server repo_api:
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
-        .arg("127.0.0.1:8291")
+        .arg(format!("127.0.0.1:{}", free_port()))
         .arg("--mode")
         .arg("real")
         .env("CORVID_HTTP_ALLOW", "other.example.com")
@@ -2771,8 +2763,6 @@ server repo_api:
 /// that rule needs: it serves the reference app in `mock` mode and drives
 /// its connector route, so a future slice that breaks the composition
 /// fails here instead of in review.
-///
-/// Port 8198.
 #[test]
 fn the_reference_application_serves_its_connector_route() {
     let main = repo_root()
@@ -2782,7 +2772,7 @@ fn the_reference_application_serves_its_connector_route() {
         .join("main.cor");
     assert!(main.exists(), "missing {}", main.display());
 
-    let port: u16 = 8198;
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&main)
@@ -3365,7 +3355,7 @@ server api:
     // then holds the connection open.
     let proxy = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = free_port();
     let child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src)
@@ -3436,7 +3426,7 @@ fn sigterm_drains_an_inflight_route_before_exiting() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("main.cor");
     std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = free_port();
     let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
         .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
     let mut guard = ServedApp(child);
@@ -3487,7 +3477,7 @@ server app:
 "#;
     std::fs::write(project.join("src/main.cor"), source).unwrap();
     let log = project.join("access.log");
-    let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let port = free_port();
     let child = Command::new(corvid_bin()).current_dir(&project)
         .args(["serve", "--access-log", "--listen", &format!("127.0.0.1:{port}")])
         .env("CORVID_TEST_SERVICE_KEY", "sample-secret-for-service")
