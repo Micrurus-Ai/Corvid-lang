@@ -231,6 +231,18 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
 
+**B14 real-time connections** (proposal awaiting frontend agreement; split between this session and Codex by the owner, 2026-11-25). [Proposal](proposals/real-time.md)
+
+Order amendment: B14 starts before B10 and B11 finish, because frontend F08 waits on it and B14 needs only B01. The `live` declaration is a read and B14's action calls over the socket (RT-5) wait for B10, so nothing in B10 changes.
+
+- [ ] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
+- [ ] RT-1. `live` declarations: parse, check and contract entry (this session).
+- [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
+- [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
+- [ ] RT-4. Typed subscriptions in the generated TypeScript client and the Corvid browser binding (Codex, F08).
+- [ ] RT-5. Action calls over the live connection, after B10 (Codex).
+- [ ] RT-6. Several server processes share commits through Postgres `LISTEN`/`NOTIFY` (this session).
+
 **B05 complete HTTP client** (in progress, macOS session). [Proposal](proposals/http-client.md)
 
 - [x] Agree the proposal: no frontend agreement needed, `http_get` and `http_post_json` replaced by a dynamic-host connector, native code after the shared native-dispatch decision. [Decisions](proposals/http-client.md#decisions)
