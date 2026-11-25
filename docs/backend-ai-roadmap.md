@@ -246,6 +246,7 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 
 - [x] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
 - [x] RT-1. `live` declarations: parsed beside `route` (a route whose response kind is `Live`, so `path`, `actor` and `requires` are the route machinery's), checked to be one `return` of a query on the delivered table without `take`, named by the last fixed path segment and unique per server, listed in the contract under `live`, lowered to a `__live__<path>` snapshot agent, and refused at serve start until RT-3 (`E5204`). [What RT-3 runs](proposals/real-time.md#built-in-rt-1-and-two-points-to-agree)
+- [ ] RT-1 checker follow-up. Require an explicit `requires` on every live declaration and diagnose an omitted policy at its source. The serve adapter refuses to open a query without an enforced policy.
 - [ ] Typed path placeholders for `route` and `live`, `"/boards/{board: Int}/cards"`, so `path.board` can be an `Int`. Shared grammar; proposed to frontend development with RT-1.
 - [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
 - [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).

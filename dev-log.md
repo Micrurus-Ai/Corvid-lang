@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-3 compiled subscription paths
+
+Serve now selects the compiled live query and its declared permission even when a GET route shares its path. HTTP handlers and subscriptions use the same path argument conversion. A compiler-backed transport test covers that distinction, encoded captures and refusal of ordinary HTTP paths. RT-2 must still supply the snapshot and stream together, and the session runtime must notify idle connections of authority changes. The startup gate stays in effect. The RT-1 checker follow-up for an omitted `requires` is tracked on the backend roadmap.
+
 ### RT-3 WebSocket transport
 
 The RT-3 transport now decodes page requests, forwards revisioned rows, releases unsubscribed handles and refreshes active queries on authority changes. Each open goes through serve's existing GET permission check. The upgrade refuses service until the live declaration, session notifications and committed stream are connected. The CLI smoke check exercises this boundary with the booking example. F08 reconnect acceptance remains pending. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)

@@ -1,5 +1,7 @@
 //! Browser socket upgrade and the integration point for RT-1 and RT-2.
 mod connection;
+mod routes;
+pub(super) use routes::Routes;
 pub(super) mod protocol;
 pub(super) mod source;
 pub(super) use source::Provider;

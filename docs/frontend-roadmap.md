@@ -18,7 +18,7 @@ The table below is the execution order for the browser frontend. The detailed de
 
 ### Ordered tasks
 
-F08 live reconnect acceptance awaits the RT-1 declaration, RT-2 committed stream and session notifications in serve. The RT-3 socket lifecycle can be exercised independently. The end-to-end case still needs an offline edit in the reconnect snapshot followed by a committed edit on that same subscription. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
+F08 live reconnect acceptance awaits the RT-2 committed stream and session notifications in serve. The RT-3 socket lifecycle can be exercised independently. The end-to-end case still needs an offline edit in the reconnect snapshot followed by a committed edit on that same subscription. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
 
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 

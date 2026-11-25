@@ -122,15 +122,16 @@ RT-1 supplies the contract entry and the runtime open/close handle described abo
 ### RT-3 integration boundary
 
 The serve transport owns the page socket, ids, heartbeat and handle lifetimes.
-Opening a path needs the RT-1 declaration and its route permission. RT-2 must
+Serve indexes the compiled RT-1 live paths separately from HTTP routes. RT-2 must
 return the initial ordered rows and a filtered change stream at the same
 commit boundary. Dropping the stream releases the subscription. Session
 invalidation must wake an idle socket, and an authority change must invalidate
 pending rows before delivery. Until serve has those interfaces it refuses the
 upgrade. A synthetic table source would not exercise that boundary.
 
-The serve adapter calls `Provider::resolve` for the bound query and its
-route policy, then passes the verified route actor to `Query::open`.
+The serve adapter resolves the declared live path, binds its captures with the
+GET handler's path conversion, and checks its declared route policy. It passes
+the declaration, typed path and verified actor to `Provider::open`.
 `Provider::observe_session` must validate the existing session and publish
 role changes, expiry and logout even while the socket is idle. RT-2 owns
 coalescing and replacement snapshots. The transport polls the handles

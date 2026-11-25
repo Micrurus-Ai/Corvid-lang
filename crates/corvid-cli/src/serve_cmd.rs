@@ -102,6 +102,7 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    live_routes: live::Routes,
     live_provider: Option<Arc<dyn live::Provider>>,
     live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
@@ -361,7 +362,7 @@ pub(crate) fn cmd_serve(
     let asset_dir = corvid_driver::wasm_output_dir_for(file);
     let quantity_page = asset_dir.join("events.js").is_file()
         && asset_dir.join("events.quantity.js").is_file()
-        && !ir.servers.iter().flat_map(|server| &server.routes).any(|route|
+        && !ir.servers.iter().flat_map(http_routes).any(|route|
             route.path == "/target/wasm/events.quantity.js" && route.method == HttpMethod::Get);
     let mut page_scripts = browser_asset::PageScripts::default();
     let mut compiled_assets = Vec::new();
@@ -384,7 +385,7 @@ pub(crate) fn cmd_serve(
             }
             compiled_assets.push((name, mime, bytes));
         }
-    } else if !ir.servers.iter().flat_map(|s| &s.routes)
+    } else if !ir.servers.iter().flat_map(http_routes)
         .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
         let bytes = Bytes::from_static(corvid_driver::FORM_CONTROLS_JS.as_bytes());
         let mime = "text/javascript; charset=utf-8";
@@ -392,7 +393,8 @@ pub(crate) fn cmd_serve(
         compiled_assets.push(("events.js", mime, bytes));
     }
     let state = Arc::new(ServeState {
-        // RT-1 and RT-2 supply the permission-bearing declaration and stream.
+        live_routes: live::Routes::new(&ir)?,
+        // RT-2 and session-change notifications are required before enabling upgrades.
         live_provider: None,
         live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
@@ -453,7 +455,7 @@ pub(crate) fn cmd_serve(
     if let Some(root) = file.parent().filter(|p| p.ends_with("src")).and_then(|src| src.parent()) {
         for (name, mime) in crate::web_assets::list(root)? {
             let route = format!("/assets/{name}");
-            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+            if state.ir.servers.iter().flat_map(http_routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
                 anyhow::bail!("GET {route} is already declared and cannot serve a public asset");
             }
             let bytes = Bytes::from(std::fs::read(root.join("assets").join(name))?);
@@ -463,7 +465,7 @@ pub(crate) fn cmd_serve(
 
     for (name, mime, bytes) in compiled_assets {
         let route = format!("/target/wasm/{name}");
-        if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+        if state.ir.servers.iter().flat_map(http_routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
             anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
         }
         app = app.route(&route, browser_asset(bytes, mime, true));
@@ -476,7 +478,7 @@ pub(crate) fn cmd_serve(
     let mut by_path: std::collections::BTreeMap<String, axum::routing::MethodRouter<Arc<ServeState>>> =
         std::collections::BTreeMap::new();
     for server in &state.ir.servers {
-        for route in &server.routes {
+        for route in http_routes(server) {
             let param_names: Vec<String> = state
                 .ir
                 .agents
@@ -494,11 +496,7 @@ pub(crate) fn cmd_serve(
                 form_encoded: route.form_encoded,
                 response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
-                path_params: route
-                    .path_params
-                    .iter()
-                    .map(|p| (p.name.clone(), p.ty.clone()))
-                    .collect(),
+                path_params: route.path_params.clone(),
                 query_ty: route.query_ty.clone(),
                 body_ty: route.body_ty.clone(),
                 upload_format: route.upload_format.clone(),
@@ -623,7 +621,7 @@ pub(crate) fn cmd_serve(
         // handler body for a reachable `IrStmt::Approve` (a conservative
         // under-count — no false positives).
         for server in &state_for_banner.ir.servers {
-            for route in &server.routes {
+            for route in http_routes(server) {
                 let approves =
                     agent_body_contains_approve(&state_for_banner.ir, &route.handler_agent);
                 let tag = if approves {
@@ -753,7 +751,7 @@ struct RouteMeta {
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
     /// Declared path params: `(name, type)` in path order.
-    path_params: Vec<(String, Type)>,
+    path_params: Vec<corvid_ir::IrRoutePathParam>,
     query_ty: Option<Type>,
     body_ty: Option<Type>,
     /// The `Upload<Format>` format tag when the body is an upload
@@ -784,6 +782,11 @@ struct RouteUploadPolicy {
     accepted_mime: Vec<String>,
 }
 
+/// Live declarations are reached through SUBSCRIBE frames on the page socket.
+fn http_routes(server: &corvid_ir::IrServer) -> impl Iterator<Item = &corvid_ir::IrRoute> {
+    server.routes.iter().filter(|route| route.response_kind != RouteResponseKind::Live)
+}
+
 /// Convert a Corvid route path (`/orders/{id}`) to axum's colon-capture
 /// syntax (`/orders/:id`) (slice 52a).
 fn corvid_route_to_axum_path(path: &str) -> String {
@@ -803,6 +806,21 @@ fn corvid_route_to_axum_path(path: &str) -> String {
         }
     }
     out
+}
+
+/// Bind decoded route captures to the handler's typed path argument.
+fn bind_path<'a>(
+    params: &[corvid_ir::IrRoutePathParam],
+    capture: impl Fn(&str) -> Option<std::borrow::Cow<'a, str>>,
+) -> Result<Value, String> {
+    let mut fields = Vec::with_capacity(params.len());
+    for param in params {
+        let name = &param.name;
+        let raw = capture(name).ok_or_else(|| format!("{name}: missing or invalid path parameter"))?;
+        let value = coerce_str_to_value(&raw, &param.ty).map_err(|error| format!("{name}: {error}"))?;
+        fields.push((name.clone(), value));
+    }
+    Ok(Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", fields)))
 }
 
 /// Coerce a raw request string (path/query param) into a `Value` of the
@@ -1222,15 +1240,10 @@ async fn run_route(
 
     // Path params → a `path` struct value.
     let path_lookup: HashMap<&str, &str> = raw_path.iter().collect();
-    let mut path_fields: Vec<(String, Value)> = Vec::new();
-    for (name, ty) in &meta.path_params {
-        let raw = path_lookup.get(name.as_str()).copied().unwrap_or("");
-        match coerce_str_to_value(raw, ty) {
-            Ok(v) => path_fields.push((name.clone(), v)),
-            Err(e) => return bad_request("invalid_path_param", &format!("{name}: {e}")),
-        }
-    }
-    let path_value = Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", path_fields));
+    let path_value = match bind_path(&meta.path_params, |name| path_lookup.get(name).copied().map(Into::into)) {
+        Ok(value) => value,
+        Err(error) => return bad_request("invalid_path_param", &error),
+    };
 
     // Query string → the declared query struct value.
     let query_value = match &meta.query_ty {

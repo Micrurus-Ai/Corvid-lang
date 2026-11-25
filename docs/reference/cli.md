@@ -110,7 +110,7 @@ corvid migrate down [--dry-run]
 
 ## Live subscriptions
 
-`corvid serve` reserves GET `/.well-known/corvid/live` for the WebSocket subprotocol `corvid.live.v1`. The Origin must match the configured public origin, or the listener's HTTP origin when serving directly. A cross-origin upgrade gets HTTP 403. A missing or unsupported subprotocol gets HTTP 400. A valid handshake gets HTTP 503 until RT-1 and RT-2 supply a live provider.
+`corvid serve` reserves GET `/.well-known/corvid/live` for the WebSocket subprotocol `corvid.live.v1`. The Origin must match the configured public origin, or the listener's HTTP origin when serving directly. A cross-origin upgrade gets HTTP 403. A missing or unsupported subprotocol gets HTTP 400. A valid handshake to a running app without a live provider gets HTTP 503. An app declaring a live query fails the startup capability check with E5204 until serve can deliver committed changes and observe session changes. The subscription path selects a compiled live declaration, including its own permission and path argument types, even when a GET route uses the same path.
 
 Once connected, a page subscribes with `{"type":"subscribe","id":"cards","path":"/boards/7/cards"}` and unsubscribes with `{"type":"unsubscribe","id":"cards"}`. Each open starts with an ordered snapshot. A denied id gets a `forbidden` error. Reusing an open id or sending a malformed message closes the socket with 1002. An invalidated session closes it with 1008 and server shutdown uses 1000. After 30 idle seconds the transport sends Ping and allows 30 seconds for its matching Pong. [Frame formats and reconnect semantics](../proposals/real-time.md#frontend-agreement-and-wire-protocol)
 

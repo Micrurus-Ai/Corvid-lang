@@ -308,3 +308,25 @@ async fn shutdown_closes_all_handles_and_allows_a_fresh_connection() {
         .unwrap();
     assert_eq!(next.reply().await["kind"], "updated");
 }
+
+#[test]
+fn live_paths_bind_the_compiled_query_and_its_own_policy() {
+    let ir = corvid_driver::compile_to_ir(include_str!("../../../tests/fixtures/live_cards.cor"))
+        .expect("valid live declaration");
+    let http: Vec<_> = crate::serve_cmd::http_routes(&ir.servers[0])
+        .map(|route| route.path.as_str())
+        .collect();
+    assert_eq!(http, ["/boards/{board}/cards", "/archive"]);
+    let routes = Routes::new(&ir).unwrap();
+    let (route, argument) = routes.resolve(&ir, "/boards/a%2Fb+c/cards").unwrap();
+    assert_eq!(route.response_kind, corvid_ast::RouteResponseKind::Live);
+    assert_eq!(route.policy.as_ref().unwrap().permissions, ["board.view"]);
+    let corvid_driver::Value::Struct(path) = argument else {
+        panic!("expected a path record")
+    };
+    assert!(
+        matches!(path.get_field("board"), Some(corvid_driver::Value::String(board)) if board.as_ref() == "a/b+c")
+    );
+    assert!(routes.resolve(&ir, "/archive").is_none());
+    assert!(routes.resolve(&ir, "/boards/%ff/cards").is_none());
+}
