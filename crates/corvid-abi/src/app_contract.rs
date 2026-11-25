@@ -86,6 +86,22 @@ pub struct ContractOperation {
     /// its own `timeout:` or the connector's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// The type of the request body, named as routes name theirs, and
+    /// how it is sent (`json` or `form`). The type, and every type it
+    /// reaches, is described in the contract's `types`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_encoding: Option<String>,
+    /// The record whose fields become the query string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_type: Option<String>,
+    /// What the operation returns, as declared (`Charge`,
+    /// `Result<Response<Charge>, ChargeError>`).
+    pub response_type: String,
+    /// The request headers its `header` lines set, by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<String>,
     /// Whether the operation is `dangerous` (requires an `approve`).
@@ -443,11 +459,15 @@ pub fn emit_application_contract(
     registry: &EffectRegistry,
     opts: &ContractOptions<'_>,
 ) -> ApplicationContract {
+    let connector_types = connector_type_names(file);
     let types = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
+            Decl::Type(t)
+                if t.visibility.is_callable_from_outside_file()
+                    || connector_types.contains(&t.name.name) =>
+            {
                 Some(contract_type(t, checked))
             }
             _ => None,
@@ -560,6 +580,17 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
                 method: op.method.as_str().to_string(),
                 path: op.path.clone(),
                 timeout_secs: c.operation_timeout_secs(op),
+                body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name)),
+                body_encoding: op.body.as_ref().map(|b| {
+                    match b.encoding {
+                        corvid_ast::BodyEncoding::Json => "json",
+                        corvid_ast::BodyEncoding::Form => "form",
+                    }
+                    .to_string()
+                }),
+                query_type: op.query.as_ref().and_then(|q| param_type_name(op, &q.name)),
+                response_type: type_ref_name(&op.return_ty),
+                headers: op.headers.iter().map(|h| h.name.clone()).collect(),
                 effects: op
                     .effect_row
                     .effects
@@ -579,6 +610,58 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
             })
             .collect(),
     }
+}
+
+/// The declared type of an operation parameter, named as routes name
+/// their types.
+fn param_type_name(op: &corvid_ast::OperationDecl, param: &str) -> Option<String> {
+    op.params.iter().find(|p| p.name.name == param).map(|p| type_ref_name(&p.ty))
+}
+
+/// The names of the declared types a connector sends or reads: its
+/// operations' body, query and return types and every type their fields
+/// reach. The contract describes them even when they are not public,
+/// because the contract describes the app's integrations, and a client
+/// or an assistant reading what a call sends needs the shape, not only
+/// a name.
+fn connector_type_names(file: &File) -> std::collections::BTreeSet<String> {
+    let decls: std::collections::HashMap<&str, &corvid_ast::TypeDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Type(t) => Some((t.name.name.as_str(), t)),
+            _ => None,
+        })
+        .collect();
+    let mut pending: Vec<&TypeRef> = Vec::new();
+    for decl in &file.decls {
+        let Decl::Connector(connector) = decl else { continue };
+        for op in &connector.operations {
+            pending.push(&op.return_ty);
+            let sent = op.body.iter().map(|b| &b.param.name).chain(op.query.iter().map(|q| &q.name));
+            for name in sent {
+                if let Some(param) = op.params.iter().find(|p| &p.name.name == name) {
+                    pending.push(&param.ty);
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            TypeRef::Named { name, .. } => {
+                if let Some(decl) = decls.get(name.name.as_str()) {
+                    if seen.insert(name.name.clone()) {
+                        pending.extend(decl.fields.iter().map(|f| &f.ty));
+                        pending.extend(decl.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)));
+                    }
+                }
+            }
+            TypeRef::Generic { args, .. } => pending.extend(args.iter()),
+            _ => {}
+        }
+    }
+    seen
 }
 
 fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> ContractProviderProtocol {

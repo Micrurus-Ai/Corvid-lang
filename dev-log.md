@@ -13,6 +13,39 @@ the required arguments. [Design](docs/proposals/frontend-web-starter.md)
 
 ---
 
+## 2026-11-25 - Connector bodies in the Application Contract (B05, slice 3d)
+
+The main-line session asked, when 3a changed how connector bodies are
+sent, that the contract, the runtime and the SDKs describe them the same
+way. Before this slice the contract named an operation's method and path
+but not its types, so it said nothing that could drift, and also
+nothing useful.
+
+`ContractOperation` now carries `body_type`, `body_encoding`,
+`query_type`, `response_type` and the header names, named by the same
+`type_ref_name` routes use. Every type reachable from those is included
+in the contract's `types` even when not public (`connector_type_names`):
+a name with no shape tells a client or an assistant nothing about what a
+call sends. OpenAPI turns them into JSON Schema through the code route
+bodies already use, so there is one description per type.
+
+**As built, not as proposed:** the proposal said the generated
+TypeScript and Swift clients would read these types. Clients never call
+a connector, so they have nothing to generate. What keeps the tiers in
+step is a test, `connector_contract_sync.rs`: it compiles a program to
+its contract and OpenAPI, runs a real connector call, and validates the
+body the provider received against the schema. The body covers `Option`
+both ways, `List`, `Decimal`, a nested record and a sum type. The test
+also checks each query parameter is a field of the declared query
+record. The workspace has no JSON Schema crate, so the test carries a
+small validator for the structural keywords the emitter uses and says
+which annotations it skips. It also proves the validator rejects the
+old `{"tag":"none"}` envelope.
+
+Slice 3 is complete.
+
+---
+
 ## 2026-11-25 - Connector responses with status and headers (B05, slice 3c)
 
 `-> Response<Charge>` gives a connector call the status and the response
