@@ -67,10 +67,6 @@ pub(super) fn call_name(table: &TableRef<'_>, op: &str) -> String {
     format!("table:{}.{op}", table.name)
 }
 
-pub(super) fn malformed(table: &TableRef<'_>, op: &str) -> RuntimeError {
-    malformed_outcome(table.name, op)
-}
-
 fn malformed_outcome(table: &str, op: &str) -> RuntimeError {
     RuntimeError::Other(format!("the recorded outcome of `{table}.{op}` is malformed"))
 }

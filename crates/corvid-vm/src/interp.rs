@@ -750,6 +750,13 @@ impl<'ir> Interpreter<'ir> {
                         out.push((fname.clone(), v));
                     }
                 }
+                if let Some(record) = self.types_by_id.get(def_id).copied() {
+                    for (name, value) in &out {
+                        if let Some(field) = record.fields.iter().find(|f| f.name == *name) {
+                            hold_refinement(type_name, field, value, expr.span)?;
+                        }
+                    }
+                }
                 Ok(ExprFlow::Value(Value::new_struct(
                     *def_id,
                     type_name.clone(),
@@ -2202,6 +2209,9 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     ));
                 }
+                for (field, value) in variant.fields.iter().zip(&arg_values) {
+                    hold_refinement(&variant.name, field, value, span)?;
+                }
                 Ok(ExprFlow::Value(Value::Enum(crate::value::EnumValue::new(
                     ir_type.id,
                     ir_type.name.clone(),
@@ -2231,6 +2241,9 @@ impl<'ir> Interpreter<'ir> {
                         )),
                         span,
                     ));
+                }
+                for (field, value) in ir_type.fields.iter().zip(&arg_values) {
+                    hold_refinement(&ir_type.name, field, value, span)?;
                 }
                 let fields: Vec<(String, Value)> = ir_type
                     .fields
@@ -2878,5 +2891,28 @@ pub(crate) fn pattern_matches(
             }
             true
         }
+    }
+}
+
+/// Stop the run when a value built or assigned in code breaks its
+/// field's refinement (B09): every value of a refined field holds it.
+/// The rule is `conv::refinement_breach`, the one decoding uses.
+pub(crate) fn hold_refinement(
+    type_name: &str,
+    field: &corvid_ir::IrField,
+    value: &Value,
+    span: corvid_ast::Span,
+) -> Result<(), InterpError> {
+    match crate::conv::refinement_breach(field, value) {
+        Some(shown) => Err(InterpError::new(
+            InterpErrorKind::RefinementViolated {
+                type_name: type_name.to_string(),
+                field: field.name.clone(),
+                refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+                value: shown,
+            },
+            span,
+        )),
+        None => Ok(()),
     }
 }

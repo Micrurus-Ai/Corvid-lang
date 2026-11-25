@@ -42,6 +42,10 @@ pub enum InterpErrorKind {
     /// Indexing a list with an out-of-range index.
     IndexOutOfBounds { len: usize, index: i64 },
 
+    /// A value built or assigned in code breaks its field's refinement
+    /// (B09): `Search(q, n)` with `n` outside `between(1, 50)`.
+    RefinementViolated { type_name: String, field: String, refinement: String, value: String },
+
     /// A streaming computation crossed the active cost budget.
     BudgetExceeded { budget: f64, used: f64 },
 
@@ -96,6 +100,9 @@ impl fmt::Display for InterpErrorKind {
             Self::Arithmetic(msg) => write!(f, "arithmetic error: {msg}"),
             Self::IndexOutOfBounds { len, index } => {
                 write!(f, "index {index} out of bounds for list of length {len}")
+            }
+            Self::RefinementViolated { type_name, field, refinement, value } => {
+                write!(f, "`{type_name}.{field}` must be {refinement}, but this value is {value}")
             }
             Self::BudgetExceeded { budget, used } => {
                 write!(f, "stream budget exceeded: used ${used:.4} over budget ${budget:.4}")

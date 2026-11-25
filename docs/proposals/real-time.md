@@ -1,6 +1,6 @@
 # Real-time connections (B14)
 
-**Status:** proposal, awaiting frontend agreement (F08). The grammar is shared, so neither side builds it until it is agreed.
+**Status:** shared design agreed with F08 on 2026-11-25. RT-1 and RT-3 can start in parallel. The examples below specify the interface being built.
 **Owners:** split by the owner on 2026-11-25. Backend and AI grammar and the table change streams: Claude Code (Windows session). The WebSocket transport in `corvid serve`, its protocol and the client libraries: Codex, with frontend F08.
 **Roadmap:** [B14](../backend-ai-roadmap.md), with frontend F08; B29 (live shared state) builds on it.
 
@@ -49,7 +49,7 @@ These are the cases of a built-in `Change<Row>`. Each row carries its revision, 
 | Tier | Derived from the `live` declaration |
 | --- | --- |
 | Backend | The server matches each committed write against every open subscription's filter, using the query it already compiles to SQL. No pub/sub code, no cache. |
-| Interface | `ui.live(board_app.cards, board)` (name to be agreed in F08) gives a typed, always-current list. The client applies `Added`, `Updated` and `Removed` by key and revision, so unaffected rows keep their identity, focus and selection (F05). |
+| Interface | `ui.live(board_app.cards, board)` (the agreed F08 binding) gives a typed, always-current list. The client applies `Added`, `Updated` and `Removed` by key and revision, so unaffected rows keep their identity, focus and selection (F05). |
 | Assistants | Not exposed by default. A later B11 slice may let an action-holding assistant subscribe, declared in source like any exposure. |
 | Contract | `corvid contract app` lists each `live` with its path, row type and permission, so the generated TypeScript client gets a typed subscription and a renamed column is a compile error in every caller. |
 
@@ -95,11 +95,29 @@ These are the cases of a built-in `Change<Row>`. Each row carries its revision, 
 
 RT-1 and RT-3 can proceed in parallel once the grammar and the wire messages are agreed. RT-2 and RT-3 meet at one runtime interface, which RT-1 writes down: a subscription handle the transport opens and closes, and a stream of `Change<Row>` values it forwards.
 
-## What frontend development needs to agree (F08)
+## Frontend agreement and wire protocol
 
-1. The `live` declaration and the four `Change<Row>` cases as written above.
-2. The wire messages: `subscribe` and `unsubscribe` from the client; `snapshot` and `change` from the server, each a public-JSON value of the declared row type; and the heartbeat and close codes.
-3. The client binding's name and shape, and that reconnect means a fresh snapshot reconciled by key and revision.
+The shared declaration is `live`, with the four `Change<Row>` cases above. The Corvid binding is `ui.live(board_app.cards, board)`. The generated client uses the same contract entry and typed path arguments. One page connection can carry multiple subscriptions. Each component owns its subscription and releases it on unmount.
+
+RT-3 uses the WebSocket subprotocol `corvid.live.v1` at `/.well-known/corvid/live`. One text frame carries one JSON object. The client chooses an id unique among its open subscriptions. Here is a subscription to board 7 and the server's initial reply:
+
+```json
+{"type":"subscribe","id":"cards","path":"/boards/7/cards"}
+{"type":"snapshot","id":"cards","rows":[{"revision":"1","row":{"card":4,"board":7,"column":"todo","title":"Read"}}]}
+```
+
+Each line above is a separate frame. The row uses the contract's public JSON mapping. Its declared table key identifies it; the revision is encoded as a decimal string to preserve integer precision in JavaScript. The server installs the subscription and takes its snapshot at one consistent commit boundary, then delivers changes in commit order. For example:
+
+```json
+{"type":"change","id":"cards","kind":"updated","revision":"2","index":0,"row":{"card":4,"board":7,"column":"done","title":"Read"}}
+{"type":"unsubscribe","id":"cards"}
+```
+
+An added or updated row carries its zero-based destination index in the ordered result after the change. A removed row carries its last visible row and the change revision, without an index. If coalescing would make ordered deltas ambiguous, the server sends a replacement snapshot. Clients reconcile snapshots by key and revision, remove absent keys, and keep unchanged row identities. A new connection subscribes again. Its first snapshot includes commits made while offline, followed by newly committed changes.
+
+Use the existing server session and route permission rules. Match the browser origin at upgrade and check permission and row visibility on the server. On session change, stop delivery before reevaluation; discard queued data that is no longer authorized. A denied subscription or revoked permission gets an id-scoped `error` frame with code `forbidden` and closes that subscription. Unrelated authorized subscriptions can continue. An invalid frame closes the connection with 1002, an invalidated session with 1008, and a normal shutdown with 1000. The server sends a WebSocket Ping after 30 idle seconds and closes an unresponsive connection after another 30 seconds without a Pong. The browser handles Pong at the transport layer.
+
+RT-1 supplies the contract entry and the runtime open/close handle described above. RT-2 supplies committed, filtered changes. RT-3 and RT-4 use those interfaces. RT-5 reuses B10's action contract when available. F08/F18 acceptance exercises a missed edit in the new snapshot and a subsequent live edit over the same subscription.
 
 ## Non-scope
 
