@@ -8,6 +8,50 @@ The inventory trial uses fixed-height rows to bound DOM work and a native link f
 
 ---
 
+## 2026-11-25 - Connectors speak public JSON (B05, slice 3a)
+
+A connector sent its arguments and read its responses in the trace's
+internal JSON envelope, the lossless form tool calls and recordings use.
+Real APIs speak the public form B01 defined for `T.to_json()`, routes and
+the contract. The two agree on records, lists and scalars and differ on
+`Option`, so a connector sent `{"tag":"none"}` where a provider expected
+`null`, and could not read a `null` it got back.
+
+The interpreter now encodes a connector call's arguments by their
+declared types with `encode_public_json`, and decodes the success body
+with `decode_public_json`, ignoring undeclared fields as `T.from_json`
+does. The runtime still wraps a `Result` operation's response in
+Corvid's own `{"tag":"ok"|"err"}` envelope, so `interp/connector_json.rs`
+reads that envelope itself and hands only the provider's body to the
+public decoder. The recorded result keeps its shape, so replay goes
+through the same function. A mismatch names the declared type and the
+path.
+
+Replay compares a recorded call's arguments with the live call's
+exactly, so a connector trace recorded before this slice with an
+`Option` argument now stops with a `ReplayDivergence` naming the
+operation and both argument lists. Normalising the old form is not
+possible at that point: replay sees JSON only, without the parameter
+types that tell an internal envelope from a record that happens to
+have a `tag` field. The break is loud, and `learnings.md` says to
+re-record such traces.
+
+Found on the way: the runtime turned a 2xx body that was not JSON into
+`null`, which the program would then read as an answer. It now fails,
+naming the status; an empty body is still `null`.
+
+Slice 3 is split into four commits (3a to 3d) because bodies, query and
+headers, `Response<T>` and the contract's body types are separate
+changes; each lands with its own tests.
+
+Tests: five end-to-end programs against a wiremock provider, covering
+an `Option` sent as `null` and as a value, a response with `null`, a
+value and an undeclared field, a mismatch naming `Charge` and `amount`,
+a refused HTML body, and a `Result` operation that decodes a 200 and
+maps a 402.
+
+---
+
 ## 2026-11-25 - Every HTTP request is in the trace (B05, second slice)
 
 A connector call recorded one `ToolCall` and one `ToolResult`, so a trace
