@@ -1,6 +1,6 @@
 # Write conflicts (B09)
 
-**Status:** decided; building.
+**Status:** shipped (Conflict-1a, 1b, 2 and 3 on `main`).
 **Owner:** backend (Claude Code). It changes no grammar; the JSON and contract shape of a conflict is recorded for frontend development.
 **Roadmap:** [B09](../backend-ai-roadmap.md), the item "a distinct conflict value for writes".
 
@@ -41,7 +41,7 @@ Each operation returns the cases it can produce, and no others:
 | Call | Result | Its conflicts |
 | --- | --- | --- |
 | `Member.insert(row)` | `Result<Member, Conflict<Member>>` | `Taken` |
-| `Member.save(row)` | `Result<Member, Conflict<Member>>` | `Changed`, `Deleted`, `Taken` |
+| `Member.save(row)` | `Result<Member, Conflict<Member>>` | `Changed`, `Deleted`, and `Taken` when the table declares `unique` values (a save keeps its key, so nothing else can hold its values otherwise) |
 | `Member.delete(row)` | `Result<Member, Conflict<Member>>` | `Changed`, `Deleted` |
 
 ```corvid
@@ -85,9 +85,9 @@ agent join(member: Member) -> String:
 
 ## Slices
 
-- [ ] Conflict-1. The type: `Conflict<T>` with `Changed(current)`, `Deleted` and `Taken(holder)`; the cases each value can hold, checked by `match` exhaustiveness; building the cases in code; subsumption into a written `Conflict<T>`; the public JSON mapping, the contract and the SDKs.
-- [ ] Conflict-2. The tables: `insert`, `save` and `delete` return it on both engines, recorded and replayed, with the reference, tour, tests and examples moved over.
-- [ ] Conflict-3. The B10 proposal's example uses `Conflict<Card>`, dropping `placed`.
+- [x] Conflict-1. The type: `Conflict<T>` with `Changed(current)`, `Deleted` and `Taken(holder)`; the cases each value can hold, checked by `match` exhaustiveness; building the cases in code; subsumption into a written `Conflict<T>`; the public JSON mapping, the contract and the SDKs.
+- [x] Conflict-2. The tables: `insert`, `save` and `delete` return it on both engines, recorded and replayed, with the reference, tour, tests and examples moved over.
+- [x] Conflict-3. The B10 proposal's example uses `Conflict<Card>`, dropping `placed`.
 
 ## Non-scope
 

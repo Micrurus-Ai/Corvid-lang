@@ -35,32 +35,24 @@ table Page:
 agent join(id: Int, email: String, nickname: Option<String>) -> String:
     return match Member.insert(Member(id, email, nickname)):
         Ok(member) -> "+" + member.id.to_string()
-        Err(holder) -> " taken by " + holder.id.to_string()
+        Err(Taken(holder)) -> " taken by " + holder.id.to_string()
 
 agent rename(id: Int, email: String) -> String:
     return match Member.get(id):
         Some(member) -> outcome(id, Member.save(Member {{ email: email, ..member }}))
         None -> " none"
 
-fn outcome(id: Int, saved: Result<Member, Option<Member>>) -> String:
+fn outcome(id: Int, saved: Result<Member, Conflict<Member>>) -> String:
     return match saved:
         Ok(member) -> " now " + member.email
-        Err(stored) -> refused(id, stored)
-
-fn refused(id: Int, stored: Option<Member>) -> String:
-    return match stored:
-        Some(holder) -> blocked(id, holder)
-        None -> " gone"
-
-fn blocked(id: Int, holder: Member) -> String:
-    if holder.id == id:
-        return " changed meanwhile"
-    return " held by " + holder.id.to_string()
+        Err(Changed(current)) -> " changed meanwhile"
+        Err(Deleted) -> " gone"
+        Err(Taken(holder)) -> " held by " + holder.id.to_string()
 
 agent publish(id: Int, tenant: String, slug: String) -> String:
     return match Page.insert(Page(id, tenant, slug)):
         Ok(page) -> "+" + page.id.to_string()
-        Err(holder) -> " taken by " + holder.id.to_string()
+        Err(Taken(holder)) -> " taken by " + holder.id.to_string()
 
 agent main() -> String:
     members = join(1, "ana@example.com", Some("ana")) + join(2, "bo@example.com", None) + join(3, "ana@example.com", None) + join(4, "cy@example.com", Some("ana")) + join(5, "di@example.com", None)

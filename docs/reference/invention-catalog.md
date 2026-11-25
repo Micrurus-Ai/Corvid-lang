@@ -1018,7 +1018,8 @@ table Shelf:
 agent store(renamed: Shelf) -> String:
     return match Shelf.save(renamed):
         Ok(saved) -> "saved revision " + saved.revision.to_string()
-        Err(current) -> "someone else changed the shelf first"
+        Err(Changed(current)) -> "someone else changed the shelf first"
+        Err(Deleted) -> "the shelf was removed"
 ```
 
 Try it: `corvid tour --topic tables`. Reference: [Tables](./tables.md).

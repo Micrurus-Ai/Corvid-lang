@@ -423,10 +423,9 @@ impl<'a> Checker<'a> {
                     .collect::<Vec<_>>();
                 (key_types, Type::Option(Box::new(row.clone())))
             }
-            TableOp::Insert => (vec![row.clone()], Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
-            TableOp::Save | TableOp::Delete => (
+            TableOp::Insert | TableOp::Save | TableOp::Delete => (
                 vec![row.clone()],
-                Type::Result(Box::new(row.clone()), Box::new(Type::Option(Box::new(row.clone())))),
+                Type::Result(Box::new(row.clone()), Box::new(Type::Conflict(Box::new(row.clone()), op.conflicts(!table.unique.is_empty())))),
             ),
         };
         let label = format!("{}.{}", table.name().name, op.name());
@@ -773,10 +772,10 @@ table Shelf:
 agent find(id: Int) -> Option<Shelf>:
     return Shelf.get(id)
 
-agent add(owner: String) -> Result<Shelf, Shelf>:
+agent add(owner: String) -> Result<Shelf, Conflict<Shelf>>:
     return Shelf.insert(Shelf(1, owner, \"Reading\", None))
 
-agent rename(shelf: Shelf, title: String) -> Result<Shelf, Option<Shelf>>:
+agent rename(shelf: Shelf, title: String) -> Result<Shelf, Conflict<Shelf>>:
     return Shelf.save(Shelf {{ title: title, ..shelf }})
 
 agent seen(shelf: Shelf) -> Int:

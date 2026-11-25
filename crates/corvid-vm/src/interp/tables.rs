@@ -59,26 +59,20 @@ impl<'ir> Interpreter<'ir> {
                     None => Value::OptionNone,
                 }
             }
-            TableOp::Insert => {
+            TableOp::Insert | TableOp::Save | TableOp::Delete => {
                 let row = self.value_row(record, &arg).map_err(fail)?;
-                match self.runtime.table_insert(&target, row).await.map_err(runtime_error)? {
-                    Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, stored).map_err(fail)?)),
-                    Err(existing) => Value::ResultErr(BoxedValue::new(self.row_value(record, existing).map_err(fail)?)),
-                }
-            }
-            TableOp::Save | TableOp::Delete => {
-                let row = self.value_row(record, &arg).map_err(fail)?;
-                let outcome = if op == TableOp::Save {
-                    self.runtime.table_save(&target, row).await
-                } else {
-                    self.runtime.table_delete(&target, row).await
+                let outcome = match op {
+                    TableOp::Insert => self.runtime.table_insert(&target, row).await,
+                    TableOp::Save => self.runtime.table_save(&target, row).await,
+                    _ => self.runtime.table_delete(&target, row).await,
                 };
                 match outcome.map_err(runtime_error)? {
                     Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, stored).map_err(fail)?)),
-                    Err(Some(current)) => Value::ResultErr(BoxedValue::new(Value::OptionSome(BoxedValue::new(
-                        self.row_value(record, current).map_err(fail)?,
-                    )))),
-                    Err(None) => Value::ResultErr(BoxedValue::new(Value::OptionNone)),
+                    Err(conflict) => {
+                        let case = conflict.case();
+                        let row = conflict.into_row().map(|row| self.row_value(record, row)).transpose().map_err(fail)?;
+                        Value::ResultErr(BoxedValue::new(Value::conflict(case, row)))
+                    }
                 }
             }
         })

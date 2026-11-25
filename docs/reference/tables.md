@@ -175,9 +175,9 @@ read many rows.
 | Call | Result |
 | --- | --- |
 | `Shelf.get(key)` | `Option<Shelf>` |
-| `Shelf.insert(row)` | `Result<Shelf, Shelf>`. `Ok` holds the stored row, with revision 1; `Err` holds the row already stored under that key. |
-| `Shelf.save(row)` | `Result<Shelf, Option<Shelf>>`. It writes only if the stored row still has `row.revision`. `Ok` holds the stored row with its new revision; `Err` holds the row stored now, or `None` if it was deleted. |
-| `Shelf.delete(row)` | `Result<Shelf, Option<Shelf>>`, checked like `save`. `Ok` holds the deleted row. |
+| `Shelf.insert(row)` | `Result<Shelf, Conflict<Shelf>>`. `Ok` holds the stored row, with revision 1. Its conflict is only `Taken(holder)`: the row with that key or one of its [unique values](#unique-values). |
+| `Shelf.save(row)` | `Result<Shelf, Conflict<Shelf>>`. It writes only if the stored row still has `row.revision`. `Ok` holds the stored row with its new revision. Its conflict is `Changed(current)` or `Deleted`, and also `Taken(holder)` when the table declares [unique values](#unique-values). |
+| `Shelf.delete(row)` | `Result<Shelf, Conflict<Shelf>>`, checked like `save`. `Ok` holds the deleted row. Its conflict is `Changed(current)` or `Deleted`. |
 
 There is no unchecked overwrite. A row read from the database carries
 its revision, and editing it with `Shelf { title: t, ..shelf }` keeps
@@ -193,7 +193,8 @@ agent rename(shelf_id: Int, title: String) -> String:
 agent store(renamed: Shelf) -> String:
     return match Shelf.save(renamed):
         Ok(saved) -> "saved revision " + saved.revision.to_string()
-        Err(current) -> "someone else changed the shelf first"
+        Err(Changed(current)) -> "someone else changed the shelf first"
+        Err(Deleted) -> "the shelf was removed"
 ```
 
 ### Conflicts
@@ -214,9 +215,23 @@ agent explain(conflict: Conflict<Member>) -> String:
         Taken(holder) -> holder.email + " already has that value"
 ```
 
-A `match` covers the cases the value can be. A written `Conflict<Row>`
-can be any of the three, so its match needs all three arms, or `_`. An
-arm naming a case the value can never be is a compile error. Code can
+A `match` covers the cases the value can be. Each operation returns
+only the conflicts it can produce, so a match on an `insert` is complete
+with `Taken` alone, and one on a `save` needs `Taken` only when the table
+has `unique` values:
+
+```corvid
+agent join(member: Member) -> String:
+    return match Member.insert(member):
+        Ok(stored) -> "welcome"
+        Err(Taken(holder)) -> "that email is already a member"
+```
+
+A written `Conflict<Row>` can be any of the three, so a function taking
+one needs all three arms, or `_`, and the conflict of any operation can
+be passed to it. An arm naming a case the value can never be, such as
+`Err(Changed(_))` on an `insert`, is a compile error, because it could
+never run. Code can
 build each case, `Changed(row)`, `Deleted` and `Taken(row)`, so a test
 or a fake store returns the same value a table does. A conflict crosses
 JSON as a sum type: `{"tag": "variant", "type": "Conflict", "variant":
@@ -225,9 +240,8 @@ union of the three cases in TypeScript, `Conflict[Row]` with
 `Conflict.Taken(holder)` in Python, and `CorvidConflict<Row>` in Swift
 and Kotlin.
 
-The operations above still return `Option<Row>` and `Row` errors; they
-move to `Conflict<Row>`, each returning only the cases it can produce,
-in the next slice ([proposal](../proposals/write-conflicts.md)).
+The trace records which case each write returned, so a replay returns
+the same case. [Why one conflict type](../proposals/write-conflicts.md).
 
 ## Atomic writes
 
@@ -237,7 +251,7 @@ undone: a `?` that passes an error out of it, or a runtime failure such
 as a division by zero.
 
 ```corvid
-agent move_title(from: Shelf, to: Shelf) -> Result<String, Option<Shelf>>:
+agent move_title(from: Shelf, to: Shelf) -> Result<String, Conflict<Shelf>>:
     atomic:
         cleared = Shelf.save(Shelf { title: "", ..from })?
         filled = Shelf.save(Shelf { title: from.title, ..to })?
@@ -338,8 +352,8 @@ like any other:
 
 | Call | When another row holds the value |
 | --- | --- |
-| `Member.insert(row)` | `Err(holder)`: the row that has it, as for a repeated key. |
-| `Member.save(row)` | `Err(Some(holder))`, and nothing is written. If `holder`'s key is the row's own, the row changed since it was read; otherwise `holder` is the row that has the value. |
+| `Member.insert(row)` | `Err(Taken(holder))`: the row that has it, as for a repeated key. |
+| `Member.save(row)` | `Err(Taken(holder))`, and nothing is written. A row that changed since it was read is `Err(Changed(current))` instead. |
 
 A missing value never conflicts, so many members may have no nickname.
 Each rule is a unique index that `corvid migrate plan` creates and drops

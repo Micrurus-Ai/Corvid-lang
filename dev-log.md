@@ -554,6 +554,44 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The shared-actions example returns its conflict (B09 Conflict-3)
+
+The B10 proposal's `move_card` example declared a `MoveRefused` sum type
+and a `placed` helper that turned a save's `Err(Some(current))` and
+`Err(None)` into it. With named conflicts the action returns
+`Result<Card, Conflict<Card>>` and its body is one `match`: the save's
+conflict is already `Changed(current)` or `Deleted`, and a missing card is
+`Err(Deleted)`. This is the measured gain the cross-tier rule asks for:
+the example lost a type, a helper and seven lines, and the conflict a
+form, an assistant and the CLI receive is the one the table produced.
+The proposal still waits on frontend agreement; it changes no grammar
+the frontend reviews, only the example's types.
+
+---
+
+## 2026-11-25 - Table writes return their conflicts by name (B09 Conflict-2)
+
+`insert`, `save` and `delete` now return `Result<Row, Conflict<Row>>`,
+each with only the cases it can produce: `TableOp::conflicts` is the one
+list the checker reads. A save keeps its key, so it can be `Taken` only
+when its table declares `unique` values; a table without them gets a
+save whose conflict is `Changed` or `Deleted`, and no arm that could
+never run. The invention catalog's tables example caught this: its
+two-arm match was correct and the first rule would have refused it. The runtime's writes return a `WriteConflict`
+built where the database outcome is known, so the save that a unique
+value blocks is `Taken(holder)` and the save of a changed row is
+`Changed(current)`, and no caller compares keys to tell them apart. The
+unique-values test shows the gain: its `refused` and `blocked` helpers,
+which made that comparison, are gone, replaced by three arms.
+
+The trace records the case by name, `{"conflict": "Taken", "row": ...}`.
+A write recorded in the earlier shape is refused with a message to
+record again: an old save's `{"err": row}` could be either case, and
+replay must return what happened, not a guess. No recorded table trace
+existed in the repository, so nothing needed converting.
+
+---
+
 ## 2026-11-25 - Clients name the conflict type (B09 Conflict-1b)
 
 A route or agent that returns a `Conflict<Row>` is advertised as

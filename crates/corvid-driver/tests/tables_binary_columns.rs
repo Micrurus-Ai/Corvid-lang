@@ -41,7 +41,7 @@ agent rotate(name: String, token: String) -> String:
         Some(key) -> rotated(ApiKey.save(ApiKey {{ token_hash: token.utf8().sha256(), previous: Some(key.token_hash), ..key }}))
         None -> "none"
 
-fn rotated(outcome: Result<ApiKey, Option<ApiKey>>) -> String:
+fn rotated(outcome: Result<ApiKey, Conflict<ApiKey>>) -> String:
     return match outcome:
         Ok(key) -> "rotated r" + key.revision.to_string()
         Err(_) -> "conflict"

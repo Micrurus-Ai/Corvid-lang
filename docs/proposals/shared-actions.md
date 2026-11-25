@@ -26,27 +26,13 @@ type MoveCard:
     to: Column
     position: Int where between(0, 500)
 
-type MoveRefused:
-    | CardMissing
-    | CardChanged(current: Card)
-    | ColumnFull(limit: Int)
-
-fn placed(saved: Result<Card, Option<Card>>) -> Result<Card, MoveRefused>:
-    return match saved:
-        Ok(card) -> Ok(card)
-        Err(Some(current)) -> Err(CardChanged(current))
-        Err(None) -> Err(CardMissing)
-
-action move_card(move: MoveCard) -> Result<Card, MoveRefused> requires permission("board.edit"):
-    moved = Err(CardMissing)
-    atomic:
-        moved = match Card.get(move.card):
-            Some(card) -> placed(Card.save(Card { column: move.to, position: move.position, ..card }))
-            None -> Err(CardMissing)
-    return moved
+action move_card(move: MoveCard) -> Result<Card, Conflict<Card>> requires permission("board.edit"):
+    return match Card.get(move.card):
+        Some(card) -> Card.save(Card { column: move.to, position: move.position, ..card })
+        None -> Err(Deleted)
 ```
 
-`action` is one new keyword. Everything else is grammar Corvid already has: an agent's signature and body, a record with field refinements, a sum type, the table operations, and the route's `requires` clause. (`ColumnFull` is left out of the body for brevity.)
+`action` is one new keyword. Everything else is grammar Corvid already has: an agent's signature and body, a record with field refinements, the table operations and their [conflicts](write-conflicts.md), and the route's `requires` clause. A save's conflict is already a typed value, `Changed(current)` or `Deleted`, so the action returns it as it is; an earlier draft needed its own `MoveRefused` sum type and a helper to translate the save's result into it. An application with refusals of its own, such as a full column, declares a sum type for them and carries the conflict inside one of its variants.
 
 ### What one declaration gives every tier
 
@@ -55,7 +41,7 @@ action move_card(move: MoveCard) -> Result<Card, MoveRefused> requires permissio
 | Backend code | `move_card(m)` is an ordinary typed call from agents, tests and workers. | — |
 | HTTP | One endpoint, `POST /actions/move_card`. A form body or a JSON body decode into `MoveCard`; the response is the typed result as JSON, or the page's HTML when the request came from a form. | The `-> html` / `-> json` route pair |
 | UI | `ui.form(move_card)` renders the inputs, with the refinements as browser validation, and `ui.button("Move", move_card, m)` submits a prepared value. The handler is a **name the compiler resolves**, never a string. | `ui.action(label, "handler")` strings, hand-written forms |
-| Assistants | The action is a tool whose input schema is `MoveCard`'s JSON Schema and whose result is `MoveRefused` or `Card`, through WebMCP in the page and through an MCP endpoint served by `corvid serve`. Only actions that say so (see [Assistant exposure](#assistant-exposure)). | `toolname=` HTML and the reading list's hand-written script |
+| Assistants | The action is a tool whose input schema is `MoveCard`'s JSON Schema and whose result is `Conflict<Card>` or `Card`, through WebMCP in the page and through an MCP endpoint served by `corvid serve`. Only actions that say so (see [Assistant exposure](#assistant-exposure)). | `toolname=` HTML and the reading list's hand-written script |
 | CLI | `corvid act move_card --card 3 --to Done --position 0`, checked against the same type. | A separate `read_page_cli.cor` |
 | Workers | `corvid jobs enqueue --task move_card --payload '{...}'` decodes into the same type. | — |
 | Contract | `corvid contract app` lists each action with its input, result, permission and exposure, so a change shows up as a contract diff. | Agents listed without permission or exposure |
@@ -64,14 +50,14 @@ action move_card(move: MoveCard) -> Result<Card, MoveRefused> requires permissio
 
 **Permission is checked once, before decoding, for every caller.** `requires permission("board.edit")` applies to the endpoint, the assistant tool, the CLI and the worker alike. Under B11, an assistant acts with the authority of the person it acts for, never more.
 
-**Conflicts are the result type.** The declared error type is the conflict behavior: every caller receives `CardChanged(current)` as a value. The UI can show the current card. An assistant can read it and decide again. No caller gets a bare HTTP 409.
+**Conflicts are the result type.** The declared error type is the conflict behavior: every caller receives `Changed(current)` as a value. The UI can show the current card. An assistant can read it and decide again. No caller gets a bare HTTP 409.
 
 ### Assistant exposure
 
 Nothing is exposed to an assistant unless the source says so ([no hidden defaults](../../AGENTS.md#no-hidden-defaults-for-consequential-policy)). An action opts in with one line, directly under its header:
 
 ```corvid
-action move_card(move: MoveCard) -> Result<Card, MoveRefused> requires permission("board.edit"):
+action move_card(move: MoveCard) -> Result<Card, Conflict<Card>> requires permission("board.edit"):
     assistants: confirm "Move a card to another column."
     atomic:
         ...
