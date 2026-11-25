@@ -490,17 +490,20 @@ pub fn emit_application_contract(
     registry: &EffectRegistry,
     opts: &ContractOptions<'_>,
 ) -> ApplicationContract {
+    let names = ContractTypes::new(file, checked);
+    // An alias names no type of its own: every use of it is advertised
+    // as the type it stands for.
     let types = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
-                Some(contract_type(t, checked))
+            Decl::Type(t) if t.visibility.is_callable_from_outside_file() && t.alias.is_none() => {
+                Some(contract_type(t, &names))
             }
             _ => None,
         })
         .collect();
-    let connector_wire = connector_wire(file, checked);
+    let connector_wire = connector_wire(file, &names);
 
     let routes = file
         .decls
@@ -509,14 +512,14 @@ pub fn emit_application_contract(
             Decl::Server(server) => Some(server),
             _ => None,
         })
-        .flat_map(|server| server.routes.iter().map(contract_route))
+        .flat_map(|server| server.routes.iter().map(|route| contract_route(route, &names)))
         .collect();
 
     // `compute_worst_case_cost` is available for a tighter
     // per-body bound; the contract advertises the callable's
     // COMPOSED EFFECT-ROW surface (what a frontend should budget for),
     // which composes downstream effects through the call graph.
-    let _ = (resolved, checked, compute_worst_case_cost);
+    let _ = (resolved, compute_worst_case_cost);
 
     let agents = file
         .decls
@@ -535,6 +538,7 @@ pub fn emit_application_contract(
                     &a.return_ty,
                     &a.effect_row,
                     registry,
+                    &names,
                 ),
                 )
             }
@@ -553,6 +557,7 @@ pub fn emit_application_contract(
                     &p.return_ty,
                     &p.effect_row,
                     registry,
+                    &names,
                 ),
             ),
             _ => None,
@@ -633,8 +638,8 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
 
 /// The declared type of an operation parameter, named as routes name
 /// their types.
-fn param_type_name(op: &corvid_ast::OperationDecl, param: &str) -> Option<String> {
-    op.params.iter().find(|p| p.name.name == param).map(|p| type_ref_name(&p.ty))
+fn param_type_name(op: &corvid_ast::OperationDecl, param: &str, names: &ContractTypes<'_>) -> Option<String> {
+    op.params.iter().find(|p| p.name.name == param).map(|p| names.name(&p.ty))
 }
 
 /// The names of the declared types a connector sends or reads: its
@@ -667,7 +672,11 @@ fn connector_type_names(file: &File) -> std::collections::BTreeSet<String> {
         match ty {
             TypeRef::Named { name, .. } => {
                 if let Some(decl) = decls.get(name.name.as_str()) {
-                    if seen.insert(name.name.clone()) {
+                    if let Some(target) = &decl.alias {
+                        // An alias is advertised as the type it stands
+                        // for, so that type is what the connector sends.
+                        pending.push(target);
+                    } else if seen.insert(name.name.clone()) {
                         pending.extend(decl.fields.iter().map(|f| &f.ty));
                         pending.extend(decl.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)));
                     }
@@ -683,13 +692,13 @@ fn connector_type_names(file: &File) -> std::collections::BTreeSet<String> {
 /// What each connector operation sends and reads, for the backend's own
 /// tooling, never for a client. [`ConnectorWire`] explains why it is
 /// kept apart from the published contract.
-fn connector_wire(file: &File, checked: &Checked) -> ConnectorWire {
-    let names = connector_type_names(file);
+fn connector_wire(file: &File, names: &ContractTypes<'_>) -> ConnectorWire {
+    let sent = connector_type_names(file);
     let types = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Type(t) if names.contains(&t.name.name) => Some(contract_type(t, checked)),
+            Decl::Type(t) if sent.contains(&t.name.name) => Some(contract_type(t, names)),
             _ => None,
         })
         .collect();
@@ -704,7 +713,7 @@ fn connector_wire(file: &File, checked: &Checked) -> ConnectorWire {
             c.operations.iter().map(move |op| ConnectorWireOperation {
                 connector: c.name.name.clone(),
                 operation: op.name.name.clone(),
-                body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name)),
+                body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name, names)),
                 body_encoding: op.body.as_ref().map(|b| {
                     match b.encoding {
                         corvid_ast::BodyEncoding::Json => "json",
@@ -712,8 +721,8 @@ fn connector_wire(file: &File, checked: &Checked) -> ConnectorWire {
                     }
                     .to_string()
                 }),
-                query_type: op.query.as_ref().and_then(|q| param_type_name(op, &q.name)),
-                response_type: type_ref_name(&op.return_ty),
+                query_type: op.query.as_ref().and_then(|q| param_type_name(op, &q.name, names)),
+                response_type: names.name(&op.return_ty),
                 headers: op.headers.iter().map(|h| h.name.clone()).collect(),
             })
         })
@@ -884,19 +893,19 @@ fn mandatory_auth_safeguards() -> Vec<String> {
 /// A public type's contract entry. A field that holds a `Secret` never
 /// leaves the server, so the contract, and every client and SDK
 /// generated from it, has no such field.
-fn contract_type(t: &corvid_ast::TypeDecl, checked: &Checked) -> ContractType {
+fn contract_type(t: &corvid_ast::TypeDecl, names: &ContractTypes<'_>) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
-        fields: public_fields(&t.fields, checked),
-        variants: t.variants.iter().map(|v| contract_variant(v, checked)).collect(),
+        fields: public_fields(&t.fields, names),
+        variants: t.variants.iter().map(|v| contract_variant(v, names)).collect(),
     }
 }
 
-fn public_fields(fields: &[corvid_ast::Field], checked: &Checked) -> Vec<ContractField> {
+fn public_fields(fields: &[corvid_ast::Field], names: &ContractTypes<'_>) -> Vec<ContractField> {
     fields
         .iter()
-        .filter(|field| !checked.secret_type_refs.contains(&field.ty.span()))
-        .map(contract_field)
+        .filter(|field| !names.checked.secret_type_refs.contains(&field.ty.span()))
+        .map(|field| contract_field(field, names))
         .collect()
 }
 
@@ -905,10 +914,10 @@ fn signature_holds_secret(params: &[corvid_ast::Param], return_ty: &TypeRef, che
     params.iter().map(|param| &param.ty).chain(std::iter::once(return_ty)).any(|ty| checked.secret_type_refs.contains(&ty.span()))
 }
 
-fn contract_variant(v: &corvid_ast::SumVariant, checked: &Checked) -> ContractVariant {
+fn contract_variant(v: &corvid_ast::SumVariant, names: &ContractTypes<'_>) -> ContractVariant {
     ContractVariant {
         name: v.name.name.clone(),
-        fields: public_fields(&v.fields, checked),
+        fields: public_fields(&v.fields, names),
         status: v.status,
         ui: ui_hints_map(&v.ui),
     }
@@ -928,16 +937,16 @@ fn ui_hints_map(hints: &[corvid_ast::UiHint]) -> std::collections::BTreeMap<Stri
     map
 }
 
-fn contract_field(f: &corvid_ast::Field) -> ContractField {
+fn contract_field(f: &corvid_ast::Field, names: &ContractTypes<'_>) -> ContractField {
     let mut field = ContractField {
         name: f.name.name.clone(),
-        type_name: type_ref_name(&f.ty),
+        type_name: names.name(&f.ty),
         minimum: None,
         maximum: None,
         min_length: None,
         max_length: None,
         ui: ui_hints_map(&f.ui),
-        upload: contract_upload(&f.ty, f.upload.as_ref()),
+        upload: names.upload(&f.ty, f.upload.as_ref()),
     };
     match f.refinement {
         Some(Refinement::Between { min, max }) => {
@@ -1016,29 +1025,7 @@ pub fn default_mime_for_format(format: &str) -> Vec<String> {
     mimes.iter().map(|m| m.to_string()).collect()
 }
 
-/// Pagination surface for a callable/route output type: `Page<Item>`
-/// is cursor pagination; `Stream<Item>` is stream pagination.
-fn pagination_for(ty: &TypeRef) -> Option<Pagination> {
-    match ty {
-        TypeRef::Generic { name, args, .. } if name.name == "Page" && args.len() == 1 => {
-            Some(Pagination {
-                style: PaginationStyle::Cursor,
-                item_type: type_ref_name(&args[0]),
-                cursor_param: Some("cursor".to_string()),
-            })
-        }
-        TypeRef::Generic { name, args, .. } if name.name == "Stream" && args.len() == 1 => {
-            Some(Pagination {
-                style: PaginationStyle::Stream,
-                item_type: type_ref_name(&args[0]),
-                cursor_param: None,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
+fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> ContractRoute {
     ContractRoute {
         method: r.method.as_str().to_string(),
         path: r.path.clone(),
@@ -1047,16 +1034,16 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .iter()
             .map(|p| ContractParam {
                 name: p.name.name.clone(),
-                type_name: type_ref_name(&p.ty),
+                type_name: names.name(&p.ty),
             })
             .collect(),
-        query_type: r.query_ty.as_ref().map(type_ref_name),
-        body_type: r.body_ty.as_ref().map(type_ref_name),
+        query_type: r.query_ty.as_ref().map(|ty| names.name(ty)),
+        body_type: r.body_ty.as_ref().map(|ty| names.name(ty)),
         request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
         upload: r
             .body_ty
             .as_ref()
-            .and_then(|ty| contract_upload(ty, r.upload.as_ref())),
+            .and_then(|ty| names.upload(ty, r.upload.as_ref())),
         approval: r.approval.as_ref().map(|policy| ContractApprovalPolicy {
             role: policy.role.clone(),
             risk: policy.risk.clone(),
@@ -1065,10 +1052,10 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             max_cost_usd: policy.max_cost_usd,
             irreversible: policy.irreversible,
         }),
-        response_type: type_ref_name(&r.response.ty),
+        response_type: names.name(&r.response.ty),
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
-            corvid_ast::RouteResponseKind::Json if type_ref_head_is(&r.response.ty, "Stream") => Some("text/event-stream".into()),
+            corvid_ast::RouteResponseKind::Json if names.is_stream(&r.response.ty) => Some("text/event-stream".into()),
             corvid_ast::RouteResponseKind::Json => None,
         },
         // A route inherits the permission surface of its effect row;
@@ -1080,7 +1067,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .iter()
             .map(|e| e.name.name.clone())
             .collect(),
-        pagination: pagination_for(&r.response.ty),
+        pagination: names.pagination(&r.response.ty),
         policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| {
             ContractRoutePolicy {
                 authenticated: true,
@@ -1109,16 +1096,17 @@ fn contract_callable(
     return_ty: &TypeRef,
     effect_row: &corvid_ast::EffectRow,
     registry: &EffectRegistry,
+    names: &ContractTypes<'_>,
 ) -> ContractCallable {
     let inputs = params
         .iter()
         .map(|p| ContractParam {
             name: p.name.name.clone(),
-            type_name: type_ref_name(&p.ty),
+            type_name: names.name(&p.ty),
         })
         .collect::<Vec<_>>();
 
-    let tainted_input = params.iter().any(|p| type_ref_is_tainted(&p.ty));
+    let tainted_input = params.iter().any(|p| names.is_tainted(&p.ty));
 
     let composed = registry.compose(
         &effect_row
@@ -1151,24 +1139,22 @@ fn contract_callable(
     ContractCallable {
         name: name.to_string(),
         inputs,
-        output_type: type_ref_name(return_ty),
+        output_type: names.name(return_ty),
         capabilities: Capabilities {
-            streaming: type_ref_head_is(return_ty, "Stream"),
-            grounded: type_ref_head_is(return_ty, "Grounded"),
+            streaming: names.is_stream(return_ty),
+            grounded: names.is_grounded(return_ty),
             tainted_input,
             approvals_possible,
             confidence_min,
             max_cost_usd,
             latency_class,
-            pagination: pagination_for(return_ty),
+            pagination: names.pagination(return_ty),
         },
     }
 }
 
-/// A frontend-facing name for a `TypeRef`. Named types keep their
-/// name (referencing the `types` section); generics render their
-/// head + inner recursively so `Stream<Answer>` and `Grounded<Doc>`
-/// read the way a client expects.
+/// A type reference named as written. [`ContractTypes::name`] expands
+/// aliases first.
 fn type_ref_name(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Named { name, .. } => name.name.clone(),
@@ -1183,6 +1169,95 @@ fn type_ref_name(ty: &TypeRef) -> String {
     }
 }
 
+/// Names the contract's types, with every alias expanded to the type it
+/// stands for: a field typed `orders: Orders` with `type Orders =
+/// List<Order>` is advertised as `List<Order>`, which every client and
+/// SDK declares, never as `Orders`, which none does. Streaming,
+/// grounding, tainted inputs and pagination are read from the expanded
+/// type too, so an alias of a `Stream` streams.
+///
+/// The expansion walks the contract file's own declarations rather than
+/// reading the checker's table of resolved types, because the driver
+/// first copies the records a contract exchanges in from other modules
+/// and gives each its contract name (`Customer_2` when two modules both
+/// declare `Customer`). Those copies keep their own module's source
+/// positions, which the checker's table, keyed by position in the root
+/// file, cannot tell apart from the root's. The test
+/// `contract_names_agree_with_the_checker` holds the two in step.
+struct ContractTypes<'a> {
+    checked: &'a Checked,
+    /// Each alias the file declares and the type it stands for. A
+    /// declaration the driver copied in is later in the file and
+    /// carries the contract names, so a later one wins.
+    aliases: std::collections::HashMap<&'a str, &'a TypeRef>,
+}
+
+impl<'a> ContractTypes<'a> {
+    fn new(file: &'a File, checked: &'a Checked) -> Self {
+        let aliases = file
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::Type(t) => t.alias.as_ref().map(|target| (t.name.name.as_str(), target)),
+                _ => None,
+            })
+            .collect();
+        Self { checked, aliases }
+    }
+
+    /// `ty` with every alias replaced by the type it stands for. The
+    /// checker refuses an alias cycle, so the depth bound is only a
+    /// guard.
+    fn expand(&self, ty: &TypeRef) -> TypeRef {
+        self.expand_within(ty, 0)
+    }
+
+    fn expand_within(&self, ty: &TypeRef, depth: usize) -> TypeRef {
+        match ty {
+            TypeRef::Named { name, .. } if depth < 32 => match self.aliases.get(name.name.as_str()) {
+                Some(target) => self.expand_within(target, depth + 1),
+                None => ty.clone(),
+            },
+            TypeRef::Generic { name, args, span } => TypeRef::Generic {
+                name: name.clone(),
+                args: args.iter().map(|arg| self.expand_within(arg, depth)).collect(),
+                span: *span,
+            },
+            TypeRef::Weak { inner, effects, span } => TypeRef::Weak {
+                inner: Box::new(self.expand_within(inner, depth)),
+                effects: *effects,
+                span: *span,
+            },
+            other => other.clone(),
+        }
+    }
+
+    /// The frontend-facing name of a type reference.
+    fn name(&self, ty: &TypeRef) -> String {
+        type_ref_name(&self.expand(ty))
+    }
+
+    fn is_stream(&self, ty: &TypeRef) -> bool {
+        type_ref_head_is(&self.expand(ty), "Stream")
+    }
+
+    fn is_grounded(&self, ty: &TypeRef) -> bool {
+        type_ref_head_is(&self.expand(ty), "Grounded")
+    }
+
+    fn is_tainted(&self, ty: &TypeRef) -> bool {
+        type_ref_is_tainted(&self.expand(ty))
+    }
+
+    fn pagination(&self, ty: &TypeRef) -> Option<Pagination> {
+        pagination_for(&self.expand(ty))
+    }
+
+    fn upload(&self, ty: &TypeRef, spec: Option<&corvid_ast::UploadSpec>) -> Option<ContractUpload> {
+        contract_upload(&self.expand(ty), spec)
+    }
+}
+
 fn type_ref_head_is(ty: &TypeRef, head: &str) -> bool {
     matches!(ty, TypeRef::Generic { name, .. } if name.name == head)
 }
@@ -1192,6 +1267,24 @@ fn type_ref_is_tainted(ty: &TypeRef) -> bool {
         TypeRef::Generic { name, .. } if name.name == "Tainted" => true,
         TypeRef::Generic { args, .. } => args.iter().any(type_ref_is_tainted),
         _ => false,
+    }
+}
+
+/// Pagination surface for a callable/route output type: `Page<Item>`
+/// is cursor pagination; `Stream<Item>` is stream pagination.
+fn pagination_for(ty: &TypeRef) -> Option<Pagination> {
+    match ty {
+        TypeRef::Generic { name, args, .. } if name.name == "Page" && args.len() == 1 => Some(Pagination {
+            style: PaginationStyle::Cursor,
+            item_type: type_ref_name(&args[0]),
+            cursor_param: Some("cursor".to_string()),
+        }),
+        TypeRef::Generic { name, args, .. } if name.name == "Stream" && args.len() == 1 => Some(Pagination {
+            style: PaginationStyle::Stream,
+            item_type: type_ref_name(&args[0]),
+            cursor_param: None,
+        }),
+        _ => None,
     }
 }
 
@@ -1579,6 +1672,83 @@ tool stream_answer(m: String) -> Stream<String>
         assert_eq!(pg.item_type, "String");
         assert!(pg.cursor_param.is_none());
         assert!(agent.capabilities.streaming);
+    }
+
+    /// An alias is advertised as the type it stands for, at every depth
+    /// and in every position, so no client meets a name it cannot find;
+    /// the alias itself is not a contract type.
+    #[test]
+    fn a_type_written_through_an_alias_is_named_as_the_type_it_stands_for() {
+        let contract = contract_for(
+            "public type Order:
+    id: String
+
+public type Orders = List<Order>
+public type Answers = Stream<Order>
+public type Label = String
+
+public type Shelf:
+    orders: Orders
+    maybe: Option<Orders>
+    label: Label
+
+tool stream_orders(label: Label) -> Answers
+
+public agent watch(label: Label) -> Answers:
+    return stream_orders(label)
+",
+        );
+        assert!(contract.types.iter().all(|t| !["Orders", "Answers", "Label"].contains(&t.name.as_str())));
+        let shelf = contract.types.iter().find(|t| t.name == "Shelf").expect("Shelf");
+        let named: Vec<(&str, &str)> = shelf.fields.iter().map(|f| (f.name.as_str(), f.type_name.as_str())).collect();
+        assert_eq!(named, [("orders", "List<Order>"), ("maybe", "Option<List<Order>>"), ("label", "String")]);
+        let agent = contract.agents.iter().find(|a| a.name == "watch").unwrap();
+        assert_eq!(agent.inputs[0].type_name, "String");
+        assert_eq!(agent.output_type, "Stream<Order>");
+        assert!(agent.capabilities.streaming, "an alias of a stream still streams");
+        assert_eq!(agent.capabilities.pagination.as_ref().map(|p| p.item_type.as_str()), Some("Order"));
+    }
+
+    /// The contract expands aliases over its own declarations
+    /// ([`ContractTypes`] says why); the checker resolves every type
+    /// reference too. The two must name every field the same way.
+    #[test]
+    fn contract_names_agree_with_the_checker() {
+        let src = "public type Order:
+    id: String
+    total: Decimal
+
+public type Orders = List<Order>
+public type Ledger = Map<String, Orders>
+public type Label = String
+
+public type Shelf:
+    orders: Orders
+    ledger: Ledger
+    maybe: Option<Orders>
+    outcome: Result<Label, String>
+    sealed: Grounded<Order>
+    label: Label
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(checked.errors.is_empty(), "check: {:?}", checked.errors);
+        let names = ContractTypes::new(&file, &checked);
+        let symbols = &resolved.symbols;
+        let mut compared = 0;
+        for decl in &file.decls {
+            let Decl::Type(t) = decl else { continue };
+            for field in &t.fields {
+                let resolved_type = &checked.type_refs[&field.ty.span()];
+                let from_checker = resolved_type.display_name_with(&|id| Some(symbols.get(id).name.clone()));
+                assert_eq!(names.name(&field.ty), from_checker, "field `{}.{}`", t.name.name, field.name.name);
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 8);
     }
 
     #[test]

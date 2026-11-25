@@ -8215,6 +8215,8 @@ A public type from another module decodes the way it is imported: `Customer.from
 
 ### Aliases from other modules
 
+The Application Contract, and every SDK generated from it, names the type an alias stands for: a field typed `Orders` with `type Orders = List<Order>` is advertised as `List<Order>`, and an agent returning an alias of a `Stream` is advertised as streaming.
+
 A `public` alias in another module is as transparent as a local one. After `import "./models" use Customers`, a parameter typed `Customers` is a `List<Customer>`, so `customers.length()` works, and a record field typed `m.Customers` after `import "./models" as m` holds the list. Before this, the compiler treated an alias from another module as a record with no fields, and a record field typed with any alias decoded as an empty record. [Type aliases](docs/book/05-types.md#type-aliases)
 
 ### Storing records in tables

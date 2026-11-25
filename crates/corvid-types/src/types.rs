@@ -265,8 +265,18 @@ impl Type {
         })
     }
 
-    /// Human-readable name used in diagnostic messages.
+    /// Human-readable name used in diagnostic messages. A declared
+    /// struct reads `struct`; [`Self::display_name_with`] names it.
     pub fn display_name(&self) -> String {
+        self.display_name_with(&|_| None)
+    }
+
+    /// The type's name, with each declared struct named by `struct_name`
+    /// (`struct` when it gives none). The one renderer of a resolved
+    /// type: diagnostics use it without names, and the Application
+    /// Contract uses it to name the type an alias stands for.
+    pub fn display_name_with(&self, struct_name: &dyn Fn(DefId) -> Option<String>) -> String {
+        let name = |ty: &Type| ty.display_name_with(struct_name);
         match self {
             Type::Int => "Int".into(),
             Type::Float => "Float".into(),
@@ -282,19 +292,19 @@ impl Type {
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),
-            Type::Struct(_) => "struct".into(),
+            Type::Struct(id) => struct_name(*id).unwrap_or_else(|| "struct".into()),
             Type::ImportedStruct(imported) => imported.name.clone(),
             Type::Function { .. } => "function".into(),
-            Type::List(inner) => format!("List<{}>", inner.display_name()),
-            Type::Map(k, v) => format!("Map<{}, {}>", k.display_name(), v.display_name()),
-            Type::Stream(inner) => format!("Stream<{}>", inner.display_name()),
+            Type::List(inner) => format!("List<{}>", name(inner)),
+            Type::Map(k, v) => format!("Map<{}, {}>", name(k), name(v)),
+            Type::Stream(inner) => format!("Stream<{}>", name(inner)),
             Type::Result(ok, err) => {
-                format!("Result<{}, {}>", ok.display_name(), err.display_name())
+                format!("Result<{}, {}>", name(ok), name(err))
             }
-            Type::Option(inner) => format!("Option<{}>", inner.display_name()),
+            Type::Option(inner) => format!("Option<{}>", name(inner)),
             Type::Weak(inner, effects) => {
                 if effects.is_any() {
-                    format!("Weak<{}>", inner.display_name())
+                    format!("Weak<{}>", name(inner))
                 } else {
                     let names = effects
                         .effects()
@@ -307,16 +317,16 @@ impl Type {
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    format!("Weak<{}, {{{names}}}>", inner.display_name())
+                    format!("Weak<{}, {{{names}}}>", name(inner))
                 }
             }
-            Type::Grounded(inner) => format!("Grounded<{}>", inner.display_name()),
-            Type::Tainted(inner) => format!("Tainted<{}>", inner.display_name()),
-            Type::Partial(inner) => format!("Partial<{}>", inner.display_name()),
-            Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
-            Type::Upload(inner) => format!("Upload<{}>", inner.display_name()),
-            Type::Page(inner) => format!("Page<{}>", inner.display_name()),
-            Type::Response(inner) => format!("Response<{}>", inner.display_name()),
+            Type::Grounded(inner) => format!("Grounded<{}>", name(inner)),
+            Type::Tainted(inner) => format!("Tainted<{}>", name(inner)),
+            Type::Partial(inner) => format!("Partial<{}>", name(inner)),
+            Type::ResumeToken(inner) => format!("ResumeToken<{}>", name(inner)),
+            Type::Upload(inner) => format!("Upload<{}>", name(inner)),
+            Type::Page(inner) => format!("Page<{}>", name(inner)),
+            Type::Response(inner) => format!("Response<{}>", name(inner)),
             Type::TraceId => "TraceId".into(),
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),
@@ -362,29 +372,21 @@ impl Type {
     /// that can see declarations walk the fields too.
     /// Whether a `Response` appears anywhere inside this type.
     pub fn mentions_response(&self) -> bool {
-        match self {
-            Type::Response(_) => true,
-            Type::List(inner)
-            | Type::Stream(inner)
-            | Type::Option(inner)
-            | Type::Grounded(inner)
-            | Type::Tainted(inner)
-            | Type::Partial(inner)
-            | Type::ResumeToken(inner)
-            | Type::Upload(inner)
-            | Type::Page(inner)
-            | Type::Weak(inner, _) => inner.mentions_response(),
-            Type::Map(a, b) | Type::Result(a, b) => a.mentions_response() || b.mentions_response(),
-            Type::Function { params, ret, .. } => {
-                ret.mentions_response() || params.iter().any(Type::mentions_response)
-            }
-            _ => false,
-        }
+        self.mentions(&|ty| matches!(ty, Type::Response(_)))
     }
 
     pub fn mentions_secret(&self) -> bool {
+        self.mentions(&|ty| matches!(ty, Type::Secret))
+    }
+
+    /// Whether this type, or any type inside it, satisfies `found`. The
+    /// one walk over a type's parts; it does not enter a declared
+    /// record's fields, which live in its declaration.
+    pub fn mentions(&self, found: &dyn Fn(&Type) -> bool) -> bool {
+        if found(self) {
+            return true;
+        }
         match self {
-            Type::Secret => true,
             Type::List(inner)
             | Type::Option(inner)
             | Type::Tainted(inner)
@@ -395,10 +397,10 @@ impl Type {
             | Type::Upload(inner)
             | Type::Page(inner)
             | Type::Response(inner)
-            | Type::Weak(inner, _) => inner.mentions_secret(),
-            Type::Map(a, b) | Type::Result(a, b) => a.mentions_secret() || b.mentions_secret(),
-            Type::Function { params, ret, .. } => ret.mentions_secret() || params.iter().any(Type::mentions_secret),
-            Type::RouteParams(params) => params.iter().any(|(_, param)| param.mentions_secret()),
+            | Type::Weak(inner, _) => inner.mentions(found),
+            Type::Map(a, b) | Type::Result(a, b) => a.mentions(found) || b.mentions(found),
+            Type::Function { params, ret, .. } => ret.mentions(found) || params.iter().any(|p| p.mentions(found)),
+            Type::RouteParams(params) => params.iter().any(|(_, param)| param.mentions(found)),
             _ => false,
         }
     }

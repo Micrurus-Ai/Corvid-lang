@@ -459,6 +459,38 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The contract names the type an alias stands for (B01)
+
+The Application Contract named each type as the source wrote it. A field
+typed with an alias, `orders: Orders` with `type Orders = List<Order>`,
+was advertised as `Orders`, and the alias was listed as a public type
+with no fields, so a generated SDK declared an empty `Orders` record
+where the program sends a list. The contract now expands every alias to
+the type it stands for, at any depth, and lists no alias as a type.
+Streaming, grounding, tainted inputs, pagination and upload formats are
+read from the expanded type, so `-> Answers` with `type Answers =
+Stream<Order>` streams. The connector wire follows an alias to the type
+it stands for when it lists what a connector sends.
+
+The first version read the checker's table of resolved types, as IR
+lowering and the ABI descriptor do. That is wrong for the contract: the
+driver first copies the records a contract exchanges in from other
+modules and gives each its contract name (`Customer_2` when the root also
+declares `Customer`), and the table is keyed by source position with no
+file, so a copied record's field could look up a root type at the same
+offset, and an imported record would lose its contract name. So the
+expansion walks the contract file's own declarations, which that pass
+has already named. Because the checker also expands aliases, a test
+compares the contract's name for every field of a program full of
+aliases with the checker's resolved type, rendered by
+`Type::display_name_with`, now the one renderer, which takes a namer for
+declared records. A driver test imports an alias of a list and of a
+stream whose record is renamed `Customer_2`. `Type::mentions` is now the
+one walk over a type's parts, used by `mentions_secret` and
+`mentions_response`.
+
+---
+
 ## 2026-11-25 - One migration history per database
 
 A program whose tables live in two databases (orders on Postgres,
