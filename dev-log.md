@@ -4,6 +4,44 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Connector queries and headers (B05, slice 3b)
+
+`GET "/v1/charges" query filter` sends a record parameter as the query
+string. The interpreter already encodes the record by its declared type
+with the public JSON mapping (3a), so the runtime turns that object into
+`name=value` pairs: `null` is left out, an array repeats the name, and
+names and values are percent-encoded. The checker keeps query fields
+flat, because nested records have no query form every API reads the
+same way. `query` comes before `body` on the request line, one order, so
+a reader never wonders whether both orders mean the same thing.
+
+`header "Name": value` takes a `String` parameter or a fixed string. The
+checker refuses the headers another declaration owns: `Authorization`
+and `auth:`'s own header, cookies, the body's `Content-Type`, the
+transport's `Host`, `Content-Length` and `Transfer-Encoding`, and an
+`async:` protocol's idempotency header. Each error names the owner. A
+header is set once, its name must be an HTTP token, and the runtime
+refuses a value with a line break before sending, so a parameter cannot
+split the header block.
+
+**Changed from the proposal: no `Secret` headers.** The proposal let a
+header take a `Secret`, for calls made with a user's own token. That
+token travels as `Authorization: Bearer <token>`: a header line cannot
+build that from a `Secret`, which never joins text, and `Authorization`
+belongs to `auth:`. The form would have fitted almost no real call, so
+B04's rule stays and the roadmap names the real design, an
+operation-level `auth: bearer(token)` taking a `Secret`. Proposal
+decision 4 records it.
+
+Tests: parsing both items and the order rule; the checker on flat and
+nested queries, a non-record query, owned, duplicate, misnamed and
+non-`String` headers; the request builder's query string and header
+values, including a refused line break; and end to end, a provider that
+matches only the exact query (`customer=cus%201&status=paid&status=refunded`,
+no `limit`) and both headers.
+
+---
+
 ## 2026-11-25 - Connectors speak public JSON (B05, slice 3a)
 
 A connector sent its arguments and read its responses in the trace's

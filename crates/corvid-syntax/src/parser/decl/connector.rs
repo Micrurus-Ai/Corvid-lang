@@ -187,6 +187,36 @@ impl<'a> Parser<'a> {
         Ok(secs)
     }
 
+    /// `header "Name": param` or `header "Name": "literal"`.
+    fn parse_operation_header(&mut self) -> Result<corvid_ast::OperationHeader, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // header
+        let name = self.expect_string_literal("a header name, such as `header \"Idempotency-Key\": key`")?.0;
+        self.expect(TokKind::Colon, "`:` between the header name and its value")?;
+        let value_span = self.peek_span();
+        let value = match self.peek().clone() {
+            TokKind::StringLit(_) => {
+                let text = self.expect_string_literal("the header's fixed value")?.0;
+                corvid_ast::OperationHeaderValue::Literal(text)
+            }
+            _ => {
+                let (param, param_span) = self.expect_ident().map_err(|_| ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(self.peek()),
+                        expected: "a parameter name or a string for the header's value".into(),
+                    },
+                    span: value_span,
+                })?;
+                corvid_ast::OperationHeaderValue::Param(Ident::new(param, param_span))
+            }
+        };
+        Ok(corvid_ast::OperationHeader {
+            name,
+            value,
+            span: start.merge(value_span),
+        })
+    }
+
     /// `redirects: never | same_host | allowed_hosts`.
     fn parse_redirect_policy(&mut self) -> Result<RedirectPolicy, ParseError> {
         let span = self.peek_span();
@@ -312,9 +342,16 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // Indent
 
-        // The request line: `<METHOD> "<path>" [body <param> | form <param>]`.
+        // The request line: `<METHOD> "<path>" [query <param>]
+        // [body <param> | form <param>]`.
         let method = self.parse_http_method()?;
         let path = self.expect_string_literal("operation path")?.0;
+        let mut query: Option<Ident> = None;
+        if self.peek_ident_is("query") {
+            self.bump();
+            let (param, param_span) = self.expect_ident()?;
+            query = Some(Ident::new(param, param_span));
+        }
         let body = match () {
             _ if self.peek_ident_is("body") => {
                 self.bump();
@@ -334,6 +371,15 @@ impl<'a> Parser<'a> {
             }
             _ => None,
         };
+        if self.peek_ident_is("query") {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "`query` after the body".into(),
+                    expected: "`query <param>` before `body` or `form`: `POST \"/path\" query q body b`".into(),
+                },
+                span: self.peek_span(),
+            });
+        }
         self.expect_newline()?;
 
         // Optional `on status <code> -> <Variant>` lines and an
@@ -342,6 +388,7 @@ impl<'a> Parser<'a> {
         let mut mock: Option<corvid_ast::Expr> = None;
         let mut protocol = None;
         let mut timeout_secs: Option<u64> = None;
+        let mut headers = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -363,6 +410,11 @@ impl<'a> Parser<'a> {
                     });
                 }
                 mock = Some(self.parse_expr()?);
+                self.expect_newline()?;
+                continue;
+            }
+            if self.peek_ident_is("header") {
+                headers.push(self.parse_operation_header()?);
                 self.expect_newline()?;
                 continue;
             }
@@ -407,6 +459,8 @@ impl<'a> Parser<'a> {
             method,
             path,
             body,
+            query,
+            headers,
             error_map,
             timeout_secs,
             mock,

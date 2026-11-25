@@ -482,6 +482,22 @@ impl<'a> Lowerer<'a> {
                     param_name: b.param.name.clone(),
                     encoding: b.encoding,
                 }),
+                query: op.query.as_ref().map(|q| q.name.clone()),
+                headers: op
+                    .headers
+                    .iter()
+                    .map(|h| crate::types::IrOperationHeader {
+                        name: h.name.clone(),
+                        value: match &h.value {
+                            corvid_ast::OperationHeaderValue::Param(p) => {
+                                crate::types::IrOperationHeaderValue::Param(p.name.clone())
+                            }
+                            corvid_ast::OperationHeaderValue::Literal(text) => {
+                                crate::types::IrOperationHeaderValue::Literal(text.clone())
+                            }
+                        },
+                    })
+                    .collect(),
                 error_map: op
                     .error_map
                     .iter()

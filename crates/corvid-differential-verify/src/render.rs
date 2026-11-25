@@ -844,6 +844,9 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
         out.push_str(method);
         out.push(' ');
         out.push_str(&render_string_literal(&op.path));
+        if let Some(query) = &op.query {
+            out.push_str(&format!(" query {}", query.name));
+        }
         if let Some(body) = &op.body {
             match body.encoding {
                 BodyEncoding::Json => out.push_str(&format!(" body {}", body.param.name)),
@@ -851,6 +854,14 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             }
         }
         out.push('\n');
+        for header in &op.headers {
+            push_indent(indent + 2, out);
+            let value = match &header.value {
+                corvid_ast::OperationHeaderValue::Param(param) => param.name.clone(),
+                corvid_ast::OperationHeaderValue::Literal(text) => render_string_literal(text),
+            };
+            out.push_str(&format!("header {}: {value}\n", render_string_literal(&header.name)));
+        }
         if let Some(secs) = op.timeout_secs {
             push_indent(indent + 2, out);
             out.push_str(&format!("timeout: {secs}s\n"));

@@ -996,6 +996,8 @@ mod tests {
             path: "/ship".to_string(),
             param_names: vec![],
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: Some(ConnectorAuthSpec::Bearer {
                 secret: "UPS_TOKEN".to_string(),
             }),

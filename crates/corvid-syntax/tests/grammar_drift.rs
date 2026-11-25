@@ -424,8 +424,9 @@ extend Customer:
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
-    operation generate(input: String) -> String dangerous:
+    operation generate(input: String, request_id: String) -> String dangerous:
         POST "/reports" body input
+        header "X-Request-Id": request_id
         timeout: 30s
         async:
             statuses: [queued, completed, failed]
