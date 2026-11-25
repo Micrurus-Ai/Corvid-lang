@@ -223,4 +223,23 @@ mod tests {
             TraceEvent::RunStarted { agent, .. } if agent == "a"
         ));
     }
+
+    /// A recorded `Float` reads back as the same number, so replay of a
+    /// `random_float` draw never reports a false divergence. Without
+    /// serde_json's `float_roundtrip` this value read back one ulp low.
+    #[test]
+    fn a_recorded_float_reads_back_exactly() {
+        let drawn = 0.9360117604640773_f64;
+        let event = TraceEvent::ToolResult {
+            ts_ms: 1,
+            run_id: "r".into(),
+            tool: "random_float".into(),
+            result: serde_json::json!(drawn),
+        };
+        let line = serialize_event_line(&event).expect("serialize");
+        let Some(TraceEvent::ToolResult { result, .. }) = parse_event_line(&line).expect("parse") else {
+            panic!("expected a tool result");
+        };
+        assert_eq!(result.as_f64(), Some(drawn), "{line}");
+    }
 }
