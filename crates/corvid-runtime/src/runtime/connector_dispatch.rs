@@ -141,8 +141,21 @@ impl Runtime {
         // operation returns `Result<Success, Error>` it is wrapped as
         // `Ok(..)`; otherwise the body decodes directly.
         if (200..300).contains(&response.status) {
-            let body: serde_json::Value =
-                serde_json::from_str(&response.body).unwrap_or(serde_json::Value::Null);
+            // An empty body (a 204, or a provider that answers with
+            // nothing) is `null`. Anything else must be JSON: a body that
+            // is not is a failure naming the operation, never a silent
+            // `null` the program would mistake for an answer.
+            let body: serde_json::Value = if response.body.trim().is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_str(&response.body).map_err(|err| RuntimeError::ToolFailed {
+                    tool: spec.operation.clone(),
+                    message: format!(
+                        "provider answered HTTP {} with a body that is not JSON ({err})",
+                        response.status
+                    ),
+                })?
+            };
             if spec.returns_result {
                 Ok((serde_json::json!({ "tag": "ok", "ok": body }), meta))
             } else {

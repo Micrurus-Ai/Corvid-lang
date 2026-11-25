@@ -40,6 +40,8 @@ mod currency;
 mod crypto;
 #[path = "interp/secret_tools.rs"]
 mod secret_tools;
+#[path = "interp/connector_json.rs"]
+mod connector_json;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 
@@ -304,7 +306,6 @@ impl<'ir> Interpreter<'ir> {
         tool: &'ir IrTool,
         callee_name: &str,
         arg_values: Vec<Value>,
-        json_args: &[serde_json::Value],
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
@@ -344,27 +345,32 @@ impl<'ir> Interpreter<'ir> {
                 // response, every transition checkpointed) instead of a
                 // one-shot request. It never treats the submit response
                 // as completion.
+                // The provider sees public JSON: an `Option` is its value
+                // or `null`, as `T.to_json()` writes it.
+                let wire_args = connector_json::connector_arguments(
+                    &tool.params,
+                    &arg_values,
+                    &self.types_by_id,
+                )
+                .map_err(|e| {
+                    InterpError::new(
+                        InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
+                        span,
+                    )
+                })?;
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
-                        .call_protocol_operation(callee_name, protocol, json_args.to_vec())
+                        .call_protocol_operation(callee_name, protocol, wire_args)
                         .await
                     {
-                        Ok(result) => json_to_value(result, result_decode_ty, &self.types_by_id)
-                            .map_err(|e| {
-                                InterpError::new(
-                                    InterpErrorKind::Marshal(format!(
-                                        "connector `{callee_name}`: {e}"
-                                    )),
-                                    span,
-                                )
-                            }),
+                        Ok(result) => self.decode_connector_result(callee_name, result, result_decode_ty, span),
                         Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
                     }
                 } else {
                     self.dispatch_connector_via_runtime(
                         callee_name,
-                        json_args,
+                        wire_args,
                         result_decode_ty,
                         span,
                     )
@@ -497,16 +503,28 @@ impl<'ir> Interpreter<'ir> {
     async fn dispatch_connector_via_runtime(
         &self,
         callee_name: &str,
-        json_args: &[serde_json::Value],
+        wire_args: Vec<serde_json::Value>,
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
         let result = self
             .runtime
-            .call_tool(callee_name, json_args.to_vec())
+            .call_tool(callee_name, wire_args)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-        json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
+        self.decode_connector_result(callee_name, result, result_decode_ty, span)
+    }
+
+    /// Read a connector result through the public JSON mapping; a
+    /// response that does not match the declared type names the path.
+    fn decode_connector_result(
+        &self,
+        callee_name: &str,
+        result: serde_json::Value,
+        result_decode_ty: &Type,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        connector_json::connector_result(result, result_decode_ty, &self.types_by_id).map_err(|e| {
             InterpError::new(
                 InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
                 span,
@@ -1814,7 +1832,6 @@ impl<'ir> Interpreter<'ir> {
                         tool,
                         callee_name,
                         arg_values,
-                        &json_args,
                         result_decode_ty,
                         span,
                     )
