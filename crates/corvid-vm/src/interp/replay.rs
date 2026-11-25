@@ -7,7 +7,6 @@ use corvid_ir::{IrExpr, IrReplayArm, IrReplayCapture, IrReplayPattern, IrReplayT
 use corvid_runtime::replay_dispatch::{
     find_first_replay_match, ReplayDispatchArm, ReplayDispatchPattern, ReplayDispatchToolArgPattern,
 };
-use corvid_runtime::WRITER_INTERPRETER;
 use corvid_types::Type;
 
 impl<'ir> Interpreter<'ir> {
@@ -37,7 +36,7 @@ impl<'ir> Interpreter<'ir> {
         let dispatch_arms: Vec<ReplayDispatchArm> =
             arms.iter().map(Self::lower_replay_dispatch_arm).collect();
         let matched =
-            find_first_replay_match(&trace_path, WRITER_INTERPRETER, &dispatch_arms).map_err(
+            find_first_replay_match(&trace_path, &dispatch_arms).map_err(
                 |err| InterpError::new(InterpErrorKind::Runtime(err), span),
             )?;
         let Some(found) = matched else {

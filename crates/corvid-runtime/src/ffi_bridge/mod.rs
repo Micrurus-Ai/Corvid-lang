@@ -205,7 +205,6 @@ pub(crate) fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
         RuntimeError::ReplayTraceLoad { .. }
             | RuntimeError::ReplayDivergence(_)
             | RuntimeError::InvalidReplayMutation { .. }
-            | RuntimeError::CrossTierReplayUnsupported { .. }
     ) {
         panic!("{context}: {err}");
     }

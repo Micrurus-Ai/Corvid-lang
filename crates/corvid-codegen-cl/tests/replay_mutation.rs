@@ -376,8 +376,10 @@ fn mutation_preserves_byte_identity_for_steps_before_step() {
     assert_eq!(recorded[..second_step_index], replayed[..second_step_index]);
 }
 
+/// A native binary runs mutation replay over an interpreter recording
+/// (native dispatch N5), as it does over a native recording.
 #[tokio::test]
-async fn cross_tier_guard_still_rejects_interpreter_trace_from_native_mutation() {
+async fn native_mutation_replays_an_interpreter_trace() {
     let trace_dir = tempfile::tempdir().unwrap();
     let (interp_result, interpreter_trace) = run_interpreter(trace_dir.path()).await;
     assert_eq!(interp_result, Value::Bool(true));
@@ -394,10 +396,10 @@ async fn cross_tier_guard_still_rejects_interpreter_trace_from_native_mutation()
         Some(&tmp.path().join("report.json")),
         "{\"decide_refund\":true}",
     );
-    assert!(!replayed.status.success(), "cross-tier replay should fail");
     assert!(
-        String::from_utf8_lossy(&replayed.stderr).contains("cross-tier replay is not supported in v1"),
-        "stderr should mention cross-tier replay rejection: {}",
+        replayed.status.success(),
+        "mutation replay of an interpreter recording should succeed: {}",
         String::from_utf8_lossy(&replayed.stderr)
     );
+    assert!(String::from_utf8_lossy(&replayed.stdout).contains("false"));
 }

@@ -176,7 +176,7 @@ execution_tier = "native"
 alert_log = "target/shadow/alerts.jsonl"
 ```
 
-`execution_tier = "interpreter"` is the default. `execution_tier = "native"` builds or reuses the native binary for `ir_path`, replays native traces through the native writer, and preserves the same differential and mutation report paths as interpreter shadow replay. Cross-tier replay is intentionally rejected: an interpreter-recorded trace must replay under the interpreter executor, and a native-recorded trace must replay under the native executor. That keeps replay equivalence honest instead of masking backend-specific behavior.
+`execution_tier = "interpreter"` is the default. `execution_tier = "native"` builds or reuses the native binary for `ir_path`, replays native traces through the native writer, and preserves the same differential and mutation report paths as interpreter shadow replay. Either executor replays a trace from either tier (native dispatch N5). Replay stays honest without a writer check: every substituted call is compared exactly (a tool call's name and arguments; a prompt call's name, model, model version, rendered text and arguments; an approval's label and arguments; each seed and clock read), so where the tiers would record a run differently, replay stops with a divergence at the first event that differs instead of masking it. Parity tests replay connector calls, the runtime's tools, secrets and passwords, responses, and a program with a tool, an approval and a prompt across tiers in both directions.
 
 ## 14.9 Provenance DAG (slices 21-inv-C-1, 21-inv-C-2)
 

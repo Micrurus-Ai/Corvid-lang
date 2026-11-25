@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A run recorded by a native binary now replays on the interpreter, and an interpreter recording replays in a native binary: tool and connector calls, prompts, approvals, clock reads, IDs and draws come back exactly as recorded. If the two tiers would have recorded the run differently, replay stops at the first event that differs, as it does on one tier. The shadow daemon replays either tier's traces with either executor. [Replay](docs/internals/effect-spec/14-replay.md)
+
 A connector operation that returns `Response<Charge>` now runs as native code: `r.status()`, `r.body()` and `r.header("ETag")` give the same answers in a native binary, and `Set-Cookie` still never reaches the program. [Response](docs/reference/functions.md#response)
 
 A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.

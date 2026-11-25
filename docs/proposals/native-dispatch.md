@@ -1,6 +1,6 @@
 # Proposal: native dispatch of runtime-owned calls
 
-Status: **decided 2026-11-25; N1 to N4 built 2026-11-25, N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
+Status: **decided 2026-11-25; N1 to N5 built 2026-11-25.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
 
 ## Problem
 
@@ -122,6 +122,16 @@ The checker's refusals are unchanged, so a native program can do with a secret e
 - *Rewriting the accessors into field reads in the IR:* that needs a second, mutable expression walk. Lowering them as methods reuses the method calling convention ownership analysis already understands.
 
 **Across the tiers.** Backend: a client that reads `ETag` or a status code builds into a native binary. Frontend: nothing changes. AI: the recorded run is the same on both tiers.
+
+## N5: replay on the other tier
+
+**The decision.** A trace recorded by either tier replays on either tier. Replay compares every substituted call exactly: a tool call's name and arguments, a prompt call's name, model, model version, rendered text and arguments, an approval's label and arguments, each seed and clock read. A trace the replaying tier would have recorded differently therefore stops with a divergence that names the first event that differs. The writer check refused before reaching that comparison, so it added no safety, only a blanket refusal. It is removed in the four places that enforced it: the replay loader, replay dispatch, and the shadow daemon's interpreter and native executors.
+
+**Why it holds now.** N1 to N4 moved connector calls, the runtime's tools, secrets and responses onto the interpreter's own runtime path, and the number-text fix made floats read the same. An exact comparison of the two tiers' traces for a program with a user tool, an approval and a prompt found one difference: the interpreter records an `llm.usage` host event and the native run does not. Replay skips host events, so it does not affect replay; it is a parity gap recorded on the roadmap.
+
+**Tests.** Each existing native parity program replays across tiers both ways: connectors (N1), the runtime's tools (N2), secrets (N3), responses (N4), and the user tool, approval and prompt program in `record_native.rs`. The tests that asserted the refusal now assert the replay.
+
+**Across the tiers.** AI: an assistant or an incident review can replay a production run, recorded by a native binary, on the interpreter's step debugger, or the reverse, and get the recorded result or the exact step where the tiers differ.
 
 ## Not in scope
 

@@ -384,8 +384,10 @@ fn native_replay_empty_and_malformed_traces_fail_cleanly() {
     );
 }
 
+/// A native binary replays an interpreter recording (native dispatch
+/// N5) and gives its recorded result.
 #[tokio::test]
-async fn native_replay_rejects_interpreter_trace() {
+async fn native_replay_replays_an_interpreter_trace() {
     let trace_dir = tempfile::tempdir().unwrap();
     let (interp_result, interpreter_trace) = run_interpreter(trace_dir.path()).await;
     assert_eq!(interp_result, Value::Bool(true));
@@ -396,13 +398,12 @@ async fn native_replay_rejects_interpreter_trace() {
     let produced = build_native_refund_bot(&ir, &bin_path);
     let native_replay_trace = tmp.path().join("native-replay.jsonl");
     let replayed = run_native_binary(&produced, &native_replay_trace, Some(&interpreter_trace));
-    assert!(!replayed.status.success(), "cross-tier replay should fail");
     assert!(
-        String::from_utf8_lossy(&replayed.stderr)
-            .contains("cross-tier replay is not supported in v1"),
-        "stderr should mention cross-tier replay rejection: {}",
+        replayed.status.success(),
+        "native replay of an interpreter recording should succeed: {}",
         String::from_utf8_lossy(&replayed.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&replayed.stdout).trim(), "true");
 }
 
 /// A program that reads zone rules natively. The tool call makes the

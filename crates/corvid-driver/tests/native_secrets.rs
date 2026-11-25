@@ -368,3 +368,24 @@ agent main() -> String:
     assert!(!output.status.success());
     assert!(stderr.contains(corvid_runtime::DECODED_KEY_TO_TOOL), "{stderr}");
 }
+
+/// Sign-up and log-in replay on the other tier (native dispatch N5): the
+/// recorded hash is substituted and the password re-read, so the
+/// verdicts come back the same, and no trace holds the password.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn passwords_replay_on_the_other_tier() {
+    let project = project(PASSWORD_PROGRAM);
+    let traces = tempfile::tempdir().unwrap();
+    let binary = native_binary(&project, PASSWORD_PROGRAM);
+
+    let native_trace = traces.path().join("native.jsonl");
+    let recorded_natively = run_native(&binary, &[("CORVID_TRACE_PATH", &native_trace)]);
+    let runtime = Runtime::builder().replay_from(&native_trace).build();
+    let replayed = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect("interpreter replays a native recording");
+    assert_eq!(replayed, Value::String(recorded_natively.clone().into()));
+
+    let recording = Runtime::builder().trace_to(traces.path()).build();
+    run_ir_with_runtime(&project.ir, None, vec![], &recording).await.expect("interpreter run");
+    let interpreter_trace = recording.tracer().path().to_path_buf();
+    assert_eq!(run_native(&binary, &[("CORVID_REPLAY_TRACE_PATH", &interpreter_trace)]), recorded_natively);
+}

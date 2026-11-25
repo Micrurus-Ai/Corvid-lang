@@ -38,7 +38,6 @@ pub struct ReplayDispatchMatch {
 
 pub fn find_first_replay_match(
     path: impl AsRef<Path>,
-    replay_writer: &'static str,
     arms: &[ReplayDispatchArm],
 ) -> Result<Option<ReplayDispatchMatch>, RuntimeError> {
     let path = path.as_ref();
@@ -56,14 +55,9 @@ pub fn find_first_replay_match(
         path: path.to_path_buf(),
         message: err.to_string(),
     })?;
+    // Either tier's trace is matched; the writer is not checked.
     match events.first() {
-        Some(TraceEvent::SchemaHeader { writer, .. }) if writer == replay_writer => {}
-        Some(TraceEvent::SchemaHeader { writer, .. }) => {
-            return Err(RuntimeError::CrossTierReplayUnsupported {
-                recorded_writer: writer.clone(),
-                replay_writer: replay_writer.to_string(),
-            });
-        }
+        Some(TraceEvent::SchemaHeader { .. }) => {}
         Some(_) => {
             return Err(RuntimeError::ReplayTraceLoad {
                 path: path.to_path_buf(),

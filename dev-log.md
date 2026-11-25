@@ -25,6 +25,54 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Replay on either tier (native dispatch N5)
+
+A recording from a native binary now replays on the interpreter, and an
+interpreter recording in a native binary, with the provider, clock and
+model gone. This closes native dispatch.
+
+**Why the refusal could go.** Replay compares every substituted call
+exactly: a tool call's name and arguments; a prompt call's name, model,
+model version, rendered text and arguments; an approval; each seed and
+clock read. A run the replaying tier would record differently therefore
+already stops with a divergence naming the first differing event. The
+writer check refused before that comparison, so it added only a blanket
+error. It is removed from the replay loader, replay dispatch and both
+shadow-daemon executors, with `CrossTierReplayUnsupported`. The replay
+constructors lost their writer argument, which nothing else read.
+
+**Measured first.** An exact comparison of the two tiers' traces for a
+program with a user tool, an approval and a prompt, removing only times,
+run ids and draw values, found one difference: the interpreter records
+an `llm.usage` host event and the native run does not. Replay skips host
+events. It is on the roadmap as a telemetry gap, and the comment in
+`record_native.rs` that named the wrong tier is corrected.
+
+**Tests.** Cross-tier replay in both directions:
+- connector calls and responses with their headers;
+- clock reads, IDs and draws, returned exactly;
+- sign-up and log-in, with the hash substituted and the password re-read;
+- a program with a tool, an approval and a prompt.
+
+The tests that asserted the refusal now assert the replay. A unit test
+checks that a trace's writer never changes whether it loads.
+
+**Also found and fixed:**
+- *A divergence's step.* Differential replay reported a divergence one
+  event early when a host event sat between a prompt call and its result.
+  The interpreter records `llm.usage` there, so the two tiers named
+  different steps for the same divergence, and an interpreter test had
+  encoded the off-by-one. Fixed in its own commit, at all five sites.
+- *Warnings.* N4 left three compiler warnings, because the gate looked
+  only for errors. It now reports warnings too.
+- *A stray probe.* An exploratory probe was committed by mistake, then
+  removed.
+- *Stale builds.* Sharing the target directory with a temporary worktree
+  left stale builds that looked like regressions. A clean build cleared
+  them.
+
+---
+
 ## 2026-11-25 - Connector responses in native code (native dispatch N4)
 
 A connector operation that returns `Response<Body>`, or

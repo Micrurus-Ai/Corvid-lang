@@ -434,3 +434,30 @@ async fn a_native_response_matches_the_interpreter() {
     };
     assert_eq!(count("ALLOCS"), count("RELEASES"), "{stderr}");
 }
+
+/// A recording from either tier replays on the other (native dispatch
+/// N5), with the provider gone: the interpreter replays a native
+/// recording and native code replays the interpreter's, for plain
+/// connector calls and for responses with their headers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_tier_replays_the_other_tiers_recording() {
+    for (program, provider_answers) in [(PROGRAM, false), (RESPONSE_PROGRAM, true)] {
+        let project = project_of(program);
+        let server = if provider_answers { response_provider().await } else { provider().await };
+        let traces = tempfile::tempdir().unwrap();
+        let binary = native_binary(&project);
+
+        let native_trace = traces.path().join("native.jsonl");
+        let recorded_natively = run_native(&binary, "real", Some(&server), &[("CORVID_TRACE_PATH", &native_trace)]);
+        let (interpreted, interpreter_trace) = interpreter_real(&project, &server, traces.path()).await;
+        drop(server);
+
+        assert_eq!(
+            interpreter_replay(&project, &native_trace).await,
+            Value::String(recorded_natively.clone().into()),
+            "the interpreter replays a native recording"
+        );
+        let replayed_natively = run_native(&binary, "replay", None, &[("CORVID_REPLAY_TRACE_PATH", &interpreter_trace)]);
+        assert_eq!(Value::String(replayed_natively.into()), interpreted, "native code replays an interpreter recording");
+    }
+}
