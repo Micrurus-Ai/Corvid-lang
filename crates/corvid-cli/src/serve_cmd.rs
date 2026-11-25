@@ -101,7 +101,7 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
-    quantity_page: bool,
+    page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
@@ -360,8 +360,36 @@ pub(crate) fn cmd_serve(
         && asset_dir.join("events.quantity.js").is_file()
         && !ir.servers.iter().flat_map(|server| &server.routes).any(|route|
             route.path == "/target/wasm/events.quantity.js" && route.method == HttpMethod::Get);
+    let mut page_scripts = browser_asset::PageScripts::default();
+    let mut compiled_assets = Vec::new();
+    if asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()? {
+        for (name, mime) in [
+            ("events.js", "text/javascript; charset=utf-8"),
+            ("events.wasm", "application/wasm"),
+            ("events.quantity.js", "text/javascript; charset=utf-8"),
+        ] {
+            if name == "events.quantity.js" && !quantity_page {
+                continue;
+            }
+            let path = asset_dir.join(name);
+            let bytes = Bytes::from(std::fs::read(&path)
+                .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
+            match name {
+                "events.js" => page_scripts.events = Some(browser_asset::PageScripts::tag(name, &bytes)),
+                "events.quantity.js" => page_scripts.quantity = Some(browser_asset::PageScripts::tag(name, &bytes)),
+                _ => {}
+            }
+            compiled_assets.push((name, mime, bytes));
+        }
+    } else if !ir.servers.iter().flat_map(|s| &s.routes)
+        .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
+        let bytes = Bytes::from_static(corvid_driver::FORM_CONTROLS_JS.as_bytes());
+        let mime = "text/javascript; charset=utf-8";
+        page_scripts.events = Some(browser_asset::PageScripts::tag("events.js", &bytes));
+        compiled_assets.push(("events.js", mime, bytes));
+    }
     let state = Arc::new(ServeState {
-        quantity_page,
+        page_scripts,
         io_policy,
         rag_embedder,
         http_policy,
@@ -426,29 +454,12 @@ pub(crate) fn cmd_serve(
         }
     }
 
-    // Read the packaged browser assets once so running requests see a consistent build.
-    let has_events = asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()?;
-    if has_events {
-        let mut assets = vec![("events.js", "text/javascript; charset=utf-8"), ("events.wasm", "application/wasm")];
-        if quantity_page {
-            assets.push(("events.quantity.js", "text/javascript; charset=utf-8"));
+    for (name, mime, bytes) in compiled_assets {
+        let route = format!("/target/wasm/{name}");
+        if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+            anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
         }
-        for (name, mime) in assets {
-            let path = asset_dir.join(name);
-            let bytes = Bytes::from(std::fs::read(&path)
-                .with_context(|| format!("read browser asset {}; rebuild src/events.cor", path.display()))?);
-            let route = format!("/target/wasm/{name}");
-            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
-                anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
-            }
-            app = app.route(&route, browser_asset(bytes, mime, name == "events.wasm"));
-        }
-    } else if !state.ir.servers.iter().flat_map(|s| &s.routes)
-        .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
-        app = app.route("/target/wasm/events.js", browser_asset(
-            Bytes::from_static(corvid_driver::FORM_CONTROLS_JS.as_bytes()),
-            "text/javascript; charset=utf-8", false,
-        ));
+        app = app.route(&route, browser_asset(bytes, mime, true));
     }
 
     // Slice 52a: register EVERY declared route and execute its body via
@@ -1331,7 +1342,7 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome, meta.response_kind, state.quantity_page, reply_encoding(&state, &meta.handler_agent))
+    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent))
 }
 
 enum RouteRequestBody {
@@ -1569,7 +1580,7 @@ fn reply_encoding(state: &ServeState, agent: &str) -> ReplyEncoding {
 fn finish(
     outcome: Result<Value, RunError>,
     response_kind: RouteResponseKind,
-    quantity_page: bool,
+    page_scripts: &browser_asset::PageScripts,
     reply: ReplyEncoding,
 ) -> Response {
     match outcome {
@@ -1620,9 +1631,7 @@ fn finish(
         }
         Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
             let mut document = html.to_string();
-            if quantity_page {
-                browser_asset::select_quantity_loader(&mut document);
-            }
+            page_scripts.attach(&mut document);
             axum::response::Html(document).into_response()
         }
         Ok(value) => match reply.encode(&value, &reply.ty) {

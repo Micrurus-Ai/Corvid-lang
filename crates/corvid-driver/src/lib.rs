@@ -137,7 +137,7 @@ pub use replay_job::replay_job_from_source;
 pub use trace_fresh::run_fresh_from_source_async;
 pub use build::{
     build_catalog_descriptor_for_source, build_native_to_disk, build_target_to_disk,
-    build_server_to_disk, build_to_disk, build_wasm_to_disk, wasm_output_dir_for, AbiBuildOutput, BuildOutput,
+    build_server_to_disk, build_to_disk, build_wasm_to_disk, build_wasm_with_component_locations, wasm_output_dir_for, AbiBuildOutput, BuildOutput,
     BuildTarget, NativeBuildOutput, ServerBuildOutput, SigningRequest, TargetBuildOutput,
     WasmBuildOutput,
 };

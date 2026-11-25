@@ -32,6 +32,9 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
             files.push(relative.clone());
         }
     }
+    // Component handlers are concatenated in this order before browser compilation.
+    files.sort();
+    files.dedup();
     for relative in &files {
         let path = root.join(relative);
         if !path.canonicalize()?.starts_with(root) {
@@ -48,6 +51,7 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
     let main = stage.path().join("src/main.cor");
     let events = stage.path().join("src/events.cor");
     let mut handlers = String::new();
+    let mut component_locations = Vec::new();
     let mut entry_components = Vec::new();
     for relative in &files {
         if relative.extension().and_then(|v| v.to_str()) != Some("cor") {
@@ -79,13 +83,25 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
         }
         for component in declarations {
             handlers.push_str(&component.events);
+            for span in component.event_line_spans {
+                let before = &contents[..span.start];
+                let line = 1 + before.bytes().filter(|&byte| byte == b'\n').count();
+                let column = 1 + before.rsplit('\n').next().unwrap().chars().count();
+                let path = relative.to_string_lossy().replace('\\', "/");
+                component_locations.push(format!("{path}:{line}:{column}"));
+            }
             if relative == Path::new("src/main.cor") {
                 entry_components.push(component.name);
             }
         }
     }
+    let mut first_component_line = 0;
     if !handlers.is_empty() {
         use std::io::Write;
+        first_component_line = 2;
+        if events.is_file() {
+            first_component_line += fs::read(&events)?.iter().filter(|&&byte| byte == b'\n').count();
+        }
         let mut output = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -119,7 +135,7 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
         bail!("a web bundle needs a server declaration in src/main.cor");
     }
     if events.is_file() {
-        let build = corvid_driver::build_wasm_to_disk(&events)?;
+        let build = corvid_driver::build_wasm_with_component_locations(&events, first_component_line, &component_locations)?;
         let (Some(js), Some(wasm)) = (build.js_loader_path, build.wasm_path) else {
             eprint!(
                 "{}",

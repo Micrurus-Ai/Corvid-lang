@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 mod catalog_descriptor;
 mod claim_coverage;
+mod browser_imports;
 mod server_render;
 pub use catalog_descriptor::build_catalog_descriptor_for_source;
 use catalog_descriptor::emit_catalog_descriptor;
@@ -335,11 +336,22 @@ pub fn build_target_to_disk(
 }
 
 pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput> {
+    build_wasm_with_component_locations(source_path, 0, &[])
+}
+
+/// Compile a staged browser entry, mapping its appended component handler lines
+/// back to the author's project-relative file, line and column.
+pub fn build_wasm_with_component_locations(
+    source_path: &Path,
+    first_component_line: usize,
+    component_locations: &[String],
+) -> anyhow::Result<WasmBuildOutput> {
     let source = std::fs::read_to_string(source_path)
         .map_err(|e| anyhow::anyhow!("cannot read `{}`: {}", source_path.display(), e))?;
 
     let config = load_corvid_config_for(source_path);
-    let parser = if source_path.canonicalize()?.ends_with("src/events.cor") {
+    let browser_events = source_path.canonicalize()?.ends_with("src/events.cor");
+    let parser = if browser_events {
         corvid_syntax::parser::parse_browser_exports
     } else {
         parse_file
@@ -355,6 +367,9 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
             diagnostics,
         }),
         Ok(frontend) => {
+            if browser_events {
+                browser_imports::check(&frontend, source_path)?;
+            }
             let out_dir = wasm_output_dir_for(source_path);
             let stem = source_path
                 .file_stem()
@@ -375,6 +390,11 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
                 let before = text.get(..span.start)?;
                 let path = path.strip_prefix(project).unwrap_or_else(|_| Path::new(path.file_name().unwrap_or_default()));
                 let line = 1 + before.bytes().filter(|b| *b == b'\n').count();
+                if !imported.contains_key(&id) {
+                    if let Some(location) = line.checked_sub(first_component_line).and_then(|i| component_locations.get(i)) {
+                        return Some(location.clone());
+                    }
+                }
                 let column = 1 + before.rsplit('\n').next()?.chars().count();
                 Some(format!("{}:{line}:{column}", path.to_string_lossy().replace('\\', "/")))
             };
