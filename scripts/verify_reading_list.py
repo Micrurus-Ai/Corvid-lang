@@ -673,7 +673,7 @@ def verify(args):
         project = root / "reading-list"
         subprocess.run([cli, "new", project.name], cwd=root, env=env, check=True)
         shutil.copyfile(example / "src/main.cor", project / "src/main.cor")
-        for name in ("library_store.cor", "reviews.cor", "handoff.cor", "extract.cor"):
+        for name in ("library_store.cor", "extraction_store.cor", "reviews.cor", "handoff.cor", "extract.cor"):
             shutil.copyfile(example / "src" / name, project / "src" / name)
         subprocess.run([cli, "check", "src/extract.cor"], cwd=project, env=env, check=True)
         subprocess.run([cli, "check", "src/reviews.cor"], cwd=project, env=env, check=True)

@@ -1,7 +1,8 @@
-import "std:db" use db_open, db_execute, db_query_rows, db_param_int, db_param_text
-import "std:json" use json_get_int, json_get_string
+import "std:time" use time_now
 import "std:ui" as ui
 import "std:ui" use View
+import "./extraction_store" use latest_progress, revise_job, set_paused, start_job
+import "./library_store" use shelf_titles
 
 public type ExtractionRequest:
     instruction: String
@@ -26,91 +27,66 @@ fn hidden(name: String, number: Int) -> View:
 fn checkpoint_form(job: Int, version: Int, command: String) -> View:
     return View("<form method='post' action='/work/checkpoint'>" + hidden("job", job).html + hidden("version", version).html + "<button name='command' value='" + command + "'>" + command + "</button></form>")
 
+fn milliseconds(at: Instant) -> Int:
+    return at.epoch_milliseconds()
+
 public agent start_extraction(owner: String, request: ExtractionRequest) -> Result<String, String>:
     if request.instruction.trim() == "" or request.budget < 1 or request.budget > 12:
         return Err("Enter an instruction and a budget between 1 and 12.")
     if request.estimated_microusd < 0 or request.estimated_microusd > 1000000000:
         return Err("Enter an estimate between 0 and 1000000000 microdollars.")
-    db = db_open("reading.sqlite")?
-    db_execute(db, "BEGIN IMMEDIATE", [])?
-    created = db_execute(db, "INSERT INTO extraction_jobs(owner, instruction, budget, estimated_microusd) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM extraction_progress p JOIN extraction_jobs j ON j.id=p.job WHERE j.owner=? AND p.state IN ('Pending','In flight'))", [db_param_text(owner), db_param_text(request.instruction), db_param_int(request.budget), db_param_int(request.estimated_microusd), db_param_text(owner)])?
-    if created.rows_affected == 0:
-        db_execute(db, "ROLLBACK", [])?
+    shelves = shelf_titles()
+    if not start_job(owner, request.instruction, request.budget, request.estimated_microusd, shelves, milliseconds(time_now())):
         return Err("Finish the current job first.")
-    db_execute(db, "INSERT INTO extraction_items(job,shelf,source_title,source_revision) SELECT (SELECT max(id) FROM extraction_jobs WHERE owner=?), shelf, title, revision FROM StoredShelf", [db_param_text(owner)])?
-    db_execute(db, "COMMIT", [])?
     return Ok("Started")
 
 public agent checkpoint(owner: String, change: Checkpoint) -> Result<String, String>:
     if change.command != "Pause" and change.command != "Resume":
         return Err("Unknown command.")
-    target = 0
-    if change.command == "Pause":
-        target = 1
-    db = db_open("reading.sqlite")?
-    written = db_execute(db, "UPDATE extraction_jobs SET paused=?,version=version+1 WHERE id=? AND owner=? AND version=? AND paused<>? AND ( ?=1 OR NOT EXISTS (SELECT 1 FROM extraction_progress WHERE job=? AND state='In flight'))", [db_param_int(target), db_param_int(change.job), db_param_text(owner), db_param_int(change.version), db_param_int(target), db_param_int(target), db_param_int(change.job)])?
-    if written.rows_affected != 1:
+    if not set_paused(owner, change.job, change.version, change.command == "Pause", milliseconds(time_now())):
         return Err("Refresh progress and retry at the next checkpoint.")
     return Ok(change.command)
 
 public agent revise(owner: String, edit: Revision) -> Result<String, String>:
     if edit.instruction.trim() == "" or edit.correction.trim() == "":
         return Err("Enter a correction and an instruction.")
-    db = db_open("reading.sqlite")?
-    db_execute(db, "BEGIN IMMEDIATE", [])?
-    changed = db_execute(db, "UPDATE extraction_jobs SET instruction=?, version=version+1 WHERE id=? AND owner=? AND paused=1 AND version=? AND NOT EXISTS (SELECT 1 FROM extraction_progress WHERE job=? AND state='In flight')", [db_param_text(edit.instruction), db_param_int(edit.job), db_param_text(owner), db_param_int(edit.version), db_param_int(edit.job)])?
-    if changed.rows_affected != 1:
-        db_execute(db, "ROLLBACK", [])?
+    problem = revise_job(owner, edit.job, edit.version, edit.shelf, edit.correction, edit.instruction, milliseconds(time_now()))
+    if problem == "checkpoint":
         return Err("Refresh progress and wait for a paused checkpoint.")
-    item = db_execute(db, "UPDATE extraction_items SET correction=? WHERE job=? AND shelf=? AND extracted IS NOT NULL", [db_param_text(edit.correction), db_param_int(edit.job), db_param_int(edit.shelf)])?
-    if item.rows_affected != 1:
-        db_execute(db, "ROLLBACK", [])?
+    if problem == "shelf":
         return Err("Select a completed shelf.")
-    db_execute(db, "COMMIT", [])?
     return Ok("Updated")
 
 public agent work_screen(owner: String) -> Result<String, String>:
-    db = db_open("reading.sqlite")?
-    db_execute(db, "BEGIN", [])?
-    jobs = db_query_rows(db, "SELECT id, instruction, spent, budget, paused, version, estimated_microusd FROM extraction_jobs WHERE owner=? ORDER BY id DESC LIMIT 1", [db_param_text(owner)])?
     content = [ui.link("Refresh progress", "/work"), ui.link("Shelf reviews", "/")]
     active = false
-    if jobs.length() > 0:
-        row = jobs[0]
-        job = json_get_int(row, "id")?
-        version = json_get_int(row, "version")?
-        paused = json_get_int(row, "paused")?
-        instruction = json_get_string(row, "instruction")?
-        spent = json_get_int(row, "spent")?
-        budget = json_get_int(row, "budget")?
+    for progress in latest_progress(owner, milliseconds(time_now())):
+        job = progress.job
+        version = progress.revision
+        instruction = progress.instruction
+        spent = progress.spent
         content.append(ui.text("Job " + job.to_string() + " | Instruction: " + instruction))
-        content.append(ui.text("Model operations reserved: " + spent.to_string() + " of " + budget.to_string() + ". Provider cost unavailable."))
-        rate = json_get_int(row, "estimated_microusd")?
+        content.append(ui.text("Model operations reserved: " + spent.to_string() + " of " + progress.budget.to_string() + ". Provider cost unavailable."))
+        rate = progress.estimated_microusd
         if rate > 0:
             estimate = spent * rate
             content.append(ui.text("Estimated cost of reserved operations: " + estimate.to_string() + " USD microdollars."))
-        items = db_query_rows(db, "SELECT shelf,source_title,source_revision,state,coalesce(used_instruction,'') AS task,coalesce(extracted,'') AS original,coalesce(correction,'') AS manual FROM extraction_progress WHERE job=? ORDER BY shelf", [db_param_int(job)])?
         flying = false
-        for item in items:
-            state = json_get_string(item, "state")?
-            if state == "In flight":
+        for item in progress.items:
+            if item.state == "In flight":
                 flying = true
-            if state == "Pending" or state == "In flight":
+            if item.state == "Pending" or item.state == "In flight":
                 active = true
-        for item in items:
-            shelf = json_get_int(item, "shelf")?
-            source = json_get_string(item, "source_title")?
-            revision = json_get_int(item, "source_revision")?
-            state = json_get_string(item, "state")?
-            content.append(ui.text("Shelf " + shelf.to_string() + " | " + state + " | Source revision " + revision.to_string() + ": " + source))
+        for item in progress.items:
+            shelf = item.shelf
+            state = item.state
+            content.append(ui.text("Shelf " + shelf.to_string() + " | " + state + " | Source revision " + item.source_revision.to_string() + ": " + item.source_title))
             if state == "Completed":
-                original = json_get_string(item, "original")?
-                manual = json_get_string(item, "manual")?
-                task = json_get_string(item, "task")?
-                content.append(ui.text("Model extraction: " + original + " | Instruction used: " + task))
+                manual = item.correction
+                content.append(ui.text("Model extraction: " + item.extracted + " | Instruction used: " + item.used_instruction))
                 if manual != "":
                     content.append(ui.text("Human correction: " + manual))
-                if paused == 1 and not flying:
+                if progress.paused and not flying:
                     content.append(View("<form method='post' action='/work/revise'>"))
                     content.append(hidden("job", job))
                     content.append(hidden("version", version))
@@ -121,14 +97,14 @@ public agent work_screen(owner: String) -> Result<String, String>:
                     content.append(View("</form>"))
             if state == "Skipped":
                 content.append(ui.text("Operation budget exhausted."))
-        if paused == 1:
+        if progress.paused:
             if flying:
                 content.append(ui.text("Pause requested. Waiting for in-flight work."))
             else:
                 content.append(ui.text("Paused at shelf checkpoint."))
                 if active:
                     content.append(checkpoint_form(job, version, "Resume"))
-        if active and paused == 0:
+        if active and not progress.paused:
             content.append(checkpoint_form(job, version, "Pause"))
     if not active:
         content.append(View("<form method='post' action='/work/start'>"))
@@ -137,7 +113,6 @@ public agent work_screen(owner: String) -> Result<String, String>:
         content.append(ui.text_field("Estimated USD microdollars per operation (0 for unknown)", "estimated_microusd", "0"))
         content.append(ui.submit("Start extraction"))
         content.append(View("</form>"))
-    db_execute(db, "COMMIT", [])?
     content.append(View("""<p role='status'></p><script>
 document.addEventListener('submit', async event => {
     event.preventDefault();

@@ -54,6 +54,11 @@ def check_handoff(cli, installed, env, provider, url, reviewer, peer, editor, pa
                 process.kill()
                 process.wait()
 
+    def version():
+        # The revision the progress page's forms carry.
+        with closing(sqlite3.connect(installed / "reading.sqlite")) as db:
+            return db.execute('SELECT revision FROM "ExtractionJob" WHERE job=?', (job,)).fetchone()[0]
+
     def request(expected):
         body = provider.requests.get(timeout=8)
         assert expected in json.dumps(body["messages"]), body
@@ -80,7 +85,7 @@ def check_handoff(cli, installed, env, provider, url, reviewer, peer, editor, pa
         started = post("/work/start", {"instruction": first, "budget": 2, "estimated_microusd": 7})
         assert "Started" in started, started
     with closing(sqlite3.connect(installed / "reading.sqlite")) as db:
-        job, = db.execute("SELECT id FROM extraction_jobs WHERE owner='reviewer' ORDER BY id DESC").fetchone()
+        job, = db.execute("""SELECT job FROM "ExtractionJob" WHERE owner='reviewer' ORDER BY job DESC""").fetchone()
     assert 'Source revision ' + str(revision) in progress()
     assert "Shelf 1 | Pending" not in progress(peer)
     enqueue()
@@ -92,9 +97,9 @@ def check_handoff(cli, installed, env, provider, url, reviewer, peer, editor, pa
             click("Pause")
             assert page.get_by_text("Pause requested. Waiting for in-flight work.").is_visible()
         else:
-            assert "Pause" in post("/work/checkpoint", {"job": job, "version": 0, "command": "Pause"})
+            assert "Pause" in post("/work/checkpoint", {"job": job, "version": version(), "command": "Pause"})
         assert "Shelf 1 | In flight" in progress()
-        fields = dict(job=job, version=1, shelf=1, correction="Reader field", instruction=revised)
+        fields = dict(job=job, version=version(), shelf=1, correction="Reader field", instruction=revised)
         assert "unavailable" in post("/work/revise", fields)
         provider.outputs.put("Model field")
     finally:
@@ -122,7 +127,7 @@ def check_handoff(cli, installed, env, provider, url, reviewer, peer, editor, pa
         assert page.get_by_text("Human correction: Reader field").is_visible()
         click("Resume")
     else:
-        assert "Resume" in post("/work/checkpoint", dict(job=job, version=2, command="Resume"))
+        assert "Resume" in post("/work/checkpoint", dict(job=job, version=version(), command="Resume"))
     enqueue(2)
     running = worker(2)
     try:

@@ -1,0 +1,221 @@
+# The shelf extraction worker's stored state, as Corvid tables. A job's
+# settings, the model operations it has reserved and its per-shelf items
+# are three tables, so a worker's reservation never changes the revision
+# a person's Pause or revision form was rendered against.
+#
+# Tables are private to their module, so this module declares its own
+# database block for the same file as library_store.cor. SQLite gives
+# both one writer turn per file.
+
+import "./library_store" use ShelfTitle
+
+database extraction:
+    engine: sqlite
+    location: "reading.sqlite"
+    tables: ExtractionJob, ExtractionSpending, ExtractionItem
+
+# What a person asked for. Its revision is the version the progress
+# page's forms carry.
+table ExtractionJob:
+    key job: Int
+    owner: String
+    instruction: String
+    budget: Int where between(1, 12)
+    estimated_microusd: Int where between(0, 1000000000)
+    paused: Bool
+
+# The model operations reserved so far. Workers write it, people never do.
+table ExtractionSpending:
+    key job: Int
+    spent: Int where between(0, 12)
+
+# One shelf of a job: the title it was given, and the worker's progress.
+table ExtractionItem:
+    key job: Int
+    key shelf: Int
+    source_title: String
+    source_revision: Int
+    attempt: Int
+    lease_until_ms: Int
+    used_instruction: Option<String>
+    extracted: Option<String>
+    correction: Option<String>
+
+public type ItemProgress:
+    shelf: Int
+    source_title: String
+    source_revision: Int
+    state: String
+    used_instruction: String
+    extracted: String
+    correction: String
+
+public type JobProgress:
+    job: Int
+    revision: Int
+    instruction: String
+    spent: Int
+    budget: Int
+    paused: Bool
+    estimated_microusd: Int
+    items: List<ItemProgress>
+
+# A shelf a worker has reserved: the model call to make, and the attempt
+# that must still hold the lease when the answer is saved.
+public type Reservation:
+    job: Int
+    shelf: Int
+    attempt: Int
+    source_title: String
+    instruction: String
+
+# Completed once extracted; in flight while a lease is held; skipped once
+# the job's operations are spent; otherwise pending.
+fn item_state(item: ExtractionItem, spent: Int, budget: Int, now_ms: Int) -> String:
+    if item.extracted != None:
+        return "Completed"
+    if item.lease_until_ms > now_ms:
+        return "In flight"
+    if spent >= budget:
+        return "Skipped"
+    return "Pending"
+
+fn text_or_empty(value: Option<String>) -> String:
+    return match value:
+        Some(text) -> text
+        None -> ""
+
+agent spent_on(job: Int) -> Int:
+    return match ExtractionSpending.get(job):
+        Some(row) -> row.spent
+        None -> 0
+
+agent progress_of(job: ExtractionJob, now_ms: Int) -> JobProgress:
+    spent = spent_on(job.job)
+    items: List<ItemProgress> = []
+    for item in ExtractionItem.where(fn (i) -> i.job == job.job):
+        state = item_state(item, spent, job.budget, now_ms)
+        items.append(ItemProgress(item.shelf, item.source_title, item.source_revision, state, text_or_empty(item.used_instruction), text_or_empty(item.extracted), text_or_empty(item.correction)))
+    return JobProgress(job.job, job.revision, job.instruction, spent, job.budget, job.paused, job.estimated_microusd, items)
+
+fn has_state(progress: JobProgress, wanted: String) -> Bool:
+    for item in progress.items:
+        if item.state == wanted:
+            return true
+    return false
+
+fn is_active(progress: JobProgress) -> Bool:
+    return has_state(progress, "Pending") or has_state(progress, "In flight")
+
+agent latest_job(owner: String) -> List<ExtractionJob>:
+    return ExtractionJob.where(fn (j) -> j.owner == owner).order_by(fn (j) -> j.job).descending().take(1)
+
+# The owner's most recent job, read in one transaction so the page shows
+# one moment of the worker's progress.
+public agent latest_progress(owner: String, now_ms: Int) -> List<JobProgress>:
+    found: List<JobProgress> = []
+    atomic:
+        for job in latest_job(owner):
+            found.append(progress_of(job, now_ms))
+    return found
+
+# Start a job over these shelves unless the owner already has one with
+# work left. Each item keeps the title and revision it was given.
+public agent start_job(owner: String, instruction: String, budget: Int, estimated_microusd: Int, shelves: List<ShelfTitle>, now_ms: Int) -> Bool:
+    started = false
+    atomic:
+        busy = false
+        for job in latest_job(owner):
+            busy = is_active(progress_of(job, now_ms))
+        if not busy:
+            next = 1
+            for newest in ExtractionJob.all().order_by(fn (j) -> j.job).descending().take(1):
+                next = newest.job + 1
+            created = ExtractionJob.insert(ExtractionJob(next, owner, instruction, budget, estimated_microusd, false))
+            ExtractionSpending.insert(ExtractionSpending(next, 0))
+            for shelf in shelves:
+                ExtractionItem.insert(ExtractionItem(next, shelf.shelf, shelf.title, shelf.revision, 0, 0, None, None, None))
+            started = true
+    return started
+
+# Pause at any time; resume only once no shelf is in flight. `seen` is the
+# revision the person's form was rendered against.
+public agent set_paused(owner: String, job: Int, seen: Int, pause: Bool, now_ms: Int) -> Bool:
+    changed = false
+    atomic:
+        for current in ExtractionJob.where(fn (j) -> j.job == job and j.owner == owner):
+            if current.revision == seen and current.paused != pause:
+                if pause or not has_state(progress_of(current, now_ms), "In flight"):
+                    changed = match ExtractionJob.save(ExtractionJob { paused: pause, ..current }):
+                        Ok(_) -> true
+                        Err(_) -> false
+    return changed
+
+# Correct a completed shelf and revise the job's instruction, only at a
+# paused checkpoint. Returns what went wrong, or "" once both are saved.
+public agent revise_job(owner: String, job: Int, seen: Int, shelf: Int, correction: String, instruction: String, now_ms: Int) -> String:
+    problem = "checkpoint"
+    atomic:
+        for current in ExtractionJob.where(fn (j) -> j.job == job and j.owner == owner):
+            if current.revision == seen and current.paused and not has_state(progress_of(current, now_ms), "In flight"):
+                problem = "shelf"
+                problem = match ExtractionItem.get(job, shelf):
+                    Some(done) -> correct(current, done, correction, instruction)
+                    None -> "shelf"
+    return problem
+
+agent correct(job: ExtractionJob, item: ExtractionItem, correction: String, instruction: String) -> String:
+    if item.extracted == None:
+        return "shelf"
+    ExtractionJob.save(ExtractionJob { instruction: instruction, ..job })
+    ExtractionItem.save(ExtractionItem { correction: Some(correction), ..item })
+    return ""
+
+# Reserve the next pending shelf of an unpaused job, spending one model
+# operation before the call is made. A worker that crashes keeps the
+# operation spent and lets its lease run out.
+public agent reserve_next(now_ms: Int) -> List<Reservation>:
+    reserved: List<Reservation> = []
+    atomic:
+        for job in ExtractionJob.where(fn (j) -> j.paused == false):
+            if reserved.length() == 0:
+                spent = spent_on(job.job)
+                for item in ExtractionItem.where(fn (i) -> i.job == job.job):
+                    if reserved.length() == 0 and item_state(item, spent, job.budget, now_ms) == "Pending":
+                        spend_one(job.job)
+                        attempt = item.attempt + 1
+                        # The shelf is held for 45 seconds before another worker may retry it.
+                        ExtractionItem.save(ExtractionItem { attempt: attempt, used_instruction: Some(job.instruction), lease_until_ms: now_ms + 45000, ..item })
+                        reserved.append(Reservation(job.job, item.shelf, attempt, item.source_title, job.instruction))
+    return reserved
+
+agent spend_one(job: Int) -> Bool:
+    return match ExtractionSpending.get(job):
+        Some(row) -> spent_saved(ExtractionSpending.save(ExtractionSpending { spent: row.spent + 1, ..row }))
+        None -> false
+
+fn spent_saved(outcome: Result<ExtractionSpending, Option<ExtractionSpending>>) -> Bool:
+    return match outcome:
+        Ok(_) -> true
+        Err(_) -> false
+
+# Save a model's answer if this attempt still holds its lease.
+public agent finish_extraction(reservation: Reservation, field: String, now_ms: Int) -> Bool:
+    saved = false
+    atomic:
+        for item in ExtractionItem.where(fn (i) -> i.job == reservation.job and i.shelf == reservation.shelf and i.attempt == reservation.attempt):
+            if item.lease_until_ms > now_ms and item.extracted == None:
+                saved = match ExtractionItem.save(ExtractionItem { extracted: Some(field), lease_until_ms: 0, ..item }):
+                    Ok(_) -> true
+                    Err(_) -> false
+    return saved
+
+# Give a shelf back after an empty answer, so another attempt can run.
+public agent release(reservation: Reservation) -> Bool:
+    released = false
+    atomic:
+        for item in ExtractionItem.where(fn (i) -> i.job == reservation.job and i.shelf == reservation.shelf and i.attempt == reservation.attempt):
+            released = match ExtractionItem.save(ExtractionItem { lease_until_ms: 0, ..item }):
+                Ok(_) -> true
+                Err(_) -> false
+    return released

@@ -573,7 +573,7 @@ The packaged HTTP exercise discarded the committed response body, restarted the 
 
 ### Pause and revise a shelf extraction
 
-From **Shelf extraction progress** in a reviewer session, enter a field to extract from each title and a maximum number of model operations. Starting the job saves all three source titles and their revisions in one transaction. The progress page shows the latest job for the signed-in reviewer. Use **Refresh progress** to read the next checkpoint.
+From **Shelf extraction progress** in a reviewer session, enter a field to extract from each title and a maximum number of model operations. Starting the job records all three source titles with the revisions they had, and creates the job and its items in one `atomic:` block. The progress page shows the latest job for the signed-in reviewer. Use **Refresh progress** to read the next checkpoint.
 
 From the same migrated package directory, configure a loopback model and run the worker in a second terminal. The schedule gives the worker one extraction opportunity per minute. To process one shelf immediately, run the CLI entry point once.
 
@@ -584,6 +584,8 @@ corvid run --target interp src/extract.cor
 ```
 
 Choose **Pause** while a shelf is in flight. A reserved extraction can finish, and each new worker checks the pause before reserving a shelf. Refresh after the current extraction finishes. Enter a correction for the completed shelf and a revised instruction, then choose **Save revision**. Restart the worker from the same directory and choose **Resume**. The page keeps the original model field, instruction and source revision beside the human correction. Remaining shelves use the revised instruction. Closing the progress page leaves the saved job available to its worker.
+
+The job lives in three tables in [`extraction_store.cor`](../../examples/reading_list/src/extraction_store.cor): the settings a person chose, the operations reserved so far, and one item per shelf. The page's Pause, Resume and revision forms carry the settings row's revision, so a worker spending an operation never makes an open form stale. Each worker reads the clock before its `atomic:` block, because the clock is a traced tool and a block admits only what the database can undo.
 
 Each attempt reserves one operation before the prompt runs. Concurrent workers and retries use the same counter. A worker that loses its 45-second reservation cannot overwrite a later result. Recovery spends another operation if one remains. An exhausted budget marks remaining shelves as skipped. The optional per-operation price displays an estimate in millionths of a US dollar. Provider billing is unavailable for this prompt.
 
