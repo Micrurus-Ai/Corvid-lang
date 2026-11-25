@@ -78,7 +78,7 @@ async fn a_table_keyed_by_two_columns_reads_and_writes_by_both() {
 
 #[test]
 fn a_key_of_two_columns_is_created_as_one_primary_key() {
-    let schemas = corvid_driver::table_schemas(&program("    engine: sqlite\n    location: \"reviews.sqlite\"")).expect("compiles");
+    let schemas = corvid_driver::table_schemas(&program("    engine: sqlite\n    location: \"reviews.sqlite\""), std::path::Path::new("program.cor")).expect("compiles");
     let sql = corvid_runtime::tables::create_table_sql(&schemas[0]);
     assert!(sql.contains("PRIMARY KEY (\"proposal\", \"shelf\")"), "{sql}");
     assert!(sql.contains("\"proposal\" TEXT NOT NULL,"), "{sql}");

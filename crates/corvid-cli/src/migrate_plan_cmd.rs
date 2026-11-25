@@ -23,7 +23,7 @@ use std::path::Path;
 
 pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch: Option<&str>) -> Result<u8> {
     let text = std::fs::read_to_string(source).with_context(|| format!("cannot read `{}`", source.display()))?;
-    let schemas = match corvid_driver::table_schemas(&text) {
+    let schemas = match corvid_driver::table_schemas(&text, source) {
         Ok(schemas) => schemas,
         Err(diagnostics) => {
             eprint!("{}", corvid_driver::render_all_pretty(&diagnostics, source, &text));

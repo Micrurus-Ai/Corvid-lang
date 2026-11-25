@@ -4,6 +4,28 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-24 - `corvid migrate` compiles a program the way `corvid check` does
+
+Porting the reading list onto tables found that `corvid migrate plan`
+refused programs `corvid check` accepts. `migrate plan src/main.cor`
+reported that `ui.text` "requires cross-file resolution", and
+`migrate plan src/reviews.cor` refused a `View(...)` call in a `fn`. The
+driver's `table_schemas` and `declared_databases` compiled the source
+text without its path, so neither `std:` nor relative imports resolved
+and `corvid.toml` was never read. Only programs with no imports could be
+planned, which every test program happened to be.
+
+Both now take the file's path and share one `compile_program`, which
+calls the driver's `compile_to_ir_with_config_at_path` with the
+`corvid.toml` found for that file, the same compile `corvid check` runs.
+`migrate plan` and `migrate up | status | down --program` both use it.
+A new test plans a table module that imports `std:ui` and a sibling
+module; with the old compile it fails with the reading list's error.
+The planner still plans the tables the named module declares, not those
+of modules it imports, as before.
+
+---
+
 ## 2026-11-25 - Native loops release rebound and early-returned values once
 
 The two native bugs the byte-string slice found are fixed, and they

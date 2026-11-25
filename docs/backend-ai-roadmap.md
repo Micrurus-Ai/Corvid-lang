@@ -203,6 +203,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] P7a. Atomic writes: `atomic:` blocks commit their table writes together or not at all; leaving through an error (a propagated `?` or a runtime failure) undoes them. The checker refuses tools, prompts, approvals and any exit that would not say whether to keep the writes, following called agents, and tables in more than one database. Each block runs on its own connection; on SQLite it holds the file's writer turn, so concurrent writers queue instead of deadlocking.
 - [x] P7b. Keys made of two or more columns: mark several fields `key`; `get` takes one value per key field in declaration order, writes are revision-checked on the whole key, queries come back in key order, and the table is created with `PRIMARY KEY (a, b)`, on SQLite and Postgres.
 - [ ] P7c. Port `examples/reading_list` from hand-written SQL to tables. Conditions that read another table stay Corvid code until queries can join.
+- [x] `corvid migrate plan` and `migrate up | status | down --program` compile the program as `corvid check` does, with its path and `corvid.toml`, so imports resolve. Before, a program importing `std:ui` or a sibling module was refused (found during P7c).
 - [ ] P5. MySQL, after B10 (see the order note).
 - [ ] P6. Native target, after B10 (see the order note).
 

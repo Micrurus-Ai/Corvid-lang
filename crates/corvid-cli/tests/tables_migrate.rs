@@ -151,6 +151,40 @@ fn planned_migrations_follow_a_table_through_its_changes() {
     lifecycle(&Engine::Sqlite { database });
 }
 
+/// The planner compiles the program as `corvid check` does, so a module
+/// that imports the standard library and a sibling module plans its
+/// tables instead of being refused for imports it cannot resolve.
+#[test]
+fn planning_resolves_the_programs_imports() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("labels.cor"), "public type Label:\n    text: String\n").unwrap();
+    std::fs::write(
+        src.join("store.cor"),
+        r#"import "std:ui" as ui
+import "./labels" use Label
+
+database library:
+    engine: sqlite
+    location: "library.sqlite"
+    tables: Shelf
+
+table Shelf:
+    key shelf: Int
+    title: String
+
+public agent heading(label: Label) -> String:
+    return ui.text(label.text).html
+"#,
+    )
+    .unwrap();
+    let engine = Engine::Sqlite { database: "library.sqlite".into() };
+    ok(&corvid(&["check", "src/store.cor"], dir.path(), &engine));
+    let planned = ok(&corvid(&["migrate", "plan", "src/store.cor", "--dry-run"], dir.path(), &engine));
+    assert!(planned.contains("CREATE TABLE \"Shelf\""), "{planned}");
+}
+
 #[test]
 fn planned_migrations_follow_a_postgres_table_through_its_changes() {
     let (Ok(base), Ok(scratch)) = (std::env::var("CORVID_TEST_POSTGRES_URL"), std::env::var(SCRATCH_ENV)) else {
