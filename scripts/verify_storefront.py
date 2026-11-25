@@ -249,6 +249,16 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
         check_static_catalog(cli, project)
         main = project / "src/main.cor"
         main.write_text(main.read_text(encoding="utf-8").replace("server shop:", '''server shop:
+    route GET "/empty-catalog" -> html:
+        products: List<View> = []
+        return catalog(products)
+
+    route GET "/large-catalog" -> html:
+        editions: List<View> = []
+        for number in range(1, 1001):
+            editions.append(ui.link("Notebook edition " + number.to_string(), "/notebook"))
+        return catalog(editions)
+
     route GET "/cart-note" -> html:
         quantity = ui.quantity_field("Quantity", "quantity", 1, "pencil_cents", "Total", 125)
         note = ui.portal("notice", [ui.text("Cart note")])
@@ -275,9 +285,19 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
         check_rebuild(cli, project, installed, root / "rebuilt")
         with serve(cli, installed, os.environ.copy()) as url:
             assert 'href="/cart"' in read(url)
+            assert "No products available." in read(url + "/empty-catalog")
+            assert read(url + "/large-catalog").count('href="/notebook"') == 1000
             assert 'action="/checkout"' in read(url + "/cart")
             assert 'src="/target/wasm/events.js"' in read(url + "/cart-note")
             assert "Total: 5525 cents" in read(url + "/checkout", b"notebook=12&pencil=1")
+            assert "Your cart is empty" in read(url + "/checkout", b"notebook=0&pencil=0")
+            try:
+                read(url + "/checkout", b"notebook=100&pencil=99")
+            except HTTPError as error:
+                assert error.code == 400
+            else:
+                raise AssertionError("Checkout accepted 100 notebooks")
+            assert "Total: 56925 cents" in read(url + "/checkout", b"notebook=99&pencil=99")
             for path, label, initial in (("notebook", "Cover", "Ocean"), ("pencil", "Barrel", "Clay")):
                 assert f"{label} color: {initial}" in read(f"{url}/{path}")
                 assert f"{label} color: Moss" in read(f"{url}/{path}", b"shade=1")
@@ -302,6 +322,21 @@ def run_browser(playwright, url, channel, engine="chromium", rebuilt_url=None):
     browser = getattr(playwright, engine).launch(channel=channel)
     try:
         check_quantity_mismatch(browser, url)
+        with browser.new_page(viewport={"width": 320, "height": 720}) as page:
+            page.goto(url + "/large-catalog")
+            page.get_by_role("link", name="Notebook edition 1000", exact=True).click()
+            page.get_by_role("heading", name="Notebook cover").wait_for()
+            page.goto(url + "/empty-catalog")
+            page.get_by_text("No products available.", exact=True).wait_for()
+            page.get_by_role("link", name="Open cart").click()
+            for label in ("Notebook quantity", "Pencil quantity"):
+                page.get_by_label(label).fill("0")
+            page.get_by_role("button", name="Checkout").press("Enter")
+            page.get_by_role("heading", name="Your cart is empty").wait_for()
+            page.get_by_role("link", name="Return to cart").click()
+            for label in ("Notebook quantity", "Pencil quantity"):
+                page.get_by_label(label).fill("99")
+            checkout(page, 99, 99)
         if rebuilt_url:
             check_split_runtime(browser, rebuilt_url)
         with browser.new_page() as page:

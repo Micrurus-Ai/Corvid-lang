@@ -2,6 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+- [ ] F18 independent application acceptance. Track the checkout and sketchbook trials, collaborative subscription dependency and independent developer report in the [F18 acceptance record](docs/proposals/frontend-application-acceptance.md).
+
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
 
 F17 compares windowed lists and tables through one shared browser workflow so that input, navigation and streaming costs are comparable across implementations. The [frontend checklist](docs/frontend-roadmap.md#running-the-frontend-loop) tracks host verification.

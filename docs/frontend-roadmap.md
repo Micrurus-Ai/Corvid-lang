@@ -22,6 +22,8 @@ Task branches use descriptive names such as `frontend/semantic-html` and `fronte
 
 Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. These tasks can proceed while F08 waits for B14. Commerce and offline-editor acceptance can start before F08 merges. Final acceptance requires the merged F08 subscription contract and a passing collaborative-workspace reconnect and resubscription check.
 
+The [F18 acceptance record](proposals/frontend-application-acceptance.md) gives the tested project boundaries, local results, pending browser commands and independent trial requirements.
+
 | ID | Deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
 | F01 | Semantic HTML and typed attributes | none | Build a document with landmarks, headings, lists, a table, links, images, forms and custom data attributes entirely in Corvid. Support element-specific attributes, safe text and attribute escaping, predictable child order, explicit trusted markup and server rendering with scripts disabled. |

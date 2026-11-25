@@ -1,5 +1,9 @@
 # Corvid — learnings
 
+Entering zero for both products in the storefront returns an empty-cart page
+with a link back to the quantity fields. The packaged checkout accepts up to
+99 of each product. [F18 checkout and editor trials](docs/proposals/frontend-application-acceptance.md)
+
 Stream a provider's answer by declaring `-> Stream<Delta>` and how its events arrive: `streams: server_sent_events` or `streams: json_lines`; add `until "[DONE]"` for providers that end a server-sent stream with that sentinel. Then `for delta in complete(prompt):` gets one typed `Delta` at a time as it arrives. The connector's `timeout` bounds the wait for each event, a stream that breaks ends with an error, and leaving the loop early closes the connection to the provider; a route that returns the stream relays it to the browser and closes the provider's connection when the browser leaves. Replay plays the recorded events back without a connection. In mock mode, the `mock:` is the list of events. [Connector grammar](docs/reference/grammar.md#connector-declarations)
 
 `http_get` and `http_post_json` are gone; make requests through a connector. To fetch a URL the program learns at run time, declare a connector with `hosts: allowed_hosts` and an operation that takes the URL:

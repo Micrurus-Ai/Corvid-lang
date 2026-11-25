@@ -2,6 +2,13 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### F18 checkout and sketchbook boundaries
+
+The storefront now returns an empty-cart page when both quantities are zero.
+The acceptance exercises use the cart's declared quantity limits and the
+sketchbook's actual canvas dimensions. The packaged HTTP and local storage
+checks passed. [Results and open dependencies](docs/proposals/frontend-application-acceptance.md)
+
 ### F16 web starter and installed component tooling
 
 The web starter uses the usual manifest and a server-rendered Corvid page

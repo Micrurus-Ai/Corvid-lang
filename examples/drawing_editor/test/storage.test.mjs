@@ -83,3 +83,39 @@ test("a newer document format keeps the upload pending until the host is compati
   await synchronizeDrawing(db, "sketch.json");
   assert.equal(uploads, 1);
 });
+
+test("the last offline mark survives reopen and completes a full shared canvas", async t => {
+  const name = "corvid-sketch:" + new URL("../", import.meta.url).pathname;
+  await new Promise((resolve, reject) => {
+    const reset = indexedDB.deleteDatabase(name);
+    reset.onsuccess = resolve;
+    reset.onerror = () => reject(reset.error);
+  });
+  const remote = [];
+  for (let x = 0; x < 96; x++) {
+    for (let y = 0; y < 64; y++) remote.push([x, y]);
+  }
+  const lastCell = remote.pop();
+  let uploaded;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    if (options.method === "PUT") {
+      uploaded = JSON.parse(options.body).cells;
+      return new Response(null, { status: 204 });
+    }
+    return Response.json({ version: 1, cells: remote }, { headers: { ETag: '"1"' } });
+  });
+  const first = await openDrawing();
+  try {
+    assert.deepEqual(await restoreCells(first), []);
+    await synchronizeDrawing(first, "sketch.json");
+    await saveCells(first, Uint16Array.from(lastCell));
+  } finally {
+    first.close();
+  }
+  const reopened = await openDrawing();
+  t.after(() => reopened.close());
+  const fullCanvas = [...remote, lastCell];
+  assert.deepEqual(await restoreCells(reopened), fullCanvas);
+  await synchronizeDrawing(reopened, "sketch.json");
+  assert.deepEqual(uploaded, fullCanvas);
+});
