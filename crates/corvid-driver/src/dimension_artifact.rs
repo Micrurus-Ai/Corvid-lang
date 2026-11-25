@@ -8,7 +8,7 @@
 use crate::compile_with_config;
 use anyhow::{anyhow, Context, Result};
 use corvid_types::CorvidConfig;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use semver::Version;
 use serde::Deserialize;
 
@@ -117,9 +117,10 @@ fn verify_signature(
         .with_context(|| format!("artifact `{}` signing_key is not an Ed25519 key", header.name))?;
     let signature = Signature::from_bytes(&sig);
     let payload = canonical_payload(header, schema, meta, regressions);
-    verifying_key
-        .verify(payload.as_bytes(), &signature)
-        .with_context(|| format!("artifact `{}` signature verification failed", header.name))
+    if !corvid_crypto::verify_ed25519_signature(&verifying_key, payload.as_bytes(), &signature) {
+        anyhow::bail!("artifact `{}` signature verification failed", header.name);
+    }
+    Ok(())
 }
 
 fn run_regressions(config: &CorvidConfig, regressions: &[RegressionCase]) -> Result<()> {

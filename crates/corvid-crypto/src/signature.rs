@@ -46,7 +46,18 @@ pub fn verify_ed25519(message: &Bytes, signature: &Bytes, public_key: &Bytes) ->
     let Ok(public_key) = VerifyingKey::from_bytes(&public_key) else {
         return false;
     };
-    public_key.verify_strict(message.as_slice(), &Signature::from_bytes(&signature)).is_ok()
+    verify_ed25519_signature(&public_key, message.as_slice(), &Signature::from_bytes(&signature))
+}
+
+/// Whether `signature` is a valid Ed25519 signature of `message` under
+/// `key`: strict verification, and a weak (small-order) key is never
+/// accepted. Every Ed25519 check in Corvid goes through here: the
+/// language's `verify_ed25519`, release and bundle attestations, signed
+/// traces, dimension artifacts and the package registry. Permissive
+/// verification accepts the identity-key forgery, where one signature
+/// is valid for every message under a small-order key.
+pub fn verify_ed25519_signature(key: &VerifyingKey, message: &[u8], signature: &Signature) -> bool {
+    !key.is_weak() && key.verify_strict(message, signature).is_ok()
 }
 
 #[cfg(test)]

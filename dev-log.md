@@ -613,6 +613,20 @@ at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
 
+## 2026-11-24 - Strict Ed25519 verification everywhere
+
+Five places verified Ed25519 signatures with `ed25519-dalek`'s permissive
+`verify`: release envelopes (`verify_envelope`, used by `ops show`),
+signed traces, bundle attestations, dimension artifacts and the package
+registry. Permissive verification accepts the identity-key forgery: under
+the small-order key `01 00..00`, the signature `01 00..00 00..00` is
+valid for every message. Where an attacker supplies the key, as a
+package index does, a forged package installs; a new registry test
+showed it did, and now shows it is refused. Every check now goes through
+one function, `corvid_crypto::verify_ed25519_signature`, which refuses a
+weak key and verifies strictly; the language's own `verify_ed25519`
+calls it too. Found by the B04 work, which demonstrated the forgery.
+
 ## 2026-11-24 - Tables keyed by several columns (B09 P7b)
 
 A table may mark several fields `key`; together they identify a row,

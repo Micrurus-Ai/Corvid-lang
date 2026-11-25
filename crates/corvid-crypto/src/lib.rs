@@ -33,5 +33,5 @@ pub use entropy::fill_random;
 pub use mac::{hmac_sha256, hmac_sha512, HmacKey};
 pub use password::{hash_password, verify_password, PasswordCost, MAX_MEMORY_KIB};
 pub use secret::{Secret, SECRET_DISPLAY};
-pub use signature::{verify_ed25519, ED25519_PUBLIC_KEY_BYTES, ED25519_SIGNATURE_BYTES};
+pub use signature::{verify_ed25519, verify_ed25519_signature, ED25519_PUBLIC_KEY_BYTES, ED25519_SIGNATURE_BYTES};
 pub use token::{random_token, MAX_TOKEN_BYTES, MIN_TOKEN_BYTES};
