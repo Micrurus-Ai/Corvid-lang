@@ -286,12 +286,15 @@ pub(super) fn lower_expr(
             )
         }
         IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
-            // B04 — a native `Secret` does not exist, so an HMAC keyed by
-            // one never reaches here; refuse it by name if it does.
-            if let Some(key) = args.iter().find(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret)) {
-                return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, key.span));
-            }
-            let method = crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard");
+            // An HMAC keyed by a `Secret` calls the entry point that opens
+            // the runtime's secret object (N3b).
+            let keyed_by_secret = args.iter().any(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret));
+            let method = match crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard") {
+                crate::text_scalar::NativeScalarMethod::Call(operation) if keyed_by_secret => {
+                    crate::text_scalar::NativeScalarMethod::Call(operation.keyed_by_secret())
+                }
+                other => other,
+            };
             scalar_call::lower_scalar_method(
                 builder, expr, method,
                 |operation| runtime.bytes_operations.get(&operation).copied(),

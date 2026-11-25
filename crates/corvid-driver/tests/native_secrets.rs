@@ -195,3 +195,79 @@ fn a_tool_of_the_programs_own_that_takes_a_secret_stays_on_the_interpreter() {
         assert!(reason.contains("tool of the program's own"), "{reason}");
     }
 }
+
+const WEBHOOK_ENV: &str = "CORVID_TEST_NATIVE_SECRET_WEBHOOK";
+/// A Standard Webhooks signing secret: `whsec_` and the base64 of the key.
+const WEBHOOK_TEXT: &str = "whsec_c2lnbmluZy1rZXktYnl0ZXM=";
+
+/// The cryptography a secret keys (native dispatch N3b): HMAC keyed by a
+/// secret's text and by a key decoded from `whsec_` base64, a decoding
+/// failure's message, and a password checked against a stored hash.
+fn crypto_program(hash: &str) -> String {
+    format!(
+        r#"
+import "./std/secrets" use secret
+import "./std/crypto" use random_token
+
+agent fallback() -> Secret:
+    return random_token(16)
+
+agent must(name: String) -> Secret:
+    return match secret(name):
+        Ok(key) -> key
+        Err(problem) -> fallback()
+
+agent signed_with_decoded(key: Secret, body: String) -> String:
+    return match key.decode_base64_after("whsec_"):
+        Ok(decoded) -> body.utf8().hmac_sha256(decoded).to_hex()
+        Err(message) -> message
+
+agent decode_message(key: Secret) -> String:
+    return match key.decode_base64_after("nope_"):
+        Ok(decoded) -> "decoded"
+        Err(message) -> message
+
+agent main() -> String:
+    key = must("CORVID_TEST_NATIVE_SECRET_KEY")
+    other = must("CORVID_TEST_NATIVE_SECRET_OTHER")
+    webhook = must("CORVID_TEST_NATIVE_SECRET_WEBHOOK")
+    body = "order.paid"
+    by_text = body.utf8().hmac_sha256(key).to_hex()
+    by_text_512 = body.utf8().hmac_sha512(key).to_hex()
+    by_decoded = signed_with_decoded(webhook, body)
+    by_bytes = body.utf8().hmac_sha256("signing-key-bytes".utf8()).to_hex()
+    checks = [key.verify_password("{hash}"), other.verify_password("{hash}"), key.verify_password("not a hash")]
+    return by_text + " " + by_text_512 + " " + by_decoded + " " + by_bytes + " " + checks.to_json() + " " + decode_message(key)
+"#
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn secret_cryptography_gives_the_same_answers_on_both_tiers() {
+    std::env::set_var(WEBHOOK_ENV, WEBHOOK_TEXT);
+    let hash = corvid_crypto::hash_password(KEY_TEXT.as_bytes(), corvid_crypto::PasswordCost::OWASP_2023).expect("hash");
+    let program = crypto_program(&hash);
+    let project = project(&program);
+
+    let runtime = Runtime::builder().build();
+    let interpreted = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect("interpreter run");
+    let Value::String(interpreted) = interpreted else { panic!("expected a String, got {interpreted:?}") };
+    let parts: Vec<&str> = interpreted.split(' ').collect();
+    // A key decoded from `whsec_` base64 keys the HMAC with its bytes,
+    // exactly as a `Bytes` key holding them does.
+    assert_eq!(parts[2], parts[3], "{interpreted}");
+    assert!(interpreted.contains("[true,false,false]"), "{interpreted}");
+    assert!(interpreted.ends_with("the secret does not start with `nope_`"), "{interpreted}");
+
+    let binary = native_binary(&project, &program);
+    let mut command = Command::new(&binary);
+    command.env(KEY_ENV, KEY_TEXT).env(OTHER_ENV, OTHER_TEXT).env(WEBHOOK_ENV, WEBHOOK_TEXT).env("CORVID_DEBUG_ALLOC", "1");
+    let output = command.output().expect("run native binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), &*interpreted, "both tiers give the same tags, verdicts and message");
+    let count = |name: &str| -> i64 {
+        stderr.lines().find_map(|line| line.strip_prefix(&format!("{name}="))).unwrap().trim().parse().unwrap()
+    };
+    assert_eq!(count("ALLOCS"), count("RELEASES"), "every secret, including the decoded key, is freed: {stderr}");
+}

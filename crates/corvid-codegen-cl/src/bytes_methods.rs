@@ -13,8 +13,10 @@
 //! misspelled symbol fails to link.
 //!
 //! The `Secret` methods (`decode_base64_after`, `verify_password`) and
-//! an HMAC keyed by a `Secret` are not here: native code has no
-//! `Secret` (see the driver's `NotNativeReason::SecretNotNative`).
+//! an HMAC keyed by a `Secret` are here too (native dispatch N3b): a
+//! native secret is the runtime's object, and each of these is one call
+//! into `ffi_bridge/secret_object.rs`, which opens it and computes with
+//! the same `corvid_crypto::Secret` methods the interpreter calls.
 
 use crate::text_scalar::{scalar_of, BinaryReading, NativeScalarMethod, ScalarBinary};
 use corvid_ast::BinaryOp;
@@ -38,6 +40,13 @@ pub enum BytesOperation {
     Sha512,
     HmacSha256,
     HmacSha512,
+    /// An HMAC keyed by a `Secret` rather than `Bytes`.
+    HmacSha256Secret,
+    HmacSha512Secret,
+    /// `secret.verify_password(hash)`: 1 when it is the password.
+    VerifyPassword,
+    /// `secret.decode_base64_after(prefix)` into a `Result<Secret, String>`.
+    DecodeBase64After,
     /// 1 when the signature verifies.
     VerifyEd25519,
     /// 1 when two byte strings are equal, compared in constant time.
@@ -65,6 +74,10 @@ impl BytesOperation {
             Sha512,
             HmacSha256,
             HmacSha512,
+            HmacSha256Secret,
+            HmacSha512Secret,
+            VerifyPassword,
+            DecodeBase64After,
             VerifyEd25519,
             Equal,
             Display,
@@ -87,6 +100,10 @@ impl BytesOperation {
             Sha512 => "corvid_bytes_sha512",
             HmacSha256 => "corvid_bytes_hmac_sha256",
             HmacSha512 => "corvid_bytes_hmac_sha512",
+            HmacSha256Secret => "corvid_secret_hmac_sha256",
+            HmacSha512Secret => "corvid_secret_hmac_sha512",
+            VerifyPassword => "corvid_secret_verify_password",
+            DecodeBase64After => "corvid_secret_decode_base64_after",
             VerifyEd25519 => "corvid_bytes_verify_ed25519",
             Equal => "corvid_bytes_equal",
             Display => "corvid_bytes_display",
@@ -99,8 +116,9 @@ impl BytesOperation {
         use BytesOperation::*;
         match self {
             FromUtf8Text | Length | ToHex | ToBase64 | Sha256 | Sha384 | Sha512 | Display => 1,
-            ToUtf8 | FromHex | FromBase64 | FromBase64Url | HmacSha256 | HmacSha512 | Equal => 2,
-            VerifyEd25519 => 3,
+            ToUtf8 | FromHex | FromBase64 | FromBase64Url | HmacSha256 | HmacSha512 | HmacSha256Secret
+            | HmacSha512Secret | VerifyPassword | Equal => 2,
+            VerifyEd25519 | DecodeBase64After => 3,
         }
     }
 
@@ -108,8 +126,21 @@ impl BytesOperation {
     pub fn is_parse(self) -> bool {
         matches!(
             self,
-            BytesOperation::ToUtf8 | BytesOperation::FromHex | BytesOperation::FromBase64 | BytesOperation::FromBase64Url
+            BytesOperation::ToUtf8
+                | BytesOperation::FromHex
+                | BytesOperation::FromBase64
+                | BytesOperation::FromBase64Url
+                | BytesOperation::DecodeBase64After
         )
+    }
+
+    /// The operation for this HMAC when its key is a `Secret`.
+    pub fn keyed_by_secret(self) -> BytesOperation {
+        match self {
+            BytesOperation::HmacSha256 => BytesOperation::HmacSha256Secret,
+            BytesOperation::HmacSha512 => BytesOperation::HmacSha512Secret,
+            other => other,
+        }
     }
 }
 
@@ -128,8 +159,9 @@ pub fn has_bytes_operand(left: &Type, right: &Type) -> bool {
     [left, right].into_iter().any(|ty| matches!(scalar_of(ty), Type::Bytes))
 }
 
-/// The native form of a `Bytes` method, or `None` for the `Secret`
-/// methods, which have none.
+/// The native form of a `Bytes` or `Secret` method. An HMAC is named
+/// here by its `Bytes`-keyed operation; the lowering switches to
+/// [`BytesOperation::keyed_by_secret`] when the key is a `Secret`.
 pub fn native_bytes_method(kind: BuiltinMethodKind) -> Option<NativeScalarMethod<BytesOperation>> {
     use BuiltinMethodKind::*;
     use BytesOperation as Op;
@@ -151,6 +183,8 @@ pub fn native_bytes_method(kind: BuiltinMethodKind) -> Option<NativeScalarMethod
         BytesHmacSha256 => Call(Op::HmacSha256),
         BytesHmacSha512 => Call(Op::HmacSha512),
         BytesVerifyEd25519 => Call(Op::VerifyEd25519),
+        SecretVerifyPassword => Call(Op::VerifyPassword),
+        SecretDecodeBase64After => Call(Op::DecodeBase64After),
         _ => return None,
     })
 }
@@ -165,7 +199,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_crypto_method_but_the_secret_ones_has_a_native_form() {
+    fn every_crypto_method_has_a_native_form() {
         use BuiltinMethodKind::*;
         let kinds = [
             StringUtf8,
@@ -183,15 +217,15 @@ mod tests {
             BytesHmacSha256,
             BytesHmacSha512,
             BytesVerifyEd25519,
+            SecretDecodeBase64After,
+            SecretVerifyPassword,
         ];
         for kind in kinds {
             assert!(kind.is_crypto(), "{kind:?}");
             assert!(is_native_bytes_method(kind), "{kind:?} needs a native form");
         }
-        for kind in [SecretDecodeBase64After, SecretVerifyPassword] {
-            assert!(kind.is_crypto(), "{kind:?}");
-            assert!(!is_native_bytes_method(kind), "native code has no `Secret`");
-        }
+        assert_eq!(BytesOperation::HmacSha256.keyed_by_secret(), BytesOperation::HmacSha256Secret);
+        assert_eq!(BytesOperation::HmacSha512.keyed_by_secret(), BytesOperation::HmacSha512Secret);
         assert!(!is_native_bytes_method(StringLength));
     }
 
@@ -201,7 +235,9 @@ mod tests {
         let symbols: std::collections::HashSet<&str> = all.iter().map(|op| op.symbol()).collect();
         assert_eq!(symbols.len(), all.len());
         for op in all {
-            if op.is_parse() {
+            if op == BytesOperation::DecodeBase64After {
+                assert_eq!(op.arity(), 3, "the secret, the prefix and the payload slot");
+            } else if op.is_parse() {
                 assert_eq!(op.arity(), 2, "{op:?} takes its operand and the payload slot");
             }
         }

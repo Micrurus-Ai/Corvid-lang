@@ -25,6 +25,29 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - The cryptography a secret keys, in native code (native dispatch N3b)
+
+`body.utf8().hmac_sha256(key)` and `hmac_sha512` with a `Secret` key,
+`password.verify_password(hash)` and `key.decode_base64_after("whsec_")`
+now compile to native code, so a webhook receiver that verifies
+signatures with a key it reads as a secret builds into a native binary.
+Each is one runtime call that opens the secret object and calls the
+`corvid_crypto::Secret` method the interpreter calls. They join the
+operation table the `Bytes` methods use; an HMAC switches to its
+secret-keyed entry point when the key's type is `Secret`.
+`decode_base64_after` writes a new secret object into the `Result`
+payload, or the message, which never quotes the secret.
+
+The parity test checks that a key decoded from `whsec_` base64 gives the
+same tag as HMAC with those bytes as a `Bytes` key, and that both tiers
+give the same tags, password verdicts (right, wrong, malformed hash) and
+decode error message, with balanced allocations.
+
+Only `hash_password` and tools of the program's own still keep a
+secret on the interpreter; that is N3c.
+
+---
+
 ## 2026-11-25 - Secrets in native code (native dispatch N3a)
 
 A native program can now read a secret with `secret(name)`, draw one with
