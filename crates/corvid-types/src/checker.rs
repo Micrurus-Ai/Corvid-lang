@@ -362,7 +362,6 @@ fn typecheck_with_everything(
     }
 
     c.record_signature_types(file);
-    c.check_json_boundaries(file);
     c.check_secret_boundaries(file);
 
     Checked {
@@ -932,7 +931,6 @@ mod match_check;
 mod expr;
 mod import_call;
 mod json_methods;
-mod json_boundaries;
 mod regex_methods;
 mod signature_types;
 mod tables;

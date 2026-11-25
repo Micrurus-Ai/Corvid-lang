@@ -51,14 +51,18 @@ pub fn query_sql(table: &TableRef<'_>, query: &TableQuery) -> Result<(String, Ve
         sql.push_str(&filter_sql(table, filter, &mut params));
     }
     // The `order_by` column first, then the key's columns, so equal sort
-    // values keep key order; without `order_by`, key order alone.
+    // values keep key order; without `order_by`, key order alone. Each is
+    // named with its table: Postgres resolves a bare name in `ORDER BY` to
+    // an output column first, and the select list reads money and time
+    // columns as text, which would sort `9.50` after `10.0`.
+    let table_name = quote(table.name);
     let mut order = Vec::new();
     if let Some(column) = &query.order {
         let direction = if query.descending { "DESC" } else { "ASC" };
-        order.push(format!("{} {direction}", quote(column)));
+        order.push(format!("{table_name}.{} {direction}", quote(column)));
     }
     for key in table.keys.iter().filter(|key| query.order.as_ref() != Some(*key)) {
-        order.push(format!("{} ASC", quote(key)));
+        order.push(format!("{table_name}.{} ASC", quote(key)));
     }
     sql.push_str(&format!(" ORDER BY {}", order.join(", ")));
     if let Some(count) = query.take {
@@ -179,7 +183,7 @@ mod tests {
         let (sql, params) = query_sql(&table, &query).unwrap();
         assert_eq!(
             sql,
-            "SELECT \"id\", \"title\", \"count\", \"revision\" FROM \"Shelf\" WHERE (\"count\" > ?1 AND substr(\"title\", 1, length(?2)) = ?2) ORDER BY \"title\" DESC, \"id\" ASC LIMIT ?3"
+            "SELECT \"id\", \"title\", \"count\", \"revision\" FROM \"Shelf\" WHERE (\"count\" > ?1 AND substr(\"title\", 1, length(?2)) = ?2) ORDER BY \"Shelf\".\"title\" DESC, \"Shelf\".\"id\" ASC LIMIT ?3"
         );
         assert_eq!(params, vec![DbValue::Integer(2), DbValue::Text("x'; DROP".into()), DbValue::Integer(5)]);
     }
@@ -193,7 +197,7 @@ mod tests {
             ..TableQuery::default()
         };
         let (sql, _) = query_sql(&table, &query).unwrap();
-        assert!(sql.ends_with("WHERE \"title\" IS ?1 ORDER BY \"id\" ASC"), "{sql}");
+        assert!(sql.ends_with("WHERE \"title\" IS ?1 ORDER BY \"Shelf\".\"id\" ASC"), "{sql}");
     }
 
     #[test]

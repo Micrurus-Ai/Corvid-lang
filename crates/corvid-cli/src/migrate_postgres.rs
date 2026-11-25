@@ -168,7 +168,7 @@ pub(crate) fn run_migration_sql(tx: &mut Transaction<'_>, sql: &str) -> Result<(
 /// does not exist.
 pub(crate) fn stored_columns(tx: &mut Transaction<'_>, table: &str) -> Result<Vec<StoredColumn>> {
     let rows = tx.query(
-        "SELECT c.column_name::text, c.data_type::text, c.is_nullable = 'NO',
+        "SELECT c.column_name::text, coalesce(c.domain_name, c.data_type)::text, c.is_nullable = 'NO',
                 EXISTS (
                     SELECT 1 FROM information_schema.table_constraints tc
                     JOIN information_schema.key_column_usage k

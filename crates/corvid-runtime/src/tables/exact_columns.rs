@@ -2,13 +2,13 @@
 //!
 //! [`corvid_types::table_columns`] decides which kind of column each
 //! type gets. This module holds the parts only the runtime can run: the
-//! collations that make SQLite compare decimal and duration text by value,
-//! and the text a zoned time is stored as.
+//! collations that make SQLite compare decimal text and a duration's
+//! nanosecond count by value, and the text a zoned time is stored as.
 
 use std::cmp::Ordering;
 
 use corvid_decimal::Decimal;
-use corvid_time::{Duration, Instant, TimeZone, ZonedTime};
+use corvid_time::{Instant, TimeZone, ZonedTime};
 use corvid_types::table_columns::{DECIMAL_COLLATION, DURATION_COLLATION};
 use rusqlite::Connection;
 
@@ -18,7 +18,7 @@ use rusqlite::Connection;
 /// never compares them some other way.
 pub fn register_sqlite_collations(connection: &Connection) -> rusqlite::Result<()> {
     connection.create_collation(DECIMAL_COLLATION, |a, b| by_value(a, b, |text| Decimal::parse(text).ok()))?;
-    connection.create_collation(DURATION_COLLATION, |a, b| by_value(a, b, |text| Duration::parse(text).ok()))
+    connection.create_collation(DURATION_COLLATION, |a, b| by_value(a, b, |text| text.parse::<i128>().ok()))
 }
 
 /// Compare two stored texts by the values they name. Corvid only stores
@@ -53,6 +53,7 @@ pub fn parse_zoned_time_column_text(text: &str) -> Result<ZonedTime, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use corvid_time::Duration;
 
     fn sorted(connection: &Connection, collation: &str, values: &[&str]) -> Vec<String> {
         connection.execute_batch(&format!("CREATE TABLE t (v TEXT COLLATE {collation})")).unwrap();
@@ -77,10 +78,13 @@ mod tests {
     fn durations_sort_by_value() {
         let connection = Connection::open_in_memory().unwrap();
         register_sqlite_collations(&connection).unwrap();
-        let texts = ["PT2H", "PT59M", "-PT1S", "PT0.5S"].map(|t| Duration::parse(t).unwrap().to_string());
+        // As stored: each duration's nanosecond count, which outgrows an
+        // SQLite integer and so cannot be compared as one.
+        let texts = ["PT2H", "PT59M", "-PT1S", "PT0.5S", "PT87600000H"].map(|t| Duration::parse(t).unwrap().nanoseconds().to_string());
         let ordered = sorted(&connection, DURATION_COLLATION, &texts.each_ref().map(String::as_str));
-        let parsed: Vec<_> = ordered.iter().map(|t| Duration::parse(t).unwrap()).collect();
+        let parsed: Vec<i128> = ordered.iter().map(|t| t.parse().unwrap()).collect();
         assert!(parsed.windows(2).all(|pair| pair[0] < pair[1]), "{ordered:?}");
+        assert!(parsed[parsed.len() - 1] > i128::from(i64::MAX), "{ordered:?}");
     }
 
     #[test]

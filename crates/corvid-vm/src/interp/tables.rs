@@ -275,7 +275,7 @@ impl<'ir> Interpreter<'ir> {
             (ColumnKind::Boolean, Value::Bool(b)) => DbValue::Bool(b),
             // B09 P8a — each as the text its column compares exactly.
             (ColumnKind::Decimal, Value::Decimal(d)) => DbValue::Text(d.to_string()),
-            (ColumnKind::Duration, Value::Duration(d)) => DbValue::Text(d.to_string()),
+            (ColumnKind::Duration, Value::Duration(d)) => DbValue::Text(d.nanoseconds().to_string()),
             (ColumnKind::Instant, Value::Instant(i)) => DbValue::Text(i.to_sortable_text()),
             (ColumnKind::ZonedTime, Value::ZonedTime(z)) => DbValue::Text(zoned_time_column_text(&z)),
             (ColumnKind::TimeZone, Value::TimeZone(z)) => DbValue::Text(z.name().to_string()),
@@ -324,7 +324,10 @@ fn exact_value(kind: ColumnKind, text: &str) -> Result<Value, String> {
     let refused = |problem: String| format!("the database holds `{text}` where {} belongs: {problem}", kind.type_name());
     Ok(match kind {
         ColumnKind::Decimal => Value::Decimal(corvid_decimal::Decimal::parse(text).map_err(|e| refused(e.to_string()))?),
-        ColumnKind::Duration => Value::Duration(corvid_time::Duration::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::Duration => {
+            let nanoseconds = text.parse::<i128>().map_err(|e| refused(e.to_string()))?;
+            Value::Duration(corvid_time::Duration::from_nanoseconds(nanoseconds).map_err(|e| refused(e.to_string()))?)
+        }
         ColumnKind::Instant => Value::Instant(corvid_time::Instant::parse(text).map_err(|e| refused(e.to_string()))?),
         ColumnKind::ZonedTime => Value::ZonedTime(parse_zoned_time_column_text(text).map_err(refused)?),
         ColumnKind::TimeZone => Value::TimeZone(corvid_time::TimeZone::parse(text).map_err(|e| refused(e.to_string()))?),

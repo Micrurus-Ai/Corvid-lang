@@ -215,6 +215,44 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-24 - Money and time columns on Postgres (B09 P8b)
+
+The money and time columns now run on Postgres too, so a finance or
+scheduling application on Postgres stores a `Decimal`, `Instant` or
+`Duration` column exactly. Before, any of these columns on Postgres was
+a compile error.
+
+Postgres, like the planner on SQLite, identifies a column by its type,
+so each Corvid type gets a domain: `corvid_decimal AS numeric`,
+`corvid_duration AS numeric(39, 0)` and byte-ordered `text` domains for
+the rest, the instant's with a `CHECK` on its fixed-width form. Byte
+order (`COLLATE "C"`) matters, because a locale collation can treat
+punctuation specially. A migration creates each domain the first time a
+table or column needs it, with a `DO` block that does nothing if it
+exists. The migration runner's transaction scanner already skips
+dollar-quoted bodies, so the block passes. The planner reads
+`domain_name` before `data_type`, so a re-plan sees the same type.
+
+Two decisions changed P8a's encoding and its SQL. A duration was ISO
+8601 text, which SQLite's collation compares by value but Postgres
+cannot: Postgres has no comparison by value for text. It is now the
+nanosecond count on both engines, which keeps the interpreter
+engine-blind. The change landed before any database could hold the old
+form, since P8a shipped today. And the first Postgres run sorted `9.50`
+after `10.0`. The select list reads these columns as `"total"::text AS
+"total"`, and Postgres resolves a bare `ORDER BY "total"` to that text
+output column. Every ordering column is now `"Table"."column"`.
+
+With that, no table column type is refused by storage any more, so the
+checker's last column refusal, its module and its error kind are
+removed. The CLI lifecycle test now adds a money column to an existing
+table, fills it, compares `10.0` with `10` and re-plans, on both
+engines. Writing that test found a papercut, recorded on the roadmap: a
+number literal inside `Some(...)` is not typed by the comparison's
+other side.
+
+---
+
 ## 2026-11-24 - Byte strings as table columns (B09 P8c)
 
 A table can now hold a `Bytes` field, stored as the bytes themselves:
