@@ -861,6 +861,31 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Native code holds refinements too (B09 Refine-2)
+
+Refine-1 checked refined values on the interpreter and kept any program
+that gave a refined field a computed value off native code, so the
+tiers could not disagree. Native code now checks them itself. At a
+constructor (record or variant) and at a field assignment, an `Int`
+under `between` is compared against its bounds and a `String` under
+`len_between` has its characters counted; a value out of range calls
+`corvid_refinement_violated_int` or `_text` with the interpreter's
+message up to the value, embedded as an immortal string literal, and
+the handler appends the value and exits. The text handler writes the
+value as serde_json writes it, quoted with the same escapes, so the
+messages match byte for byte; a parity test with a quote inside the
+value holds that. The check lives in its own module,
+`lowering/expr/refinement.rs`. The routing rule from Refine-1 is gone,
+so a refined program builds with `corvid build`.
+
+Found on the way: the parity harness links against a prebuilt
+`corvid-test-tools` release staticlib, which bundles the C runtime, so a
+new C symbol fails to link until that library is rebuilt
+(`cargo build --release -p corvid-test-tools`); rebuild it before
+running the parity tests after changing the C runtime.
+
+---
+
 ## 2026-11-25 - The Python build target is retired
 
 `corvid build` defaulted to a Python transpiler from Corvid's first

@@ -7,6 +7,7 @@ mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
+mod refinement;
 mod scalar_call;
 mod try_propagate;
 mod try_retry;
@@ -23,6 +24,7 @@ pub(super) use operand::{
     lower_string_operand_maybe_borrowed,
 };
 pub(super) use overflow::{trap_if, with_overflow_trap};
+pub(super) use refinement::hold_refinement;
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
@@ -1340,16 +1342,18 @@ pub(super) fn lower_expr(
             IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
                 let ty = runtime.ir_types.get(def_id).ok_or_else(||
                     CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
-                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                // A refinement message names the record, or the variant as the
+                // interpreter does.
+                let (fields, info, tag, owner) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
                     let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
                         CodegenError::cranelift("unknown constructor tag", expr.span))?;
-                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index), variant.name.as_str())
                 } else {
-                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None, ty.name.as_str())
                 };
                 let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder, module, runtime, fields, *info, tag,
+                    builder, module, runtime, owner, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,

@@ -62,6 +62,51 @@ typedef struct {
     long long length;
 } corvid_string;
 
+/* B09 Refine-2: a value built or assigned in native code broke its
+ * field's refinement. `message` is the interpreter's message up to the
+ * value (`` `Search.limit` must be between(1, 50), but this value is ``);
+ * the handler appends the value as the interpreter shows it, then
+ * stops the program. */
+static void corvid_write_string(FILE* out, const corvid_string* s) {
+    fwrite(s->bytes_ptr, 1, (size_t)s->length, out);
+}
+
+void corvid_refinement_violated_int(void* message, long long value) {
+    fputs("corvid: runtime error: ", stderr);
+    corvid_write_string(stderr, (const corvid_string*)message);
+    fprintf(stderr, "%lld\n", value);
+    exit(1);
+}
+
+/* The value as JSON text, the form the interpreter prints: quoted, with
+ * `"`, `\` and control characters escaped as serde_json escapes them. */
+void corvid_refinement_violated_text(void* message, void* value) {
+    const corvid_string* text = (const corvid_string*)value;
+    fputs("corvid: runtime error: ", stderr);
+    corvid_write_string(stderr, (const corvid_string*)message);
+    fputc('"', stderr);
+    for (long long i = 0; i < text->length; i++) {
+        unsigned char c = (unsigned char)text->bytes_ptr[i];
+        switch (c) {
+            case '"': fputs("\\\"", stderr); break;
+            case '\\': fputs("\\\\", stderr); break;
+            case '\n': fputs("\\n", stderr); break;
+            case '\r': fputs("\\r", stderr); break;
+            case '\t': fputs("\\t", stderr); break;
+            case '\b': fputs("\\b", stderr); break;
+            case '\f': fputs("\\f", stderr); break;
+            default:
+                if (c < 0x20) {
+                    fprintf(stderr, "\\u%04x", c);
+                } else {
+                    fputc(c, stderr);
+                }
+        }
+    }
+    fputs("\"\n", stderr);
+    exit(1);
+}
+
 /* Allocate a fresh String with `len` bytes, copying from `src`. The
  * descriptor and bytes share one allocation; bytes_ptr points at the
  * memory immediately following the descriptor (same allocation block).

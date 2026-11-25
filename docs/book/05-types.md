@@ -499,8 +499,8 @@ agent aged(years: Int) -> Person:
 
 A table row read from the database is checked too, so a row written
 outside the program cannot hand on a value its column forbids. Native
-code does not check refinements yet, so a program that gives a refined
-field a computed value runs on the interpreter.
+code checks refinements the same way and stops with the same message,
+so a refined program compiles with `corvid build`.
 
 ## Sum types (enums)
 

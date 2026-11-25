@@ -66,6 +66,8 @@ mod currency;
 mod crypto;
 #[path = "parity/loop_ownership.rs"]
 mod loop_ownership;
+#[path = "parity/refinements.rs"]
+mod refinements;
 
 /// Path to the `corvid-test-tools` staticlib. The parity harness links
 /// this into every compiled Corvid binary so `#[tool]`-declared mocks

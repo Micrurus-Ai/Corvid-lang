@@ -73,3 +73,20 @@ pub(super) fn assert_parity_trap(src: &str, message: &str) {
     );
 }
 
+
+/// Both tiers stop with `message`: the interpreter's error says it, and
+/// the compiled binary prints it as a runtime error and fails.
+#[track_caller]
+pub(super) fn assert_parity_stop(src: &str, message: &str) {
+    let ir = ir_of(src);
+    let error = interpret(&ir).expect_err("the interpreter must stop");
+    assert!(error.to_string().contains(message), "interpreter error `{error}` does not carry `{message}`; src=\n{src}");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = std::process::Command::new(compile(&ir, &tmp)).output().expect("run compiled binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "the compiled binary must stop; stdout={}", String::from_utf8_lossy(&output.stdout));
+    assert!(
+        stderr.contains(&format!("corvid: runtime error: {message}")),
+        "native stderr `{stderr}` does not carry `{message}`; src=\n{src}"
+    );
+}
