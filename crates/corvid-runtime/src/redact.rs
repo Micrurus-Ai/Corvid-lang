@@ -53,6 +53,26 @@ impl RedactionSet {
         self.secrets.is_empty()
     }
 
+    /// Replace every occurrence of a known secret inside `text`. For text
+    /// that embeds values rather than being one, such as a URL whose path
+    /// or query carries a token, or an error message that quotes the URL.
+    /// Longer secrets are replaced first, so one secret that contains
+    /// another is removed whole.
+    pub fn redact_within(&self, text: &str) -> String {
+        if self.secrets.is_empty() {
+            return text.to_string();
+        }
+        let mut secrets: Vec<&String> = self.secrets.iter().collect();
+        secrets.sort_by(|a, b| b.len().cmp(&a.len()).then(a.cmp(b)));
+        let mut out = text.to_string();
+        for secret in secrets {
+            if out.contains(secret.as_str()) {
+                out = out.replace(secret.as_str(), crate::secret_arguments::REDACTED_SECRET);
+            }
+        }
+        out
+    }
+
     /// Walk a JSON value and redact any string equal to a known secret.
     /// Returns a new `Value`; the original is not mutated.
     pub fn redact(&self, value: Value) -> Value {
@@ -98,6 +118,22 @@ fn name_looks_secret(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn redact_within_removes_a_secret_embedded_in_text() {
+        let mut set = RedactionSet::empty();
+        set.add("tok-123");
+        set.add("tok-123-long");
+        assert_eq!(
+            set.redact_within("https://api.example.com/files?key=tok-123-long&x=tok-123"),
+            format!(
+                "https://api.example.com/files?key={0}&x={0}",
+                crate::secret_arguments::REDACTED_SECRET
+            )
+        );
+        assert_eq!(set.redact_within("nothing here"), "nothing here");
+    }
+
     use super::*;
     use serde_json::json;
 

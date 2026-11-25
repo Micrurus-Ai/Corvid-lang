@@ -53,16 +53,24 @@ server Billing:
     ));
 }
 
+/// B09 P8a stores the B06 types in exact columns, and inside a
+/// JSON-stored column as their exact text, so only `Bytes` still waits
+/// for its column (P8c), directly or inside a record.
 #[test]
-fn a_table_column_of_a_b06_type_waits_for_its_storage_mapping() {
+fn a_table_column_waits_only_for_bytes() {
     let errors: Vec<_> = check(
         "type Price:
     amount: Decimal
+
+type Signed:
+    signature: Bytes
 
 table Product:
     key id: String
     price: Decimal
     nested: Price
+    data: Bytes
+    proof: Signed
 ",
     )
     .errors
@@ -78,5 +86,5 @@ table Product:
             _ => None,
         })
         .collect();
-    assert_eq!(columns, ["Decimal", "Decimal"], "got {errors:?}");
+    assert_eq!(columns, ["Bytes", "Bytes"], "got {errors:?}");
 }

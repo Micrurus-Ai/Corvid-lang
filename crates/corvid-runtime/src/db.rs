@@ -219,6 +219,9 @@ impl DbHandleRegistry {
                 RuntimeError::Other(format!("std.db sqlite open `{path}` failed: {err}"))
             })?
         };
+        // Table columns of money and time compare through these (B09 P8a).
+        crate::tables::register_sqlite_collations(&conn)
+            .map_err(|err| RuntimeError::Other(format!("std.db sqlite open `{path}` could not register collations: {err}")))?;
         let writer = if path == ":memory:" {
             None
         } else {

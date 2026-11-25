@@ -16,16 +16,36 @@ pub enum ColumnKind {
     Boolean,
     /// Any other type, stored as its public JSON text.
     Json,
+    /// B09 P8a — a `Decimal`, as its exact text (`19.90`), compared by
+    /// value through the `corvid_decimal` collation.
+    Decimal,
+    /// A `Duration`, as its ISO 8601 text (`PT1H30M`), compared by value
+    /// through the `corvid_duration` collation. Corvid durations hold
+    /// 128-bit nanoseconds, more than an SQLite integer.
+    Duration,
+    /// An `Instant`, as UTC RFC 3339 text with all nine fractional
+    /// digits, which sorts in time order.
+    Instant,
+    /// A `ZonedTime`, as its instant's sortable text and its zone,
+    /// `2026-03-29T01:30:00.000000000Z[Europe/Berlin]`.
+    ZonedTime,
+    /// A `TimeZone`, as its IANA name.
+    TimeZone,
+    /// A `Currency`, as its ISO 4217 code.
+    Currency,
+    /// A `Locale`, as its canonical BCP 47 tag.
+    Locale,
 }
 
 impl ColumnKind {
     /// The declared SQL type. Each kind has its own, so the stored
     /// schema records how a column is stored and the migration planner
-    /// can see a change from `Int` to `Bool` or from `String` to a
-    /// JSON-stored type. `BOOLEAN` has SQLite's numeric affinity, which
-    /// keeps 0 and 1 as integers; `JSON TEXT` contains `TEXT`, so its
-    /// affinity is text and JSON such as `5` is never turned into a
-    /// number.
+    /// can see a change from `Int` to `Bool`, from `String` to a
+    /// JSON-stored type, or from `String` to `Decimal`, rather than
+    /// reading stored values as another type. `BOOLEAN` has SQLite's
+    /// numeric affinity, which keeps 0 and 1 as integers. Every name
+    /// ending in `TEXT` has text affinity (none contains `INT`), so text
+    /// such as `5` is never turned into a number.
     pub fn sql_type(self) -> &'static str {
         match self {
             Self::Integer => "INTEGER",
@@ -33,22 +53,89 @@ impl ColumnKind {
             Self::Text => "TEXT",
             Self::Boolean => "BOOLEAN",
             Self::Json => "JSON TEXT",
+            Self::Decimal => "DECIMAL TEXT",
+            Self::Duration => "DURATION TEXT",
+            Self::Instant => "INSTANT TEXT",
+            Self::ZonedTime => "ZONED TIME TEXT",
+            Self::TimeZone => "TIME ZONE TEXT",
+            Self::Currency => "CURRENCY TEXT",
+            Self::Locale => "LOCALE TEXT",
         }
     }
+
+    /// Every kind, for reading a stored column's declared type back.
+    pub const ALL: [ColumnKind; 12] = [
+        Self::Integer,
+        Self::Real,
+        Self::Text,
+        Self::Boolean,
+        Self::Json,
+        Self::Decimal,
+        Self::Duration,
+        Self::Instant,
+        Self::ZonedTime,
+        Self::TimeZone,
+        Self::Currency,
+        Self::Locale,
+    ];
 
     /// The kind a stored column's declared type names, if Corvid
     /// created it.
     pub fn from_sql_type(sql_type: &str) -> Option<Self> {
-        Some(match sql_type.trim().to_ascii_uppercase().as_str() {
-            "INTEGER" => Self::Integer,
-            "REAL" => Self::Real,
-            "TEXT" => Self::Text,
-            "BOOLEAN" => Self::Boolean,
-            "JSON TEXT" => Self::Json,
-            _ => return None,
-        })
+        let sql_type = sql_type.trim();
+        Self::ALL.into_iter().find(|kind| kind.sql_type().eq_ignore_ascii_case(sql_type))
+    }
+
+    /// The SQLite collation a column of this kind compares with, where
+    /// text order is not value order. Corvid registers each on every
+    /// SQLite connection it opens.
+    pub fn sqlite_collation(self) -> Option<&'static str> {
+        match self {
+            Self::Decimal => Some(DECIMAL_COLLATION),
+            Self::Duration => Some(DURATION_COLLATION),
+            _ => None,
+        }
+    }
+
+    /// Whether the kind stores one of the money and time types in a
+    /// column that compares it exactly (B09 P8a).
+    pub fn is_exact_text(self) -> bool {
+        matches!(
+            self,
+            Self::Decimal | Self::Duration | Self::Instant | Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale
+        )
+    }
+
+    /// Whether the type stored has an order in Corvid, so `order_by` may
+    /// sort by it. A zoned time compares only by equality, since two in
+    /// different zones can be the same instant.
+    pub fn is_ordered(self) -> bool {
+        !matches!(self, Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale | Self::Json)
+    }
+
+    /// The Corvid type a column of this kind holds, for messages.
+    pub fn type_name(self) -> &'static str {
+        match self {
+            Self::Integer => "Int",
+            Self::Real => "Float",
+            Self::Text => "String",
+            Self::Boolean => "Bool",
+            Self::Json => "a JSON-stored type",
+            Self::Decimal => "Decimal",
+            Self::Duration => "Duration",
+            Self::Instant => "Instant",
+            Self::ZonedTime => "ZonedTime",
+            Self::TimeZone => "TimeZone",
+            Self::Currency => "Currency",
+            Self::Locale => "Locale",
+        }
     }
 }
+
+/// The SQLite collation that compares decimal text by value.
+pub const DECIMAL_COLLATION: &str = "corvid_decimal";
+/// The SQLite collation that compares ISO 8601 duration text by value.
+pub const DURATION_COLLATION: &str = "corvid_duration";
 
 /// How a field of type `ty` is stored, and whether the column admits
 /// `NULL`. The interpreter and the migration planner both decide
@@ -66,16 +153,15 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         Type::Float => (ColumnKind::Real, false),
         Type::String => (ColumnKind::Text, false),
         Type::Bool => (ColumnKind::Boolean, false),
-        // B06 — a decision, not a fallthrough: `Decimal` stays JSON-stored
-        // until B06 and the main line agree its column mapping (the
-        // "Decimal, Instant, Duration and ZonedTime as B09 table columns"
-        // roadmap item, after B06's JSON slice). The checker refuses
-        // `Decimal` table columns until then.
-        Type::Decimal => (ColumnKind::Json, false),
-        // B06 — the same deferred decision for the time types.
-        Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => (ColumnKind::Json, false),
-        // The same deferred decision for `Bytes`, which may want a BLOB
-        // column; the checker refuses `Bytes` table columns until then.
+        Type::Decimal => (ColumnKind::Decimal, false),
+        Type::Duration => (ColumnKind::Duration, false),
+        Type::Instant => (ColumnKind::Instant, false),
+        Type::ZonedTime => (ColumnKind::ZonedTime, false),
+        Type::TimeZone => (ColumnKind::TimeZone, false),
+        Type::Currency => (ColumnKind::Currency, false),
+        Type::Locale => (ColumnKind::Locale, false),
+        // A decision, not a fallthrough: `Bytes` may want a BLOB column
+        // (B09 P8c); the checker refuses `Bytes` table columns until then.
         Type::Bytes => (ColumnKind::Json, false),
         // A `Secret` is never stored: the checker refuses a `Secret`
         // column (hash it, or wait for an encrypted column). Named here
@@ -91,4 +177,34 @@ pub fn untainted(mut ty: &Type) -> &Type {
         ty = inner;
     }
     ty
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_kind_reads_back_from_its_declared_type() {
+        for kind in ColumnKind::ALL {
+            assert_eq!(ColumnKind::from_sql_type(kind.sql_type()), Some(kind), "{kind:?}");
+            assert_eq!(ColumnKind::from_sql_type(&kind.sql_type().to_ascii_lowercase()), Some(kind), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn text_kinds_keep_sqlite_text_affinity() {
+        // SQLite gives integer affinity to any declared type containing
+        // `INT`, ahead of the `TEXT` rule.
+        for kind in ColumnKind::ALL.into_iter().filter(|k| k.sql_type().ends_with("TEXT")) {
+            assert!(!kind.sql_type().contains("INT"), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn money_and_time_get_their_own_columns() {
+        assert_eq!(column_kind(&Type::Decimal), (ColumnKind::Decimal, false));
+        assert_eq!(column_kind(&Type::Option(Box::new(Type::Instant))), (ColumnKind::Instant, true));
+        assert_eq!(column_kind(&Type::Bytes).0, ColumnKind::Json);
+        assert!(!ColumnKind::ZonedTime.is_ordered() && ColumnKind::Duration.is_ordered());
+    }
 }

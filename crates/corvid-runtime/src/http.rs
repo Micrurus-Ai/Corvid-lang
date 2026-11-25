@@ -136,6 +136,59 @@ pub struct HttpResponse {
     pub elapsed_ms: u64,
 }
 
+/// How one hop of one attempt ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpExchangeOutcome {
+    /// A response arrived and is the answer.
+    Response,
+    /// A redirect arrived and was followed.
+    Redirected,
+    /// The declared timeout expired with this hop in flight.
+    Timeout,
+    /// A response arrived, but the declared policy refused where it led.
+    Refused,
+    /// The connection or the body failed.
+    TransportError,
+}
+
+impl HttpExchangeOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Response => "response",
+            Self::Redirected => "redirected",
+            Self::Timeout => "timeout",
+            Self::Refused => "refused",
+            Self::TransportError => "transport_error",
+        }
+    }
+}
+
+/// What one hop of one attempt did, reported to the caller of
+/// [`HttpClient::send_observed`] so it can be recorded. It holds nothing
+/// credential-shaped: headers by name only, the request body by its
+/// SHA-256 and size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpExchangeObservation {
+    /// 1 for the first attempt, 2 for the first retry, and so on.
+    pub attempt: u32,
+    /// 0 for the request as sent, 1 for the first redirect followed.
+    pub hop: u32,
+    pub method: String,
+    pub url: String,
+    pub request_headers: Vec<String>,
+    pub request_body_sha256: Option<String>,
+    pub request_body_bytes: u64,
+    pub status: Option<u16>,
+    pub response_headers: Vec<String>,
+    pub response_body_bytes: u64,
+    pub elapsed_ms: u64,
+    pub outcome: HttpExchangeOutcome,
+    pub detail: Option<String>,
+}
+
+/// The receiver of every exchange a send makes.
+pub type HttpExchangeObserver<'a> = &'a (dyn Fn(HttpExchangeObservation) + Send + Sync);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedHttpExchange {
     pub request_fingerprint: String,
@@ -242,6 +295,15 @@ impl HttpClient {
     }
 
     pub async fn send(&self, request: &HttpRequest) -> Result<HttpResponse, RuntimeError> {
+        self.send_observed(request, &|_| {}).await
+    }
+
+    /// [`Self::send`], reporting every hop of every attempt to `observe`.
+    pub async fn send_observed(
+        &self,
+        request: &HttpRequest,
+        observe: HttpExchangeObserver<'_>,
+    ) -> Result<HttpResponse, RuntimeError> {
         if self.quarantined {
             return Err(RuntimeError::QuarantineViolation {
                 surface: "http".to_string(),
@@ -259,7 +321,7 @@ impl HttpClient {
         let mut last_error = None;
         while attempt < attempts_allowed {
             attempt += 1;
-            match self.attempt(request).await {
+            match self.attempt(request, attempt, observe).await {
                 Ok((status, headers, body)) => {
                     let should_retry =
                         request.retry.retry_on_5xx && status >= 500 && attempt < attempts_allowed;
@@ -301,22 +363,39 @@ impl HttpClient {
     async fn attempt(
         &self,
         request: &HttpRequest,
+        attempt: u32,
+        observe: HttpExchangeObserver<'_>,
     ) -> Result<(u16, Vec<HttpHeader>, String), AttemptFailure> {
         let timeout = Duration::from_millis(request.timeout_ms);
-        match tokio::time::timeout(timeout, self.follow_redirects(request)).await {
+        // The hop in flight, so a timeout that cancels the redirect loop
+        // can still be recorded against the request it interrupted.
+        let in_flight = std::sync::Mutex::new(HopInFlight {
+            hop: 0,
+            url: request.url.clone(),
+            headers: request.headers.clone(),
+            body: request.body.clone(),
+            started: Instant::now(),
+        });
+        let exchange = ExchangeRecorder { request, attempt, observe, in_flight: &in_flight };
+        match tokio::time::timeout(timeout, self.follow_redirects(request, &exchange)).await {
             Ok(result) => result,
-            Err(_) => Err(AttemptFailure::transient(format!(
-                "{} `{}` did not finish within its declared timeout of {}",
-                request.method,
-                request.url,
-                describe_timeout(request.timeout_ms)
-            ))),
+            Err(_) => {
+                let message = format!(
+                    "{} `{}` did not finish within its declared timeout of {}",
+                    request.method,
+                    request.url,
+                    describe_timeout(request.timeout_ms)
+                );
+                exchange.timed_out(&message);
+                Err(AttemptFailure::transient(message))
+            }
         }
     }
 
     async fn follow_redirects(
         &self,
         request: &HttpRequest,
+        exchange: &ExchangeRecorder<'_>,
     ) -> Result<(u16, Vec<HttpHeader>, String), AttemptFailure> {
         let method = request.method.parse::<reqwest::Method>().map_err(|err| {
             AttemptFailure::refused(format!("invalid HTTP method `{}`: {err}", request.method))
@@ -328,6 +407,7 @@ impl HttpClient {
         let mut body = request.body.clone();
         let mut hops = 0;
         loop {
+            exchange.start_hop(hops, &url, &headers, &body);
             let mut builder = self.client.request(method.clone(), url.clone());
             for header in &headers {
                 builder = builder.header(&header.name, &header.value);
@@ -335,27 +415,45 @@ impl HttpClient {
             if let Some(body) = &body {
                 builder = builder.body(body.clone());
             }
-            let response = builder
-                .send()
-                .await
-                .map_err(|err| AttemptFailure::transient(err.to_string()))?;
+            let response = match builder.send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    let failure = AttemptFailure::transient(err.to_string());
+                    exchange.finish(None, &[], 0, HttpExchangeOutcome::TransportError, Some(&failure.message));
+                    return Err(failure);
+                }
+            };
             let status = response.status().as_u16();
+            let received_headers = response_headers(response.headers());
             let location = redirect_location(&response);
             let Some(location) = location.filter(|_| request.redirects != RedirectPolicy::Never)
             else {
-                let response_headers = response_headers(response.headers());
-                let text = response.text().await.map_err(|err| {
-                    AttemptFailure::transient(format!("failed to read HTTP response body: {err}"))
-                })?;
-                return Ok((status, response_headers, text));
+                let text = match response.text().await {
+                    Ok(text) => text,
+                    Err(err) => {
+                        let failure = AttemptFailure::transient(format!(
+                            "failed to read HTTP response body: {err}"
+                        ));
+                        exchange.finish(Some(status), &received_headers, 0, HttpExchangeOutcome::TransportError, Some(&failure.message));
+                        return Err(failure);
+                    }
+                };
+                exchange.finish(Some(status), &received_headers, text.len() as u64, HttpExchangeOutcome::Response, None);
+                return Ok((status, received_headers, text));
+            };
+            // Every refusal below is recorded against the hop whose
+            // response led to it.
+            let refuse = |message: String| {
+                exchange.finish(Some(status), &received_headers, 0, HttpExchangeOutcome::Refused, Some(&message));
+                AttemptFailure::refused(message)
             };
             let next = url.join(&location).map_err(|err| {
-                AttemptFailure::refused(format!(
+                refuse(format!(
                     "`{url}` answered {status} with a Location `{location}` that is not a URL: {err}"
                 ))
             })?;
             if hops == MAX_REDIRECT_HOPS {
-                return Err(AttemptFailure::refused(format!(
+                return Err(refuse(format!(
                     "{} `{}` was redirected more than {MAX_REDIRECT_HOPS} times; the last hop pointed at `{next}`",
                     request.method, request.url
                 )));
@@ -365,7 +463,7 @@ impl HttpClient {
                 && method != reqwest::Method::GET
                 && method != reqwest::Method::HEAD;
             if changes_method {
-                return Err(AttemptFailure::refused(format!(
+                return Err(refuse(format!(
                     "{method} `{url}` was answered {status}, which would re-send it to `{next}` as a GET \
                      without its body; Corvid refuses rather than change the request's method. \
                      A provider that moves a {method} endpoint answers 307 or 308"
@@ -375,7 +473,7 @@ impl HttpClient {
             match request.redirects {
                 RedirectPolicy::Never => unreachable!("a `never` policy returns the 3xx above"),
                 RedirectPolicy::SameHost if leaves_origin => {
-                    return Err(AttemptFailure::refused(format!(
+                    return Err(refuse(format!(
                         "`{url}` redirected to `{next}`, another host, and the connector declares \
                          `redirects: same_host`"
                     )));
@@ -383,13 +481,14 @@ impl HttpClient {
                 RedirectPolicy::SameHost => {}
                 RedirectPolicy::AllowedHosts => {
                     if let Err(err) = self.egress.check(next.as_str()) {
-                        return Err(AttemptFailure::refused(format!(
+                        return Err(refuse(format!(
                             "`{url}` redirected to `{next}`, which the project's HTTP policy refuses: {}",
                             policy_message(err)
                         )));
                     }
                 }
             }
+            exchange.finish(Some(status), &received_headers, 0, HttpExchangeOutcome::Redirected, None);
             if leaves_origin {
                 headers.retain(|header| !request.is_credential_header(&header.name));
             }
@@ -400,6 +499,68 @@ impl HttpClient {
             }
             url = next;
         }
+    }
+}
+
+/// The hop an attempt is sending, kept so a timeout can name it.
+struct HopInFlight {
+    hop: u32,
+    url: String,
+    headers: Vec<HttpHeader>,
+    body: Option<String>,
+    started: Instant,
+}
+
+/// Turns each hop of one attempt into an [`HttpExchangeObservation`].
+struct ExchangeRecorder<'a> {
+    request: &'a HttpRequest,
+    attempt: u32,
+    observe: HttpExchangeObserver<'a>,
+    in_flight: &'a std::sync::Mutex<HopInFlight>,
+}
+
+impl ExchangeRecorder<'_> {
+    fn start_hop(&self, hop: u32, url: &reqwest::Url, headers: &[HttpHeader], body: &Option<String>) {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *in_flight = HopInFlight {
+            hop,
+            url: url.to_string(),
+            headers: headers.to_vec(),
+            body: body.clone(),
+            started: Instant::now(),
+        };
+    }
+
+    fn finish(
+        &self,
+        status: Option<u16>,
+        response_headers: &[HttpHeader],
+        response_body_bytes: u64,
+        outcome: HttpExchangeOutcome,
+        detail: Option<&str>,
+    ) {
+        let in_flight = self.in_flight.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        (self.observe)(HttpExchangeObservation {
+            attempt: self.attempt,
+            hop: in_flight.hop,
+            method: self.request.method.clone(),
+            url: in_flight.url.clone(),
+            request_headers: in_flight.headers.iter().map(|h| h.name.to_ascii_lowercase()).collect(),
+            request_body_sha256: in_flight.body.as_ref().map(|body| {
+                encode_hex(&Sha256::digest(body.as_bytes()))
+            }),
+            request_body_bytes: in_flight.body.as_ref().map_or(0, |body| body.len() as u64),
+            status,
+            response_headers: response_headers.iter().map(|h| h.name.to_ascii_lowercase()).collect(),
+            response_body_bytes,
+            elapsed_ms: elapsed_ms(in_flight.started),
+            outcome,
+            detail: detail.map(str::to_string),
+        });
+    }
+
+    fn timed_out(&self, message: &str) {
+        self.finish(None, &[], 0, HttpExchangeOutcome::Timeout, Some(message));
     }
 }
 
@@ -1105,6 +1266,106 @@ mod tests {
 
         assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
         assert!(err.to_string().contains("declared timeout of 300ms"), "{err}");
+    }
+
+    /// Collects what an observed send reports.
+    fn observe_into(
+        seen: &std::sync::Mutex<Vec<HttpExchangeObservation>>,
+    ) -> impl Fn(HttpExchangeObservation) + Send + Sync + '_ {
+        move |observation| seen.lock().unwrap().push(observation)
+    }
+
+    /// A followed redirect and its answer are two exchanges, numbered by
+    /// hop; a retried 5xx is a second attempt. Headers are reported by
+    /// name, and no credential value reaches an observation.
+    #[tokio::test]
+    async fn every_hop_of_every_attempt_is_observed_without_credentials() {
+        let server = MockServer::start().await;
+        Mock::given(path("/a"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        redirect_to(&server, "/a", 302, "/b".to_string()).await;
+        answer(&server, "/b", "done").await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+        let req = request("GET", url_on("api.example.com", &server, "/a"), RedirectPolicy::SameHost)
+            .retry(HttpRetryPolicy { max_retries: 1, retry_on_5xx: true })
+            .credential_header("authorization", "Bearer sk_observed_secret");
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let response = client.send_observed(&req, &observe_into(&seen)).await.unwrap();
+
+        assert_eq!(response.body, "done");
+        let seen = seen.into_inner().unwrap();
+        let summary: Vec<_> = seen.iter().map(|o| (o.attempt, o.hop, o.status, o.outcome)).collect();
+        assert_eq!(
+            summary,
+            vec![
+                (1, 0, Some(503), HttpExchangeOutcome::Response),
+                (2, 0, Some(302), HttpExchangeOutcome::Redirected),
+                (2, 1, Some(200), HttpExchangeOutcome::Response),
+            ]
+        );
+        assert!(seen[2].url.ends_with("/b"));
+        assert_eq!(seen[2].response_body_bytes, 4);
+        assert!(seen[0].request_headers.contains(&"authorization".to_string()));
+        assert!(!format!("{seen:?}").contains("sk_observed_secret"));
+    }
+
+    /// A timeout and a refused redirect are each recorded against the hop
+    /// they ended, with the reason.
+    #[tokio::test]
+    async fn a_timeout_and_a_refusal_are_observed_with_their_reason() {
+        let server = MockServer::start().await;
+        Mock::given(path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+            .mount(&server)
+            .await;
+        redirect_to(&server, "/away", 302, "https://elsewhere.example.org/x".to_string()).await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let slow = HttpRequest::new(
+            "GET",
+            url_on("api.example.com", &server, "/slow"),
+            Duration::from_millis(200),
+            RedirectPolicy::Never,
+        );
+        client.send_observed(&slow, &observe_into(&seen)).await.expect_err("times out");
+        let away = request("GET", url_on("api.example.com", &server, "/away"), RedirectPolicy::SameHost);
+        client.send_observed(&away, &observe_into(&seen)).await.expect_err("refused");
+
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].outcome, HttpExchangeOutcome::Timeout);
+        assert_eq!(seen[0].status, None);
+        assert!(seen[0].detail.as_deref().unwrap().contains("declared timeout of 200ms"));
+        assert_eq!(seen[1].outcome, HttpExchangeOutcome::Refused);
+        assert_eq!(seen[1].status, Some(302));
+        assert!(seen[1].detail.as_deref().unwrap().contains("redirects: same_host"));
+    }
+
+    /// The request body is recorded by its SHA-256 and size, never as text.
+    #[tokio::test]
+    async fn the_request_body_is_observed_by_digest_only() {
+        let server = MockServer::start().await;
+        answer(&server, "/submit", "ok").await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+        let body = r#"{"card":"4242424242424242"}"#;
+        let req = request("PUT", url_on("api.example.com", &server, "/submit"), RedirectPolicy::Never)
+            .json_body(body);
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        client.send_observed(&req, &observe_into(&seen)).await.unwrap();
+
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen[0].request_body_bytes, body.len() as u64);
+        assert_eq!(
+            seen[0].request_body_sha256.as_deref(),
+            Some(encode_hex(&Sha256::digest(body.as_bytes())).as_str())
+        );
+        assert!(!format!("{seen:?}").contains("4242424242424242"));
     }
 
     #[test]

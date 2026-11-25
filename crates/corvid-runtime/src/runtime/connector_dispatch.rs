@@ -83,7 +83,12 @@ impl Runtime {
             if let Some((limit, window_secs)) = spec.rate_limit {
                 self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;
             }
-            match self.http.send(&request).await {
+            // The dispatcher drives retries itself, so it numbers them.
+            let record = |mut observation: crate::http::HttpExchangeObservation| {
+                observation.attempt = attempt as u32 + 1;
+                self.record_http_exchange(Some(&spec.connector), &spec.operation, observation);
+            };
+            match self.http.send_observed(&request, &record).await {
                 Ok(got) => {
                     // Retry only what the previous policy retried: a 5xx.
                     // A 4xx is the provider's answer, not a hiccup, and

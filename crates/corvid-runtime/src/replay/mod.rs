@@ -42,6 +42,7 @@ pub use corvid_runtime_core::replay_divergence::ReplayDivergence;
 pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;
+pub(crate) use substitute::is_dispatch_metadata;
 use redrawn_tokens::ReplayRedrawnTokens;
 use scrubbed_results::ReplayScrubbedResults;
 use zone_rules::ReplayZoneRules;

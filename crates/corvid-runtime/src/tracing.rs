@@ -329,6 +329,46 @@ impl Tracer {
                 name,
                 payload: r.redact(payload),
             },
+            // A URL can embed a secret in its path or query, and an error
+            // detail can quote the URL, so both are redacted within the
+            // text, not only when the whole string is a secret.
+            TraceEvent::HttpExchange {
+                url,
+                ts_ms,
+                run_id,
+                connector,
+                operation,
+                attempt,
+                hop,
+                method,
+                request_headers,
+                request_body_sha256,
+                request_body_bytes,
+                status,
+                response_headers,
+                response_body_bytes,
+                elapsed_ms,
+                outcome,
+                detail,
+            } => TraceEvent::HttpExchange {
+                url: r.redact_within(&url),
+                ts_ms,
+                run_id,
+                connector,
+                operation,
+                attempt,
+                hop,
+                method,
+                request_headers,
+                request_body_sha256,
+                request_body_bytes,
+                status,
+                response_headers,
+                response_body_bytes,
+                elapsed_ms,
+                outcome,
+                detail: detail.map(|d| r.redact_within(&d)),
+            },
             other => other,
         }
     }
@@ -371,6 +411,41 @@ pub fn deterministic_seed() -> Option<u64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A secret embedded in a recorded request URL, or quoted in its
+    /// error detail, is redacted within the text.
+    #[test]
+    fn an_http_exchange_url_and_detail_are_redacted_within_the_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut redaction = crate::redact::RedactionSet::empty();
+        redaction.add("tok-in-url");
+        let tracer = Tracer::open(dir.path(), "run-http").with_redaction(redaction);
+        tracer.emit(TraceEvent::HttpExchange {
+            ts_ms: 1,
+            run_id: "run-http".into(),
+            connector: Some("files".into()),
+            operation: "fetch".into(),
+            attempt: 1,
+            hop: 0,
+            method: "GET".into(),
+            url: "https://api.example.com/files/tok-in-url".into(),
+            request_headers: vec![],
+            request_body_sha256: None,
+            request_body_bytes: 0,
+            status: None,
+            response_headers: vec![],
+            response_body_bytes: 0,
+            elapsed_ms: 3,
+            outcome: "timeout".into(),
+            detail: Some("GET `https://api.example.com/files/tok-in-url` did not finish".into()),
+        });
+        drop(tracer);
+
+        let body = std::fs::read_to_string(dir.path().join("run-http.jsonl")).unwrap();
+        assert!(!body.contains("tok-in-url"), "{body}");
+        assert!(body.contains("\"kind\":\"http_exchange\""), "{body}");
+        assert!(body.contains("/files/<redacted>"), "{body}");
+    }
 
     #[test]
     fn writes_events_to_jsonl() {
