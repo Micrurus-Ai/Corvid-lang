@@ -35,6 +35,28 @@ instead. It combines with the existing modifiers:
 Programming errors stay loud, so `try ... else` cannot hide a bug; a
 person's or a policy's decision is not an outage to paper over.
 
+### One way per failure: connectors declare theirs
+
+A connector operation can declare `on failure -> Variant` (B05). That
+maps every failure of the request itself to a typed error value at the
+declaration: a missing credential or argument, the client rate limit, a
+blocked or unlisted host, the timeout, a transport error or refused
+redirect, an unmapped status, a body that does not decode, and an open
+circuit breaker (the dependency is known to be down, so nothing is sent).
+Governance is not mapped and stays loud, exactly as here: a denied
+approval, an exceeded budget, a replay divergence.
+
+So the two never overlap. A call to an operation that declares `on
+failure` already returns every outage as a value, and wrapping it in
+`try ... else` is a compile error that says there is nothing to catch and
+to match on the declared variant instead. `try ... else` is for the
+operations that have no typed failure of their own: tables, tools,
+prompts and model calls, and `timeout`. A connector operation without
+`on failure` is such an operation, and `try` catches its request
+failures. Because outages are catchable only through one of the two, a
+connector's `circuit_breaker:` matters only once its failures are caught
+one way or the other; breaker state is per interpreter run.
+
 ## Rules
 
 - The fallback's type must be assignable to the expression's type; the
