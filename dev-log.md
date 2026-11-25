@@ -21,6 +21,32 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Connector breakers count, and an open one is an on failure value (B05)
+
+The main-line session proposed that `on failure` also map an open
+circuit breaker. A breaker opens because the dependency is known to be
+down: no one decided "no", and a caller's sensible response is the same
+as for a timeout. With that, everything a request can fail with is a
+typed value at the declaration. Governance (a denied approval, an
+exceeded budget, a replay divergence) stays loud, so `try ... else`
+around an `on failure` call has nothing left to catch.
+
+Checking it found an older bug: a connector's `circuit_breaker: N` never
+tripped. The interpreter counts breaker failures in its general tool
+path, and connector calls take their own branch, which never counted.
+Connector calls now count by the same rule: an error, or an `Err` result
+(a mapped status or an `on failure` value), is one consecutive failure,
+and a success resets the count. An open breaker on an `on failure`
+operation returns the variant with a reason naming the breaker, and
+sends nothing.
+
+Tests: a provider that always answers 500 behind `circuit_breaker: 2`.
+Two calls return the 500 as values, the third returns the open breaker,
+and the provider sees exactly two requests. Without `on failure`, the
+first failure stops the program.
+
+---
+
 ## 2026-11-25 - Connectors replace http_get and http_post_json (B05, slice 4)
 
 Corvid now has one way to make an HTTP request: a connector. The two

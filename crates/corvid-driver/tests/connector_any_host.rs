@@ -295,3 +295,108 @@ async fn on_failure_turns_every_failure_into_the_declared_variant() {
     assert_eq!(replayed, Value::String(std::sync::Arc::from(refused.as_ref())));
     assert_eq!(server.received_requests().await.unwrap().len(), before);
 }
+
+fn breaker_source(on_failure: bool) -> String {
+    let (ret, failure) = if on_failure {
+        ("Result<Response<String>, FetchError>", "        on failure -> Unreachable\n")
+    } else {
+        ("Response<String>", "")
+    };
+    let main = if on_failure {
+        r#"
+agent reason_of(e: FetchError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+agent describe(r: Result<Response<String>, FetchError>) -> String:
+    return match r:
+        Ok(answer) -> "ok"
+        Err(e) -> reason_of(e)
+
+agent main(url: String) -> String uses http_read:
+    first = describe(page(url))
+    second = describe(page(url))
+    third = describe(page(url))
+    return first + " / " + second + " / " + third
+"#
+    } else {
+        r#"
+agent main(url: String) -> Int uses http_read:
+    a = page(url)
+    b = page(url)
+    c = page(url)
+    return c.status()
+"#
+    };
+    format!(
+        r#"
+effect http_read:
+    cost: 1.0
+
+type FetchError:
+    | Unreachable(reason: String)
+
+connector web:
+    hosts: allowed_hosts
+    timeout: 5s
+    redirects: never
+    circuit_breaker: 2
+    modes: [real]
+    operation page(url: String) -> {ret} uses http_read:
+        GET url
+        response: text
+{failure}{main}"#
+    )
+}
+
+async fn always_failing() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(path("/down")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
+    server
+}
+
+fn compile_source(src: &str) -> (tempfile::TempDir, corvid_ir::IrFile) {
+    let dir = tempfile::tempdir().unwrap();
+    let path_on_disk = dir.path().join("main.cor");
+    std::fs::write(&path_on_disk, src).unwrap();
+    let ir = compile_to_ir_with_config_at_path(src, &path_on_disk, None).expect("compiles");
+    (dir, ir)
+}
+
+/// A connector's `circuit_breaker: N` opens after N consecutive
+/// failures, and with `on failure` the open breaker is a typed value
+/// naming it; no further request is sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_open_breaker_is_the_declared_failure_and_sends_nothing() {
+    let (_dir, ir) = compile_source(&breaker_source(true));
+    let server = always_failing().await;
+    let rt = runtime(&ir, &["api.example.com"], &[("api.example.com", &server)]);
+
+    let result = run_ir_with_runtime(&ir, None, vec![text("http://api.example.com/down")], &rt)
+        .await
+        .expect("every failure is a value");
+
+    let Value::String(result) = result else { panic!("expected text, got {result:?}") };
+    let parts: Vec<&str> = result.split(" / ").collect();
+    assert!(parts[0].contains("provider returned HTTP 500"), "{result}");
+    assert!(parts[1].contains("provider returned HTTP 500"), "{result}");
+    assert!(parts[2].contains("circuit breaker open for `page` after 2 consecutive failures"), "{result}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2, "the open breaker sends nothing");
+}
+
+/// Without `on failure`, the first failure stops the program, so no
+/// later call is made; the breaker matters to an `on failure` operation,
+/// whose failures are values the program keeps running past.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn without_on_failure_the_first_failure_stops_the_program() {
+    let (_dir, ir) = compile_source(&breaker_source(false));
+    let server = always_failing().await;
+    let rt = runtime(&ir, &["api.example.com"], &[("api.example.com", &server)]);
+
+    let err = run_ir_with_runtime(&ir, None, vec![text("http://api.example.com/down")], &rt)
+        .await
+        .expect_err("an unmapped failure stops the program");
+
+    assert!(err.to_string().contains("provider returned HTTP 500"), "{err}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1, "the first failure stops this program");
+}

@@ -1695,6 +1695,22 @@ impl<'ir> Interpreter<'ir> {
                         .expect("breaker state poisoned")
                         .get(callee_name)
                         .is_some_and(|count| *count >= threshold);
+                    // An open breaker means the dependency is known to be
+                    // down: an outage, like a timeout. A connector
+                    // operation with `on failure` answers with its typed
+                    // error, the reason naming the breaker.
+                    let on_failure = self
+                        .connector_ops_by_id
+                        .get(def_id)
+                        .and_then(|(_, op)| op.on_failure.as_deref());
+                    if let (true, Some(variant)) = (open, on_failure) {
+                        let reason = format!(
+                            "circuit breaker open for `{callee_name}` after {threshold} consecutive failures; not called again this run"
+                        );
+                        let value = connector_json::failure_value(variant, &reason, &tool.return_ty, &self.types_by_id)
+                            .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span))?;
+                        return Ok(ExprFlow::Value(value));
+                    }
                     if open {
                         return Err(InterpError::new(
                             InterpErrorKind::Other(format!(
@@ -1836,16 +1852,32 @@ impl<'ir> Interpreter<'ir> {
                     // Tool arm, so the effect / approval / budget / taint
                     // / provenance / trace pipeline still brackets it —
                     // the operation IS a tool.
-                    self.dispatch_connector_operation(
-                        connector,
-                        op,
-                        tool,
-                        callee_name,
-                        arg_values,
-                        result_decode_ty,
-                        span,
-                    )
-                    .await?
+                    let outcome = self
+                        .dispatch_connector_operation(
+                            connector,
+                            op,
+                            tool,
+                            callee_name,
+                            arg_values,
+                            result_decode_ty,
+                            span,
+                        )
+                        .await;
+                    // Circuit-breaker accounting for a connector, by the
+                    // rule other tools follow: an error, or an `Err`
+                    // result (a mapped status or an `on failure`
+                    // variant), counts as one consecutive failure.
+                    if tool.breaker.is_some() {
+                        let failed = matches!(&outcome, Err(_) | Ok(Value::ResultErr(_)));
+                        let mut state = self.breaker_state.lock().expect("breaker state poisoned");
+                        let count = state.entry(callee_name.to_string()).or_insert(0);
+                        if failed {
+                            *count += 1;
+                        } else {
+                            *count = 0;
+                        }
+                    }
+                    outcome?
                 } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
                     self.eval_mock_body(mock, callee_name, arg_values, span).await?
                 } else if is_stdlib_db_tool(callee_name) {

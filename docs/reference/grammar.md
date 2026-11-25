@@ -396,10 +396,12 @@ no fields or one `String` field for the reason; without it a failure
 stops the program. It maps the failures of the request itself: building
 it (a missing credential or argument), the client rate limit, the SSRF
 block and allowlist, the timeout, a transport error, a refused redirect,
-an unmapped status and decoding. It does not map what governs the call
-around the request, which still stops the program: a denied approval, an
-exceeded budget, an open circuit breaker, and a replay that diverges from
-its trace. An operation with an `async:` protocol cannot declare it,
+an unmapped status and decoding, and an open `circuit_breaker`, which
+means the dependency is known to be down. A connector's breaker counts
+each failure, an `on failure` value included, and a success resets it.
+`on failure` does not map what governs the call around the request,
+which still stops the program: a denied approval, an exceeded budget,
+and a replay that diverges from its trace. An operation with an `async:` protocol cannot declare it,
 because a protocol fails through its deadline target and circuit breaker.
 
 `HEAD` and `OPTIONS` are connector methods; a route never declares them,
