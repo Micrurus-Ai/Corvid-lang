@@ -378,29 +378,3 @@ fn native_recording_overhead_smoke() {
     );
 }
 
-#[tokio::test]
-#[ignore]
-async fn probe_exact_cross_tier_differences() {
-    let ir = ir_of(RECORD_NATIVE_SRC);
-    let interp_trace_dir = tempfile::tempdir().unwrap();
-    let (_, interp_trace_path) = run_interpreter(interp_trace_dir.path()).await;
-    let native_tmp = tempfile::tempdir().unwrap();
-    let produced = build_native_to_disk(&ir, "corvid_record_native", &native_tmp.path().join("p"), &[test_tools_lib_path().as_path()]).unwrap();
-    let native_trace_path = native_tmp.path().join("t.jsonl");
-    let output = run_native_binary(&produced, &native_trace_path);
-    assert!(output.status.success());
-    let strip = |path: &Path| -> Vec<serde_json::Value> {
-        read_events_from_path(path).unwrap().iter().map(|e| {
-            let mut v = serde_json::to_value(e).unwrap();
-            let o = v.as_object_mut().unwrap();
-            for k in ["ts_ms", "run_id", "writer", "token_id", "issued_at_ms", "expires_at_ms", "value"] { o.remove(k); }
-            v
-        }).collect()
-    };
-    let (a, b) = (strip(&interp_trace_path), strip(&native_trace_path));
-    println!("interp {} native {}", a.len(), b.len());
-    for i in 0..a.len().max(b.len()) {
-        let (x, y) = (a.get(i), b.get(i));
-        if x != y { println!("#{i}\n  interp: {}\n  native: {}", x.map(|v| v.to_string()).unwrap_or_default(), y.map(|v| v.to_string()).unwrap_or_default()); }
-    }
-}
