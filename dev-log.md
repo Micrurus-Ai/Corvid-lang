@@ -4,6 +4,48 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Every HTTP request is in the trace (B05, second slice)
+
+A connector call recorded one `ToolCall` and one `ToolResult`, so a trace
+showed what the program asked for and what it got, but not what went
+over the wire: not the 500 that was retried, nor the redirect that sent
+the request to another path or host. A new trace event, `HttpExchange`,
+records each hop of each attempt.
+
+**What is recorded and what is not.** Connector, operation, method, URL,
+attempt and hop, header names, the request body's SHA-256 and size, the
+status, response header names and size, elapsed time, and an outcome
+(`response`, `redirected`, `timeout`, `refused`, `transport_error`, with
+a detail). The proposal said literal header values would be kept; as
+built, no header value is recorded at all, because names are enough to
+audit what was sent, and a record without values cannot leak a key or a
+cookie. The tracer's redaction now also works within text
+(`RedactionSet::redact_within`): exact-match redaction would miss a token
+embedded in a URL path, and an error detail quotes the URL.
+
+**How it is wired.** The transport reports each hop to an observer
+(`HttpClient::send_observed`), and the runtime writes the event. A
+timeout cancels the redirect loop mid-hop, so the transport keeps the
+hop in flight and records the timeout against it. The connector
+dispatcher drives its own retries, so it numbers attempts itself.
+
+**Replay.** A new event kind is additive, so the schema stays at v3.
+Replay steps past `HttpExchange` like `HostEvent` and substitutes the
+enclosing tool call, so a replayed run makes no request. Two hand-kept
+lists of the events replay steps past had to agree; a preceding refactor
+commit made `replay_dispatch` call the canonical one. Six trace readers
+copy per-event `run_id`/`ts_ms` matches; this slice added the new event
+to each, and the roadmap now asks for one accessor on `TraceEvent`.
+
+Tests: observer tests for hops, attempts, a timeout, a refusal and a
+body seen only by digest; the tracer redacting a secret inside a URL and
+detail; `redact_within`; and end to end, a real call through a 500, a
+retry, a 302 and a 200 that records exactly three exchanges, keeps the
+bearer token out of the trace file, and replays with no request reaching
+the provider.
+
+---
+
 ## 2026-11-25 - Connectors declare their timeout and redirect policy (B05, first slice)
 
 Every request a connector sent used a 30-second timeout and followed up

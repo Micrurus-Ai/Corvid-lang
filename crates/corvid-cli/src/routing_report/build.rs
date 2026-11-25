@@ -500,6 +500,7 @@ fn event_ts_ms(event: &TraceEvent) -> u64 {
         | TraceEvent::HumanChoiceRequest { ts_ms, .. }
         | TraceEvent::HumanChoiceResponse { ts_ms, .. }
         | TraceEvent::HostEvent { ts_ms, .. }
+        | TraceEvent::HttpExchange { ts_ms, .. }
         | TraceEvent::SeedRead { ts_ms, .. }
         | TraceEvent::ClockRead { ts_ms, .. }
         | TraceEvent::ModelSelected { ts_ms, .. }

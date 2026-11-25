@@ -631,3 +631,111 @@ async fn redirects_same_host_follows_within_the_provider() {
 
     assert_eq!(result, Value::String(std::sync::Arc::from("moved")));
 }
+
+/// Each request a call makes is recorded: a 500 that is retried, then a
+/// redirect followed within the host, then the answer, three
+/// `HttpExchange` events with their attempt and hop. The bearer token is
+/// nowhere in the trace, and replaying it returns the same value without
+/// a single request reaching the provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_attempt_and_redirect_is_recorded_and_replays_without_the_provider() {
+    const TOKEN_ENV: &str = "CORVID_TEST_EXCHANGE_TOKEN";
+    let source = format!(
+        r#"
+effect http_read:
+    cost: 1.0
+
+type Repo:
+    name: String
+
+connector files:
+    base_url: "http://api.example.com"
+    auth: bearer(secret("{TOKEN_ENV}"))
+    timeout: 10s
+    redirects: same_host
+    retry: 2
+    modes: [real, replay]
+    operation fetch(id: String) -> Repo uses http_read:
+        GET "/files/{{id}}"
+
+agent main() -> String:
+    r = fetch("f1")
+    return r.name
+"#
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ir = compile_source(dir.path(), &source);
+
+    let server = MockServer::start().await;
+    Mock::given(path("/files/f1"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/files/f1"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/files/f1-moved"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/files/f1-moved"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"name":"moved"}"#))
+        .mount(&server)
+        .await;
+    std::env::set_var(TOKEN_ENV, "tok-exchange-secret");
+
+    let trace_dir = tempfile::tempdir().expect("trace dir");
+    let record_runtime = Runtime::builder()
+        .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .http_client(HttpClient::with_reqwest_builder(loopback_client("api.example.com", &server)))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .trace_to(trace_dir.path())
+        .build();
+    let recorded = run_ir_with_runtime(&ir, None, vec![], &record_runtime).await.expect("recorded run");
+    assert_eq!(recorded, Value::String(std::sync::Arc::from("moved")));
+    let trace_path = record_runtime.tracer().path().to_path_buf();
+    drop(record_runtime);
+    std::env::remove_var(TOKEN_ENV);
+
+    let raw = std::fs::read_to_string(&trace_path).expect("trace readable");
+    assert!(!raw.contains("tok-exchange-secret"), "the token must never reach the trace");
+
+    let exchanges: Vec<(u32, u32, Option<u16>, String, String)> = read_events_from_path(&trace_path)
+        .expect("trace deserializes")
+        .into_iter()
+        .filter_map(|event| match event {
+            corvid_trace_schema::TraceEvent::HttpExchange {
+                connector, operation, attempt, hop, status, outcome, url, request_headers, ..
+            } => {
+                assert_eq!(connector.as_deref(), Some("files"));
+                assert_eq!(operation, "fetch");
+                assert!(request_headers.contains(&"authorization".to_string()), "header names are kept");
+                Some((attempt, hop, status, outcome, url))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        exchanges,
+        vec![
+            (1, 0, Some(500), "response".to_string(), "http://api.example.com/files/f1".to_string()),
+            (2, 0, Some(302), "redirected".to_string(), "http://api.example.com/files/f1".to_string()),
+            (2, 1, Some(200), "response".to_string(), "http://api.example.com/files/f1-moved".to_string()),
+        ],
+        "one record per hop of every attempt"
+    );
+
+    let requests_before_replay = server.received_requests().await.unwrap().len();
+    let replay_runtime = Runtime::builder()
+        .connector_mode(Some(corvid_ast::ConnectorMode::Replay))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
+        .replay_from(&trace_path)
+        .build();
+    let replayed = run_ir_with_runtime(&ir, None, vec![], &replay_runtime).await.expect("replayed");
+    assert_eq!(replayed, Value::String(std::sync::Arc::from("moved")));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        requests_before_replay,
+        "replay must not reach the provider"
+    );
+}

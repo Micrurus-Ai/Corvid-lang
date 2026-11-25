@@ -39,6 +39,7 @@ pub(super) fn event_kind(event: &TraceEvent) -> &'static str {
         TraceEvent::HumanChoiceRequest { .. } => "human_choice_request",
         TraceEvent::HumanChoiceResponse { .. } => "human_choice_response",
         TraceEvent::HostEvent { .. } => "host_event",
+        TraceEvent::HttpExchange { .. } => "http_exchange",
         TraceEvent::SeedRead { .. } => "seed_read",
         TraceEvent::ClockRead { .. } => "clock_read",
         TraceEvent::ModelSelected { .. } => "model_selected",
