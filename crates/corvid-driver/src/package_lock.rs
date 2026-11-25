@@ -96,6 +96,18 @@ pub(crate) fn load_package_lock_for(root_path: &Path) -> Result<Option<PackageLo
     Ok(Some(PackageLockFile { path, lock }))
 }
 
+/// Read an installed component for editor inspection directly from its verified lock entry.
+pub fn installed_component_source(importer: &Path, uri: &str) -> Option<(PathBuf, String)> {
+    let lock = load_package_lock_for(importer).ok()??;
+    let entry = lock.lock.find(uri)?;
+    let path = crate::package_cache::artifact(lock.path.parent()?, &entry.sha256);
+    let bytes = std::fs::read(&path).ok()?;
+    if !crate::import_integrity::sha256_hex(&bytes).eq_ignore_ascii_case(&entry.sha256) {
+        return None;
+    }
+    Some((path, String::from_utf8(bytes).ok()?))
+}
+
 /// Relative cache paths for the validated content digests in this project's lock.
 pub fn locked_artifact_paths(project: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let path = lock_path_for_project(project);
