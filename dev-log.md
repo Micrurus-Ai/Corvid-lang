@@ -794,6 +794,13 @@ python` (native bindings), `corvid bench` against Python baselines, and
 (`tools.py`). Filed: trimming the parts of `runtime/python` that only
 generated code used.
 
+Found after the push: the retirement commit kept the old `Cargo.lock`,
+which still listed `corvid-codegen-py`, so a `--locked` build of `main`
+would have failed to resolve. The lock was corrected in its own commit,
+checked with `cargo metadata --locked`. The habit of restoring the lock
+after every local build is right for incidental churn but wrong when a
+change adds or removes a crate; such a change commits its lock update.
+
 ---
 
 ## 2026-11-25 - `live` declarations (B14 RT-1)
