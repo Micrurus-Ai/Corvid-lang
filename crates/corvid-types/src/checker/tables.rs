@@ -442,8 +442,9 @@ impl<'a> Checker<'a> {
                 Expr::Lambda { params, body, .. } => params.first().and_then(|p| column_read(query.table, p, body)),
                 _ => None,
             };
-            if column.is_none() {
-                self.query_error(order.span(), "`order_by` takes a function that reads one column, such as `fn (s) -> s.title`");
+            match column {
+                None => self.query_error(order.span(), "`order_by` takes a function that reads one column, such as `fn (s) -> s.title`"),
+                Some(column) => self.check_column_is_orderable(query.table, &column, order.span()),
             }
         }
         if let Some(count) = query.take {
@@ -502,12 +503,31 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A column the database can compare: not one stored as JSON.
+    /// A column the database can compare: not one stored as JSON. The
+    /// rule is the one the runtime stores columns by.
     fn check_column_is_queryable(&mut self, table: &TableDecl, column: &str, span: Span) {
         let Some(field) = table.record.fields.iter().find(|f| f.name.name == column) else { return };
         let ty = self.type_ref_to_type(&field.ty);
-        if !queryable_column_type(&ty) {
+        if crate::table_columns::column_kind(&ty).0 == crate::table_columns::ColumnKind::Json {
             self.query_error(span, &format!("column `{column}` is stored as JSON, so the database cannot compare it"));
+        }
+    }
+
+    /// A column the database can order as Corvid does: not one stored as
+    /// JSON, whose text would sort in the wrong order, and not one whose
+    /// type has no order.
+    fn check_column_is_orderable(&mut self, table: &TableDecl, column: &str, span: Span) {
+        use crate::table_columns::{column_kind, ColumnKind};
+        let Some(field) = table.record.fields.iter().find(|f| f.name.name == column) else { return };
+        let ty = self.type_ref_to_type(&field.ty);
+        let kind = column_kind(&ty).0;
+        if kind == ColumnKind::Json {
+            self.query_error(span, &format!("column `{column}` is stored as JSON, so the database cannot order it"));
+        } else if !kind.is_ordered() {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TableOrderUnordered { column: column.to_string(), type_name: kind.type_name().to_string() },
+                span,
+            ));
         }
     }
 
@@ -558,16 +578,6 @@ fn atomic_exits(block: &Block, loops: usize, refusals: &mut Vec<(Span, String)>)
 /// The column `expr` reads, through the one rule IR lowering also uses.
 fn column_read(table: &TableDecl, row: &corvid_ast::LambdaParam, expr: &Expr) -> Option<String> {
     crate::table_ops::query_column(table, &row.name.name, expr)
-}
-
-/// Scalar columns and options of scalars; other types are stored as JSON.
-fn queryable_column_type(ty: &Type) -> bool {
-    match ty {
-        Type::Int | Type::Float | Type::String | Type::Bool => true,
-        Type::Tainted(inner) => queryable_column_type(inner),
-        Type::Option(inner) => matches!(**inner, Type::Int | Type::Float | Type::String | Type::Bool),
-        _ => false,
-    }
 }
 
 fn mentions_ident(expr: &Expr, name: &str) -> bool {

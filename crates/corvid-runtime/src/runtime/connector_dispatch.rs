@@ -83,7 +83,12 @@ impl Runtime {
             if let Some((limit, window_secs)) = spec.rate_limit {
                 self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;
             }
-            match self.http.send(&request).await {
+            // The dispatcher drives retries itself, so it numbers them.
+            let record = |mut observation: crate::http::HttpExchangeObservation| {
+                observation.attempt = attempt as u32 + 1;
+                self.record_http_exchange(Some(&spec.connector), &spec.operation, observation);
+            };
+            match self.http.send_observed(&request, &record).await {
                 Ok(got) => {
                     // Retry only what the previous policy retried: a 5xx.
                     // A 4xx is the provider's answer, not a hiccup, and
@@ -136,8 +141,21 @@ impl Runtime {
         // operation returns `Result<Success, Error>` it is wrapped as
         // `Ok(..)`; otherwise the body decodes directly.
         if (200..300).contains(&response.status) {
-            let body: serde_json::Value =
-                serde_json::from_str(&response.body).unwrap_or(serde_json::Value::Null);
+            // An empty body (a 204, or a provider that answers with
+            // nothing) is `null`. Anything else must be JSON: a body that
+            // is not is a failure naming the operation, never a silent
+            // `null` the program would mistake for an answer.
+            let body: serde_json::Value = if response.body.trim().is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_str(&response.body).map_err(|err| RuntimeError::ToolFailed {
+                    tool: spec.operation.clone(),
+                    message: format!(
+                        "provider answered HTTP {} with a body that is not JSON ({err})",
+                        response.status
+                    ),
+                })?
+            };
             if spec.returns_result {
                 Ok((serde_json::json!({ "tag": "ok", "ok": body }), meta))
             } else {

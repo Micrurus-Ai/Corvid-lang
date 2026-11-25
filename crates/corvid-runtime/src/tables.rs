@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod dialect;
+pub mod exact_columns;
 mod migration;
 mod postgres;
 mod query;
@@ -29,6 +30,7 @@ mod recorded;
 mod schema;
 mod transaction;
 pub use dialect::TableEngine;
+pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
 pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};

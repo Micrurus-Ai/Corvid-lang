@@ -13,7 +13,10 @@ use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
 use corvid_runtime::db::DbValue;
-use corvid_runtime::tables::{column_kind, untainted, ColumnKind, Row, TableEngine, TableFilter, TableQuery, TableRef};
+use corvid_runtime::tables::{
+    column_kind, parse_zoned_time_column_text, untainted, zoned_time_column_text, ColumnKind, Row, TableEngine, TableFilter,
+    TableQuery, TableRef,
+};
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
 
@@ -270,6 +273,14 @@ impl<'ir> Interpreter<'ir> {
             (ColumnKind::Real, Value::Int(n)) => DbValue::Float(n as f64),
             (ColumnKind::Text, Value::String(s)) => DbValue::Text(s.to_string()),
             (ColumnKind::Boolean, Value::Bool(b)) => DbValue::Bool(b),
+            // B09 P8a — each as the text its column compares exactly.
+            (ColumnKind::Decimal, Value::Decimal(d)) => DbValue::Text(d.to_string()),
+            (ColumnKind::Duration, Value::Duration(d)) => DbValue::Text(d.to_string()),
+            (ColumnKind::Instant, Value::Instant(i)) => DbValue::Text(i.to_sortable_text()),
+            (ColumnKind::ZonedTime, Value::ZonedTime(z)) => DbValue::Text(zoned_time_column_text(&z)),
+            (ColumnKind::TimeZone, Value::TimeZone(z)) => DbValue::Text(z.name().to_string()),
+            (ColumnKind::Currency, Value::Currency(c)) => DbValue::Text(c.to_string()),
+            (ColumnKind::Locale, Value::Locale(l)) => DbValue::Text(l.to_string()),
             (_, other) => return Err(format!("{} where the column holds {}", other.type_name(), ty.display_name())),
         })
     }
@@ -295,12 +306,29 @@ impl<'ir> Interpreter<'ir> {
             (ColumnKind::Boolean, DbValue::Bool(b)) => Value::Bool(b),
             // SQLite stores a Bool as an integer.
             (ColumnKind::Boolean, DbValue::Integer(n)) => Value::Bool(n != 0),
+            (kind, DbValue::Text(text)) if kind.is_exact_text() => exact_value(kind, &text)?,
             (_, column) => {
                 return Err(format!("the database holds {column:?} where the declaration says {}", ty.display_name()))
             }
         };
         Ok(if nullable { Value::OptionSome(BoxedValue::new(scalar)) } else { scalar })
     }
+}
+
+/// A money or time value from the text its column stores (B09 P8a),
+/// read with each type's own parser.
+fn exact_value(kind: ColumnKind, text: &str) -> Result<Value, String> {
+    let refused = |problem: String| format!("the database holds `{text}` where {} belongs: {problem}", kind.type_name());
+    Ok(match kind {
+        ColumnKind::Decimal => Value::Decimal(corvid_decimal::Decimal::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::Duration => Value::Duration(corvid_time::Duration::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::Instant => Value::Instant(corvid_time::Instant::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::ZonedTime => Value::ZonedTime(parse_zoned_time_column_text(text).map_err(refused)?),
+        ColumnKind::TimeZone => Value::TimeZone(corvid_time::TimeZone::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::Currency => Value::Currency(corvid_currency::Currency::parse(text).map_err(|e| refused(e.to_string()))?),
+        ColumnKind::Locale => Value::Locale(Arc::new(corvid_currency::Locale::parse(text).map_err(|e| refused(e.to_string()))?)),
+        other => return Err(format!("{other:?} is not a money or time column")),
+    })
 }
 
 fn next_operand(operands: &mut std::vec::IntoIter<Value>) -> Result<Value, String> {

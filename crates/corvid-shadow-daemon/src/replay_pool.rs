@@ -68,7 +68,7 @@ impl ReplayPool {
 /// `ShadowReplayOutcome::traces_match` for why telemetry events are
 /// excluded from the byte-identity comparison.
 pub(super) fn is_decision_event(event: &TraceEvent) -> bool {
-    !matches!(event, TraceEvent::HostEvent { .. })
+    !matches!(event, TraceEvent::HostEvent { .. } | TraceEvent::HttpExchange { .. })
 }
 
 fn normalize_event_json(event: &TraceEvent) -> serde_json::Value {

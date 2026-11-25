@@ -712,7 +712,8 @@ impl Runtime {
         if let Err(error) = self.http_policy.check(url) {
             return Ok(stdlib_result_err(error));
         }
-        match self.http.send(&request.effect_tag("std.http.request")).await {
+        let record = |observation| self.record_http_exchange(None, name, observation);
+        match self.http.send_observed(&request.effect_tag("std.http.request"), &record).await {
             Ok(response) => Ok(stdlib_result_ok(serde_json::json!({
                 "status": response.status,
                 "body": response.body,

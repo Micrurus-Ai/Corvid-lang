@@ -250,6 +250,80 @@ database library:
   values in declaration order, `Edit.get(proposal, shelf)`, so the common
   one-field case reads exactly as before.
 
+## Exact columns for money and time (P8)
+
+A field typed `Decimal`, `Duration`, `Instant`, `ZonedTime`, `TimeZone`,
+`Currency` or `Locale` is a column the database compares exactly as
+Corvid does, so `where` and `order_by` work on it. Nothing is written in
+source beyond the field's type: `price: Decimal`.
+
+```corvid
+table Invoice:
+    key number: Int
+    total: Decimal
+    issued: Instant
+    payment_terms: Duration
+    currency: Currency
+
+agent large_recent(since: Instant) -> List<Invoice>:
+    return Invoice.where(fn (i) -> i.issued >= since and i.total > 1000.00).order_by(fn (i) -> i.total).descending()
+```
+
+| Type | Stored on SQLite as | Compared by |
+| --- | --- | --- |
+| `Decimal` | its exact text, such as `19.90` | value, through the `corvid_decimal` collation: `10 == 10.0`, and `9.50` sorts before `10.0` |
+| `Duration` | its ISO 8601 text, such as `PT1H30M` | value, through the `corvid_duration` collation |
+| `Instant` | UTC RFC 3339 text with all nine fractional digits, such as `2026-03-29T01:30:00.000000000Z` | text, which is time order: the year always has four digits in Corvid's range |
+| `ZonedTime` | the instant's text and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | equality only, as in Corvid: same instant and zone |
+| `TimeZone`, `Currency`, `Locale` | their canonical names (`Europe/Berlin`, `EUR`, `en-GB`) | equality only |
+
+Decisions, and the simpler alternatives considered:
+
+- **Each type declares its own column type** (`DECIMAL TEXT`, `INSTANT
+  TEXT` and so on), never a plain `TEXT` or `INTEGER`. The migration
+  planner identifies a column by its declared type, so changing a field
+  from `String` to `Decimal`, or from `Int` to `Duration`, is a type
+  change it plans or refuses, never a silent reinterpretation of the
+  stored values. Each name keeps SQLite's text affinity.
+- **Decimals and durations compare through a collation.** Corvid's
+  `Duration` holds 128-bit nanoseconds (about ±10,000 years), which no
+  SQLite integer holds, and a decimal's equality is by value while its
+  scale must round-trip (`19.90` stays `19.90`). An order-preserving
+  encoding of a 38-digit decimal would need a second column for the
+  scale and would be unreadable; a collation keeps one readable column
+  and compares exactly. Corvid registers both collations on every SQLite
+  connection it opens, including `corvid migrate`. A tool that opens the
+  file without them still reads every value; comparing or sorting such a
+  column there is refused with "no such collation sequence", never
+  answered wrongly.
+- **Instants need no collation.** Fixed-width UTC text sorts as time
+  does, so the column also works in any SQLite tool. Instants carry no
+  zone, so writing UTC loses nothing.
+- **A zoned time stores its instant and zone, not its offset.** The
+  offset follows from the two through the time-zone database, so a
+  database update never makes two equal zoned times stop comparing equal.
+  `ZonedTime`, `TimeZone`, `Currency` and `Locale` have no `<` in Corvid,
+  so `order_by` on them is a compile error.
+- **These types inside a JSON-stored column are allowed too.** A record
+  or list field is stored as its public JSON text, which writes each of
+  these types exactly; the database never compares inside it.
+- **Postgres comes in a second slice.** Postgres identifies a column by
+  its type as well, and `numeric` would hold decimals exactly, but
+  telling an `Instant` text column from a `String` one needs a domain
+  type per Corvid type, created by the migration that first needs it.
+  Until that lands, these columns on a Postgres database are a compile
+  error naming the slice, so a program never stores them a weaker way.
+- **Across the tiers:** the backend knows the exact value, so a form
+  field bound to one of these columns, an assistant's tool input and the
+  stored row all carry the same exact text, which is already the JSON
+  form B06 publishes. Nothing new reaches the frontend or assistants, and
+  a query an assistant triggers through an action compares money and
+  time as exactly as one a person triggers.
+
+Slices: P8a, SQLite (this change). P8b, Postgres through domains.
+P8c, `Bytes` as a binary column (`BLOB`, `bytea`), which needs a binary
+value in the runtime's database layer.
+
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.

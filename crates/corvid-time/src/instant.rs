@@ -100,6 +100,19 @@ impl Instant {
 /// RFC 3339 in UTC with a trailing `Z`, with no fraction for a whole
 /// second and otherwise 3, 6 or 9 fractional digits, the fewest that
 /// show the value exactly.
+impl Instant {
+    /// RFC 3339 in UTC with all nine fractional digits, such as
+    /// `2026-03-29T01:30:00.000000000Z`. Every instant in range has a
+    /// four-digit year, so this text sorts in time order and equal
+    /// instants have equal text: the form a table column stores.
+    /// [`Instant::parse`] reads it back. If the range ever reaches a
+    /// negative or five-digit year, this form needs a sign-aware year
+    /// encoding; a test pins it to the range's ends.
+    pub fn to_sortable_text(&self) -> String {
+        self.to_chrono().to_rfc3339_opts(SecondsFormat::Nanos, true)
+    }
+}
+
 impl fmt::Display for Instant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_chrono().to_rfc3339_opts(SecondsFormat::AutoSi, true))
@@ -128,6 +141,35 @@ mod tests {
         assert_eq!(at("2026-07-11T08:30:00.5Z").to_string(), "2026-07-11T08:30:00.500Z");
         assert_eq!(at("2026-07-11T08:30:00.000000001Z").to_string(), "2026-07-11T08:30:00.000000001Z");
         assert_eq!(at("1969-12-31T23:59:59.999Z").to_string(), "1969-12-31T23:59:59.999Z");
+    }
+
+    #[test]
+    fn sortable_text_orders_as_time_does_and_reads_back() {
+        let instants = [
+            "0001-01-01T00:00:00Z",
+            "1969-12-31T23:59:59.999Z",
+            "1970-01-01T00:00:00Z",
+            "2026-07-11T08:30:00.000000001Z",
+            "2026-07-11T08:30:00.5Z",
+            "2026-07-11T08:30:01Z",
+            "9999-12-31T23:59:59.999999999Z",
+        ]
+        .map(at);
+        let texts = instants.map(|i| i.to_sortable_text());
+        assert_eq!(texts[4], "2026-07-11T08:30:00.500000000Z");
+        assert!(texts.windows(2).all(|pair| pair[0] < pair[1]), "{texts:?}");
+        for (instant, text) in instants.iter().zip(&texts) {
+            assert_eq!(text.len(), 30, "{text}");
+            assert_eq!(&Instant::parse(text).unwrap(), instant);
+        }
+        assert_eq!(at("2026-03-29T03:30:00+02:00").to_sortable_text(), at("2026-03-29T01:30:00Z").to_sortable_text());
+
+        // The range's own ends, so widening it fails here first.
+        let first = Instant::from_nanoseconds(MIN_NANOSECONDS).unwrap().to_sortable_text();
+        let last = Instant::from_nanoseconds(MAX_NANOSECONDS).unwrap().to_sortable_text();
+        assert_eq!(first, "0001-01-01T00:00:00.000000000Z");
+        assert_eq!(last, "9999-12-31T23:59:59.999999999Z");
+        assert!(first < texts[1] && texts[texts.len() - 2] < last);
     }
 
     #[test]

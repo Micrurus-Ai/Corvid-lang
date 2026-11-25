@@ -46,6 +46,7 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch
                 bail!("`--scratch` names a Postgres scratch database, but `{}` keeps its tables on SQLite", source.display());
             }
             let connection = Connection::open_in_memory().context("open an in-memory database")?;
+            corvid_runtime::tables::register_sqlite_collations(&connection).context("prepare the in-memory database")?;
             plan(source, dir, dry_run, &schemas, &mut History::Sqlite(connection))
         }
         TableEngine::Postgres { .. } => {

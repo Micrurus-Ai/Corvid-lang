@@ -26,7 +26,8 @@ impl Runtime {
                 "body_bytes": request.body.as_ref().map(|body| body.len()).unwrap_or(0),
             }),
         );
-        match self.http.send(&request).await {
+        let record = |observation| self.record_http_exchange(None, "std.http.request", observation);
+        match self.http.send_observed(&request, &record).await {
             Ok(response) => {
                 self.emit_host_event(
                     "std.http.response",

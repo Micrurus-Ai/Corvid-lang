@@ -73,6 +73,8 @@ Every run writes a newline-delimited JSON (`.jsonl`) trace. The first line is al
 
 Event variants that can substitute during replay: `ToolCall`, `ToolResult`, `LlmCall`, `LlmResult`, `ApprovalRequest`, `ApprovalResponse`, `ApprovalDecision`, `SeedRead`, `ClockRead`. `ProvenanceEdge` records provenance graph structure (§14.9) but does not substitute.
 
+`HttpExchange` (B05) records one HTTP request the runtime sent: one hop of one attempt, so a retried call has an event per attempt and a followed redirect an event per hop. It names the connector and operation (or the standard library tool), the method, the URL, the attempt and hop, the status, elapsed time and an outcome (`response`, `redirected`, `timeout`, `refused` or `transport_error`, with a `detail` for the last three). Request and response headers appear by name only and the request body by its SHA-256 and size, so no credential, cookie or body text is recorded; the tracer's redaction also replaces any known secret inside the URL or the detail. It is evidence, like `HostEvent`: replay substitutes the enclosing `ToolCall` / `ToolResult` and steps past every `HttpExchange`, so a replayed run never reaches the network.
+
 ## 14.4 Replay modes (slices 21-inv-B / 21-inv-D)
 
 `corvid replay <trace>` re-executes a recorded run against the current code, substituting every recorded external response. Three modes compose on top of that primitive:

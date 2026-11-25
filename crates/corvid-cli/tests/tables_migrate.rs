@@ -185,6 +185,45 @@ public agent heading(label: Label) -> String:
     assert!(planned.contains("CREATE TABLE \"Shelf\""), "{planned}");
 }
 
+/// A decimal column goes from declaration to a running query through the
+/// CLI: the planner writes its collation, `migrate up` creates the table
+/// on a connection that knows it, and `corvid run` compares by value.
+#[test]
+fn a_decimal_column_is_planned_applied_and_queried_by_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("src/main.cor"),
+        r#"database ledger:
+    engine: sqlite
+    location: "ledger.sqlite"
+    tables: Price
+
+table Price:
+    key item: String
+    amount: Decimal
+
+agent main() -> String:
+    a = Price.insert(Price("tea", 9.50))
+    b = Price.insert(Price("cake", 10.0))
+    out = ""
+    for row in Price.where(fn (p) -> p.amount >= 9.5).order_by(fn (p) -> p.amount).descending():
+        out = out + row.item + " " + row.amount.to_string() + ","
+    return out
+"#,
+    )
+    .unwrap();
+    let engine = Engine::Sqlite { database: "ledger.sqlite".into() };
+    let planned = ok(&corvid(&["migrate", "plan", "src/main.cor"], dir.path(), &engine));
+    assert!(planned.contains("plan: wrote"), "{planned}");
+    let migration = std::fs::read_dir(dir.path().join("migrations")).unwrap().next().unwrap().unwrap().path();
+    let sql = std::fs::read_to_string(migration).unwrap();
+    assert!(sql.contains("\"amount\" DECIMAL TEXT COLLATE corvid_decimal NOT NULL"), "{sql}");
+    ok(&corvid(&["migrate", "up", "--dir", "migrations", "--database", "ledger.sqlite"], dir.path(), &engine));
+    let out = ok(&corvid(&["run", "--target", "interp", "src/main.cor"], dir.path(), &engine));
+    assert!(out.contains("cake 10.0,tea 9.50,"), "{out}");
+}
+
 #[test]
 fn planned_migrations_follow_a_postgres_table_through_its_changes() {
     let (Ok(base), Ok(scratch)) = (std::env::var("CORVID_TEST_POSTGRES_URL"), std::env::var(SCRATCH_ENV)) else {

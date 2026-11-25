@@ -435,6 +435,10 @@ impl ReplaySession {
                     run_id: event_run_id,
                     ..
                 }
+                | TraceEvent::HttpExchange {
+                    run_id: event_run_id,
+                    ..
+                }
                 | TraceEvent::PromptCache {
                     run_id: event_run_id,
                     ..
@@ -743,6 +747,7 @@ fn first_run_id(events: &[TraceEvent]) -> Result<&str, ReplayLoadError> {
         | Some(TraceEvent::HumanChoiceRequest { run_id, .. })
         | Some(TraceEvent::HumanChoiceResponse { run_id, .. })
         | Some(TraceEvent::HostEvent { run_id, .. })
+        | Some(TraceEvent::HttpExchange { run_id, .. })
         | Some(TraceEvent::SeedRead { run_id, .. })
         | Some(TraceEvent::ClockRead { run_id, .. })
         | Some(TraceEvent::ModelSelected { run_id, .. })
@@ -789,6 +794,7 @@ fn first_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HumanChoiceRequest { ts_ms, .. })
         | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
         | Some(TraceEvent::HostEvent { ts_ms, .. })
+        | Some(TraceEvent::HttpExchange { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })
@@ -824,6 +830,7 @@ fn last_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HumanChoiceRequest { ts_ms, .. })
         | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
         | Some(TraceEvent::HostEvent { ts_ms, .. })
+        | Some(TraceEvent::HttpExchange { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })

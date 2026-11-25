@@ -24,9 +24,12 @@ pub(crate) fn open_database(database: &Path, writing: bool) -> Result<Option<Con
     } else {
         Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
     };
-    Ok(Some(conn.with_context(|| {
-        format!("cannot open migration database `{}`", database.display())
-    })?))
+    let conn = conn.with_context(|| format!("cannot open migration database `{}`", database.display()))?;
+    // Migrations create and copy money and time columns, which SQLite
+    // refuses without their collations (B09 P8a).
+    corvid_runtime::tables::register_sqlite_collations(&conn)
+        .with_context(|| format!("cannot prepare migration database `{}`", database.display()))?;
+    Ok(Some(conn))
 }
 
 pub(crate) fn read_history(

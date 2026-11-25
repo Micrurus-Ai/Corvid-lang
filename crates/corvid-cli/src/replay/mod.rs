@@ -161,6 +161,7 @@ fn run_id_of(events: &[TraceEvent]) -> Option<&str> {
         | TraceEvent::HumanChoiceRequest { run_id, .. }
         | TraceEvent::HumanChoiceResponse { run_id, .. }
         | TraceEvent::HostEvent { run_id, .. }
+        | TraceEvent::HttpExchange { run_id, .. }
         | TraceEvent::SeedRead { run_id, .. }
         | TraceEvent::ClockRead { run_id, .. }
         | TraceEvent::ModelSelected { run_id, .. }

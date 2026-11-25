@@ -234,13 +234,10 @@ fn rebuild_statements(table: &TableSchema, columns: &[(&str, &corvid_types::Type
     ]
 }
 
-fn kind_label(kind: ColumnKind) -> &'static str {
+fn kind_label(kind: ColumnKind) -> String {
     match kind {
-        ColumnKind::Integer => "`Int`",
-        ColumnKind::Real => "`Float`",
-        ColumnKind::Text => "`String`",
-        ColumnKind::Boolean => "`Bool`",
-        ColumnKind::Json => "a JSON-stored type",
+        ColumnKind::Json => kind.type_name().to_string(),
+        kind => format!("`{}`", kind.type_name()),
     }
 }
 

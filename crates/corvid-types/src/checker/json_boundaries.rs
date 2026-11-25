@@ -1,16 +1,21 @@
-//! B06 — refusing the B06 types as table columns until B09 maps them.
+//! The table columns a database cannot store yet.
 //!
-//! `Decimal`, the time types, `Currency`, `Locale` and `Bytes` cross
-//! JSON as their exact text everywhere else (routes, `to_json`, tools, prompts,
-//! stores). A table column is different: how it is stored decides how
-//! `where` and `order_by` compare it (a decimal stored as text sorts
-//! wrong; Postgres timestamps hold microseconds, not nanoseconds), so
-//! the mapping belongs with B09's query and migration planner. Until
-//! it lands, a table that would store one is a compile error. The walk
-//! is `to_json`'s, so a record column holding one is caught too.
+//! B09 P8a stores `Decimal`, the time types, `Currency` and `Locale` in
+//! columns that SQLite compares exactly as Corvid does (see
+//! [`crate::table_columns`]). Two cases still wait, and are compile
+//! errors that name what they wait for:
+//!
+//! - `Bytes`, anywhere in a column, until B09 P8c gives it a binary
+//!   column. The walk is `to_json`'s, so a record column holding one is
+//!   caught too.
+//! - Those exact columns on a Postgres database, until B09 P8b gives
+//!   each a Postgres type that compares it exactly. Inside a JSON-stored
+//!   column they are fine on either engine: JSON holds their exact text,
+//!   and the database never compares inside it.
 
 use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
+use crate::table_columns::column_kind;
 use corvid_ast::{Decl, File};
 
 impl<'a> Checker<'a> {
@@ -18,9 +23,29 @@ impl<'a> Checker<'a> {
     pub(super) fn check_json_boundaries(&mut self, file: &File) {
         for decl in &file.decls {
             let Decl::Table(table) = decl else { continue };
+            let table_name = &table.name().name;
+            let on_postgres = file.decls.iter().any(|decl| match decl {
+                Decl::Database(db) => {
+                    db.tables.iter().any(|t| t.name == *table_name)
+                        && db.engine.as_ref().is_some_and(|engine| engine.name == "postgres")
+                }
+                _ => false,
+            });
             for field in &table.record.fields {
                 let Some(ty) = self.type_refs.get(&field.ty.span()).cloned() else { continue };
-                if let Some(type_name) = self.b06_type_reached(&ty) {
+                let kind = column_kind(&ty).0;
+                if on_postgres && kind.is_exact_text() {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ExactColumnNotYetOnPostgres {
+                            table: table_name.clone(),
+                            column: field.name.name.clone(),
+                            type_name: kind.type_name().to_string(),
+                        },
+                        field.ty.span(),
+                    ));
+                    continue;
+                }
+                if let Some(type_name) = self.unstored_column_type_reached(&ty) {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::PendingJsonFormAtBoundary {
                             type_name: type_name.to_string(),
