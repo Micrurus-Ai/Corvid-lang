@@ -95,13 +95,11 @@ three, decides what counts as an outage.
 
 - Seeing which failure happened in the fallback (`else (error) -> ...`).
   It can follow once a failure type is agreed.
-- A failure in the middle of a stream. A streamed connector operation
-  (`Stream<T>`, B05) cannot declare `on failure`, so an error after the
-  stream has opened is raised by the `for x in stream` loop reading it.
-  That is an outage, so it should be catchable, but a loop is a
-  statement and `try ... else` wraps an expression. Two directions to
-  decide with the frontend: a `try` form for a loop
-  (`try for event in stream: ... else: ...`), or typed per-event
-  failures (`Stream<Result<T, E>>`, on the B05 roadmap), which would
-  make the failure a value and leave nothing for `try` to catch, as for
-  `on failure`. The second keeps one way per failure and is preferred.
+- A failure in the middle of a stream is settled by B05, not here: a
+  streamed operation that declares  returns
+  , its events arrive as , and an outage
+  becomes one final  after which the stream ends
+  ([HTTP client decision 7](http-client.md#decisions)). The loop reading
+  it never raises for an outage, so there is nothing for 
+  to catch and no loop form is needed. A budget exceeded mid-stream and
+  a replay divergence are still raised, never folded into the .
