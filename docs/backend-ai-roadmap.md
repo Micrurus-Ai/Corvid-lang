@@ -211,7 +211,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [x] Conflict-3. The B10 proposal's example returns `Conflict<Card>`, dropping its `MoveRefused` type and `placed` helper; the action body is three lines.
   - [ ] IR lowering falls back to `DefId(u32::MAX)` for an unresolved variant owner in about eight places, which is `JSON_ERROR_TYPE_ID`. A checked program never reaches them, but an id that names a real record is the wrong fallback: make the fallback an error the lowerer reports, or an id outside `RESERVED_TYPE_IDS`. Found by the Mac session.
 - [x] Match exhaustiveness combines nested patterns: `Err(Some(x))` and `Err(None)` cover `Err(_)`, at any depth and inside sum variants and records, through one pattern-matrix walk (`checker/match_coverage.rs`). Literals still never cover a number or text. Found during B09 P10.
-- [ ] Native code for nested variant patterns: `match r: Err(Some(reason)) -> ...` runs on the interpreter, and `--target native` refuses it by name ("this pattern requires the interpreter").
+- [x] Native code for nested variant patterns. They already compiled natively, since ef8292bf (2026-11-20): `match_pattern` recurses into a payload and `supports_match` accepts nested `Some`, `Ok`, `Err` and variant patterns. What this item had seen refused was the arm bodies, not the patterns: a native match arm reads only simple operands, and `Int.to_string()` is not native at all (its own item above). A parity test now holds `Err(Some(reason))`, `Some(Some(n))` and `Ok(Moved(to))` to the interpreter's results.
 - [x] P11a. A table says where it lives: a module's tables live in its one `database` block, `table Shelf in library:` names one when the module declares several, and the `tables:` list is removed (writing it is a parse error that says the table now says where it lives). One rule, `table_ops::table_placement`, decides placement for the checker, IR lowering and the migration planner. [Design](proposals/typed-persistence.md#one-database-many-modules-p11)
 - [x] P11b. A `public database` imported by other modules (`import "./storage" use library`, then `table Shelf in library:`) is one database across the program: an `atomic:` block may call agents in other modules, whose writes join its transaction and which are checked in their own modules, and `corvid migrate plan` and `migrate up --program` cover every module's tables, refusing two tables of one name.
 - [x] Migrations per database: a program with one database keeps its history in `migrations/`; one with several keeps each in `migrations/<database>/`. `corvid migrate plan` plans each database into its own folder (a Postgres one against the scratch database, reused in turn), `migrate up | status | down --program` runs each, with a state file per database, and a flat `migrations/` left from a one-database program is refused with the move to make.
@@ -230,6 +230,18 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Agree the grammar with frontend development (F15): the `action` declaration, the `assistants:` line, `ui.form(action)` and `ui.button(label, action, value)` by name, one endpoint per action, and the typed refusal shape.
 - [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
+
+**B14 real-time connections** (proposal awaiting frontend agreement; split between this session and Codex by the owner, 2026-11-25). [Proposal](proposals/real-time.md)
+
+Order amendment: B14 starts before B10 and B11 finish, because frontend F08 waits on it and B14 needs only B01. The `live` declaration is a read and B14's action calls over the socket (RT-5) wait for B10, so nothing in B10 changes.
+
+- [ ] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
+- [ ] RT-1. `live` declarations: parse, check and contract entry (this session).
+- [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
+- [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
+- [ ] RT-4. Typed subscriptions in the generated TypeScript client and the Corvid browser binding (Codex, F08).
+- [ ] RT-5. Action calls over the live connection, after B10 (Codex).
+- [ ] RT-6. Several server processes share commits through Postgres `LISTEN`/`NOTIFY` (this session).
 
 **B05 complete HTTP client** (in progress, macOS session). [Proposal](proposals/http-client.md)
 
