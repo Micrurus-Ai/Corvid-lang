@@ -141,43 +141,40 @@ agent main() -> String:
 /// `Secret`, so the driver's programs, which read the key with
 /// `secret(name)`, run on the interpreter. The key bytes and the
 /// signatures are the same, so the verdicts must be too. The header
-/// is read without returning from inside a loop or reassigning a string
-/// in one, which native code does not yet release cleanly (see the
-/// roadmap); the driver's programs do both.
+/// is read as the driver's programs read it: rebinding the timestamp
+/// inside a loop over the header's fields, and returning from inside
+/// the loop that finds a matching signature.
 #[test]
 fn the_recorded_stripe_and_standard_webhooks_verify_and_tampered_ones_are_rejected() {
     let out = assert_parity_text(
         r#"
-agent timestamp_of(signature_header: String) -> String:
-    first = signature_header.split(",")[0]
-    if first.starts_with("t="):
-        return first.substring(2, first.length())
-    return ""
-
 agent verify_stripe(key: Bytes, signature_header: String, body: String) -> Bool:
-    timestamp = timestamp_of(signature_header)
+    timestamp = ""
+    for part in signature_header.split(","):
+        if part.starts_with("t="):
+            timestamp = part.substring(2, part.length())
     if timestamp == "":
         return false
     expected = (timestamp + "." + body).utf8().hmac_sha256(key)
-    verified = false
     for part in signature_header.split(","):
         if part.starts_with("v1="):
             matched = match Bytes.from_hex(part.substring(3, part.length())):
                 Ok(received) -> received == expected
                 Err(problem) -> false
-            verified = verified or matched
-    return verified
+            if matched:
+                return true
+    return false
 
 agent verify_standard_webhook(key: Bytes, message_id: String, timestamp: String, signature_header: String, body: String) -> Bool:
     expected = (message_id + "." + timestamp + "." + body).utf8().hmac_sha256(key)
-    verified = false
     for entry in signature_header.split(" "):
         if entry.starts_with("v1,"):
             matched = match Bytes.from_base64(entry.substring(3, entry.length())):
                 Ok(received) -> received == expected
                 Err(problem) -> false
-            verified = verified or matched
-    return verified
+            if matched:
+                return true
+    return false
 
 agent standard_key(written: String) -> Bytes:
     return match Bytes.from_base64(written.substring(6, written.length())):

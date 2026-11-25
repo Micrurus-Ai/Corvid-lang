@@ -1,7 +1,7 @@
 use corvid_ir::{IrAgent, IrBlock, IrExpr, IrExprKind, IrStmt};
 use corvid_resolve::LocalId;
 use corvid_types::Type;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ownership::is_refcounted;
 
@@ -99,10 +99,14 @@ pub(super) struct BuiltCfg {
     pub loop_exits: Vec<(BlockId, BlockId)>,
     pub ir_paths: BTreeMap<ProgramPoint, IrPath>,
     pub if_cfg_coords: BTreeMap<IrPath, IfCfgCoords>,
+    pub loop_bodies: BTreeMap<IrPath, LoopBodyCoords>,
 }
 
 pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
     let mut builder = CfgBuilder::new();
+    // Native lowering binds parameters before the body, so a `Let` to a
+    // parameter's local rebinds it.
+    builder.bound.extend(agent.params.iter().map(|p| p.local_id));
     let entry = builder.alloc_block();
     builder.lower_block(&agent.body, entry, Vec::new());
     BuiltCfg {
@@ -113,6 +117,7 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
         ir_paths: builder.ir_paths,
         loop_exits: builder.loop_exits,
         if_cfg_coords: builder.if_cfg_coords,
+        loop_bodies: builder.loop_bodies,
     }
 }
 // ---------------------------------------------------------------------------
@@ -135,17 +140,43 @@ struct CfgBuilder {
     ///   - `merge_or_else_cfg`: the CFG block control flows to when
     ///     the cond is false (either the synthesized merge block for
     ///     a no-else If, or the first block of the else-branch).
-    ///   - `has_else`: whether the source If had an else-block.
+    ///   - `branch_pos`: where the Branch sits in `cond_block`.
+    ///   - `bound`: the locals native lowering has bound at the If.
     /// Keyed by `IrPath` to the If statement.
     if_cfg_coords: BTreeMap<IrPath, IfCfgCoords>,
+    /// For each lowered `For` or `While`, keyed by its `IrPath`, the
+    /// loop head and the first block of the body.
+    loop_bodies: BTreeMap<IrPath, LoopBodyCoords>,
+    /// Locals native lowering has already bound when it reaches the
+    /// statement being lowered. Lowering walks statements in the same
+    /// order as this builder and never forgets a binding, so a `Let`
+    /// to a local in this set is a rebinding, which releases the
+    /// local's previous value.
+    bound: BTreeSet<LocalId>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct IfCfgCoords {
     pub(super) cond_block: BlockId,
+    /// Position of the `Branch` statement (the condition) in `cond_block`.
+    pub(super) branch_pos: StmtPos,
     pub(super) then_cfg: BlockId,
     pub(super) merge_or_else_cfg: BlockId,
-    pub(super) has_else: bool,
+    /// Locals native lowering has bound when it reaches the If. Only
+    /// these can be released on entry to a branch: lowering has no
+    /// variable yet for a local first bound later in the source.
+    pub(super) bound: BTreeSet<LocalId>,
+}
+
+/// CFG coordinates of one loop: the head, which tests whether another
+/// iteration runs, and the first block of the body it enters.
+#[derive(Debug, Clone)]
+pub(super) struct LoopBodyCoords {
+    pub(super) head: BlockId,
+    pub(super) body: BlockId,
+    /// Locals native lowering has bound on entering the body; as for
+    /// `IfCfgCoords::bound`, only these can be released there.
+    pub(super) bound: BTreeSet<LocalId>,
 }
 
 impl CfgBuilder {
@@ -156,6 +187,8 @@ impl CfgBuilder {
             blocks: Vec::new(),
             ir_paths: BTreeMap::new(),
             if_cfg_coords: BTreeMap::new(),
+            loop_bodies: BTreeMap::new(),
+            bound: BTreeSet::new(),
         }
     }
 
@@ -172,6 +205,11 @@ impl CfgBuilder {
         let pos = self.blocks[b].stmts.len();
         self.blocks[b].stmts.push(s);
         self.ir_paths.insert((b, pos), ir_path);
+    }
+
+    fn record_loop_body(&mut self, loop_path: IrPath, head: BlockId, body: BlockId) {
+        let bound = self.bound.clone();
+        self.loop_bodies.insert(loop_path, LoopBodyCoords { head, body, bound });
     }
 
     fn add_succ(&mut self, from: BlockId, to: BlockId) {
@@ -228,7 +266,13 @@ impl CfgBuilder {
                     ty,
                     ..
                 } => {
-                    let reads = collect_reads(value, true);
+                    let mut reads = collect_reads(value, true);
+                    // Rebinding a refcounted local releases its previous
+                    // value after the new one is computed, so the
+                    // statement consumes the old value as its last read.
+                    if !self.bound.insert(*local_id) && is_refcounted(ty) {
+                        reads.push(LocalRead { local_id: *local_id, kind: ReadKind::Owned });
+                    }
                     self.push_stmt(
                         cur,
                         CfgStmt::Let {
@@ -263,7 +307,9 @@ impl CfgBuilder {
                     ..
                 } => {
                     let if_ir_path = my_path.clone();
+                    let bound_at_if = self.bound.clone();
                     let cond_block = cur;
+                    let branch_pos = self.blocks[cond_block].stmts.len();
                     let cond_reads = collect_reads(cond, false);
                     self.push_stmt(cur, CfgStmt::Branch { reads: cond_reads }, my_path.clone());
                     let then_id = self.alloc_block();
@@ -276,7 +322,7 @@ impl CfgBuilder {
                     if let Some(at) = after_then {
                         self.add_succ(at, join);
                     }
-                    let (merge_or_else_cfg, has_else) = if let Some(eb) = else_block {
+                    let merge_or_else_cfg = if let Some(eb) = else_block {
                         let else_id = self.alloc_block();
                         self.add_succ(cur, else_id);
                         let mut else_parent = my_path.clone();
@@ -285,20 +331,21 @@ impl CfgBuilder {
                         if let Some(ae) = after_else {
                             self.add_succ(ae, join);
                         }
-                        (else_id, true)
+                        else_id
                     } else {
                         // No else branch: control may fall through.
                         self.add_succ(cur, join);
-                        (join, false)
+                        join
                     };
                     // Record CFG coords for 17b-2 per-branch drop analysis.
                     self.if_cfg_coords.insert(
                         if_ir_path,
                         IfCfgCoords {
                             cond_block,
+                            branch_pos,
                             then_cfg: then_id,
                             merge_or_else_cfg,
-                            has_else,
+                            bound: bound_at_if,
                         },
                     );
                     cur = join;
@@ -333,6 +380,7 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::WhileBody);
+                    self.record_loop_body(my_path.clone(), cur, body_id);
                     self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
                     self.loop_targets.pop();
@@ -353,6 +401,18 @@ impl CfgBuilder {
                 } => {
                     // Evaluate and own the iterable once, before the first iteration.
                     let iter_reads = collect_reads(iter, true);
+                    // A local the iterable only borrows (the receiver of
+                    // `text.split(",")`) has no place to be released between
+                    // evaluating the iterable and entering the loop, so it
+                    // stays live until the loop exits: the exit reads it
+                    // below, and a `return` inside the body releases it on
+                    // the way out like any other live local.
+                    let borrowed_by_iter: Vec<LocalRead> = iter_reads
+                        .iter()
+                        .filter(|read| read.kind == ReadKind::Borrowed)
+                        .cloned()
+                        .collect();
+                    self.bound.insert(*var_local);
                     // Evaluate the iterable once. The back edge returns to
                     // the loop head, not to preceding local initializers.
                     self.push_stmt(cur, CfgStmt::Expr { reads: iter_reads }, my_path.clone());
@@ -376,6 +436,7 @@ impl CfgBuilder {
                     self.add_succ(cur, after_loop);
                     let mut body_parent = my_path.clone();
                     body_parent.push(IrNavStep::ForBody);
+                    self.record_loop_body(my_path.clone(), cur, body_id);
                     self.loop_targets.push((cur, after_loop));
                     let after_body = self.lower_block(body, body_id, body_parent);
                     self.loop_targets.pop();
@@ -383,7 +444,7 @@ impl CfgBuilder {
                         self.add_succ(ab, cur);
                     }
                     self.loop_exits.push((cur, after_loop));
-                    self.push_stmt(after_loop, CfgStmt::Other { reads: Vec::new() }, my_path);
+                    self.push_stmt(after_loop, CfgStmt::Other { reads: borrowed_by_iter }, my_path);
                     cur = after_loop;
                 }
                 IrStmt::Approve { args, .. } => {

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ownership::is_refcounted;
 
-use super::cfg::IfCfgCoords;
+use super::cfg::{IfCfgCoords, LoopBodyCoords};
 use super::liveness::{stmt_def, stmt_reads};
 use super::{BlockId, Cfg, CfgStmt, Liveness, ProgramPoint, ReadKind}; // ---------------------------------------------------------------------------
                                                                       // Ownership plan — what .6b will consume
@@ -72,12 +72,19 @@ pub struct OwnershipPlan {
     /// Key: `IrPath` pointing to the If statement.
     /// Value: which locals die on which branch edge.
     ///
-    /// Applied by `dup_drop::apply_plan` after the main insertions:
-    ///   - `then_drops`: append `Drop`s to the tail of the If's
+    /// Applied by `dup_drop::apply_plan`:
+    ///   - `then_drops`: insert `Drop`s at the start of the If's
     ///     `then_block`.
-    ///   - `fallthrough_drops`: append `Drop`s to the tail of the
+    ///   - `fallthrough_drops`: insert `Drop`s at the start of the
     ///     If's `else_block` (synthesizing an else_block if None).
     pub branch_drops: BTreeMap<IrPath, BranchDrops>,
+    /// Locals that die on the edge from a loop's head into its body:
+    /// live while the loop runs (the exit still reads them) but dead
+    /// on entry to the body, because every path through the body
+    /// returns without reading them or binds them afresh. Keyed by
+    /// the `IrPath` of the `For` or `While`; `dup_drop::apply_plan`
+    /// inserts the `Drop`s at the start of the body.
+    pub loop_entry_drops: BTreeMap<IrPath, BTreeSet<LocalId>>,
 }
 
 /// Per-`If` branch-scoped drop bookkeeping. Each set lists
@@ -85,9 +92,9 @@ pub struct OwnershipPlan {
 /// branch edge to match live-out-of-If with live-in-of-post-If.
 #[derive(Debug, Clone, Default)]
 pub struct BranchDrops {
-    /// Drops to apply at the tail of `then_block`.
+    /// Drops to apply at the start of `then_block`.
     pub then_drops: BTreeSet<LocalId>,
-    /// Drops to apply at the tail of `else_block` (or in a
+    /// Drops to apply at the start of `else_block` (or in a
     /// synthesized else_block when the source had `else_block: None`).
     pub fallthrough_drops: BTreeSet<LocalId>,
 }
@@ -114,56 +121,67 @@ impl OwnershipPlan {
 /// Per-`If` per-branch drop analysis.
 ///
 /// For each If statement recorded in `if_cfg_coords`, compute the
-/// set of refcounted locals that die on the then-edge (but not the
-/// else/fallthrough-edge) and vice versa. Drops on each edge are
-/// injected by `dup_drop::apply_plan` at the tail of the
-/// corresponding IR branch.
+/// set of refcounted locals that die on the then-edge and on the
+/// else/fallthrough-edge. Drops on each edge are injected by
+/// `dup_drop::apply_plan` at the START of the corresponding IR branch.
 ///
-/// Algorithm:
-///   - `dies_on_then_edge = live_out[cond] - live_in[then_cfg]`
-///     → schedule drops at tail of then_block
-///   - `dies_on_other_edge = live_out[cond] - live_in[merge_or_else]`
-///     → schedule drops at tail of else_block (synthesize if None)
+/// Algorithm, where `at_branch` is `live_out[cond]` plus the locals
+/// whose last use is a borrowed read in the condition itself
+/// (`cond_deaths`, which `build_plan` leaves to this function):
+///   - `dies_on_then_edge = at_branch - live_in[then_cfg]`
+///   - `dies_on_other_edge = at_branch - live_in[merge_or_else]`
 ///
-/// A local dropped at the tail of a branch MUST NOT be dropped
-/// anywhere else on that branch — otherwise double-free. In
-/// practice, the analysis only schedules a branch-tail drop when
-/// the local is NOT used in that branch (live_in of that branch's
-/// CFG entry doesn't contain it), which means no in-branch drop
-/// exists for it. Safe by construction.
+/// The start of the branch is the only placement that is right on
+/// every path. A drop after the whole If never runs when the branch
+/// returns, breaks or continues; a drop at the branch's tail runs
+/// after a statement in the branch has bound the local afresh, and
+/// so releases the new value instead of the old one. A local dead on
+/// entry to the branch has no use there, so dropping it first is safe.
 pub(super) fn build_branch_drops(
-    cfg: &Cfg,
     liveness: &Liveness,
     if_cfg_coords: &BTreeMap<IrPath, IfCfgCoords>,
-    _params: &BTreeMap<LocalId, Type>,
+    cond_deaths: &BTreeMap<ProgramPoint, BTreeSet<LocalId>>,
 ) -> BTreeMap<IrPath, BranchDrops> {
     let mut out: BTreeMap<IrPath, BranchDrops> = BTreeMap::new();
     for (ir_path, coords) in if_cfg_coords {
-        let live_out_cond = &liveness.live_out[coords.cond_block];
+        let mut at_branch = liveness.live_out[coords.cond_block].clone();
+        if let Some(deaths) = cond_deaths.get(&(coords.cond_block, coords.branch_pos)) {
+            at_branch.extend(deaths.iter().copied());
+        }
+        // A local first bound later in the source holds no value here.
+        at_branch.retain(|l| coords.bound.contains(l));
         let live_in_then = &liveness.live_in[coords.then_cfg];
         let live_in_other = &liveness.live_in[coords.merge_or_else_cfg];
 
-        let mut branch = BranchDrops::default();
-
-        // then-edge: local live going into the branch but NOT used
-        // in the then-branch → dies on this edge.
-        for &l in live_out_cond {
-            if !live_in_then.contains(&l) {
-                branch.then_drops.insert(l);
-            }
-        }
-        // other-edge: same idea for the else/fallthrough branch.
-        for &l in live_out_cond {
-            if !live_in_other.contains(&l) {
-                branch.fallthrough_drops.insert(l);
-            }
-        }
-
-        let _ = coords.has_else; // consumed by apply_plan
-        let _ = cfg; // silence unused; kept for future per-block access
-
+        let branch = BranchDrops {
+            then_drops: at_branch.difference(live_in_then).copied().collect(),
+            fallthrough_drops: at_branch.difference(live_in_other).copied().collect(),
+        };
         if !branch.then_drops.is_empty() || !branch.fallthrough_drops.is_empty() {
             out.insert(ir_path.clone(), branch);
+        }
+    }
+    out
+}
+
+/// Locals that die on the edge from each loop's head into its body:
+/// `live_out[head] - live_in[body]`. Such a local is still needed if
+/// the loop exits, but no path through the body reads it before
+/// returning or binding it afresh, so it is released on entering
+/// the body, the one place every one of those paths passes through.
+pub(super) fn build_loop_entry_drops(
+    liveness: &Liveness,
+    loop_bodies: &BTreeMap<IrPath, LoopBodyCoords>,
+) -> BTreeMap<IrPath, BTreeSet<LocalId>> {
+    let mut out = BTreeMap::new();
+    for (ir_path, coords) in loop_bodies {
+        let dying: BTreeSet<LocalId> = liveness.live_out[coords.head]
+            .difference(&liveness.live_in[coords.body])
+            .filter(|l| coords.bound.contains(l))
+            .copied()
+            .collect();
+        if !dying.is_empty() {
+            out.insert(ir_path.clone(), dying);
         }
     }
     out
@@ -173,12 +191,18 @@ pub(super) fn build_branch_drops(
 // Plan construction
 // ---------------------------------------------------------------------------
 
+/// Build the plan. Also returns the locals whose last use is a
+/// borrowed read in an `If` condition, keyed by that condition's
+/// program point (one of `if_branch_points`): `build_branch_drops`
+/// releases those at the start of each branch, not after the `If`.
 pub(super) fn build_plan(
     cfg: &Cfg,
     liveness: &Liveness,
     params: &BTreeMap<LocalId, Type>,
-) -> OwnershipPlan {
+    if_branch_points: &BTreeSet<ProgramPoint>,
+) -> (OwnershipPlan, BTreeMap<ProgramPoint, BTreeSet<LocalId>>) {
     let mut plan = OwnershipPlan::default();
+    let mut cond_deaths: BTreeMap<ProgramPoint, BTreeSet<LocalId>> = BTreeMap::new();
 
     // Walk every statement; classify each consuming use as last/non-last.
     for (b, blk) in cfg.blocks.iter().enumerate() {
@@ -194,7 +218,20 @@ pub(super) fn build_plan(
             let mut live_before = live_after_this.clone();
             if let Some(d) = stmt_def(stmt) {
                 live_before.remove(&d);
+                // A refcounted binding nothing reads afterwards is
+                // released as soon as it is made. This is decided per
+                // binding: another binding of the same local may still
+                // be read elsewhere.
+                if let CfgStmt::Let { lhs_ty, .. } = stmt {
+                    if is_refcounted(lhs_ty) && !live_after_this.contains(&d) {
+                        plan.drop_after((b, pos), d);
+                    }
+                }
             }
+            // Reads happen before the statement's own binding, so a
+            // read of the local being rebound sees the old value, which
+            // the rebinding ends: what is live afterwards is the new one.
+            let live_after_reads = live_before.clone();
 
             // Classify each read. For statements with multiple reads
             // of the same local (e.g. `s + s`), only the LAST read in
@@ -210,7 +247,7 @@ pub(super) fn build_plan(
                 // A use is "last" iff (no later in-statement read of
                 // it) AND (not live after the statement on any
                 // successor path).
-                let is_last = !read_again_in_stmt && !live_after_this.contains(&l);
+                let is_last = !read_again_in_stmt && !live_after_reads.contains(&l);
 
                 live_before.insert(l);
 
@@ -226,7 +263,11 @@ pub(super) fn build_plan(
                         // takes the final +1 and closes the local.
                     }
                     ReadKind::Borrowed => {
-                        if is_last {
+                        if is_last && if_branch_points.contains(&(b, pos)) {
+                            // After the whole If is too late when a
+                            // branch leaves early; release on each edge.
+                            cond_deaths.entry((b, pos)).or_default().insert(l);
+                        } else if is_last {
                             // Last borrowed use → drop after, since
                             // borrowed reads don't transfer ownership.
                             plan.drop_after((b, pos), l);
@@ -244,9 +285,7 @@ pub(super) fn build_plan(
         // not represented anywhere — handle that case below.
     }
 
-    // Locals defined-but-never-used → drop right after the defining Let.
-    // Walk forward, find each Let whose `lhs` is refcounted and never
-    // shows up in any read in the function. Drop after that Let.
+    // A refcounted loop variable nothing reads → drop after the loop head.
     let mut all_reads: BTreeSet<LocalId> = BTreeSet::new();
     for blk in &cfg.blocks {
         for stmt in &blk.stmts {
@@ -257,11 +296,6 @@ pub(super) fn build_plan(
     }
     for (b, blk) in cfg.blocks.iter().enumerate() {
         for (pos, stmt) in blk.stmts.iter().enumerate() {
-            if let CfgStmt::Let { lhs, lhs_ty, .. } = stmt {
-                if is_refcounted(lhs_ty) && !all_reads.contains(lhs) {
-                    plan.drop_after((b, pos), *lhs);
-                }
-            }
             if let CfgStmt::LoopHead { var, var_ty, .. } = stmt {
                 if is_refcounted(var_ty) && !all_reads.contains(var) {
                     plan.drop_after((b, pos), *var);
@@ -279,5 +313,5 @@ pub(super) fn build_plan(
         }
     }
 
-    plan
+    (plan, cond_deaths)
 }

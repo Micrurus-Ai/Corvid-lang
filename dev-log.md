@@ -4,6 +4,64 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Native loops release rebound and early-returned values once
+
+The two native bugs the byte-string slice found are fixed, and they
+turned out to be wider than loops. The ownership pass and native
+lowering disagreed about who releases a rebound local's old value.
+Lowering releases it whenever a `Let` rebinds a local it has already
+bound; the pass's analysis treated the rebinding as a plain definition,
+so it also released the old value at its last read, or, when the
+rebinding sat inside a branch, dropped the local at the branch's tail,
+which by then held the new value. Any rebound string, record, list or
+byte string could be released twice: `s = "a" + "x"`, `n = s.length()`,
+`s = "b" + "y"` aborted on its own, with no loop in sight. The parity
+tests had passed because the two errors cancelled in the shapes they
+used, for instance a `Dup` the analysis scheduled for the wrong reason
+balancing `text = text + "t"`, and `s = s.trim()` read freed memory and
+returned garbage instead of crashing.
+
+The analysis now models what lowering does. The CFG builder tracks the
+locals lowering has bound, in lowering's own statement order, and a
+rebinding `Let` reads the old value as its last, consuming use; reads in
+a `Let` are judged against what is live after its binding, since they
+see the old value. A binding nothing reads afterwards is dropped where
+it is made, decided per binding rather than per local, because another
+binding of the same local may still be read. Lowering now releases the old value after
+computing the new one on both ownership paths, so `s = s.trim()` reads
+a live string, and the unified path's release-first order, which only
+worked because of the compensating `Dup`, is gone.
+
+The leak on `return` from inside a loop came from three drop placements
+that a path leaving a block early skips. A local whose last read is an
+`if` condition was dropped after the whole `if`, never reached when the
+branch returns; the drop now lands at the start of both branches. A
+local dying on a branch edge was dropped at the branch's tail; it is now
+dropped at its start, the one place that is right on every path, and
+the tail placement was also the double free inside the branch. And a
+local the iterable only borrows, like `header` in
+`for part in header.split(",")`, was dropped after the loop; it now
+stays live until the loop exits, so a `return` in the body releases it.
+A local needed only if the loop finishes, in a body that returns
+without reading it, dies on the edge into the body, which no drop
+covered; the pass now drops it there. Edge drops skip locals lowering
+has not bound yet, because it has no variable for them.
+
+Ten parity tests in `parity/loop_ownership.rs` run these shapes on both
+tiers with balanced allocations, for strings, records, lists, byte
+strings, a rebound parameter and nested loops; nine fail without the
+fix. Four tests in `edge_drop_placement.rs` pin where the pass puts the
+drops. The recorded-webhook parity test now reads the header the way
+the driver's programs do, rebinding the timestamp in a loop and
+returning from the loop that finds a signature. One related leak stays
+open: a local first bound inside a loop body and read after the loop is
+overwritten on the next iteration without being released, because
+lowering only releases on a rebinding it can see in the source. The fix
+needs lowering to have a variable for the local before the loop without
+keeping every body local alive across iterations; it is on the roadmap.
+
+---
+
 ## 2026-11-25 - Byte strings, hashing, HMAC and signatures in native code (B04, sixth slice)
 
 `Bytes` compiles to native code, with every method on it: `utf8()`,

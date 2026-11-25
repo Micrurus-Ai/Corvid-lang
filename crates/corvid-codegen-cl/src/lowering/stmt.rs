@@ -280,28 +280,16 @@ fn lower_stmt(
                     (new_var, false)
                 }
             };
-            // For reassignment of a refcounted local: read the old
-            // value first, release it, THEN bind the new value (which
-            // came pre-Owned from `lower_expr`).
-            // Reassignment: the old value of the Local is being
-            // replaced; its +1 must drop. The .6d pass doesn't yet
-            // model reassignment-kill (the analysis treats a rebind
-            // as a def but doesn't schedule a Drop for the previous
-            // value Ã¢â‚¬â€ this is a forward-compatibility gap tracked for
-            // a future analysis extension). Always release the old
-            // value at codegen time so the unified pass stays
-            // refcount-correct on reassigned refcounted locals.
-            //
-            // The unified pass releases the old value before lowering
-            // the new one, as its ownership analysis expects. The legacy
-            // path (`CORVID_DUP_DROP_PASS=0`) lowers the new value first:
-            // in `text = text + "t"` the new value reads the old one, and
-            // releasing it first would free the string the read retains.
-            let release_old_first = runtime.dup_drop_enabled;
+            // Reassignment of a refcounted local: the old value's +1
+            // drops here, after the new value (which came pre-Owned
+            // from `lower_expr`) is computed, because in
+            // `text = text + "t"` or `text = text.trim()` the new value
+            // reads the old one. Both ownership paths do this. The
+            // unified pass's analysis models it: a rebinding `Let`
+            // reads the old value as its last, consuming use
+            // (`dataflow::cfg`), so the pass never drops that value
+            // itself.
             let old = (refcounted && is_reassignment).then(|| builder.use_var(var));
-            if let (Some(old), true) = (old, release_old_first) {
-                emit_release(builder, module, runtime, old);
-            }
             let v = lower_expr(
                 builder,
                 value,
@@ -312,7 +300,7 @@ fn lower_stmt(
                 module,
                 runtime,
             )?;
-            if let (Some(old), false) = (old, release_old_first) {
+            if let Some(old) = old {
                 emit_release(builder, module, runtime, old);
             }
             // The Value flowing into a refcounted
