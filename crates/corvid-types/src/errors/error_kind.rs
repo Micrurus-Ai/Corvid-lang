@@ -6,6 +6,10 @@ pub enum TypeErrorKind {
     /// (slice 45i).
     NonExhaustiveMatch { missing: String },
 
+    /// A `live` declaration (B14) that is not one table query of the
+    /// row type it delivers, or whose name is unusable.
+    LiveDeclarationInvalid { path: String, problem: String },
+
     /// A constant given to a refined field breaks its refinement:
     /// `Search("dune", 500)` where `limit: Int where between(1, 50)`.
     RefinementOutOfRange { type_name: String, field: String, refinement: String, value: String },
@@ -616,6 +620,9 @@ impl TypeErrorKind {
             Self::NonExhaustiveMatch { missing } => {
                 format!("non-exhaustive match: missing {missing}")
             }
+            Self::LiveDeclarationInvalid { path, problem } => {
+                format!("`live \"{path}\"` {problem}")
+            }
             Self::RefinementOutOfRange { type_name, field, refinement, value } => {
                 format!("`{type_name}.{field}` must be {refinement}, but this value is {value}")
             }
@@ -1151,6 +1158,9 @@ impl TypeErrorKind {
         match self {
             Self::NonExhaustiveMatch { .. } => Some(
                 "add the missing arm(s), or a final `_ -> ...` catch-all".into(),
+            ),
+            Self::LiveDeclarationInvalid { .. } => Some(
+                "a `live` body is one `return` of a query on the table it delivers, such as `return Card.where(fn (c) -> c.board == board)`; a subscriber gets those rows, then each committed change to them".into(),
             ),
             Self::RefinementOutOfRange { .. } => Some(
                 "use a value the refinement admits; every value of a refined field holds its refinement, however it is built".into(),

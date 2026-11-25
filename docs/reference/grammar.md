@@ -303,13 +303,18 @@ The `zone` clause
 on schedules is mandatory.
 
 ```ebnf
-server_decl       ::= 'server' IDENT ':' INDENT route_decl+ DEDENT
+server_decl       ::= 'server' IDENT ':' INDENT (route_decl | live_decl)+ DEDENT
 
 route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
                       | approval_annotation NEWLINE (upload_annotation NEWLINE)?)?
                       'route' http_method STRING_LITERAL
                       (route_query route_payload? | route_payload route_query?)?
                       '->' ('json' type_ref | 'html') uses_clause? route_policy? ':' INDENT block DEDENT
+
+# B14: a `live` names one table query; a subscriber receives the rows it
+# matches, then each committed change. `live` is contextual: an ordinary
+# name everywhere but the start of a server-block declaration.
+live_decl         ::= 'live' STRING_LITERAL '->' type_ref route_policy? ':' INDENT block DEDENT
 
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref

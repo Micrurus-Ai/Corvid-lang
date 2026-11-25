@@ -726,6 +726,36 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - `live` declarations (B14 RT-1)
+
+A `live` declaration is held as a route whose response kind is `Live`
+and whose response type is `List<Row>`, the snapshot. That one choice
+gives it every route rule for free, from one implementation: the
+resolver binds `path` and `actor`, the checker types the body against
+`List<Row>` and enforces `requires`, and IR lowering builds the handler
+agent `corvid serve` runs. On top, `check_live` requires the body to be
+one `return` of a query on the delivered table, without `take`, and
+names each live by its path's last fixed segment, unique per server.
+The contract lists lives apart from routes, and the source renderer,
+the grammar and the drift test know the form. Considered: a separate
+`LiveDecl` beside `HttpRouteDecl`, which would have needed its own
+copy of path binding, actor binding and policy checking in the
+resolver, the checker and lowering, the drift the single-source rule
+forbids.
+
+Two things found against the agreed example. It read the path
+parameter as a bare `board`, where routes read `path.board`; RT-1 uses
+`path.board` so there is one way. And a path parameter is a `String`,
+so `c.board == path.board` against an `Int` column does not check. The
+fix is typed placeholders, `{board: Int}`, for routes and lives alike,
+proposed to frontend development rather than built, because the
+frontend parses paths too. A handler agent for a live is named
+`__live__<path>` so a GET route on the same path keeps its own.
+`corvid serve` refuses to start a program with a live until RT-3 serves
+it, so nothing advertises a subscription no socket answers.
+
+---
+
 ## 2026-11-25 - Refinements hold for every value on the interpreter (B09 Refine-1)
 
 A field refinement was checked only where values entered from outside,

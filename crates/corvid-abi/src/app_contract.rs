@@ -36,6 +36,11 @@ pub struct ApplicationContract {
     pub types: Vec<ContractType>,
     /// Declared HTTP routes.
     pub routes: Vec<ContractRoute>,
+    /// Declared `live` subscriptions (B14): a client subscribes by name
+    /// and receives the matching rows, then each committed change.
+    /// Empty when the program declares none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub live: Vec<ContractLive>,
     /// Public agents (agent invocations, not ordinary REST).
     pub agents: Vec<ContractCallable>,
     /// Public prompts exposed to callers.
@@ -386,6 +391,19 @@ pub struct ContractRoute {
     pub policy: Option<ContractRoutePolicy>,
 }
 
+/// A `live` declaration in the contract (B14). A client reaches it by
+/// `name`, with `path_params` filling the path, and receives `row_type`
+/// rows: a snapshot, then `Added`, `Updated` and `Removed` changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractLive {
+    pub name: String,
+    pub path: String,
+    pub path_params: Vec<ContractParam>,
+    pub row_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ContractRoutePolicy>,
+}
+
 /// A route's authentication/authorization policy (slice 51h).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractRoutePolicy {
@@ -512,7 +530,16 @@ pub fn emit_application_contract(
             Decl::Server(server) => Some(server),
             _ => None,
         })
-        .flat_map(|server| server.routes.iter().map(|route| contract_route(route, &names)))
+        .flat_map(|server| server.routes.iter().filter(|route| !route.is_live()).map(|route| contract_route(route, &names)))
+        .collect();
+    let live = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Server(server) => Some(server),
+            _ => None,
+        })
+        .flat_map(|server| server.routes.iter().filter_map(|route| contract_live(route, &names)))
         .collect();
 
     // `compute_worst_case_cost` is available for a tighter
@@ -589,6 +616,7 @@ pub fn emit_application_contract(
         source_path: opts.source_path.to_string(),
         types,
         routes,
+        live,
         agents,
         prompts,
         identities,
@@ -1064,7 +1092,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
             corvid_ast::RouteResponseKind::Json if names.is_stream(&r.response.ty) => Some("text/event-stream".into()),
-            corvid_ast::RouteResponseKind::Json => None,
+            corvid_ast::RouteResponseKind::Json | corvid_ast::RouteResponseKind::Live => None,
         },
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
@@ -1084,6 +1112,26 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             }
         }),
     }
+}
+
+/// A `live` declaration's contract entry, or `None` for an ordinary
+/// route.
+fn contract_live(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> Option<ContractLive> {
+    Some(ContractLive {
+        name: r.live_name()?.to_string(),
+        path: r.path.clone(),
+        path_params: r
+            .path_params
+            .iter()
+            .map(|p| ContractParam { name: p.name.name.clone(), type_name: names.name(&p.ty) })
+            .collect(),
+        row_type: names.name(r.response.live_row()?),
+        policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| ContractRoutePolicy {
+            authenticated: true,
+            roles: p.roles.clone(),
+            permissions: p.permissions.clone(),
+        }),
+    })
 }
 
 /// Collect the file's effect declarations to build the registry the

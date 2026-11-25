@@ -75,6 +75,8 @@ pub struct RuntimeCapabilities {
     /// executes with a stub actor and does NOT enforce its
     /// requirement, so the contract's auth promise is unmet.
     pub auth_enforcement: bool,
+    /// `live` subscriptions over the WebSocket transport (B14 RT-3).
+    pub live_subscriptions: bool,
 }
 
 impl RuntimeCapabilities {
@@ -103,6 +105,11 @@ impl RuntimeCapabilities {
             // checked, and cookie-authenticated mutations require CSRF
             // double-submit. This was the last Contract Closure gap.
             auth_enforcement: true,
+            // B14: a `live` declaration checks and lowers (RT-1), but the
+            // transport that serves it (RT-3) is still being built, so a
+            // program that declares one refuses to start rather than
+            // advertise a subscription no socket answers.
+            live_subscriptions: false,
         }
     }
 }
@@ -115,6 +122,16 @@ pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<Clo
     let mut gaps = Vec::new();
     for server in &ir.servers {
         for route in &server.routes {
+            if route.response_kind == corvid_ast::RouteResponseKind::Live {
+                if !caps.live_subscriptions {
+                    gaps.push(ClosureGap {
+                        element: format!("live {}", route.path),
+                        missing_capability: "live subscriptions over the WebSocket transport".to_string(),
+                        provided_by: "B14 RT-3",
+                    });
+                }
+                continue;
+            }
             let element = format!("route {} {}", route.method.as_str(), route.path);
 
             // Response boundary types.
