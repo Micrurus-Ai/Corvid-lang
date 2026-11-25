@@ -1003,6 +1003,7 @@ mod tests {
             }),
             error_map: vec![],
             returns_result: false,
+            returns_response: false,
             retry: None,
             rate_limit: None,
             circuit_breaker: None,

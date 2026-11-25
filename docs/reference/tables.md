@@ -238,11 +238,11 @@ with a divergence naming the operation.
 | `String` | `TEXT` | `text` |
 | `Bool` | `BOOLEAN`, 0 or 1 | `boolean` |
 | `Option<T>` | `T`'s column, nullable | `T`'s column, nullable |
-| `Decimal` | `DECIMAL TEXT COLLATE corvid_decimal`: its exact text, compared by value | not yet |
-| `Duration` | `DURATION TEXT COLLATE corvid_duration`: its ISO 8601 text, compared by value | not yet |
-| `Instant` | `INSTANT TEXT`: UTC with all nine fractional digits, which sorts in time order | not yet |
-| `ZonedTime` | `ZONED TIME TEXT`: the instant and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | not yet |
-| `TimeZone`, `Currency`, `Locale` | `TIME ZONE TEXT`, `CURRENCY TEXT`, `LOCALE TEXT`: the canonical name | not yet |
+| `Decimal` | `DECIMAL TEXT COLLATE corvid_decimal`: its exact text, compared by value | `corvid_decimal`, a `numeric` domain |
+| `Duration` | `DURATION TEXT COLLATE corvid_duration`: its count of nanoseconds, compared by value | `corvid_duration`, a `numeric(39, 0)` domain |
+| `Instant` | `INSTANT TEXT`: UTC with all nine fractional digits, which sorts in time order | `corvid_instant`, a byte-ordered `text` domain that checks the form |
+| `ZonedTime` | `ZONED TIME TEXT`: the instant and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | `corvid_zoned_time`, a byte-ordered `text` domain |
+| `TimeZone`, `Currency`, `Locale` | `TIME ZONE TEXT`, `CURRENCY TEXT`, `LOCALE TEXT`: the canonical name | `corvid_time_zone`, `corvid_currency`, `corvid_locale`, byte-ordered `text` domains |
 | `Bytes` | `BLOB`: the bytes themselves | `bytea` |
 | `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON | `jsonb` holding the value's public JSON |
 
@@ -284,9 +284,13 @@ index those two columns there ("no such collation sequence") rather than
 compare their text. Instant columns need no collation and sort correctly
 in any SQLite tool.
 
-On Postgres these columns are a compile error for now: Postgres needs a
-column type for each that compares it exactly, which is
-[planned](../proposals/typed-persistence.md#exact-columns-for-money-and-time-p8).
+On Postgres each of these types is declared with a domain of its own,
+so the stored schema says which Corvid type a column holds. A decimal is
+`numeric`, which is exact at any scale, and a duration is its nanosecond
+count as `numeric`; the text forms compare in byte order, so a locale's
+sorting rules never reorder instants. The migration that first needs a
+domain creates it, and running that statement again does nothing. Other
+tools can read these columns as ordinary numbers and text.
 ### Binary values
 
 A `Bytes` field is stored as the bytes themselves, on both engines, and

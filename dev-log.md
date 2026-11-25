@@ -13,6 +13,52 @@ the required arguments. [Design](docs/proposals/frontend-web-starter.md)
 
 ---
 
+## 2026-11-25 - Connector responses with status and headers (B05, slice 3c)
+
+`-> Response<Charge>` gives a connector call the status and the response
+headers next to the decoded body, for the calls that need an `ETag`, a
+`Location` or a rate-limit header. It follows `Upload`: a compiler-known
+generic (`Type::Response`) read with methods, `status()`, `body()` and
+`header(name)`, so compiler-known values have one accessor style. The
+runtime returns `{status, headers, body}` for an operation that declares
+it, and the interpreter builds the record from one field list,
+`RESPONSE_FIELDS`, under a reserved type id, as `JsonError` and
+`RegexMatch` do.
+
+**Decisions.** `Set-Cookie` is dropped rather than redacted. A header
+the program can read is a value the trace must record for replay, and a
+connector is not a browser session. A `Response` describes one call, so
+it stays in the program that made it. A new pass,
+`checker/response_boundaries.rs`, refuses it in record fields, stores,
+tables, tools, prompts, routes, connector parameters, and the signatures
+of `main` and exported agents. It also has no JSON form. Mock mode
+needed a way to produce one without a public constructor, which would
+have added an IR expression kind across every native pass for a value
+native code never sees. So a `Response` operation's `mock:` is its body,
+answered with status 200 and no headers, and the checker types the mock
+that way.
+
+**`HEAD` and `OPTIONS`.** They join the method rule routes and
+operations share. A `HEAD` operation must return `Response<Nothing>`,
+since its answer has no body. A route declaring either is a new error,
+`RouteMethodAnsweredByServer`, because `corvid serve` answers `HEAD`
+from the `GET` and `OPTIONS` from its routes and CORS policy. Declaring
+them would make a second, conflicting answer.
+
+`Response` reaches native code nowhere, because connector calls run on
+the interpreter; every native match names it with a "runs on the
+interpreter" refusal rather than a wildcard.
+
+Tests: the checker on a helper agent taking a `Response`, typed
+accessors, `Result<Response<T>, E>`, a `HEAD` operation, and refusals
+(nested, a non-`Nothing` `HEAD`, a wrong mock, a record field, a tool,
+a route and a `HEAD` route, `to_json`). End to end: status, `ETag` and
+body with the cookie absent from the program and the trace and the
+header replayed from the recording, a `HEAD` request, a mapped 404
+inside `Result`, and mock mode.
+
+---
+
 ## 2026-11-25 - Connector queries and headers (B05, slice 3b)
 
 `GET "/v1/charges" query filter` sends a record parameter as the query
@@ -221,6 +267,44 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-24 - Money and time columns on Postgres (B09 P8b)
+
+The money and time columns now run on Postgres too, so a finance or
+scheduling application on Postgres stores a `Decimal`, `Instant` or
+`Duration` column exactly. Before, any of these columns on Postgres was
+a compile error.
+
+Postgres, like the planner on SQLite, identifies a column by its type,
+so each Corvid type gets a domain: `corvid_decimal AS numeric`,
+`corvid_duration AS numeric(39, 0)` and byte-ordered `text` domains for
+the rest, the instant's with a `CHECK` on its fixed-width form. Byte
+order (`COLLATE "C"`) matters, because a locale collation can treat
+punctuation specially. A migration creates each domain the first time a
+table or column needs it, with a `DO` block that does nothing if it
+exists. The migration runner's transaction scanner already skips
+dollar-quoted bodies, so the block passes. The planner reads
+`domain_name` before `data_type`, so a re-plan sees the same type.
+
+Two decisions changed P8a's encoding and its SQL. A duration was ISO
+8601 text, which SQLite's collation compares by value but Postgres
+cannot: Postgres has no comparison by value for text. It is now the
+nanosecond count on both engines, which keeps the interpreter
+engine-blind. The change landed before any database could hold the old
+form, since P8a shipped today. And the first Postgres run sorted `9.50`
+after `10.0`. The select list reads these columns as `"total"::text AS
+"total"`, and Postgres resolves a bare `ORDER BY "total"` to that text
+output column. Every ordering column is now `"Table"."column"`.
+
+With that, no table column type is refused by storage any more, so the
+checker's last column refusal, its module and its error kind are
+removed. The CLI lifecycle test now adds a money column to an existing
+table, fills it, compares `10.0` with `10` and re-plans, on both
+engines. Writing that test found a papercut, recorded on the roadmap: a
+number literal inside `Some(...)` is not typed by the comparison's
+other side.
 
 ---
 

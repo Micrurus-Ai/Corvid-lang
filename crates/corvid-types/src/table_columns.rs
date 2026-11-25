@@ -19,9 +19,10 @@ pub enum ColumnKind {
     /// B09 P8a — a `Decimal`, as its exact text (`19.90`), compared by
     /// value through the `corvid_decimal` collation.
     Decimal,
-    /// A `Duration`, as its ISO 8601 text (`PT1H30M`), compared by value
-    /// through the `corvid_duration` collation. Corvid durations hold
-    /// 128-bit nanoseconds, more than an SQLite integer.
+    /// A `Duration`, as its count of nanoseconds (`5400000000000` for an
+    /// hour and a half), compared by value: through the `corvid_duration`
+    /// collation on SQLite, whose integers cannot hold Corvid's 128-bit
+    /// nanoseconds, and as `numeric` on Postgres.
     Duration,
     /// An `Instant`, as UTC RFC 3339 text with all nine fractional
     /// digits, which sorts in time order.
@@ -141,7 +142,7 @@ impl ColumnKind {
 
 /// The SQLite collation that compares decimal text by value.
 pub const DECIMAL_COLLATION: &str = "corvid_decimal";
-/// The SQLite collation that compares ISO 8601 duration text by value.
+/// The SQLite collation that compares a duration's nanosecond count by value.
 pub const DURATION_COLLATION: &str = "corvid_duration";
 
 /// How a field of type `ty` is stored, and whether the column admits

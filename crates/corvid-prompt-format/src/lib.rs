@@ -257,6 +257,9 @@ fn schema_for_inner(
         // schemas (an upload as a string handle, a page as an array of
         // its element schema); the typechecker is the real backstop.
         Type::Upload(_) => json!({ "type": "string" }),
+        // The checker keeps a connector `Response` out of every prompt, so
+        // no schema ever describes one; an empty schema keeps this total.
+        Type::Response(_) => json!({}),
         Type::Page(inner) => json!({
             "type": "array",
             "items": schema_for_inner(inner, types_by_id, visiting),

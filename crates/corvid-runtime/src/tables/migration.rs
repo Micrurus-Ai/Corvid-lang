@@ -168,6 +168,11 @@ pub fn plan_table_change(table: &TableSchema, stored: &[StoredColumn]) -> Result
             statements.push(format!("ALTER TABLE {table_name} RENAME COLUMN {} TO {};", quote(old), quote(new)));
         }
         for (name, kind) in &added {
+            if let Some(definition) = table.engine.domain_definition(*kind) {
+                if !statements.contains(&definition) {
+                    statements.push(definition);
+                }
+            }
             statements.push(format!("ALTER TABLE {table_name} ADD COLUMN {} {};", quote(name), table.engine.column_type(*kind)));
         }
         for name in &retired {

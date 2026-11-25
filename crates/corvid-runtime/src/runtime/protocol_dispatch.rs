@@ -556,6 +556,7 @@ impl Runtime {
             auth: spec.auth.clone(),
             error_map: Vec::new(),
             returns_result: false,
+            returns_response: false,
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,
@@ -603,6 +604,7 @@ impl Runtime {
             // never returns a Result envelope.
             error_map: Vec::new(),
             returns_result: false,
+            returns_response: false,
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,

@@ -768,6 +768,41 @@ pub(super) fn eval_builtin_method(
         // `filename` / `content_type` / `size` / `bytes` (List<Int>)
         // fields. The accessors read them; `text()` decodes the bytes
         // as UTF-8 (lossy).
+        // ----- Response<Body> accessors (B05) ---------------------
+        //
+        // A connector call builds the record from
+        // `corvid_types::RESPONSE_FIELDS`; see `interp/connector_json.rs`.
+        ResponseStatus => response_field(&recv, "status", span),
+        ResponseBody => response_field(&recv, "body", span),
+        ResponseHeader => {
+            let wanted = match &args[0] {
+                Value::String(name) => name.to_ascii_lowercase(),
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch { expected: "String".into(), got: other.type_name() },
+                        span,
+                    ))
+                }
+            };
+            let headers = response_field(&recv, "headers", span)?;
+            let found = match &headers {
+                Value::List(pairs) => pairs.iter_cloned().into_iter().find_map(|pair| match pair {
+                    Value::List(pair) => match pair.iter_cloned().as_slice() {
+                        [Value::String(name), value @ Value::String(_)] if name.as_ref() == wanted => {
+                            Some(value.clone())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                }),
+                _ => None,
+            };
+            Ok(match found {
+                Some(value) => Value::OptionSome(crate::value::BoxedValue::new(value)),
+                None => Value::OptionNone,
+            })
+        }
+
         UploadFilename => upload_field(&recv, "filename", span),
         UploadContentType => upload_field(&recv, "content_type", span),
         UploadSize => upload_field(&recv, "size", span),
@@ -866,6 +901,26 @@ pub(super) fn eval_json_decode(
 
 /// Read a field from the `Upload<Format>` struct value `corvid serve`
 /// materialised for a route body (slice 52c-2).
+fn response_field(recv: &Value, field: &str, span: Span) -> Result<Value, InterpError> {
+    match recv {
+        Value::Struct(s) if s.type_id() == corvid_types::RESPONSE_TYPE_ID => {
+            s.get_field(field).ok_or_else(|| {
+                InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: format!("Response with `{field}`"),
+                        got: recv.type_name(),
+                    },
+                    span,
+                )
+            })
+        }
+        other => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch { expected: "Response".into(), got: other.type_name() },
+            span,
+        )),
+    }
+}
+
 fn upload_field(recv: &Value, field: &str, span: Span) -> Result<Value, InterpError> {
     match recv {
         Value::Struct(s) => s.get_field(field).ok_or_else(|| {

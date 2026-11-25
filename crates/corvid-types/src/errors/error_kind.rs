@@ -455,9 +455,6 @@ pub enum TypeErrorKind {
     TableOutsideDatabase { table: String },
     /// B09 — a table two `database` blocks list.
     TableInTwoDatabases { table: String, first: String, second: String },
-    /// B09 P8a — a money or time column on a Postgres database, which
-    /// cannot yet store it so that queries compare it exactly.
-    ExactColumnNotYetOnPostgres { table: String, column: String, type_name: String },
     /// B09 P8a — `order_by` on a column whose type has no order.
     TableOrderUnordered { column: String, type_name: String },
     /// B09 — a `database` block omits a setting that has no default.
@@ -490,6 +487,13 @@ pub enum TypeErrorKind {
 
     /// A GET route declared a request body.
     GetRouteBody { server: String, path: String },
+
+    /// A route declared with `HEAD` or `OPTIONS`, which the server
+    /// answers itself (B05: the methods exist for connector operations).
+    RouteMethodAnsweredByServer { server: String, method: String, path: String },
+
+    /// A connector `Response` outside the program that made the call.
+    ResponseOutsideCaller { place: String },
 
     ModelOutputFormatMismatch {
         prompt: String,
@@ -961,9 +965,6 @@ impl TypeErrorKind {
             Self::TableInTwoDatabases { table, first, second } => {
                 format!("table `{table}` is listed in both database `{first}` and database `{second}`")
             }
-            Self::ExactColumnNotYetOnPostgres { table, column, type_name } => format!(
-                "column `{column}` of table `{table}` is a `{type_name}`, which a Postgres table cannot store yet: Postgres needs a column type that compares it exactly, which arrives with B09 P8b"
-            ),
             Self::TableOrderUnordered { column, type_name } => {
                 format!("`order_by` reads column `{column}`, a `{type_name}`, which has no order")
             }
@@ -1004,6 +1005,12 @@ impl TypeErrorKind {
             }
             Self::GetRouteBody { server, path } => {
                 format!("GET route `{path}` in server `{server}` declares a request body")
+            }
+            Self::ResponseOutsideCaller { place } => {
+                format!("{place} cannot hold a `Response`")
+            }
+            Self::RouteMethodAnsweredByServer { server, method, path } => {
+                format!("route `{method} {path}` in server `{server}` declares a method the server answers itself")
             }
             Self::ModelOutputFormatMismatch {
                 prompt,
@@ -1409,9 +1416,6 @@ impl TypeErrorKind {
                 "add the table to `tables:` in the `database` block that holds it".into(),
             ),
             Self::TableInTwoDatabases { .. } => Some("list each table in exactly one `database` block".into()),
-            Self::ExactColumnNotYetOnPostgres { .. } => Some(
-                "keep this table in a SQLite database for now, or store the value's exact text with `to_string()` in a `String` column".into(),
-            ),
             Self::TableOrderUnordered { type_name, .. } if type_name == "ZonedTime" => {
                 Some("order by an `Instant` column instead: two zoned times in different zones can be the same instant".into())
             }
@@ -1447,6 +1451,12 @@ impl TypeErrorKind {
             )),
             Self::GetRouteBody { .. } => Some(
                 "move request data for GET into a `query Type` clause, or change the method to POST/PUT/PATCH".into(),
+            ),
+            Self::ResponseOutsideCaller { .. } => Some(
+                "a `Response` is what a connector call answered: read `status()`, `header(name)` and `body()` where the call is made, and pass on the values you need".into(),
+            ),
+            Self::RouteMethodAnsweredByServer { .. } => Some(
+                "`corvid serve` answers HEAD from the route's GET and OPTIONS from its routes and CORS policy; declare the GET route. HEAD and OPTIONS are for connector operations".into(),
             ),
             Self::ModelOutputFormatMismatch { required, .. } => Some(format!(
                 "add `output_format: {required}` to the target `model` declaration, or route this prompt to a model that supports that response format"

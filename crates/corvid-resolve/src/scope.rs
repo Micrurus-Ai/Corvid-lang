@@ -129,6 +129,11 @@ pub enum BuiltIn {
     /// `Item` argument is an ordinary type and resolves normally.
     /// Call: `Page(items: List<T>, next_cursor: Option<String>) -> Page<T>`.
     Page,
+    /// B05 — `Response<Body>`, what a connector operation returns when the
+    /// program needs the status or a header as well as the body. Only a
+    /// connector call produces one; programs read it with `status()`,
+    /// `body()` and `header(name)`.
+    Response,
     /// B03 — `RegexMatch`, the compiler-known record `find_regex` and
     /// `find_all_regex` return. Nameable so helper agents can take a
     /// match as a parameter; only the regex methods construct one.
@@ -243,6 +248,7 @@ impl SymbolTable {
         // Slice 51f — HTTP-boundary upload / pagination heads.
         self.builtins.insert("Upload".into(), BuiltIn::Upload);
         self.builtins.insert("Page".into(), BuiltIn::Page);
+        self.builtins.insert("Response".into(), BuiltIn::Response);
         // B03 — see the `BuiltIn::RegexMatch` docstring.
         self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
     }

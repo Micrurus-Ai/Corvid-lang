@@ -486,10 +486,12 @@ impl<'a> Parser<'a> {
             "PUT" => Ok(HttpMethod::Put),
             "PATCH" => Ok(HttpMethod::Patch),
             "DELETE" => Ok(HttpMethod::Delete),
+            "HEAD" => Ok(HttpMethod::Head),
+            "OPTIONS" => Ok(HttpMethod::Options),
             _ => Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken {
                     got: format!("HTTP method `{method}`"),
-                    expected: "`GET`, `POST`, `PUT`, `PATCH`, or `DELETE`".into(),
+                    expected: "`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, or `OPTIONS`".into(),
                 },
                 span: span.merge(method_span),
             }),
