@@ -173,9 +173,13 @@ fn every_native_runtime_tool_is_covered() {
         assert!(corvid_runtime::runtime::is_native_runtime_tool(name), "`{name}` is not a native runtime tool");
         assert!(PROGRAM.contains(&format!("{name}(")), "the program does not call `{name}`");
     }
-    // `secret` and `random_token` joined in N3, with their own test
-    // (`native_secrets.rs`), because their result is a `Secret`.
-    for name in ["hash_password", "io_read_text", "rag_search", "mcp_call", "charge"] {
+    // `secret`, `random_token` and `hash_password` joined in N3, with
+    // their own tests (`native_secrets.rs`), because they produce or take
+    // a `Secret`.
+    for name in ["secret", "random_token", "hash_password"] {
+        assert!(corvid_runtime::runtime::is_native_runtime_tool(name), "`{name}` is a native runtime tool since N3");
+    }
+    for name in ["io_read_text", "rag_search", "mcp_call", "charge"] {
         assert!(!corvid_runtime::runtime::is_native_runtime_tool(name), "`{name}` is not a native runtime tool");
     }
 }

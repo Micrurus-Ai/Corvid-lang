@@ -1938,13 +1938,16 @@ fn dispatch_stdlib_random_tool(
 /// tool added here must pass the parity test in
 /// `corvid-driver/tests/native_runtime_tools.rs`. `secret(name)` and
 /// `random_token(bytes)` are on the list too (N3): their result is a
-/// `Secret`, which only the runtime call's decoder can build.
+/// `Secret`, which only the runtime call's decoder can build. So is
+/// `hash_password(secret, cost)`, whose secret argument the runtime call
+/// records as `<redacted>` and reveals only to the implementation.
 pub fn is_native_runtime_tool(name: &str) -> bool {
     is_stdlib_time_tool(name)
         || is_stdlib_random_tool(name)
         || super::uuid::is_uuid_tool(name)
         || name == "secret_read"
         || is_stdlib_secret_value_tool(name)
+        || super::crypto_tools::is_password_hash_tool(name)
 }
 
 /// Exact-name gate for the executing secrets surface.

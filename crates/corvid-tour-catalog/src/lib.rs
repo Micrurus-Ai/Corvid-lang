@@ -528,7 +528,7 @@ agent api_key() -> Result<String, String>:
         spec: "docs/reference/cryptography.md#secrets",
         roadmap: "B04 cryptography, slices 2 to 4",
         test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-vm/src/tests/hmac.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-driver/tests/webhook_verification.rs + crates/corvid-vm/src/tests/passwords.rs + crates/corvid-driver/tests/tokens_and_passwords.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
-        non_scope: "Native code reads, holds and compares secrets and keys HMAC and password checks with them; passing one to a tool of the program's own or to `hash_password` runs on the interpreter until native dispatch N3c. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
+        non_scope: "Native code does everything with a secret except pass it to a tool of the program's own, which runs on the interpreter because native tool calls record their arguments without redaction. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
         source: r#"import "./std/secrets" use secret
 import "./std/crypto" use random_token, hash_password, owasp_2023
 

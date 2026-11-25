@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Hashing and checking passwords now runs as native code: `hash_password(password, owasp_2023())` records the password as `<redacted>` and reveals it only to the hashing, exactly as on the interpreter, so a sign-up and log-in service builds into a native binary. The only secret use that still needs the interpreter is passing a secret to a tool you declared yourself. [Native code](docs/reference/cryptography.md#native-code)
+
 Verifying a webhook with a key read as a `Secret` now runs as native code: `hmac_sha256` and `hmac_sha512` keyed by a secret, `verify_password` and `decode_base64_after("whsec_")` give the same answers in a native binary as on the interpreter. Passing a secret to a tool of your own or to `hash_password` still runs on the interpreter. [Native code](docs/reference/cryptography.md#native-code)
 
 A program that holds a `Secret` now runs as native code: it can read one with `secret(name)`, draw one with `random_token(bytes)`, keep it in records, lists and options, and compare secrets with `==` in constant time, and the trace holds `<redacted>` as on the interpreter. Passing a secret to a tool of your own, `hash_password`, and HMAC, `verify_password` or `decode_base64_after` keyed by a secret still run on the interpreter, and `corvid run` says so. [Native code](docs/reference/cryptography.md#native-code)

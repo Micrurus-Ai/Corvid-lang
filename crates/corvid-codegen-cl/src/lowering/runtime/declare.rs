@@ -181,14 +181,27 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .declare_function("corvid_json_decode_typed", Linkage::Import, &json_decode_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare json_decode_typed: {e}"), Span::new(0, 0)))?;
     // corvid_runtime_call(name, args, arg_count, plan, plan_len, typeinfos, payload) -> tag
+    // corvid_runtime_call(name, args, count, plan, plan_len, typeinfos,
+    // payload, revealed) -> tag; `revealed` is null unless the tool takes
+    // a secret (native dispatch N3c).
     let mut runtime_call_sig = module.make_signature();
-    for _ in 0..7 {
+    for _ in 0..8 {
         runtime_call_sig.params.push(AbiParam::new(I64));
     }
     runtime_call_sig.returns.push(AbiParam::new(I64));
     let runtime_call_id = module
         .declare_function("corvid_runtime_call", Linkage::Import, &runtime_call_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare runtime_call: {e}"), Span::new(0, 0)))?;
+    // corvid_json_encode_tool_argument(name, value, plan, plan_len,
+    // typeinfos, revealed) -> String (native dispatch N3c).
+    let mut tool_argument_sig = module.make_signature();
+    for _ in 0..6 {
+        tool_argument_sig.params.push(AbiParam::new(I64));
+    }
+    tool_argument_sig.returns.push(AbiParam::new(I64));
+    let json_encode_tool_argument = module
+        .declare_function("corvid_json_encode_tool_argument", Linkage::Import, &tool_argument_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_encode_tool_argument: {e}"), Span::new(0, 0)))?;
     // corvid_json_encode_typed(value, plan, plan_len, typeinfos) -> String
     let mut json_encode_sig = module.make_signature();
     for _ in 0..4 {
@@ -1341,6 +1354,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         json_decode_typed: json_decode_typed_id,
         runtime_call: runtime_call_id,
         json_encode_typed: json_encode_typed_id,
+        json_encode_tool_argument,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,

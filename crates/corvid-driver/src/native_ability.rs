@@ -531,9 +531,10 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                     }
                     return Ok(());
                 }
-                // A tool of the program's own, or `hash_password`, whose
-                // signature holds a secret: native code would record its
-                // arguments without redaction.
+                // A tool of the program's own whose signature holds a
+                // secret: native code would record its arguments without
+                // redaction. The runtime's tools (`hash_password`) passed
+                // the arm above.
                 IrCallKind::Tool { def_id, .. } if tool_takes_or_returns_secret(*def_id, context) => {
                     return Err(NotNativeReason::SecretNotNative)
                 }

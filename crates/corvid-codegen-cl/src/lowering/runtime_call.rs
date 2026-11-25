@@ -12,7 +12,7 @@
 
 use super::*;
 use super::expr::lower_container_maybe_borrowed;
-use super::public_json::{json_plan, lower_json_encode, native_runtime_call_types};
+use super::public_json::{json_plan, lower_json_encode, lower_tool_argument_encode, native_runtime_call_types};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lower_runtime_call(
@@ -36,9 +36,16 @@ pub(super) fn lower_runtime_call(
     }
 
     // Arguments: each encoded as public JSON text. A computed argument
-    // lives until the call returns.
+    // lives until the call returns. A tool that takes a secret gets each
+    // argument twice: the recorded form every record of the call holds,
+    // with `<redacted>` in a secret's place, and the revealed form only
+    // its implementation receives (N3c).
+    let name = super::prompt::emit_string_const(builder, module, runtime, &tool.name, expr.span)?;
+    let types_by_id: HashMap<DefId, &corvid_ir::IrType> = runtime.ir_types.iter().map(|(id, ty)| (*id, ty)).collect();
+    let takes_secret = tool.params.iter().any(|p| corvid_ir::holds_secret(&p.ty, &types_by_id));
     let outer_temporaries = runtime.return_temporaries.borrow().len();
     let mut encoded = Vec::with_capacity(args.len());
+    let mut revealed = Vec::new();
     for (arg, param) in args.iter().zip(&tool.params) {
         let (value, borrowed) = lower_container_maybe_borrowed(
             builder, arg, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
@@ -46,17 +53,26 @@ pub(super) fn lower_runtime_call(
         if !borrowed && is_refcounted_type(&arg.ty) {
             runtime.return_temporaries.borrow_mut().push(value);
         }
-        encoded.push(lower_json_encode(builder, module, runtime, &param.ty, value, arg.span)?);
+        if takes_secret {
+            encoded.push(lower_tool_argument_encode(builder, module, runtime, name, &param.ty, value, false, arg.span)?);
+            revealed.push(lower_tool_argument_encode(builder, module, runtime, name, &param.ty, value, true, arg.span)?);
+        } else {
+            encoded.push(lower_json_encode(builder, module, runtime, &param.ty, value, arg.span)?);
+        }
     }
-    let slots = builder.create_sized_stack_slot(clir::StackSlotData::new(
-        clir::StackSlotKind::ExplicitSlot,
-        (encoded.len().max(1) * 8) as u32,
-        3,
-    ));
-    for (index, text) in encoded.iter().enumerate() {
-        builder.ins().stack_store(*text, slots, (index * 8) as i32);
-    }
-    let args_ptr = builder.ins().stack_addr(I64, slots, 0);
+    let store_texts = |builder: &mut FunctionBuilder, texts: &[ClValue]| {
+        let slots = builder.create_sized_stack_slot(clir::StackSlotData::new(
+            clir::StackSlotKind::ExplicitSlot,
+            (texts.len().max(1) * 8) as u32,
+            3,
+        ));
+        for (index, text) in texts.iter().enumerate() {
+            builder.ins().stack_store(*text, slots, (index * 8) as i32);
+        }
+        builder.ins().stack_addr(I64, slots, 0)
+    };
+    let args_ptr = store_texts(builder, &encoded);
+    let revealed_ptr = if takes_secret { store_texts(builder, &revealed) } else { builder.ins().iconst(I64, 0) };
     let arg_count = builder.ins().iconst(I64, encoded.len() as i64);
 
     // The answer, decoded by the runtime into the declared return type.
@@ -68,14 +84,13 @@ pub(super) fn lower_runtime_call(
     let table = builder.ins().symbol_value(I64, table);
     let payload_slot = builder.create_sized_stack_slot(clir::StackSlotData::new(clir::StackSlotKind::ExplicitSlot, 8, 3));
     let payload = builder.ins().stack_addr(I64, payload_slot, 0);
-    let name = super::prompt::emit_string_const(builder, module, runtime, &tool.name, expr.span)?;
 
     let call_ref = module.declare_func_in_func(runtime.runtime_call, builder.func);
     builder
         .ins()
-        .call(call_ref, &[name, args_ptr, arg_count, plan, plan_len, table, payload]);
+        .call(call_ref, &[name, args_ptr, arg_count, plan, plan_len, table, payload, revealed_ptr]);
 
-    for text in encoded {
+    for text in encoded.into_iter().chain(revealed) {
         emit_release(builder, module, runtime, text);
     }
     for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {

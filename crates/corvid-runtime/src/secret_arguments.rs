@@ -34,6 +34,10 @@ use serde_json::Value as J;
 /// What every trace record writes in place of a secret's text.
 pub const REDACTED_SECRET: &str = "<redacted>";
 
+/// Why a key made by `decode_base64_after` cannot reach a tool: it is
+/// bytes, so there is no text to reveal. Both tiers stop with this.
+pub const DECODED_KEY_TO_TOOL: &str = "a key made by `decode_base64_after` is bytes, not text, so no tool can receive it; pass the secret `secret(name)` read, or use the key only for `hmac_sha256` and `hmac_sha512`";
+
 /// The reserved key of a recorded `ToolResult` whose payload had a
 /// secret's text replaced. A scrubbed result is recorded as
 /// `{"__corvid_secret_scrubbed__": <scrubbed result>}`; a scrubbed error

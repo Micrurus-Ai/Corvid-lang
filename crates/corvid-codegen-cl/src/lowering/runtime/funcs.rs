@@ -59,6 +59,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.
     pub json_encode_typed: FuncId,
+    /// `corvid_json_encode_tool_argument`: one argument of a runtime call
+    /// whose tool takes a secret, recorded (`<redacted>`) or revealed.
+    pub json_encode_tool_argument: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older

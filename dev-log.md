@@ -25,6 +25,48 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Hashing passwords in native code (native dispatch N3c)
+
+`hash_password(password, cost)` now runs in native code, so the sign-up
+and log-in programs from the cryptography reference build into a native
+binary. N3 is complete: native code does everything with a secret that
+the interpreter does, except pass one to a tool of the program's own.
+
+**Recorded and revealed arguments.** A tool whose parameters hold a
+secret needs two forms of its arguments: the recorded one, with
+`<redacted>` in a secret's place, which the trace, replay and approvals
+use, and the revealed one, which only the implementation receives. The
+public JSON encoder gained an opt-in `ValueReader::secret`, refused by
+default so `to_json` can never write a secret. The native reader writes
+`<redacted>` or the text, and `corvid_json_encode_tool_argument` encodes
+each argument in either form. `corvid_runtime_call` takes the revealed
+array, null for a tool that takes no secret, and calls
+`call_tool_revealing_secrets`, the interpreter's path, so redaction and
+echo scrubbing are one implementation.
+
+A key made by `decode_base64_after` has no text, so passing it to a tool
+stops both tiers with `DECODED_KEY_TO_TOOL`, a message that moved from
+the interpreter into the runtime so the two say the same thing.
+
+**Left.** A tool of the program's own is called directly by native code,
+which records its arguments without redaction, so one that takes or
+returns a secret keeps the program on the interpreter. Moving user tools
+onto the runtime call is now a roadmap item.
+
+**Found, and on the roadmap.** A native `match` arm cannot call a tool,
+so `Err(problem) -> random_token(16)` keeps a program off native code
+for where a call is written. And a native build links whatever runtime
+staticlib is on disk without checking that it matches the compiler,
+which made three builds in this work fail to link a new export. Both
+are written up as roadmap items with what stronger looks like.
+
+**Tests.** Native sign-up and log-in give the same verdicts as the
+interpreter, the recorded `hash_password` call holds `<redacted>` and the
+declared cost, replay gives the same verdicts, and a decoded key stops
+both tiers with the same message.
+
+---
+
 ## 2026-11-25 - The cryptography a secret keys, in native code (native dispatch N3b)
 
 `body.utf8().hmac_sha256(key)` and `hmac_sha512` with a `Secret` key,
