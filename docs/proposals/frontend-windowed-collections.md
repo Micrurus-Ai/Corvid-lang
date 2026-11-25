@@ -8,6 +8,8 @@ Build the collection and its bounded rendering first, then check keyboard moveme
 
 ## Measurement protocol
 
+For ordinary bin activation, push the link URL into browser history and render the detail in the current document. Back and Forward render from the URL and saved collection state. This keeps one model instance across detail visits and avoids allocating another document for each visit. Keep native links for direct entry, modified clicks and opening another tab. Explicitly include both view links in sequential focus order along with the active bin.
+
 The active bin link is the collection's single Tab stop. Give the scrolling viewport a negative tabindex so browsers that make scrolling containers keyboard-focusable skip the container during sequential navigation. Native Tab and Shift+Tab then enter and leave through the active link without custom key handlers.
 
 Run on an idle host, on loopback, headless at 960 × 720 CSS pixels and device scale 1. Record the revision, CLI build, Node and browser versions, OS and host model alongside stdout. Each view gets four paired trials per engine, alternating which implementation runs first. A fresh browser context provides a cold cache, then revisits the same URL for the warm measurement. Both versions use identical HTML, CSS, DOM updates and response cache headers.

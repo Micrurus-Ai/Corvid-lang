@@ -13,6 +13,8 @@ the required arguments. [Design](docs/proposals/frontend-web-starter.md)
 
 ## 2026-11-25 - Windowed inventory regression coverage (F17)
 
+The second hosted run reached both Firefox views and exposed excess working-set growth in the Corvid list trial. WebKit then failed reverse Tab from Bin 1. The inventory now reuses its loaded model across detail visits, removes collection listeners when leaving the view, and gives both navigation links an explicit place in the tab order. The existing paired browser check covers these changes with the original budgets. [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45583694755)
+
 The inventory trial uses fixed-height rows to bound DOM work and a native link for each mounted bin. The paired build shares its browser adapter and feed so differences in load size and interaction costs include the actual Corvid loader and model. The CLI model test, Wasm build, TypeScript parity and HTTP fixture checks passed locally. Browser budgets and keyboard/history behavior await hosted verification. [Trial design](docs/proposals/frontend-windowed-collections.md)
 
 The first hosted run finished both Edge views and stopped in Firefox when Tab from Stock table left Bin 1 inactive. The viewport now explicitly yields the Tab stop to the active bin link. The existing forward and reverse Tab assertions cover this change in both views. [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45566193574)

@@ -1,15 +1,14 @@
 import { instantiate } from "./target/wasm/inventory.js";
 
 const inventory = await instantiate();
-const query = new URLSearchParams(location.search);
 const viewport = document.querySelector("#viewport");
 const receive = document.querySelector("#receive");
 const status = document.querySelector("#status");
-const table = query.get("view") === "table";
+const heading = document.querySelector("h1");
 const height = 32;
 const initialCount = 10000;
 
-function openCollection() {
+function openCollection(table) {
     const saved = history.state;
     let count = saved?.count ?? initialCount;
     let active = saved?.active ?? 0;
@@ -101,12 +100,22 @@ function openCollection() {
         history.replaceState({scroll: viewport.scrollTop, active, count,
             focused: rows.contains(document.activeElement)}, "");
     }
-    rows.addEventListener("click", remember);
+    rows.addEventListener("click", event => {
+        const link = event.target.closest("a");
+        if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey ||
+                event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        remember();
+        history.pushState(null, "", link.href);
+        renderLocation();
+        heading.focus();
+    });
     let shipment;
-    window.addEventListener("pagehide", () => {
+    function stopShipment() {
         shipment?.close();
         receive.disabled = count === initialCount + 32;
-    });
+    }
+    window.addEventListener("pagehide", stopShipment);
     receive.disabled = count === initialCount + 32;
     receive.onclick = () => {
         receive.disabled = true;
@@ -129,14 +138,32 @@ function openCollection() {
             status.value = "Shipment interrupted. Receive again to resume.";
         };
     };
+    return () => {
+        stopShipment();
+        viewport.removeEventListener("scroll", render);
+        window.removeEventListener("pagehide", stopShipment);
+        receive.onclick = null;
+    };
 }
 
-const bin = Number(query.get("bin"));
-if (Number.isInteger(bin) && bin >= 1 && bin <= initialCount + 32) {
-    document.querySelector("h1").textContent = "Bin " + query.get("bin");
-    viewport.textContent = inventory.stock(BigInt(bin)) + " parts";
-    receive.hidden = true;
-} else {
-    openCollection();
+let closeCollection;
+function renderLocation() {
+    closeCollection?.();
+    closeCollection = undefined;
+    viewport.replaceChildren();
+    const query = new URLSearchParams(location.search);
+    const bin = Number(query.get("bin"));
+    const detail = Number.isInteger(bin) && bin >= 1 && bin <= initialCount + 32;
+    receive.hidden = detail;
+    heading.textContent = detail ? "Bin " + bin : "Parts inventory";
+    status.value = "";
+    if (detail) {
+        viewport.textContent = inventory.stock(BigInt(bin)) + " parts";
+    } else {
+        closeCollection = openCollection(query.get("view") === "table");
+    }
 }
+heading.tabIndex = -1;
+window.addEventListener("popstate", renderLocation);
+renderLocation();
 performance.mark("inventory-ready");

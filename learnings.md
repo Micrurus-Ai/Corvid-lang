@@ -8,7 +8,7 @@ Give a connector operation a query with `GET "/v1/charges" query filter`, where 
 
 Start a browser project with `corvid new palette --web`. The starter's rendering test and GET route call the same page function. In a consuming app, complete a component through its module alias and follow the definition into the locked source, even offline. [Browser views](docs/book/19-browser-views.md#preview-your-first-web-project)
 
-The windowed inventory example keeps a native link for the focused bin even when scrolling moves it outside the visible window. Use the same fixed row height for layout, range calculations and keyboard movement. [Browser guide](docs/book/19-browser-views.md#window-a-long-inventory)
+The windowed inventory example keeps a native link for the focused bin even when scrolling moves it outside the visible window. Use the same fixed row height for layout, range calculations and keyboard movement. Detail visits reuse the loaded model. The collection saves its active bin and pixel offset in browser history so Back can restore both. [Browser guide](docs/book/19-browser-views.md#window-a-long-inventory)
 
 Use `tabindex="-1"` on the scrolling viewport when the active row link already provides the collection's Tab stop.
 
