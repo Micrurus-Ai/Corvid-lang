@@ -610,6 +610,13 @@ pub struct OperationDecl {
     /// parameter carrying the request body, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<OperationBody>,
+    /// `query <param>` — a record parameter whose fields become the
+    /// request's query parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<Ident>,
+    /// `header "Name": value` lines, in source order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OperationHeader>,
     /// `on status <code> -> Variant` — map a response status to a typed
     /// error variant instead of the success return.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -969,6 +976,24 @@ pub struct ProtocolTransition {
 pub struct OperationBody {
     pub param: Ident,
     pub encoding: BodyEncoding,
+}
+
+/// One `header "Name": value` line on an operation: a request header
+/// whose value is a parameter or a fixed string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationHeader {
+    pub name: String,
+    pub value: OperationHeaderValue,
+    pub span: Span,
+}
+
+/// Where an operation header's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationHeaderValue {
+    /// `header "Idempotency-Key": key` — a `String` or `Secret` parameter.
+    Param(Ident),
+    /// `header "Accept": "application/json"` — the same text on every call.
+    Literal(String),
 }
 
 /// How an operation encodes its request body (slice 52g).

@@ -551,6 +551,8 @@ impl Runtime {
             path,
             param_names: Vec::new(),
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: spec.auth.clone(),
             error_map: Vec::new(),
             returns_result: false,
@@ -594,6 +596,8 @@ impl Runtime {
             path,
             param_names: Vec::new(),
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: spec.auth.clone(),
             // A poll observes; it never maps statuses to typed errors and
             // never returns a Result envelope.

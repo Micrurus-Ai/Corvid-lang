@@ -35,6 +35,15 @@ pub struct ConnectorBodySpec {
     pub encoding: ConnectorBodyEncoding,
 }
 
+/// Where an operation header's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorHeaderValue {
+    /// The named `String` parameter's value on this call.
+    Param(String),
+    /// The same text on every call.
+    Literal(String),
+}
+
 /// How a connector authenticates — every credential is the NAME of a
 /// secret, resolved to a value only at dispatch and never held here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +79,10 @@ pub struct ConnectorHttpSpec {
     pub param_names: Vec<String>,
     /// The request body binding, if any.
     pub body: Option<ConnectorBodySpec>,
+    /// The record parameter whose fields become the query, if any.
+    pub query: Option<String>,
+    /// The operation's `header` lines, in source order.
+    pub headers: Vec<(String, ConnectorHeaderValue)>,
     /// Credentials — secret NAMES only.
     pub auth: Option<ConnectorAuthSpec>,
     /// `on status <code> -> Variant` mappings: a mapped
@@ -187,6 +200,22 @@ pub fn connector_calls_from_ir(
                             corvid_ast::BodyEncoding::Form => ConnectorBodyEncoding::Form,
                         },
                     }),
+                    query: op.query.clone(),
+                    headers: op
+                        .headers
+                        .iter()
+                        .map(|h| {
+                            let value = match &h.value {
+                                corvid_ir::IrOperationHeaderValue::Param(p) => {
+                                    ConnectorHeaderValue::Param(p.clone())
+                                }
+                                corvid_ir::IrOperationHeaderValue::Literal(text) => {
+                                    ConnectorHeaderValue::Literal(text.clone())
+                                }
+                            };
+                            (h.name.clone(), value)
+                        })
+                        .collect(),
                     auth: connector.auth.as_ref().map(auth_from_ir),
                     error_map: op
                         .error_map
@@ -246,7 +275,23 @@ pub fn build_connector_request(
 
     // Fill `{placeholder}` path segments from the arguments.
     let filled_path = fill_path(&spec.path, &by_name, &spec.operation)?;
-    let url = format!("{}{}", spec.base_url.trim_end_matches('/'), filled_path);
+    let mut url = format!("{}{}", spec.base_url.trim_end_matches('/'), filled_path);
+    if let Some(query_param) = &spec.query {
+        let value = by_name.get(query_param.as_str()).copied().ok_or_else(|| {
+            ConnectorRequestError::MissingArgument {
+                operation: spec.operation.clone(),
+                param: query_param.clone(),
+            }
+        })?;
+        let query = encode_query(value).ok_or_else(|| ConnectorRequestError::BadArgument {
+            operation: spec.operation.clone(),
+            param: query_param.clone(),
+        })?;
+        if !query.is_empty() {
+            url.push(if url.contains('?') { '&' } else { '?' });
+            url.push_str(&query);
+        }
+    }
 
     let timeout_secs = spec.timeout_secs.ok_or_else(|| ConnectorRequestError::UndeclaredPolicy {
         operation: spec.operation.clone(),
@@ -291,6 +336,29 @@ pub fn build_connector_request(
     if let Some(auth) = &spec.auth {
         let header = build_auth_header(auth, &spec.operation, resolve_secret)?;
         request = request.credential_header(header.0, header.1);
+    }
+
+    // The operation's `header` lines. The checker keeps them off every
+    // header `auth:`, the body and the transport own.
+    for (name, value) in &spec.headers {
+        let text = match value {
+            ConnectorHeaderValue::Literal(text) => text.clone(),
+            ConnectorHeaderValue::Param(param) => by_name
+                .get(param.as_str())
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| ConnectorRequestError::BadArgument {
+                    operation: spec.operation.clone(),
+                    param: param.clone(),
+                })?,
+        };
+        if text.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+            return Err(ConnectorRequestError::BadArgument {
+                operation: spec.operation.clone(),
+                param: name.clone(),
+            });
+        }
+        request = request.header(name.clone(), text);
     }
 
     // Request-specific headers (the protocol's idempotency key on a
@@ -358,6 +426,35 @@ fn scalar_to_path_segment(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+/// The query string for a record argument in its public JSON form: one
+/// `name=value` pair per field, in field-name order. An absent `Option`
+/// (`null`) is left out and a `List` repeats the name, the forms most
+/// APIs read. `None` when the value is not a flat record, which the
+/// checker already refuses.
+fn encode_query(value: &serde_json::Value) -> Option<String> {
+    let serde_json::Value::Object(fields) = value else {
+        return None;
+    };
+    let mut pairs = Vec::new();
+    for (name, field) in fields {
+        let items: Vec<&serde_json::Value> = match field {
+            serde_json::Value::Null => continue,
+            serde_json::Value::Array(items) => items.iter().collect(),
+            single => vec![single],
+        };
+        for item in items {
+            let text = match item {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                _ => return None,
+            };
+            pairs.push(format!("{}={}", urlencode(name), urlencode(&text)));
+        }
+    }
+    Some(pairs.join("&"))
 }
 
 fn encode_form(value: &serde_json::Value) -> String {
@@ -443,6 +540,8 @@ mod tests {
             path: "/repos/{owner}/{repo}".to_string(),
             param_names: vec!["owner".to_string(), "repo".to_string()],
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: Some(ConnectorAuthSpec::Bearer {
                 secret: "GITHUB_TOKEN".to_string(),
             }),
@@ -535,6 +634,54 @@ mod tests {
         })
         .expect_err("no redirect policy declared");
         assert!(err.into_runtime_error().to_string().contains("declares no `redirects:`"));
+    }
+
+    /// A query record becomes `name=value` pairs: `None` is left out, a
+    /// list repeats the name, and values are percent-encoded.
+    #[test]
+    fn a_query_record_becomes_the_query_string() {
+        let mut listed = spec();
+        listed.path = "/repos/{owner}/{repo}/issues".to_string();
+        listed.param_names.push("filter".to_string());
+        listed.query = Some("filter".to_string());
+        let req = build_connector_request(
+            &listed,
+            &[
+                json!("o"),
+                json!("r"),
+                json!({ "labels": ["bug", "good first"], "milestone": null, "state": "open" }),
+            ],
+            &|_| Some("tok".to_string()),
+        )
+        .expect("build");
+        assert_eq!(
+            req.url,
+            "https://api.github.com/repos/o/r/issues?labels=bug&labels=good%20first&state=open"
+        );
+    }
+
+    #[test]
+    fn header_lines_carry_a_parameter_or_a_fixed_value() {
+        let mut headed = spec();
+        headed.param_names.push("request_id".to_string());
+        headed.headers = vec![
+            ("X-Request-Id".to_string(), ConnectorHeaderValue::Param("request_id".to_string())),
+            ("Accept".to_string(), ConnectorHeaderValue::Literal("application/json".to_string())),
+        ];
+        let req = build_connector_request(&headed, &[json!("o"), json!("r"), json!("req-7")], &|_| {
+            Some("tok".to_string())
+        })
+        .expect("build");
+        let value = |name: &str| req.headers.iter().find(|h| h.name == name).map(|h| h.value.as_str());
+        assert_eq!(value("X-Request-Id"), Some("req-7"));
+        assert_eq!(value("Accept"), Some("application/json"));
+
+        // A value that would split the header block is refused.
+        let err = build_connector_request(&headed, &[json!("o"), json!("r"), json!("a\r\nX-Evil: 1")], &|_| {
+            Some("tok".to_string())
+        })
+        .expect_err("a line break in a header value must be refused");
+        assert!(matches!(err, ConnectorRequestError::BadArgument { .. }));
     }
 
     #[test]

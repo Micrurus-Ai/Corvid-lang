@@ -3819,6 +3819,34 @@ fn connector_policy_items_reject_unclear_forms() {
     assert!(twice.contains("second `timeout:`"), "{twice}");
 }
 
+/// `query <param>` sits on the request line before any body, and
+/// `header` lines take a parameter or a fixed string.
+#[test]
+fn parses_operation_query_and_headers() {
+    let src = "connector payments:
+    base_url: \"https://api.payments.example\"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation charge(filter: ChargeQuery, new: NewCharge, key: String) -> Charge:
+        POST \"/v1/charges\" query filter body new
+        header \"Idempotency-Key\": key
+        header \"Accept\": \"application/json\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    let op = &c.operations[0];
+    assert_eq!(op.query.as_ref().map(|q| q.name.as_str()), Some("filter"));
+    assert_eq!(op.body.as_ref().map(|b| b.param.name.as_str()), Some("new"));
+    assert_eq!(op.headers.len(), 2);
+    assert_eq!(op.headers[0].name, "Idempotency-Key");
+    assert!(matches!(&op.headers[0].value, corvid_ast::OperationHeaderValue::Param(p) if p.name == "key"));
+    assert!(matches!(&op.headers[1].value, corvid_ast::OperationHeaderValue::Literal(t) if t == "application/json"));
+
+    let (_, errors) = parse_file_errs(&src.replace("query filter body new", "body new query filter"));
+    assert!(format!("{:?}", errors.first().map(|e| &e.kind)).contains("before `body` or `form`"), "{errors:?}");
+}
+
 #[test]
 fn parses_connector_with_config_and_operations() {
     let src = "connector github:
