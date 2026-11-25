@@ -35,7 +35,15 @@ it prevents the build from finishing.
 | Collaborative workspace | The roadmap still lists the shared B14/F08 subscription contract as a dependency. | After F08 merges, disconnect one client, commit an edit from another, reconnect and verify the resumed subscription delivers missed and subsequent edits. |
 | Independent component | No independent developer report is available for this revision. | Record the developer's own component and report from the public-docs-only trial. |
 
-The two Edge checks stopped while importing Playwright on this Windows runner
+Hosted Edge reached the empty and 6,143-cell canvas assertions at
+`aa59242bba98fb80972488267e274c18e37a2bfa`. After the offline click the
+storage message still read “Drawings save on this device.” The run stopped
+before storefront verification. Target the final cell relative to the canvas
+so Playwright scrolls it into view and checks that it receives the click.
+Verify that the mark is painted, saved, restored and synchronized.
+[Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45621854525)
+
+The two Edge checks stopped while importing Playwright on this local Windows runner
 with `PermissionError: [Errno 13]`. Run both from the repository root on hosted
 Windows with the CLI built from the revision under test.
 

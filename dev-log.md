@@ -9,6 +9,11 @@ The acceptance exercises use the cart's declared quantity limits and the
 sketchbook's actual canvas dimensions. The packaged HTTP and local storage
 checks passed. [Results and open dependencies](docs/proposals/frontend-application-acceptance.md)
 
+Hosted Edge reached the nearly full canvas but timed out waiting for the
+offline click to save. The revised trial clicks relative to the canvas and
+checks the full drawing before and after reload. Both Edge trials await
+verification on the updated tree.
+
 ### F16 web starter and installed component tooling
 
 The web starter uses the usual manifest and a server-rendered Corvid page

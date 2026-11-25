@@ -91,8 +91,11 @@ def check_canvas_capacity(browser, server, base):
         expect(page.locator("#offline")).to_have_text("Ready for offline reload.")
         expect(page.get_by_role("status")).to_have_text("Drag to draw.")
         context.set_offline(True)
-        page.mouse.click(*point(canvas, 95, 63))
+        bounds = canvas.bounding_box()
+        canvas.click(position={"x": bounds["width"] * 95.5 / 96,
+                               "y": bounds["height"] * 63.5 / 64})
         expect(page.locator("#storage")).to_have_text("Drawing saved.")
+        assert page.evaluate(count_marks) == len(cells)
         assert page.reload().from_service_worker
         expect(page.get_by_role("status")).to_have_text("Drag to draw.")
         assert page.evaluate(count_marks) == len(cells)
