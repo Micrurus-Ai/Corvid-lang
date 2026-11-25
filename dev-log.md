@@ -459,6 +459,30 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - One migration history per database
+
+A program whose tables live in two databases (orders on Postgres,
+analytics in a local file, say) could not be migrated: `corvid migrate
+plan` refused any program with tables on more than one engine, and
+`migrate up --program` any program with more than one database.
+`TableSchema` now records its database's name, so the planner groups a
+program's tables and plans each database into its own history. Each
+group keeps its engine, so two Postgres databases plan in turn against
+the scratch database, which every plan rolls back. `up`, `status` and
+`down` run each database against its folder and give each a state file
+of its own.
+
+The layout keeps the common case unchanged. A program with one database
+keeps `migrations/`, and one with several uses `migrations/<database>/`.
+Going from one to two is the only moment the two meet, so it is refused
+rather than guessed: the files already in `migrations/` belong to the
+first database, and the planner says to move them into its folder. The
+test plans a two-database program into two folders, re-plans with
+nothing to do, applies both with `--program`, runs the program against
+both, and checks the refusal for a flat folder.
+
+---
+
 ## 2026-11-25 - One database, many modules (B09 P11b)
 
 A database can now be declared once, `public database library:`, and

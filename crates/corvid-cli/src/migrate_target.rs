@@ -32,17 +32,60 @@ pub(crate) fn run(request: MigrateRequest<'_>, database: &Path, program: Option<
             return Ok(1);
         }
     };
-    let declared = match databases.as_slice() {
-        [one] => one,
+    match databases.as_slice() {
         [] => bail!("`{}` declares no `database` block", program.display()),
-        _ => bail!(
-            "`{}` declares more than one database; migrations per database are planned work, so migrate each with its own program for now",
-            program.display()
-        ),
-    };
+        [one] => run_declared(&request, one),
+        several => {
+            // One history per database, each in `<dir>/<database>/`, with
+            // its own state file beside the given one.
+            let names: Vec<&str> = several.iter().map(|db| db.name.as_str()).collect();
+            refuse_a_shared_history(request.dir, &names)?;
+            let mut status = 0;
+            for declared in several {
+                println!("database `{}`", declared.name);
+                let dir = request.dir.join(&declared.name);
+                let down_dir = request.down_dir.map(|d| d.join(&declared.name));
+                let state = per_database_state(request.state, &declared.name);
+                let one = MigrateRequest { action: request.action, dir: &dir, down_dir: down_dir.as_deref(), state: &state, dry_run: request.dry_run };
+                status = status.max(run_declared(&one, declared)?);
+            }
+            Ok(status)
+        }
+    }
+}
+
+/// A program with several databases keeps one history per database, in
+/// `<dir>/<database>/`. Migration files directly in `<dir>` belonged to
+/// the single database the program had before; running them against any
+/// one of several would be a guess, so they must be moved first.
+pub(crate) fn refuse_a_shared_history(dir: &Path, databases: &[&str]) -> Result<()> {
+    let flat = std::fs::read_dir(dir)
+        .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "sql")))
+        .unwrap_or(false);
+    if flat {
+        bail!(
+            "this program uses {} databases ({}), so each keeps its migrations in `{}/<database>/`, but `{}` holds migrations directly; move them into the folder of the database they belong to",
+            databases.len(),
+            databases.iter().map(|d| format!("`{d}`")).collect::<Vec<_>>().join(", "),
+            dir.display(),
+            dir.display(),
+        );
+    }
+    Ok(())
+}
+
+/// `target/state.json` becomes `target/state.<database>.json`.
+fn per_database_state(state: &Path, database: &str) -> PathBuf {
+    let stem = state.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "state".into());
+    let extension = state.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    state.with_file_name(format!("{stem}.{database}{extension}"))
+}
+
+/// Run the request against one database the program declares.
+fn run_declared(request: &MigrateRequest<'_>, declared: &corvid_driver::DeclaredDatabase) -> Result<u8> {
     let location = resolve_location(&declared.location).map_err(|e| anyhow::anyhow!("{e}"))?;
     match declared.engine {
-        TableEngine::Sqlite => run_sqlite(&request, &PathBuf::from(location)),
+        TableEngine::Sqlite => run_sqlite(request, &PathBuf::from(location)),
         TableEngine::Postgres { .. } => {
             let label = match &declared.location {
                 corvid_ast::DatabaseLocation::Env(name) => format!("postgres database `{}` from `{name}`", declared.name),

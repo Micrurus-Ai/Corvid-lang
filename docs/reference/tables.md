@@ -526,6 +526,27 @@ A name in either clause cannot also be a declared field, and each stored
 name appears in one clause. `retired` written without a colon is the
 clause, so a table may still have a field named `retired: Bool`.
 
+### Several databases
+
+Each database keeps its own migration history. A program with one
+database keeps it in `migrations/`. A program with several keeps each in
+`migrations/<database>/`, and `corvid migrate plan src/main.cor` plans
+every database's tables into its own folder:
+
+```text
+migrations/
+  orders/001_create_order.sql
+  analytics/001_create_pageview.sql
+```
+
+`corvid migrate up --program src/main.cor` applies each database's
+history to that database, and `status` and `down` work the same way; a
+`--state target/state.json` becomes `target/state.orders.json` and
+`target/state.analytics.json`. When a program gains a second database,
+the files already in `migrations/` belong to the first one. The planner
+refuses to guess: it stops and asks you to move them into that
+database's folder.
+
 ## Not yet
 
 These are later slices of [B09](../proposals/typed-persistence.md):

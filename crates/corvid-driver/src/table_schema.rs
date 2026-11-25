@@ -132,6 +132,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
                 renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
                 retired: table.retired.iter().map(|name| name.name.clone()).collect(),
                 engine,
+                database: database.name.name.clone(),
                 unique: table.unique.iter().map(|rule| rule.iter().map(|c| c.name.clone()).collect()).collect(),
                 indexes: Vec::new(),
             })

@@ -252,6 +252,42 @@ fn indexes_follow_the_queries() {
     assert!(plan().contains("already match every declared table"));
 }
 
+/// A program with two databases keeps one migration history each, in
+/// `migrations/<database>/`; `migrate up --program` applies both, and a
+/// flat `migrations/` from the program's one-database days is refused
+/// with the move to make.
+#[test]
+fn each_database_of_a_program_has_its_own_migrations() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "orders.sqlite".into() };
+    std::fs::write(
+        root.join("src/main.cor"),
+        "database orders:\n    engine: sqlite\n    location: \"orders.sqlite\"\n\ndatabase analytics:\n    engine: sqlite\n    location: \"analytics.sqlite\"\n\ntable Order in orders:\n    key id: Int\n    item: String\n\ntable PageView in analytics:\n    key id: Int\n    path: String\n\nagent main() -> Int:\n    a = match Order.insert(Order(1, \"tea\")):\n        Ok(row) -> row.id\n        Err(_) -> 0\n    b = match PageView.insert(PageView(7, \"/\")):\n        Ok(row) -> row.id\n        Err(_) -> 0\n    return a + b\n",
+    )
+    .unwrap();
+
+    // Left over from when the program had one database.
+    std::fs::create_dir_all(root.join("migrations")).unwrap();
+    std::fs::write(root.join("migrations/001_create_order.sql"), "-- old\n").unwrap();
+    let stderr = refused(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(stderr.contains("`migrations/<database>/`") && stderr.contains("`orders`, `analytics`"), "{stderr}");
+    std::fs::remove_file(root.join("migrations/001_create_order.sql")).unwrap();
+
+    let planned = ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(planned.contains("database `orders`") && planned.contains("database `analytics`"), "{planned}");
+    let orders = std::fs::read_to_string(root.join("migrations/orders/001_create_order.sql")).expect("orders migration");
+    let analytics = std::fs::read_to_string(root.join("migrations/analytics/001_create_pageview.sql")).expect("analytics migration");
+    assert!(orders.contains("CREATE TABLE \"Order\"") && !orders.contains("PageView"), "{orders}");
+    assert!(analytics.contains("CREATE TABLE \"PageView\"") && !analytics.contains("\"Order\""), "{analytics}");
+    assert!(ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine)).contains("already match every declared table"));
+
+    ok(&corvid(&["migrate", "up", "--program", "src/main.cor", "--state", "target/state.json"], root, &engine));
+    assert!(root.join("target/state.orders.json").exists() && root.join("target/state.analytics.json").exists());
+    assert_eq!(ok(&corvid(&["run", "--target", "interp", "src/main.cor"], root, &engine)).trim(), "8");
+}
+
 /// One database shared by import (B09 P11): planning the program from
 /// its entry point writes one migration for the tables of every module
 /// that lives in the database, and the program then runs against it.
