@@ -266,7 +266,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// offsets, constructor arity checks, destructor lookup) without
     /// threading `&IrFile` through every call site.
     pub ir_types: HashMap<DefId, corvid_ir::IrType>,
-    /// The tools that are connector operations, by id. Native code
+    /// The runtime-owned tools, by id: connector operations and the
+    /// tools the runtime implements (`is_native_runtime_tool`). Native code
     /// calls them through `corvid_runtime_call`, which runs
     /// `Runtime::call_tool` and so records, replays, redacts and applies
     /// the HTTP policy exactly as the interpreter does.

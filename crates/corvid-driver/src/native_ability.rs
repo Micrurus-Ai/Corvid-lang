@@ -44,6 +44,11 @@ pub enum NotNativeReason {
         operation: String,
         reason: &'static str,
     },
+    /// A tool the runtime implements whose declared types have no
+    /// native JSON form.
+    RuntimeToolNotNative {
+        name: String,
+    },
     /// Wider tagged unions and retry bodies outside the supported
     /// native `Result` / `Option` subset still route to the
     /// interpreter. Nullable-pointer `Option<T>` with a
@@ -97,6 +102,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::ConnectorMockMode => write!(
                 f,
                 "connectors run in `mock` mode, whose payloads are Corvid expressions the interpreter evaluates"
+            ),
+            Self::RuntimeToolNotNative { name } => write!(
+                f,
+                "program calls `{name}`, a tool the runtime implements, with a type that has no native JSON form - it runs on the interpreter"
             ),
             Self::ConnectorNotNative { operation, reason } => write!(
                 f,
@@ -230,6 +239,22 @@ fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext
     })
 }
 
+/// `None` when the tool is not one the runtime implements; otherwise
+/// whether its declared types have a native JSON form.
+fn runtime_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> Option<bool> {
+    let tool = context.tools.iter().find(|t| t.id == tool_id)?;
+    if !corvid_runtime::runtime::is_native_runtime_tool(&tool.name) {
+        return None;
+    }
+    let native = tool
+        .params
+        .iter()
+        .map(|p| &p.ty)
+        .chain(std::iter::once(&tool.return_ty))
+        .all(|ty| corvid_codegen_cl::native_public_json_type(ty, context.types));
+    Some(native)
+}
+
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
     let context = ScanContext { types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if declared_types(ir).any(Type::mentions_secret) {
@@ -338,12 +363,27 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
         .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
-/// Every type a declared record field, tool, prompt or agent signature names.
+/// Every type a declared record field, prompt or agent signature, or a
+/// called tool's signature, names.
+///
+/// A tool that is never called produces no value, so its signature is
+/// left out: importing `std/secrets` for `secret_read` also brings in
+/// `secret`, whose signature holds a `Secret`.
 fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
+    let mut called = std::collections::HashSet::new();
+    corvid_ir::for_each_expr(ir, &mut |_, expr| {
+        if let IrExprKind::Call { kind: IrCallKind::Tool { def_id, .. }, .. } = &expr.kind {
+            called.insert(*def_id);
+        }
+    });
     let fields = ir.types.iter().flat_map(|decl| {
         decl.fields.iter().chain(decl.variants.iter().flat_map(|variant| &variant.fields)).map(|field| &field.ty)
     });
-    let tools = ir.tools.iter().flat_map(|tool| tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)));
+    let tools = ir
+        .tools
+        .iter()
+        .filter(move |tool| called.contains(&tool.id))
+        .flat_map(|tool| tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)));
     let prompts =
         ir.prompts.iter().flat_map(|prompt| prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty)));
     let agents = ir.agents.iter().flat_map(|agent| agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)));
@@ -459,6 +499,18 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 IrCallKind::Tool { def_id, .. } if connector_native_problem(*def_id, context).is_some() => {
                     if let Some(Err(reason)) = connector_native_problem(*def_id, context) {
                         return Err(NotNativeReason::ConnectorNotNative { operation: callee_name.clone(), reason });
+                    }
+                    for a in args {
+                        scan_expr(a, current_return_ty, context)?;
+                    }
+                    return Ok(());
+                }
+                // A tool the runtime implements is a runtime-owned call
+                // too (N2): no tools library, and its text-scalar types
+                // (an `Instant`) cross as public JSON.
+                IrCallKind::Tool { def_id, .. } if runtime_tool_is_native(*def_id, context).is_some() => {
+                    if runtime_tool_is_native(*def_id, context) == Some(false) {
+                        return Err(NotNativeReason::RuntimeToolNotNative { name: callee_name.clone() });
                     }
                     for a in args {
                         scan_expr(a, current_return_ty, context)?;
@@ -710,7 +762,7 @@ agent main() -> Decimal:
             "effect secrets_read:\n    reversible: true\n\ntool secret(name: String) -> Result<Secret, String> uses secrets_read\n\nagent main() -> Bool:\n    return match secret(\"KEY\"):\n        Ok(key) -> true\n        Err(problem) -> false\n",
             "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
             "type Credentials:\n    user: String\n    password: Secret\n\nagent main() -> Int:\n    return 1\n",
-            "tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n",
+            "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
@@ -724,6 +776,12 @@ agent main() -> Decimal:
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability(&ir), Err(NotNativeReason::SecretNotNative), "{src}");
         }
+        // A tool whose signature holds a `Secret` but is never called
+        // produces none, as when `std/secrets` is imported for
+        // `secret_read` and brings in `secret`.
+        let ir = crate::compile_to_ir("tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n")
+            .expect("valid program");
+        assert_eq!(native_ability(&ir), Ok(()));
         let reason = NotNativeReason::SecretNotNative.to_string();
         assert!(reason.contains("do not dispatch the standard library's tools") || reason.contains("neither dispatch"), "{reason}");
     }

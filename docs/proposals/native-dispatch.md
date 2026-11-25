@@ -1,6 +1,6 @@
 # Proposal: native dispatch of runtime-owned calls
 
-Status: **decided 2026-11-25; N1 built 2026-11-25, N2–N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
+Status: **decided 2026-11-25; N1 and N2 built 2026-11-25, N3–N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
 
 ## Problem
 
@@ -60,6 +60,21 @@ A native call that skipped the runtime would silently lose all of them. That is 
 4. **N4. `Response<T>` in native code**, as a native record built from `RESPONSE_FIELDS`.
 5. **N5. Replay on the other tier.** See "Across the tiers".
 
+## N2: the standard library's runtime tools
+
+**Which tools.** The runtime implements these by exact name inside `dispatch_tool`: the time tools (`time_now`, `time_now_utc`, `time_monotonic_ms`, `time_parse_iso`, `time_format_iso`), `random_int`, `random_float`, `uuid_v4`, `uuid_v7` and `secret_read`. One runtime function, `is_native_runtime_tool`, names them, built from the same gates `dispatch_tool` uses. The tier picker and the code generator both call it, so the list cannot drift between the runtime, the picker and native code.
+
+**The same export.** A call to one of them lowers to `corvid_runtime_call`, as a connector call does. `call_tool` records it, replay substitutes the recorded value (a clock read or a draw never re-runs on replay), and `secret_read` keeps its own rules: the trace holds `<redacted>`, and replay re-reads the environment.
+
+**Why the public JSON mapping is safe here.** The interpreter's generic tool arm decodes a tool's answer with its internal JSON form, not the public one connectors use. The two differ only for `Option`, and none of these tools has an `Option` in its signature: they take and return `Int`, `Float`, `String`, `Instant`, flat records and `Result<_, String>`. A parity test calls each tool on both tiers and compares the values, or for clock reads and draws, the recorded events and the values replay gives back. A tool added to the list later must pass the same test.
+
+**Left out, and why.**
+- `secret`, `random_token` and `hash_password` return or take a `Secret`: N3.
+- The io, path, cache, retrieval, database, JSON-handle and MCP tools return handles or need policies native code does not set up yet. Each is a later decision, not part of N2.
+- A user tool that happens to share a name with one of these is already dispatched by name to the runtime's implementation on the interpreter, so native code does the same; nothing changes for it.
+
+**Across the tiers.** Backend: a program that makes IDs, reads the clock or draws random numbers now builds into a native binary, and those values replay exactly. Frontend: nothing changes. AI: the recorded run is the same from either tier, so an assistant reviewing it sees the same clock reads and IDs.
+
 ## Not in scope
 
 - `Stream<T>` connector operations in native code. Native code has no streams yet (`StreamLoweringNotImplemented`), for any source.
@@ -79,3 +94,10 @@ A native call that skipped the runtime would silently lose all of them. That is 
 - The specs come from `connectors::connector_calls_json`, the serialized form of `connector_calls_from_ir`; the generated `main` passes them to `corvid_register_connectors` before the runtime starts, and both runtime builders install them.
 - `native_ability` names why an operation stays on the interpreter: a `circuit_breaker`, a stream, a provider protocol, a `Response`, a file or multipart body, or a type with no native JSON form. `corvid run --mode mock` keeps a program with connectors on the interpreter.
 - Tests: `crates/corvid-driver/tests/native_connectors.rs` (same value and the same recorded run on both tiers, each tier replaying its recording without the provider, the refusals) and `crates/corvid-cli/tests/native_connectors_run.rs` (`corvid run --target native` sends the request under the project's `[http] allow`, and refuses a host outside it).
+
+## As built (N2)
+
+- `corvid_runtime::runtime::is_native_runtime_tool`, built from `dispatch_tool`'s own gates. Codegen adds those tools to `runtime_call_ops`; `native_ability` accepts a call to one whose types have a native JSON form and names it otherwise (`RuntimeToolNotNative`).
+- Found while building it: importing `std/secrets` for `secret_read` brings in `secret`, whose signature holds a `Secret`, and the native check refused every program that declared a `Secret` anywhere. A tool's signature now counts only when the tool is called; records, agents and prompts still count wherever they are declared.
+- Found by the replay test: serde_json read a recorded `Float` back with its fast, inexact parser, so a replayed `random_float` could differ in the last digit and replay reported a divergence. The workspace enables `float_roundtrip` (separate commit, with a trace-schema test).
+- Tests: `crates/corvid-driver/tests/native_runtime_tools.rs` calls every tool the list names (and fails if one is added without a call), compares fixed answers and the recorded calls on both tiers, checks `secret_read`'s recorded result is redacted, and replays each tier's recording exactly.

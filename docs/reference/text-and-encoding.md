@@ -2,7 +2,7 @@
 
 Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing, `contains_regex`, `replace_regex` and `split_regex` also compile to native code, with the same results and messages. A program that calls `find_regex` or `find_all_regex` runs on the interpreter until native code can build `RegexMatch` records, and native UUID generation waits for native stdlib tools. [Proposal](../proposals/text-and-encoding.md)
+Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing, `contains_regex`, `replace_regex` and `split_regex` also compile to native code, with the same results and messages. A program that calls `find_regex` or `find_all_regex` runs on the interpreter until native code can build `RegexMatch` records. `uuid_v4` and `uuid_v7` run in native code through the runtime, so a native run records and replays them as the interpreter does. [Proposal](../proposals/text-and-encoding.md)
 
 ## Encoding
 
@@ -78,7 +78,7 @@ agent new_order_id() -> String:
 | `uuid_v4()` | A random UUID (RFC 9562 version 4). |
 | `uuid_v7()` | A time-ordered UUID (RFC 9562 version 7): the Unix time in milliseconds, then random bits. Later UUIDs sort after earlier ones, which keeps database indexes compact. UUIDs from the same millisecond are ordered randomly. |
 
-Both return the canonical form and use the `uuid_generate` effect. Generation is not pure, so these are tools in `std/uuid` rather than builtin methods: each call is traced, replay returns the recorded UUID, and the compiler refuses them inside `@deterministic` agents. The random bits come from the operating system's entropy source. Native programs cannot call them yet, like the other stdlib tools.
+Both return the canonical form and use the `uuid_generate` effect. Generation is not pure, so these are tools in `std/uuid` rather than builtin methods: each call is traced, replay returns the recorded UUID, and the compiler refuses them inside `@deterministic` agents. The random bits come from the operating system's entropy source. Native programs call them through the runtime, with the same trace and replay.
 
 ## Regular expressions
 

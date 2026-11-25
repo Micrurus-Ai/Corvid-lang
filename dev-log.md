@@ -21,6 +21,47 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - The standard library's runtime tools in native code (native dispatch N2)
+
+A program that reads the clock, makes a UUID, draws a random number or
+reads a secret envelope now compiles to native code. The time tools,
+`random_int`, `random_float`, `uuid_v4`, `uuid_v7` and `secret_read`
+lower to the same `corvid_runtime_call` connector calls use, so the
+runtime records them, replay substitutes the recorded value, and
+`secret_read` keeps its rules (`<redacted>` in the trace, the
+environment re-read on replay). One runtime function,
+`is_native_runtime_tool`, built from the gates `dispatch_tool` routes
+by, names them for the runtime, the tier picker and the code generator.
+
+**Why the public decoder is safe for them.** The interpreter's tool arm
+decodes a tool's answer with its internal JSON form, and the public form
+differs only for `Option`. None of these tools has an `Option` in its
+signature. The parity test calls every tool on the list, fails if a tool
+is added without a call, and compares the fixed answers on both tiers.
+
+**Two things found.**
+- *Importing `std/secrets` kept programs off native code.* Importing it
+  for `secret_read` also brings in `secret`, whose signature holds a
+  `Secret`, and the native check refused any program that declared one.
+  A tool's signature now counts only when the tool is called. A call
+  that could produce or take a `Secret` is still refused, and with the
+  `Secret` reason, which the unit tests check.
+- *A replayed float could differ in its last digit.* serde_json parsed
+  numbers with its fast, inexact algorithm, so a recorded `random_float`
+  of 0.9360117604640773 came back as 0.9360117604640772 and replay
+  reported a divergence at the run's result. That affected the
+  interpreter too. The workspace enables `float_roundtrip`, committed
+  separately with a trace-schema test.
+
+**Simpler options considered.** Listing the tools in the tier picker and
+again in codegen would have been shorter, but it would be a second and
+third copy of the runtime's routing that could drift. Routing every
+runtime-implemented tool, io and retrieval included, would have widened
+N2 to tools that return handles or need policies native code does not
+set up yet; each is its own decision.
+
+---
+
 ## 2026-11-25 - Connector calls in native code (B05 slice 7, native dispatch N1)
 
 A program that calls a connector now compiles to native code in `real`

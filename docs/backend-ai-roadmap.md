@@ -133,7 +133,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Named-group lookup on `RegexMatch` checked against the pattern's group names.
 - [ ] Raw string literals for patterns. Agree the lexical rule with frontend development first.
 - [x] Byte encoders and decoders, with B04's byte representation: `corvid-text` gained byte variants of its codecs, and the text codecs are built on them, so `Bytes.from_hex` and `text.decode_hex()` share one decoder and its messages. Delivered by B04 slice 1. [Cryptography](reference/cryptography.md)
-- [ ] Native UUID generation, with native dispatch of the other stdlib tools.
+- [x] Native UUID generation, with native dispatch of the other stdlib tools: `uuid_v4` and `uuid_v7` run in native code through the runtime since native dispatch N2. [Native dispatch](proposals/native-dispatch.md)
 
 **B06 decimal money, durations and time zones** (in progress, macOS session). [Proposal](proposals/decimal-and-time.md)
 
@@ -253,7 +253,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [x] N1. Connector calls in native code in real and replay modes, through `corvid_runtime_call`; the binary embeds the connector specs and reads its mode from `CORVID_CONNECTOR_MODE` and its allowlist from `CORVID_HTTP_ALLOW`, which `corvid run` sets after the startup check. A connector with `circuit_breaker`, a streamed, file, protocol or `Response` operation, and mock mode stay on the interpreter and say why. Parity tests compare the value and the whole recorded run, event for event; the `connector.invocation` record moved into the runtime so both tiers write it.
   - [ ] N5. Replay a recording on the other tier. Replay refuses a trace written by the other tier (`CrossTierReplayUnsupported`, checked on the trace's writer) for every kind of event. N1 shows a connector run records the same events on both tiers; lifting the refusal needs the same proof for prompt calls, user tools, approvals and seeds, so it is its own slice.
   - [ ] A circuit breaker that spans a server: under `corvid serve` one runtime serves every request, so an opened breaker needs a declared reset policy (how long it stays open, how it probes) before its count can move into the runtime, which would also let a connector with `circuit_breaker` run in native code. The source declares the policy; omitting it is a compile error.
-  - [ ] N2. `uuid_v4`, `uuid_v7`, `time_now`, the `random_*` tools and `secret_read` in native code.
+  - [x] N2. The time tools, `random_int`, `random_float`, `uuid_v4`, `uuid_v7` and `secret_read` in native code, through `corvid_runtime_call`. `is_native_runtime_tool` in the runtime names them for the runtime, the tier picker and the code generator. A tool signature counts toward the `Secret` refusal only when the tool is called, so importing `std/secrets` for `secret_read` stays native. Parity tests compare fixed answers and recorded calls on both tiers and check that replay gives back clock reads, IDs and draws exactly; they found that a recorded `Float` read back one ulp off, fixed by serde_json's `float_roundtrip`.
   - [ ] N3. Native `Secret` as an opaque runtime-owned handle.
   - [ ] N4. `Response<T>` in native code.
 

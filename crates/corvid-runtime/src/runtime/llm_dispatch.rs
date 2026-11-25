@@ -1928,6 +1928,19 @@ fn dispatch_stdlib_random_tool(
     }
 }
 
+/// The tools the runtime implements that native code calls through
+/// `corvid_runtime_call` (native dispatch N2): the time tools, the
+/// random draws, the UUID tools and `secret_read`. Built from the gates
+/// `dispatch_tool` routes by, so the tier picker, the code generator and
+/// the runtime name the same tools. Every one takes and returns types
+/// whose internal and public JSON forms agree (no `Option`), which is
+/// why native code may decode their answers with the public decoder; a
+/// tool added here must pass the parity test in
+/// `corvid-driver/tests/native_runtime_tools.rs`.
+pub fn is_native_runtime_tool(name: &str) -> bool {
+    is_stdlib_time_tool(name) || is_stdlib_random_tool(name) || super::uuid::is_uuid_tool(name) || name == "secret_read"
+}
+
 /// Exact-name gate for the executing secrets surface.
 fn is_stdlib_secret_tool(name: &str) -> bool {
     name == "secret_read" || is_secret_value_read(name)

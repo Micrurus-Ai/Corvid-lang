@@ -95,6 +95,10 @@ pub fn lower_file(
     // declare the matching `__corvid_tool_<name>` wrapper import.
     for tool in &ir.tools {
         runtime.ir_tools.insert(tool.id, tool.clone());
+        // A tool the runtime implements is a runtime-owned call (N2).
+        if corvid_runtime::runtime::is_native_runtime_tool(&tool.name) {
+            runtime.runtime_call_ops.insert(tool.id);
+        }
     }
     for connector in &ir.connectors {
         for op in &connector.operations {

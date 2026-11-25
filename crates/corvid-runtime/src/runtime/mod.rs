@@ -38,7 +38,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 pub use builder::RuntimeBuilder;
-pub use llm_dispatch::is_stdlib_secret_value_tool;
+pub use llm_dispatch::{is_native_runtime_tool, is_stdlib_secret_value_tool};
 
 mod builder;
 mod connector_dispatch;

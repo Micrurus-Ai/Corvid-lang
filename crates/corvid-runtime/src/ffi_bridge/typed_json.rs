@@ -68,7 +68,8 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     }
 }
 
-/// A runtime-owned call from native code (native dispatch N1): run
+/// A runtime-owned call from native code (native dispatch N1, N2): a
+/// connector operation or a tool the runtime implements. Run
 /// `Runtime::call_tool(name, args)`, the path the interpreter takes, and
 /// decode its answer into the plan's root type, writing it to `payload`.
 /// The arguments are public JSON texts the compiled code encoded. A
@@ -128,7 +129,7 @@ pub unsafe extern "C" fn corvid_runtime_call(
             }
             None => {
                 runtime.record_connector_call(&name, false);
-                eprintln!("corvid: connector `{name}`: the response does not match the declared type {}", error.message());
+                eprintln!("corvid: `{name}`: the answer does not match the declared type {}", error.message());
                 std::process::exit(1);
             }
         },

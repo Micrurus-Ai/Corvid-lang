@@ -9,9 +9,14 @@
 use crate::errors::RuntimeError;
 use serde_json::{json, Value};
 
+/// The two std/uuid tool names.
+pub(super) fn is_uuid_tool(name: &str) -> bool {
+    matches!(name, "uuid_v4" | "uuid_v7")
+}
+
 /// Only the two std/uuid tool names are handled here.
 pub(super) fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, RuntimeError>> {
-    if !matches!(name, "uuid_v4" | "uuid_v7") {
+    if !is_uuid_tool(name) {
         return None;
     }
     if !args.is_empty() {
