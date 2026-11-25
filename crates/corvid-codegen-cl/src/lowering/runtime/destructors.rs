@@ -21,7 +21,7 @@ pub fn define_struct_destructor(
     let mut sig = module.make_signature();
     sig.params.push(AbiParam::new(I64));
 
-    let symbol = format!("corvid_destroy_{}", ty.name);
+    let symbol = super::type_query::record_symbol("corvid_destroy_", ty);
     let func_id = module
         .declare_function(&symbol, Linkage::Local, &sig)
         .map_err(|e| {

@@ -24,6 +24,15 @@ pub fn option_uses_wrapper(option_ty: &Type) -> bool {
 
 
 
+/// The symbol of a record's typeinfo, trace or destructor function:
+/// `prefix`, then the record's name and id. The id makes it unique, so
+/// two records that share a name (the record native code holds each
+/// `Response<Body>` as, one per body type, or same-named records from
+/// different modules) never define the same symbol.
+pub(crate) fn record_symbol(prefix: &str, record: &corvid_ir::IrType) -> String {
+    format!("{prefix}{}_{}", record.name, record.id.0)
+}
+
 /// Stable, link-safe string from a Corvid `Type` for use in typeinfo
 /// symbol names. `List<List<String>>` → `List_List_String`, etc.
 pub fn mangle_type_name(ty: &Type) -> String {
