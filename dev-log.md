@@ -459,6 +459,25 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Decided: one conflict type for table writes (B09)
+
+A `save` that another row's unique value blocks returned `Err(Some(holder))`,
+the same value as a row that changed since it was read, so callers told
+them apart by comparing keys, and every application translated the
+result into its own sum type by hand (the B10 proposal's `placed`
+helper). Decided in [the proposal](docs/proposals/write-conflicts.md):
+one built-in `Conflict<T>` with `Changed(current)`, `Deleted` and
+`Taken(holder)`, and each operation returns only the cases it can
+produce, carried in the type, so a `match` on an `insert` is complete
+with `Taken` alone and nobody writes a wildcard that hides the next case.
+A written `Conflict<T>` means every case and accepts any narrower one.
+Rejected: one type without per-operation cases (impossible arms), three
+separate types (three names for one idea), and a record with a reason
+field (not matchable exhaustively). It changes no grammar. Its JSON is
+the existing sum-type form, recorded for frontend development.
+
+---
+
 ## 2026-11-25 - The contract names the type an alias stands for (B01)
 
 The Application Contract named each type as the source wrote it. A field
