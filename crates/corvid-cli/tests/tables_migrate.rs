@@ -202,6 +202,58 @@ public agent heading(label: Label) -> String:
     assert!(planned.contains("CREATE TABLE \"Shelf\""), "{planned}");
 }
 
+/// Indexes follow the queries (B09 P9): the planner creates the index a
+/// query needs, replaces it when the query changes, drops it when no
+/// query needs it, and SQLite's own query plan uses it.
+#[test]
+fn indexes_follow_the_queries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "jobs.sqlite".into() };
+    let write = |query: &str| {
+        std::fs::write(
+            root.join("src/main.cor"),
+            format!(
+                "database work:\n    engine: sqlite\n    location: \"jobs.sqlite\"\n    tables: Job\n\ntable Job:\n    key job: Int\n    owner: String\n    paused: Bool\n    budget: Int\n\nagent latest(owner: String) -> List<Job>:\n{query}\n\nagent main() -> Int:\n    return 0\n"
+            ),
+        )
+        .unwrap()
+    };
+    let plan = || ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    let migration = |n: &str| {
+        let path = std::fs::read_dir(root.join("migrations")).unwrap().map(|e| e.unwrap().path()).find(|p| p.file_name().unwrap().to_string_lossy().starts_with(n)).unwrap();
+        std::fs::read_to_string(path).unwrap()
+    };
+
+    write("    return Job.where(fn (j) -> j.owner == owner and not j.paused).order_by(fn (j) -> j.job).descending().take(1)");
+    plan();
+    let first = migration("001");
+    assert!(first.contains("CREATE INDEX IF NOT EXISTS \"Job_by_owner_job\" ON \"Job\" (\"owner\", \"job\");"), "{first}");
+    assert!(first.contains("for the queries in `latest`"), "{first}");
+    assert!(plan().contains("already match every declared table"));
+    ok(&corvid(&["migrate", "up", "--dir", "migrations", "--database", "jobs.sqlite"], root, &engine));
+    let db = rusqlite::Connection::open(root.join("jobs.sqlite")).unwrap();
+    let detail: String = db
+        .query_row("EXPLAIN QUERY PLAN SELECT * FROM \"Job\" WHERE \"owner\" = 'ana' ORDER BY \"Job\".\"job\" DESC", [], |row| row.get(3))
+        .unwrap();
+    assert!(detail.contains("Job_by_owner_job"), "{detail}");
+
+    // The query changes, so its index does.
+    write("    return Job.where(fn (j) -> j.owner == owner and j.budget >= 3)");
+    plan();
+    let second = migration("002");
+    assert!(second.contains("DROP INDEX IF EXISTS \"Job_by_owner_job\";"), "{second}");
+    assert!(second.contains("CREATE INDEX IF NOT EXISTS \"Job_by_owner_budget\""), "{second}");
+
+    // A query by key needs no index of its own.
+    write("    return Job.where(fn (j) -> j.job == 1)");
+    plan();
+    let third = migration("003");
+    assert!(third.contains("DROP INDEX IF EXISTS \"Job_by_owner_budget\";") && !third.contains("CREATE INDEX"), "{third}");
+    assert!(plan().contains("already match every declared table"));
+}
+
 /// A decimal column goes from declaration to a running query through the
 /// CLI: the planner writes its collation, `migrate up` creates the table
 /// on a connection that knows it, and `corvid run` compares by value.

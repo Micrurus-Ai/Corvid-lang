@@ -991,6 +991,16 @@ create and change declared tables. A rename (`renamed from`) and a drop
 (`retired`) are declared, so the planner never mistakes one for the
 other, and a change that would lose data is refused by name.
 
+Money, time and bytes are columns the database compares exactly as
+Corvid does, on SQLite and Postgres: `10 == 10.0` for a `Decimal`, and
+instants in time order to the nanosecond. **Indexes follow the queries**:
+a table is private to its module, so the compiler sees every query it
+gets, and the planner creates the index each one needs (its equality
+columns, then the column it orders or compares by), replaces it when the
+query changes, and drops it when no query needs it. The migration names
+the agents each index serves, so nobody maintains an index list beside
+the code, and none goes stale.
+
 ```corvid
 database library:
     engine: sqlite

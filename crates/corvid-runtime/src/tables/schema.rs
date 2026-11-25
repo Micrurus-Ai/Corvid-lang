@@ -21,6 +21,8 @@ pub struct TableSchema {
     pub retired: Vec<String>,
     /// The engine its database runs on.
     pub engine: TableEngine,
+    /// The indexes its queries need (B09 P9), derived from the program.
+    pub indexes: Vec<super::TableIndex>,
 }
 
 /// The `CREATE TABLE` statement for a declared table, on SQLite.

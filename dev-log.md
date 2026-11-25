@@ -19,6 +19,67 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Connector wire shapes stay out of the published contract (B05, slice 3d fix)
+
+Slice 3d put every type a connector sends or reads into the contract's
+public `types`, private ones included. The main-line session pointed out
+that `corvid serve` publishes the contract at `/.well-known/corvid` and
+the OpenAPI document at `/openapi.json`, which clients, generated SDKs
+and assistants read. That made a private record, such as a payment
+provider's request, public by default, against "nothing is exposed by
+default".
+
+The description moves to `ApplicationContract::connector_wire`, a field
+marked `#[serde(skip)]`, so no serialized copy can carry it. In-process
+tooling and tests read it. `openapi::component_schemas`, now public,
+gives its types the same JSON Schema published types get, so the sync
+test still validates the provider's received body against one schema
+path. A new test asserts that no connector-only type or field name
+appears in the published contract or OpenAPI document. The
+operation-level type names were removed from the published connector
+entries too, since they name private types.
+
+Left open, now on the roadmap: the published connector entries still
+carry the base URL, paths, effects and slice 1's `timeout` and
+`redirects`, a 52g-3d choice to advertise integrations. Whether a
+deployment publishes its outbound integrations at all is a consequential
+privacy decision that may need a source declaration.
+
+---
+
+## 2026-11-25 - Connector bodies in the Application Contract (B05, slice 3d)
+
+The main-line session asked, when 3a changed how connector bodies are
+sent, that the contract, the runtime and the SDKs describe them the same
+way. Before this slice the contract named an operation's method and path
+but not its types, so it said nothing that could drift, and also
+nothing useful.
+
+`ContractOperation` now carries `body_type`, `body_encoding`,
+`query_type`, `response_type` and the header names, named by the same
+`type_ref_name` routes use. Every type reachable from those is included
+in the contract's `types` even when not public (`connector_type_names`):
+a name with no shape tells a client or an assistant nothing about what a
+call sends. OpenAPI turns them into JSON Schema through the code route
+bodies already use, so there is one description per type.
+
+**As built, not as proposed:** the proposal said the generated
+TypeScript and Swift clients would read these types. Clients never call
+a connector, so they have nothing to generate. What keeps the tiers in
+step is a test, `connector_contract_sync.rs`: it compiles a program to
+its contract and OpenAPI, runs a real connector call, and validates the
+body the provider received against the schema. The body covers `Option`
+both ways, `List`, `Decimal`, a nested record and a sum type. The test
+also checks each query parameter is a field of the declared query
+record. The workspace has no JSON Schema crate, so the test carries a
+small validator for the structural keywords the emitter uses and says
+which annotations it skips. It also proves the validator rejects the
+old `{"tag":"none"}` envelope.
+
+Slice 3 is complete.
+
+---
+
 ## 2026-11-25 - Connector responses with status and headers (B05, slice 3c)
 
 `-> Response<Charge>` gives a connector call the status and the response
@@ -273,6 +334,37 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-25 - Indexes follow the queries (B09 P9)
+
+The reading list's port to tables left a full scan where the
+hand-written schema had an index: a table declaration had no way to ask
+for one. Rather than add an `index` line, the planner now derives
+indexes from the queries. A table is private to its module, so the
+compiler sees every query it will ever get, and an `index` line would
+only repeat what those queries say, and go stale the day one changes.
+
+Each query's index is its top-level equality columns in declaration
+order, then its `order_by` column or else its range column. The key
+serves its own lookups, and an index that leads a longer one is merged
+into it. The planner applies the table changes to its planning database
+first and reads the indexes back, because a SQLite rebuild drops a
+table's indexes. It then creates what is missing and drops what Corvid
+named (`Table_by_columns`) that no query needs, naming the agents each
+index serves in the migration. It verifies the result as it does
+columns. Indexes added by hand are never touched.
+
+Finding the queries needed a read-only walk of every IR expression, so
+`corvid-ir` gained `for_each_expr`. Its matches are exhaustive like the
+type visitor's, so a new expression kind cannot be silently skipped. The
+test plans an index for a query, checks with `EXPLAIN QUERY PLAN` that
+SQLite uses it, changes the query and sees the index replaced, then
+makes the query a key lookup and sees it dropped. The migration
+lifecycle on Postgres passes with the derived index for its decimal
+query. Unique constraints are recorded as their own item, since a
+uniqueness rule needs a conflict value of its own.
 
 ---
 

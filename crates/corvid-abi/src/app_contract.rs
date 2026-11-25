@@ -54,6 +54,10 @@ pub struct ApplicationContract {
     /// program declares no connectors.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<ContractConnector>,
+    /// What the connector operations send and read. Never serialized:
+    /// see [`ConnectorWire`] for why it stays out of every published copy.
+    #[serde(skip)]
+    pub connector_wire: ConnectorWire,
 }
 
 /// A declared `connector` in the contract (slice 52g-3d). Credentials
@@ -74,6 +78,43 @@ pub struct ContractConnector {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redirects: Option<String>,
     pub operations: Vec<ContractOperation>,
+}
+
+/// What a program's connector operations send and read: each
+/// operation's body, query and return types, its header names, and the
+/// declared types they reach, described as the contract describes its
+/// public types.
+///
+/// It is NOT part of the published contract. `corvid serve` publishes
+/// the contract at `/.well-known/corvid` and `/openapi.json`, which
+/// clients, generated SDKs and assistants read, and a connector's
+/// request and response records are backend detail the source never
+/// chose to publish ("nothing is exposed by default"). The field holding
+/// this is never serialized, so no output can carry it; the backend's
+/// own tooling and tests read it in process, and
+/// [`crate::openapi::component_schemas`] turns its types into the same
+/// JSON Schema routes get.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectorWire {
+    pub operations: Vec<ConnectorWireOperation>,
+    pub types: Vec<ContractType>,
+}
+
+/// One connector operation's wire shape; see [`ConnectorWire`].
+#[derive(Debug, Clone)]
+pub struct ConnectorWireOperation {
+    pub connector: String,
+    pub operation: String,
+    /// The request body's type, named as routes name theirs, and how it
+    /// is sent (`json` or `form`).
+    pub body_type: Option<String>,
+    pub body_encoding: Option<String>,
+    /// The record whose fields become the query string.
+    pub query_type: Option<String>,
+    /// What the operation returns, as declared.
+    pub response_type: String,
+    /// The request headers its `header` lines set, by name.
+    pub headers: Vec<String>,
 }
 
 /// One `operation` of a connector in the contract (slice 52g-3d).
@@ -453,6 +494,7 @@ pub fn emit_application_contract(
             _ => None,
         })
         .collect();
+    let connector_wire = connector_wire(file, checked);
 
     let routes = file
         .decls
@@ -540,6 +582,7 @@ pub fn emit_application_contract(
         prompts,
         identities,
         connectors,
+        connector_wire,
     }
 }
 
@@ -579,6 +622,96 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
             })
             .collect(),
     }
+}
+
+/// The declared type of an operation parameter, named as routes name
+/// their types.
+fn param_type_name(op: &corvid_ast::OperationDecl, param: &str) -> Option<String> {
+    op.params.iter().find(|p| p.name.name == param).map(|p| type_ref_name(&p.ty))
+}
+
+/// The names of the declared types a connector sends or reads: its
+/// operations' body, query and return types and every type their fields
+/// reach.
+fn connector_type_names(file: &File) -> std::collections::BTreeSet<String> {
+    let decls: std::collections::HashMap<&str, &corvid_ast::TypeDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Type(t) => Some((t.name.name.as_str(), t)),
+            _ => None,
+        })
+        .collect();
+    let mut pending: Vec<&TypeRef> = Vec::new();
+    for decl in &file.decls {
+        let Decl::Connector(connector) = decl else { continue };
+        for op in &connector.operations {
+            pending.push(&op.return_ty);
+            let sent = op.body.iter().map(|b| &b.param.name).chain(op.query.iter().map(|q| &q.name));
+            for name in sent {
+                if let Some(param) = op.params.iter().find(|p| &p.name.name == name) {
+                    pending.push(&param.ty);
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            TypeRef::Named { name, .. } => {
+                if let Some(decl) = decls.get(name.name.as_str()) {
+                    if seen.insert(name.name.clone()) {
+                        pending.extend(decl.fields.iter().map(|f| &f.ty));
+                        pending.extend(decl.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)));
+                    }
+                }
+            }
+            TypeRef::Generic { args, .. } => pending.extend(args.iter()),
+            _ => {}
+        }
+    }
+    seen
+}
+
+/// What each connector operation sends and reads, for the backend's own
+/// tooling, never for a client. [`ConnectorWire`] explains why it is
+/// kept apart from the published contract.
+fn connector_wire(file: &File, checked: &Checked) -> ConnectorWire {
+    let names = connector_type_names(file);
+    let types = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Type(t) if names.contains(&t.name.name) => Some(contract_type(t, checked)),
+            _ => None,
+        })
+        .collect();
+    let operations = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Connector(c) => Some(c),
+            _ => None,
+        })
+        .flat_map(|c| {
+            c.operations.iter().map(move |op| ConnectorWireOperation {
+                connector: c.name.name.clone(),
+                operation: op.name.name.clone(),
+                body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name)),
+                body_encoding: op.body.as_ref().map(|b| {
+                    match b.encoding {
+                        corvid_ast::BodyEncoding::Json => "json",
+                        corvid_ast::BodyEncoding::Form => "form",
+                    }
+                    .to_string()
+                }),
+                query_type: op.query.as_ref().and_then(|q| param_type_name(op, &q.name)),
+                response_type: type_ref_name(&op.return_ty),
+                headers: op.headers.iter().map(|h| h.name.clone()).collect(),
+            })
+        })
+        .collect();
+    ConnectorWire { operations, types }
 }
 
 fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> ContractProviderProtocol {
