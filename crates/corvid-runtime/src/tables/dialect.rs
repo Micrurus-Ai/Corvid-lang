@@ -132,11 +132,14 @@ impl TableEngine {
             .join(", ")
     }
 
-    /// The SQL type a column of `kind` declares on this engine.
-    pub fn column_type(self, kind: ColumnKind) -> &'static str {
-        match self {
-            Self::Sqlite => kind.sql_type(),
-            Self::Postgres { .. } => postgres_type(kind),
+    /// The SQL type a column of `kind` declares on this engine, with the
+    /// collation it compares by where SQLite's text order is not the
+    /// value's order.
+    pub fn column_type(self, kind: ColumnKind) -> String {
+        match (self, kind.sqlite_collation()) {
+            (Self::Sqlite, Some(collation)) => format!("{} COLLATE {collation}", kind.sql_type()),
+            (Self::Sqlite, None) => kind.sql_type().to_string(),
+            (Self::Postgres { .. }, _) => postgres_type(kind).to_string(),
         }
     }
 
@@ -165,5 +168,16 @@ fn postgres_type(kind: ColumnKind) -> &'static str {
         ColumnKind::Text => "text",
         ColumnKind::Boolean => "boolean",
         ColumnKind::Json => "jsonb",
+        // B09 P8b gives each a Postgres type that compares it exactly; the
+        // checker refuses these columns on Postgres until then, and these
+        // names, which no Postgres database defines yet, keep any other
+        // route loud.
+        ColumnKind::Decimal => "corvid_decimal",
+        ColumnKind::Duration => "corvid_duration",
+        ColumnKind::Instant => "corvid_instant",
+        ColumnKind::ZonedTime => "corvid_zoned_time",
+        ColumnKind::TimeZone => "corvid_time_zone",
+        ColumnKind::Currency => "corvid_currency",
+        ColumnKind::Locale => "corvid_locale",
     }
 }

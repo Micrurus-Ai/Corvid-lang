@@ -83,7 +83,9 @@ impl TestDatabase {
         let sql = schemas.iter().map(|table| create_table_sql_on(table, self.engine())).collect::<Vec<_>>().join("\n");
         match self {
             TestDatabase::Sqlite { path, .. } => {
-                rusqlite::Connection::open(path).expect("open").execute_batch(&sql).expect("create tables");
+                let connection = rusqlite::Connection::open(path).expect("open");
+                corvid_runtime::tables::register_sqlite_collations(&connection).expect("register collations");
+                connection.execute_batch(&sql).expect("create tables");
             }
             TestDatabase::Postgres { client, .. } => client.batch_execute(&sql).await.expect("create tables"),
         }

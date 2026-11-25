@@ -177,9 +177,10 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    /// B06 — the first B06 type `ty` reaches, walking records the way
-    /// `to_json` does, for the table-column check.
-    pub(super) fn b06_type_reached(&mut self, ty: &Type) -> Option<&'static str> {
+    /// The first type `ty` reaches that a table cannot store yet
+    /// (`Bytes`, until B09 P8c), walking records the way `to_json` does,
+    /// for the table-column check.
+    pub(super) fn unstored_column_type_reached(&mut self, ty: &Type) -> Option<&'static str> {
         let outer = std::mem::replace(&mut self.refuse_b06_columns, true);
         let pending = [Direction::Encode, Direction::Decode].into_iter().find_map(|direction| {
             match self.json_form(ty, direction, &mut Vec::new()) {
@@ -225,11 +226,11 @@ impl<'a> Checker<'a> {
                 )),
             },
             // B06 — each crosses JSON as its exact canonical text (see
-            // `corvid_public_json::text_scalar`). Table columns are the
-            // exception: their storage mapping decides query semantics and
-            // belongs to B09, so a table check refuses them for now.
-            // `Bytes` crosses JSON as base64url text, the same way, and
-            // waits for B09's storage mapping like the B06 types.
+            // `corvid_public_json::text_scalar`). A table stores each B06
+            // type in a column that compares it exactly (B09 P8a), and
+            // inside a JSON-stored column as that same text. `Bytes`
+            // crosses JSON as base64url text, the same way, but a table
+            // refuses it until B09 P8c gives it a binary column.
             Type::Decimal
             | Type::Duration
             | Type::Instant
@@ -238,17 +239,8 @@ impl<'a> Checker<'a> {
             | Type::Currency
             | Type::Locale
             | Type::Bytes => {
-                if self.refuse_b06_columns {
-                    Err(NoForm::pending(match ty {
-                        Type::Decimal => "Decimal",
-                        Type::Duration => "Duration",
-                        Type::Instant => "Instant",
-                        Type::TimeZone => "TimeZone",
-                        Type::ZonedTime => "ZonedTime",
-                        Type::Currency => "Currency",
-                        Type::Bytes => "Bytes",
-                        _ => "Locale",
-                    }))
+                if self.refuse_b06_columns && matches!(ty, Type::Bytes) {
+                    Err(NoForm::pending("Bytes"))
                 } else {
                     Ok(false)
                 }

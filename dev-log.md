@@ -133,6 +133,51 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-24 - Money and time as table columns (B09 P8a)
+
+A table can now hold a `Decimal`, `Duration`, `Instant`, `ZonedTime`,
+`TimeZone`, `Currency` or `Locale` field, and `where` and `order_by`
+compare it exactly as the agent would. Before, each was refused as a
+column. A program storing money had to keep its exact text in a
+`String` column, where `9.50` sorts after `10.0` and `10` does not equal
+`10.0`.
+
+Each type declares its own SQLite column type (`DECIMAL TEXT`, `INSTANT
+TEXT` and so on), because the migration planner identifies a stored
+column by its declared type. A shared `INTEGER` or `TEXT` would let a
+change from `Int` to `Duration` pass as no change and read stored
+numbers as nanoseconds. Two of the types cannot be compared as stored
+text. Corvid's `Duration` holds 128-bit nanoseconds, more than any
+SQLite integer, and a decimal's equality is numeric while its scale must
+round-trip. So decimals and durations are stored as their canonical text
+and compare through two collations, `corvid_decimal` and
+`corvid_duration`, registered on every SQLite connection Corvid opens.
+That covers the runtime's `std.db` handles, `corvid migrate` and the
+planner's check run. A test confirmed the failure mode first: a tool
+without the collations still reads the values, and SQLite refuses to
+compare or index the column there rather than comparing it wrongly.
+
+Instants use a new `Instant::to_sortable_text` in `corvid-time`: UTC
+with all nine fractional digits. That text sorts in time order, because
+every instant in range has a four-digit year, so it needs no collation
+and works in any tool. A zoned time stores its instant and zone, not
+its offset, so a time-zone database update never makes two equal zoned
+times differ. `order_by` now refuses types without an order (zoned
+times, zones, currencies, locales). It also refuses JSON-stored
+columns, which it previously accepted and sorted by their JSON text.
+These types inside a record or list column are now allowed, as their
+exact JSON text.
+
+Postgres waits for P8b. Telling an `Instant` text column from a
+`String` one there needs a domain type per Corvid type, so these
+columns on a Postgres database are a compile error naming the slice
+rather than stored a weaker way. A refactor commit before this one moved
+`ColumnKind` and `column_kind` into `corvid-types`. The checker's query
+rule now calls the runtime's storage rule instead of keeping its own
+copy, `queryable_column_type`.
+
+---
+
 ## 2026-11-24 - `corvid migrate` compiles a program the way `corvid check` does
 
 Porting the reading list onto tables found that `corvid migrate plan`

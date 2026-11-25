@@ -198,7 +198,7 @@ before the query runs, so it may use the agent's variables and calls but
 not the row. Anything else is a compile error that says which part the
 database cannot run: comparing two columns, calling a function on a
 column, or comparing a column stored as JSON. `order_by` reads exactly
-one column, and `take` takes an `Int`; a negative count stops the run
+one column whose type has an order and that is not stored as JSON, and `take` takes an `Int`; a negative count stops the run
 with its reason.
 
 Results always come back in a defined order. With `order_by`, rows with
@@ -238,14 +238,55 @@ with a divergence naming the operation.
 | `String` | `TEXT` | `text` |
 | `Bool` | `BOOLEAN`, 0 or 1 | `boolean` |
 | `Option<T>` | `T`'s column, nullable | `T`'s column, nullable |
+| `Decimal` | `DECIMAL TEXT COLLATE corvid_decimal`: its exact text, compared by value | not yet |
+| `Duration` | `DURATION TEXT COLLATE corvid_duration`: its ISO 8601 text, compared by value | not yet |
+| `Instant` | `INSTANT TEXT`: UTC with all nine fractional digits, which sorts in time order | not yet |
+| `ZonedTime` | `ZONED TIME TEXT`: the instant and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | not yet |
+| `TimeZone`, `Currency`, `Locale` | `TIME ZONE TEXT`, `CURRENCY TEXT`, `LOCALE TEXT`: the canonical name | not yet |
 | `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON | `jsonb` holding the value's public JSON |
 
 The table is named as declared, and columns as the fields are named.
 Each kind of field has its own column type, so the stored schema records
 how every column is stored and the migration planner can see a change
-from `Int` to `Bool` or from `String` to a list. `JSON TEXT` columns keep
-SQLite's text handling, so JSON such as `5` is never read back as a
-number.
+from `Int` to `Bool`, from `String` to a list or from `String` to
+`Decimal`. Every text column keeps SQLite's text handling, so text such
+as `5` is never read back as a number.
+
+### Money and time
+
+A `Decimal`, `Duration`, `Instant`, `ZonedTime`, `TimeZone`, `Currency`
+or `Locale` field is a column the database compares exactly as Corvid
+does, so a query on it means what the same comparison means in the
+agent:
+
+```corvid
+agent large_recent(since: Instant) -> List<Invoice>:
+    return Invoice.where(fn (i) -> i.issued >= since and i.total > 1000.00).order_by(fn (i) -> i.total).descending()
+```
+
+- `i.total == 10` matches a stored `10.0`, and `9.50` sorts before
+  `10.0`. The stored text keeps its scale, so `19.90` reads back as
+  `19.90`.
+- Instants compare on the timeline to the nanosecond, whatever offset
+  they were written with, and read back in UTC.
+- `ZonedTime`, `TimeZone`, `Currency` and `Locale` compare only by
+  equality, as in Corvid, so `order_by` on one is a compile error. Order
+  zoned times by an `Instant` column instead.
+- Inside a record, list or other JSON-stored column these types are
+  their exact JSON text; the database does not compare inside it.
+
+Decimal and duration columns compare through two SQLite collations,
+`corvid_decimal` and `corvid_duration`, which Corvid registers on every
+connection it opens, `corvid migrate` included. Another tool that opens
+the file still reads every value, but SQLite refuses to compare, sort or
+index those two columns there ("no such collation sequence") rather than
+compare their text. Instant columns need no collation and sort correctly
+in any SQLite tool.
+
+On Postgres these columns are a compile error for now: Postgres needs a
+column type for each that compares it exactly, which is
+[planned](../proposals/typed-persistence.md#exact-columns-for-money-and-time-p8).
+`Bytes` columns are planned too and are refused on both engines.
 
 ## Migrations
 
