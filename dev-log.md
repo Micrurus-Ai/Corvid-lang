@@ -25,6 +25,21 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Serve tests no longer share ports
+
+`approval_transition_endpoints_approve_re_executes_and_deny_drops_pending`
+failed in every parallel gate run and passed alone. The cause was not
+the approval code: `serve_smoke.rs` gave each served app a fixed port,
+and 8196, 8198 and 8204 to 8207 were each used by two tests, so under
+parallel load one test's requests reached another test's server. Every
+served app in the file now takes an OS-assigned port from `free_port()`,
+as the newer tests in the file and in `serve_public_json.rs` already
+did, including the two refusal tests that named a fixed address. Five
+parallel runs of the file passed. The unused `TcpListener` import the
+file carried is removed in its own commit. Desktop handed both over.
+
+---
+
 ## 2026-11-25 - Hashing passwords in native code (native dispatch N3c)
 
 `hash_password(password, cost)` now runs in native code, so the sign-up
