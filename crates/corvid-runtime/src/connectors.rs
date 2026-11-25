@@ -25,6 +25,10 @@ use std::collections::BTreeMap;
 pub enum ConnectorBodyEncoding {
     Json,
     Form,
+    /// A `Bytes` or `Upload` parameter sent as the body itself.
+    Raw,
+    /// `multipart/form-data` built from a record's fields.
+    Multipart,
 }
 
 /// The request body binding of an operation: which parameter supplies
@@ -215,8 +219,17 @@ pub fn connector_calls_from_ir(
                     body: op.body.as_ref().map(|b| ConnectorBodySpec {
                         param: b.param_name.clone(),
                         encoding: match b.encoding {
-                            corvid_ast::BodyEncoding::Json => ConnectorBodyEncoding::Json,
+                            // A `Bytes` or `Upload` body is sent as itself;
+                            // any other `body` is JSON.
+                            corvid_ast::BodyEncoding::Json => {
+                                let raw = tool.params.iter().any(|p| {
+                                    p.name == b.param_name
+                                        && matches!(p.ty, corvid_types::Type::Bytes | corvid_types::Type::Upload(_))
+                                });
+                                if raw { ConnectorBodyEncoding::Raw } else { ConnectorBodyEncoding::Json }
+                            }
                             corvid_ast::BodyEncoding::Form => ConnectorBodyEncoding::Form,
+                            corvid_ast::BodyEncoding::Multipart => ConnectorBodyEncoding::Multipart,
                         },
                     }),
                     query: op.query.clone(),
@@ -395,13 +408,25 @@ pub fn build_connector_request(
                 operation: spec.operation.clone(),
                 param: body.param.clone(),
             })?;
+        let bad = || ConnectorRequestError::BadArgument {
+            operation: spec.operation.clone(),
+            param: body.param.clone(),
+        };
         request = match body.encoding {
             ConnectorBodyEncoding::Json => {
                 let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
                 request.json_body(json)
             }
             ConnectorBodyEncoding::Form => {
-                request.body("application/x-www-form-urlencoded", encode_form(value))
+                request.body("application/x-www-form-urlencoded", encode_form(value).into_bytes())
+            }
+            ConnectorBodyEncoding::Raw => {
+                let payload = payload_of(value).ok_or_else(bad)?;
+                request.body(&payload.content_type, payload.bytes)
+            }
+            ConnectorBodyEncoding::Multipart => {
+                let (content_type, bytes) = encode_multipart(value).ok_or_else(bad)?;
+                request.body(&content_type, bytes)
             }
         };
     }
@@ -502,6 +527,119 @@ fn scalar_to_path_segment(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+/// A file-like value the interpreter hands the request builder: an
+/// `Upload` as `{"filename", "content_type", "bytes"}`, or `Bytes` as its
+/// base64url text. The bytes are base64url in both.
+struct Payload {
+    filename: Option<String>,
+    content_type: String,
+    bytes: Vec<u8>,
+}
+
+fn payload_of(value: &serde_json::Value) -> Option<Payload> {
+    match value {
+        serde_json::Value::String(encoded) => Some(Payload {
+            filename: None,
+            content_type: "application/octet-stream".to_string(),
+            bytes: corvid_text::encoding::decode_base64_url_bytes(encoded).ok()?,
+        }),
+        serde_json::Value::Object(upload) => Some(Payload {
+            filename: upload.get("filename").and_then(|f| f.as_str()).map(str::to_string),
+            content_type: upload
+                .get("content_type")
+                .and_then(|c| c.as_str())
+                .filter(|c| !c.is_empty())
+                .unwrap_or("application/octet-stream")
+                .to_string(),
+            bytes: corvid_text::encoding::decode_base64_url_bytes(upload.get("bytes")?.as_str()?).ok()?,
+        }),
+        _ => None,
+    }
+}
+
+/// A `multipart/form-data` body for a record argument: a text part per
+/// scalar field (an absent `Option` is left out, a `List` repeats the
+/// part) and a file part per `Upload` or `Bytes` field. The boundary is
+/// derived from the content, so the same request has the same bytes and
+/// the same recorded digest, and it is checked not to occur in any part.
+fn encode_multipart(value: &serde_json::Value) -> Option<(String, Vec<u8>)> {
+    use sha2::Digest;
+    let serde_json::Value::Object(fields) = value else { return None };
+    enum Part {
+        Text(String, String),
+        File(String, Payload),
+    }
+    let mut parts = Vec::new();
+    for (name, field) in fields {
+        let items: Vec<&serde_json::Value> = match field {
+            serde_json::Value::Null => continue,
+            serde_json::Value::Array(items) => items.iter().collect(),
+            single => vec![single],
+        };
+        for item in items {
+            match item {
+                serde_json::Value::Object(o) if o.contains_key("bytes") => {
+                    parts.push(Part::File(name.clone(), payload_of(item)?))
+                }
+                serde_json::Value::Object(_) | serde_json::Value::Array(_) => return None,
+                serde_json::Value::String(s) => parts.push(Part::Text(name.clone(), s.clone())),
+                other => parts.push(Part::Text(name.clone(), other.to_string())),
+            }
+        }
+    }
+    let mut digest = sha2::Sha256::new();
+    for part in &parts {
+        match part {
+            Part::Text(name, text) => {
+                digest.update(name.as_bytes());
+                digest.update(text.as_bytes());
+            }
+            Part::File(name, payload) => {
+                digest.update(name.as_bytes());
+                digest.update(&payload.bytes);
+            }
+        }
+    }
+    let seed = corvid_text::encoding::encode_hex_bytes(&digest.finalize());
+    let mut boundary = format!("corvid-{}", &seed[..32]);
+    let occurs = |boundary: &str| {
+        parts.iter().any(|part| match part {
+            Part::Text(_, text) => text.contains(boundary),
+            Part::File(_, payload) => payload.bytes.windows(boundary.len()).any(|w| w == boundary.as_bytes()),
+        })
+    };
+    while occurs(&boundary) {
+        boundary.push('x');
+    }
+    let quote = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"").replace(['\r', '\n'], " ");
+    let mut body = Vec::new();
+    for part in &parts {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        match part {
+            Part::Text(name, text) => {
+                body.extend_from_slice(format!("Content-Disposition: form-data; name=\"{}\"\r\n\r\n", quote(name)).as_bytes());
+                body.extend_from_slice(text.as_bytes());
+            }
+            Part::File(name, payload) => {
+                let filename = payload.filename.clone().unwrap_or_else(|| name.clone());
+                body.extend_from_slice(
+                    format!(
+                        "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+                        quote(name),
+                        quote(&filename),
+                        payload.content_type
+                    )
+                    .as_bytes(),
+                );
+                body.extend_from_slice(&payload.bytes);
+            }
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Some((format!("multipart/form-data; boundary={boundary}"), body))
 }
 
 /// The query string for a record argument in its public JSON form: one
@@ -798,7 +936,7 @@ mod tests {
         .expect("build");
         assert_eq!(req.method, "POST");
         assert_eq!(req.url, "https://api.github.com/repos/micrurus/issues");
-        assert_eq!(req.body.as_deref(), Some(r#"{"title":"bug"}"#));
+        assert_eq!(req.body.as_deref(), Some(r#"{"title":"bug"}"#.as_bytes()));
     }
 
     #[test]

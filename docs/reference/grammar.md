@@ -405,6 +405,15 @@ which still stops the program: a denied approval, an exceeded budget,
 and a replay that diverges from its trace. An operation with an `async:` protocol cannot declare it,
 because a protocol fails through its deadline target and circuit breaker.
 
+`body file` sends a `Bytes` or `Upload` parameter as the body itself (an
+upload with its own content type, `Bytes` as `application/octet-stream`);
+any other `body` is sent as JSON and must have a JSON form. `form` sends a
+record of text fields. `multipart receipt` sends a record as
+`multipart/form-data`: a text part per scalar field, a part per `List`
+item, nothing for an absent `Option`, and a file part per `Upload` or
+`Bytes` field. A file is recorded by its name, type, size and SHA-256,
+never its content, and replay matches it by that digest.
+
 An operation returning `Stream<T>` declares how its events arrive:
 `streams: server_sent_events` (each event's `data:` lines are one JSON
 value) or `streams: json_lines` (one value per line). Each event decodes
@@ -442,7 +451,7 @@ connector_auth    ::= 'bearer' '(' secret_ref ')'
                     | 'basic' '(' secret_ref ',' secret_ref ')'
 secret_ref        ::= 'secret' '(' STRING_LITERAL ')'
 operation_decl    ::= 'operation' IDENT params '->' type_ref 'dangerous'? uses_clause? ':'
-                      INDENT http_method (STRING_LITERAL | IDENT) ('query' IDENT)? (('body' | 'form') IDENT)? NEWLINE
+                      INDENT http_method (STRING_LITERAL | IDENT) ('query' IDENT)? (('body' | 'form' | 'multipart') IDENT)? NEWLINE
                       operation_item* DEDENT
 operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEWLINE
                     | 'timeout' ':' INT 's' NEWLINE

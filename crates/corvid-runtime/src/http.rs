@@ -45,7 +45,9 @@ pub struct HttpRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<HttpHeader>,
-    pub body: Option<String>,
+    /// The request body's bytes: JSON or form text, a raw upload, or a
+    /// multipart body.
+    pub body: Option<Vec<u8>>,
     /// The longest one attempt may take, from connecting to the last
     /// byte of the response, redirects included.
     pub timeout_ms: u64,
@@ -81,11 +83,11 @@ impl HttpRequest {
 
     /// Send `body` as JSON.
     pub fn json_body(self, body: impl Into<String>) -> Self {
-        self.body("application/json", body)
+        self.body("application/json", body.into().into_bytes())
     }
 
     /// Send `body` with the given content type.
-    pub fn body(mut self, content_type: &str, body: impl Into<String>) -> Self {
+    pub fn body(mut self, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
         self.headers.push(HttpHeader {
             name: "content-type".to_string(),
             value: content_type.to_string(),
@@ -595,7 +597,7 @@ struct HopInFlight {
     hop: u32,
     url: String,
     headers: Vec<HttpHeader>,
-    body: Option<String>,
+    body: Option<Vec<u8>>,
     started: Instant,
 }
 
@@ -608,7 +610,7 @@ struct ExchangeRecorder<'a> {
 }
 
 impl ExchangeRecorder<'_> {
-    fn start_hop(&self, hop: u32, url: &reqwest::Url, headers: &[HttpHeader], body: &Option<String>) {
+    fn start_hop(&self, hop: u32, url: &reqwest::Url, headers: &[HttpHeader], body: &Option<Vec<u8>>) {
         let mut in_flight = self.in_flight.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         *in_flight = HopInFlight {
             hop,
@@ -634,9 +636,7 @@ impl ExchangeRecorder<'_> {
             method: self.request.method.clone(),
             url: in_flight.url.clone(),
             request_headers: in_flight.headers.iter().map(|h| h.name.to_ascii_lowercase()).collect(),
-            request_body_sha256: in_flight.body.as_ref().map(|body| {
-                encode_hex(&Sha256::digest(body.as_bytes()))
-            }),
+            request_body_sha256: in_flight.body.as_ref().map(|body| encode_hex(&Sha256::digest(body))),
             request_body_bytes: in_flight.body.as_ref().map_or(0, |body| body.len() as u64),
             status,
             response_headers: response_headers.iter().map(|h| h.name.to_ascii_lowercase()).collect(),
@@ -737,7 +737,7 @@ pub fn request_fingerprint(request: &HttpRequest) -> String {
         "method": request.method,
         "url": request.url,
         "headers": headers,
-        "body": request.body,
+        "body_sha256": request.body.as_ref().map(|body| encode_hex(&Sha256::digest(body))),
         "timeout_ms": request.timeout_ms,
         "redirects": request.redirects.as_str(),
         "retry": {

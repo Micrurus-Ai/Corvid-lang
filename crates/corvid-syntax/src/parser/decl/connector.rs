@@ -409,6 +409,14 @@ impl<'a> Parser<'a> {
                     encoding: BodyEncoding::Form,
                 })
             }
+            _ if self.peek_ident_is("multipart") => {
+                self.bump();
+                let (param, param_span) = self.expect_ident()?;
+                Some(OperationBody {
+                    param: Ident::new(param, param_span),
+                    encoding: BodyEncoding::Multipart,
+                })
+            }
             _ => None,
         };
         if self.peek_ident_is("query") {

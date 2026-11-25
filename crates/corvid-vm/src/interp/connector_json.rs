@@ -30,20 +30,133 @@ use corvid_types::Type;
 use serde_json::Value as J;
 use std::collections::HashMap;
 
+/// A connector call's arguments in the two forms the runtime takes:
+/// what every record of the call holds, and what the request is built
+/// from. They differ only for a file sent as the body or inside a
+/// multipart body, which is recorded by its name, type, size and SHA-256
+/// rather than its content: an upload of a person's document never lands
+/// in a trace, and replay matches the same file by its digest.
+pub(super) struct ConnectorArguments {
+    pub recorded: Vec<J>,
+    pub implementation: Vec<J>,
+}
+
+impl ConnectorArguments {
+    /// The runtime's revealed form, when the two differ.
+    pub(super) fn revealed(&self) -> Option<corvid_runtime::RevealedToolArguments> {
+        (self.recorded != self.implementation)
+            .then(|| corvid_runtime::RevealedToolArguments::new(&self.recorded, self.implementation.clone()))
+    }
+}
+
 /// Encode a connector call's arguments, each by its declared type.
+/// `payload_param` names the parameter sent as a raw or multipart body.
 pub(super) fn connector_arguments(
     params: &[IrParam],
     values: &[Value],
     types_by_id: &HashMap<DefId, &IrType>,
-) -> Result<Vec<J>, String> {
-    params
-        .iter()
-        .zip(values)
-        .map(|(param, value)| {
-            encode_public_json(value, &param.ty, types_by_id)
-                .map_err(|e| format!("argument `{}` cannot be sent as JSON: {e}", param.name))
-        })
-        .collect()
+    payload_param: Option<&str>,
+) -> Result<ConnectorArguments, String> {
+    let mut recorded = Vec::with_capacity(values.len());
+    let mut implementation = Vec::with_capacity(values.len());
+    for (param, value) in params.iter().zip(values) {
+        let (record, send) = if payload_param == Some(param.name.as_str()) {
+            payload_forms(value, &param.ty, types_by_id)
+                .map_err(|e| format!("argument `{}` cannot be sent: {e}", param.name))?
+        } else {
+            let json = encode_public_json(value, &param.ty, types_by_id)
+                .map_err(|e| format!("argument `{}` cannot be sent as JSON: {e}", param.name))?;
+            (json.clone(), json)
+        };
+        recorded.push(record);
+        implementation.push(send);
+    }
+    Ok(ConnectorArguments { recorded, implementation })
+}
+
+/// The recorded and sent forms of a raw or multipart body value.
+fn payload_forms(value: &Value, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<(J, J), String> {
+    match (ty, value) {
+        (Type::Upload(_), Value::Struct(upload)) => {
+            let text = |field: &str| match upload.get_field(field) {
+                Some(Value::String(s)) => s.to_string(),
+                _ => String::new(),
+            };
+            let bytes = match upload.get_field("bytes") {
+                Some(Value::List(items)) => items
+                    .iter_cloned()
+                    .into_iter()
+                    .map(|item| match item {
+                        Value::Int(b) => u8::try_from(b).map_err(|_| "an upload byte is out of range".to_string()),
+                        other => Err(format!("an upload byte is {}", other.type_name())),
+                    })
+                    .collect::<Result<Vec<u8>, String>>()?,
+                _ => return Err("the upload has no bytes".to_string()),
+            };
+            Ok(file_forms(Some(text("filename")), Some(text("content_type")), &bytes))
+        }
+        (Type::Bytes, Value::Bytes(bytes)) => Ok(file_forms(None, None, bytes.as_slice())),
+        (Type::Struct(_), Value::Struct(record)) => {
+            let decl = match ty {
+                Type::Struct(id) => types_by_id.get(id).copied(),
+                _ => None,
+            }
+            .ok_or_else(|| "the multipart record's type is missing".to_string())?;
+            let mut recorded = serde_json::Map::new();
+            let mut sent = serde_json::Map::new();
+            for field in &decl.fields {
+                let field_value = record.get_field(&field.name).unwrap_or(Value::OptionNone);
+                let (r, s) = multipart_field_forms(&field_value, &field.ty, types_by_id)?;
+                recorded.insert(field.name.clone(), r);
+                sent.insert(field.name.clone(), s);
+            }
+            Ok((J::Object(recorded), J::Object(sent)))
+        }
+        _ => Err(format!("a `{}` is not a file or a multipart record", ty.display_name())),
+    }
+}
+
+fn multipart_field_forms(value: &Value, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<(J, J), String> {
+    match (ty, value) {
+        (Type::Upload(_) | Type::Bytes, _) => payload_forms(value, ty, types_by_id),
+        (Type::Option(_), Value::OptionNone) => Ok((J::Null, J::Null)),
+        (Type::Option(inner), Value::OptionSome(item)) => multipart_field_forms(&item.get(), inner, types_by_id),
+        (Type::List(inner), Value::List(items)) => {
+            let mut recorded = Vec::new();
+            let mut sent = Vec::new();
+            for item in items.iter_cloned() {
+                let (r, s) = multipart_field_forms(&item, inner, types_by_id)?;
+                recorded.push(r);
+                sent.push(s);
+            }
+            Ok((J::Array(recorded), J::Array(sent)))
+        }
+        _ => {
+            let json = encode_public_json(value, ty, types_by_id)?;
+            Ok((json.clone(), json))
+        }
+    }
+}
+
+/// A file's recorded form (name, type, size, digest) and its sent form
+/// (name, type, base64url bytes). A `Bytes` value has no name or type.
+fn file_forms(filename: Option<String>, content_type: Option<String>, bytes: &[u8]) -> (J, J) {
+    use sha2::Digest;
+    let digest = corvid_text::encoding::encode_hex_bytes(&sha2::Sha256::digest(bytes));
+    let mut recorded = serde_json::Map::new();
+    let mut sent = serde_json::Map::new();
+    if let Some(filename) = filename {
+        recorded.insert("filename".into(), J::String(filename.clone()));
+        sent.insert("filename".into(), J::String(filename));
+    }
+    if let Some(content_type) = content_type {
+        recorded.insert("content_type".into(), J::String(content_type.clone()));
+        sent.insert("content_type".into(), J::String(content_type));
+    }
+    recorded.insert("size".into(), J::from(bytes.len() as u64));
+    recorded.insert("sha256".into(), J::String(digest));
+    sent.insert("bytes".into(), J::String(corvid_text::encoding::encode_base64_url_bytes(bytes)));
+    (J::Object(recorded), J::Object(sent))
 }
 
 /// Read a connector call's result, as the runtime returned or replay

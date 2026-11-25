@@ -347,10 +347,17 @@ impl<'ir> Interpreter<'ir> {
                 // as completion.
                 // The provider sees public JSON: an `Option` is its value
                 // or `null`, as `T.to_json()` writes it.
+                let payload_param = op.body.as_ref().and_then(|b| {
+                    let file = tool.params.iter().any(|p| {
+                        p.name == b.param_name && matches!(p.ty, Type::Bytes | Type::Upload(_))
+                    });
+                    (file || b.encoding == corvid_ast::BodyEncoding::Multipart).then_some(b.param_name.as_str())
+                });
                 let wire_args = connector_json::connector_arguments(
                     &tool.params,
                     &arg_values,
                     &self.types_by_id,
+                    payload_param,
                 )
                 .map_err(|e| {
                     InterpError::new(
@@ -361,6 +368,8 @@ impl<'ir> Interpreter<'ir> {
                 if let (Some(_), Type::Stream(event_ty)) = (op.streams, result_decode_ty) {
                     return self.open_connector_stream(callee_name, wire_args, event_ty, span).await;
                 }
+                let revealed = wire_args.revealed();
+                let wire_args = wire_args.recorded;
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
@@ -375,6 +384,7 @@ impl<'ir> Interpreter<'ir> {
                         callee_name,
                         op.on_failure.as_deref(),
                         wire_args,
+                        revealed,
                         result_decode_ty,
                         span,
                     )
@@ -509,13 +519,16 @@ impl<'ir> Interpreter<'ir> {
         callee_name: &str,
         on_failure: Option<&str>,
         wire_args: Vec<serde_json::Value>,
+        revealed: Option<corvid_runtime::RevealedToolArguments>,
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
-        let result = self
-            .runtime
-            .call_tool(callee_name, wire_args)
-            .await
+        // A file body is recorded by digest and sent by its bytes.
+        let result = match revealed {
+            Some(revealed) => self.runtime.call_tool_revealing_secrets(callee_name, wire_args, revealed).await,
+            None => self.runtime.call_tool(callee_name, wire_args).await,
+        };
+        let result = result
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         self.decode_connector_result(callee_name, on_failure, result, result_decode_ty, span)
     }
@@ -527,13 +540,13 @@ impl<'ir> Interpreter<'ir> {
     async fn open_connector_stream(
         &self,
         callee_name: &str,
-        wire_args: Vec<serde_json::Value>,
+        wire_args: connector_json::ConnectorArguments,
         event_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
         let events = self
             .runtime
-            .call_connector_stream(callee_name, wire_args)
+            .call_connector_stream(callee_name, wire_args.recorded, wire_args.implementation)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         let (sender, stream) = crate::value::StreamValue::channel(effect_compose::default_stream_backpressure());

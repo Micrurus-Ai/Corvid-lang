@@ -3010,6 +3010,71 @@ connector provider:
     assert!(has(&wrong_mock, "the operation's mock is `List<"), "{wrong_mock:?}");
 }
 
+/// A `body` is a file sent as itself or a value with a JSON form; a
+/// `form` carries no files; `multipart` is a record of flat fields, files
+/// included; a response is read through JSON.
+#[test]
+fn connector_bodies_and_responses_have_a_wire_form() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect write:
+    cost: 1.0
+
+type Nested:
+    inner: Receipt
+
+type Receipt:
+    title: String
+    file: Upload<Pdf>
+    copies: List<Bytes>
+    note: Option<String>
+
+type Mixed:
+    title: String
+    file: Upload<Pdf>
+
+connector storage:
+    base_url: "https://storage.example"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        "    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" body file\n    operation b(data: Bytes) -> String uses write:\n        PUT \"/b\" body data\n    operation c(r: Receipt) -> String uses write:\n        POST \"/c\" multipart r\n",
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let json_with_file = messages(program("    operation a(m: Mixed) -> String uses write:\n        POST \"/a\" body m\n"));
+    assert!(has(&json_with_file, "sends `m` as its JSON body, but field `Mixed.file`: an upload has no JSON form"), "{json_with_file:?}");
+
+    let form_file = messages(program("    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" form file\n"));
+    assert!(has(&form_file, "carries text fields only"), "{form_file:?}");
+
+    let nested = messages(program("    operation a(n: Nested) -> String uses write:\n        POST \"/a\" multipart n\n"));
+    assert!(has(&nested, "multipart field `inner` is `Receipt`"), "{nested:?}");
+
+    let not_record = messages(program("    operation a(t: String) -> String uses write:\n        POST \"/a\" multipart t\n"));
+    assert!(has(&not_record, "so it is a record whose fields become the parts"), "{not_record:?}");
+
+    let upload_response = messages(program("    operation a() -> Upload<Pdf> uses write:\n        GET \"/a\"\n"));
+    assert!(has(&upload_response, "reads its response as `"), "{upload_response:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:

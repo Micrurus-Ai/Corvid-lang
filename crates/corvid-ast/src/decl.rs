@@ -1064,6 +1064,9 @@ pub enum BodyEncoding {
     Json,
     /// `form <param>` — `application/x-www-form-urlencoded`.
     Form,
+    /// `multipart <param>` — `multipart/form-data`: a record whose
+    /// fields become parts, `Upload` and `Bytes` fields as file parts.
+    Multipart,
 }
 
 /// `on status <code> -> Variant` (slice 52g) — a response-status →

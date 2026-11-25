@@ -31,10 +31,14 @@ pub type ConnectorEventStream =
 
 impl Runtime {
     /// Open the streamed connector operation `name`. See the module docs.
+    /// `args` is what every record of the call holds; `implementation`
+    /// is what the request is built from (they differ only for a file
+    /// body, recorded by digest).
     pub async fn call_connector_stream(
         &self,
         name: &str,
         args: Vec<serde_json::Value>,
+        implementation: Vec<serde_json::Value>,
     ) -> Result<ConnectorEventStream, RuntimeError> {
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
@@ -55,7 +59,7 @@ impl Runtime {
         let mut recording = StreamRecording::new(self.tracer.clone(), name);
         let opened = async {
             let resolve = |secret: &str| self.secrets.read_env(secret).ok().and_then(|read| read.value);
-            let request = build_connector_request(spec, &args, &resolve).map_err(|e| e.into_runtime_error())?;
+            let request = build_connector_request(spec, &implementation, &resolve).map_err(|e| e.into_runtime_error())?;
             self.http_policy.check(&request.url)?;
             if let Some((limit, window_secs)) = spec.rate_limit {
                 self.check_connector_rate_limit(&spec.connector, limit, window_secs)?;

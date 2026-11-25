@@ -596,6 +596,7 @@ impl<'a> Checker<'a> {
             self.check_operation_response_shape(decl, op);
             self.check_operation_on_failure(decl, op);
             self.check_operation_stream(decl, op);
+            self.check_operation_body(decl, op);
 
             if let Some(secs) = op.timeout_secs {
                 let subject = format!("operation `{}`", op.name.name);
@@ -1965,5 +1966,92 @@ fn mentions_stream(ty: &Type) -> bool {
         Type::List(inner) | Type::Option(inner) | Type::Response(inner) => mentions_stream(inner),
         Type::Result(a, b) | Type::Map(a, b) => mentions_stream(a) || mentions_stream(b),
         _ => false,
+    }
+}
+
+/// A multipart field's value: a scalar part, or an `Upload` or `Bytes`
+/// file part.
+fn is_multipart_value(ty: &Type) -> bool {
+    is_query_scalar(ty) || matches!(ty, Type::Upload(_) | Type::Bytes)
+}
+
+impl<'a> Checker<'a> {
+    /// What an operation sends and reads has a wire form: a `body` is a
+    /// `Bytes` or `Upload` sent as itself, or a value with a JSON form;
+    /// a `form` carries no files; a `multipart` body is a record of flat
+    /// fields, files included; a response is read through JSON unless it
+    /// is `response: text`.
+    fn check_operation_body(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.span,
+            )
+        };
+        let operation = &op.name.name;
+        if let Some(body) = &op.body {
+            let Some(param) = op.params.iter().find(|p| p.name.name == body.param.name) else { return };
+            let ty = self.type_ref_to_type(&param.ty);
+            let file = matches!(ty, Type::Upload(_) | Type::Bytes);
+            match body.encoding {
+                corvid_ast::BodyEncoding::Json if file => {}
+                corvid_ast::BodyEncoding::Json => {
+                    if let Some(problem) = self.json_wire_problem(&ty, true) {
+                        self.errors.push(invalid(format!(
+                            "operation `{operation}` sends `{}` as its JSON body, but {problem}",
+                            body.param.name
+                        )));
+                    }
+                }
+                corvid_ast::BodyEncoding::Form if file => self.errors.push(invalid(format!(
+                    "operation `{operation}` sends `{}` as a form, which carries text fields only; send a file as `body {}` or inside a `multipart` record",
+                    body.param.name, body.param.name
+                ))),
+                corvid_ast::BodyEncoding::Form => {}
+                corvid_ast::BodyEncoding::Multipart => match ty {
+                    Type::Struct(id) if self.types_by_id.get(&id).is_some_and(|d| d.variants.is_empty()) => {
+                        let fields: Vec<(String, corvid_ast::TypeRef)> = self.types_by_id[&id]
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.name.clone(), f.ty.clone()))
+                            .collect();
+                        for (field, field_ty) in fields {
+                            let ty = self.type_ref_to_type(&field_ty);
+                            let ok = match &ty {
+                                Type::Option(inner) | Type::List(inner) => is_multipart_value(inner),
+                                other => is_multipart_value(other),
+                            };
+                            if !ok {
+                                self.errors.push(invalid(format!(
+                                    "operation `{operation}` multipart field `{field}` is `{}`; a part is a number, text, `Bool`, a decimal or time value, an `Upload` or `Bytes`, or an `Option` or `List` of one",
+                                    self.json_type_name(&ty)
+                                )));
+                            }
+                        }
+                    }
+                    other => self.errors.push(invalid(format!(
+                        "operation `{operation}` sends `{}` as multipart, so it is a record whose fields become the parts, not `{}`",
+                        body.param.name,
+                        self.json_type_name(&other)
+                    ))),
+                },
+            }
+        }
+        if !op.response_text {
+            let read = match self.type_ref_to_type(&op.return_ty) {
+                Type::Result(ok, _) => *ok,
+                other => other,
+            };
+            let read = match read {
+                Type::Response(body) | Type::Stream(body) => *body,
+                other => other,
+            };
+            if let Some(problem) = self.json_wire_problem(&read, false) {
+                self.errors.push(invalid(format!(
+                    "operation `{operation}` reads its response as `{}`, but {problem}",
+                    self.json_type_name(&read)
+                )));
+            }
+        }
     }
 }

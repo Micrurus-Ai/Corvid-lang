@@ -164,6 +164,16 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// Why `ty` cannot be sent (`encode`) or read as JSON, with what to
+    /// write instead; `None` when it can. For connector bodies and
+    /// responses, which travel as the same public JSON as `to_json`.
+    pub(super) fn json_wire_problem(&mut self, ty: &Type, encode: bool) -> Option<String> {
+        let direction = if encode { Direction::Encode } else { Direction::Decode };
+        self.json_form(ty, direction, &mut Vec::new())
+            .err()
+            .map(|no| format!("{}; {}", no.reason, no.hint))
+    }
+
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
     /// reports whether any part of it is `Tainted`. `seen` stops
     /// recursion through self-referential records.

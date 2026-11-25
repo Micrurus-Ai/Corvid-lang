@@ -1,5 +1,10 @@
 //! Tool arguments that hold a `Secret`.
 //!
+//! The same two forms carry a connector's file body (B05): the recorded
+//! form holds an upload's name, type, size and SHA-256, the revealed form
+//! its bytes. Nothing in a file body is a `<redacted>` marker, so nothing
+//! is scrubbed from the result.
+//!
 //! A tool may take a `Secret` parameter, and its implementation must
 //! receive the real text. Every record of the call must not: the
 //! `ToolCall` event, the replay comparison, an approval request, the

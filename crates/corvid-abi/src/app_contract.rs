@@ -715,9 +715,17 @@ fn connector_wire(file: &File, names: &ContractTypes<'_>) -> ConnectorWire {
                 operation: op.name.name.clone(),
                 body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name, names)),
                 body_encoding: op.body.as_ref().map(|b| {
+                    let raw = op.params.iter().any(|p| {
+                        p.name.name == b.param.name && {
+                            let name = type_ref_name(&p.ty);
+                            name == "Bytes" || name.starts_with("Upload<")
+                        }
+                    });
                     match b.encoding {
+                        corvid_ast::BodyEncoding::Json if raw => "raw",
                         corvid_ast::BodyEncoding::Json => "json",
                         corvid_ast::BodyEncoding::Form => "form",
+                        corvid_ast::BodyEncoding::Multipart => "multipart",
                     }
                     .to_string()
                 }),

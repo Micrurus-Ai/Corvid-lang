@@ -856,6 +856,7 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             match body.encoding {
                 BodyEncoding::Json => out.push_str(&format!(" body {}", body.param.name)),
                 BodyEncoding::Form => out.push_str(&format!(" form {}", body.param.name)),
+                BodyEncoding::Multipart => out.push_str(&format!(" multipart {}", body.param.name)),
             }
         }
         out.push('\n');

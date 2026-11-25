@@ -425,6 +425,8 @@ extend Customer:
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
+    operation attach(file: Upload<Pdf>) -> String:
+        POST "/files" multipart file
     operation deltas(input: String) -> Stream<String>:
         POST "/stream" body input
         streams: server_sent_events until "[DONE]"

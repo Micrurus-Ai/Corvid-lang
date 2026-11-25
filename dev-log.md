@@ -21,6 +21,50 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - File bodies and multipart for connectors (B05, slice 6)
+
+`body file` with an `Upload` or `Bytes` parameter sends the file as the
+body, an upload with its own content type and `Bytes` as
+`application/octet-stream`. `multipart receipt` sends a record as
+`multipart/form-data`, with `Upload` and `Bytes` fields as file parts.
+The HTTP request body became bytes rather than a `String`, which this
+needed.
+
+**Files never reach a trace.** A connector's arguments were recorded as
+given, so a 50 MB user document would have been written into the trace
+as base64. B04's recorded-versus-revealed mechanism, built so a tool
+taking a `Secret` records `<redacted>` while its implementation gets the
+text, already separates what every record of a call holds from what the
+implementation receives. The interpreter now builds both forms for a
+file body: the recorded one has the file's name, type, size and SHA-256,
+and the implementation's has its bytes. Nothing in a file is a
+`<redacted>` marker, so nothing is scrubbed from the result. Replay
+compares recorded forms, so it matches the same file by digest.
+
+**A reproducible multipart body.** The boundary is derived from a
+SHA-256 of the parts, and lengthened if it ever occurs in a part. The
+same request has the same bytes and the same recorded digest; a random
+boundary would make every recording of it differ.
+
+**Checks found on the way.** A JSON body whose type had no JSON form,
+such as a record holding an `Upload`, failed only at run time. The
+checker now requires a JSON body, and a decoded response, to have a JSON
+form, using the same check `to_json` uses, and the message names the
+field.
+
+**Deferred**, with reasons in proposal decision 8: a `Stream<T>` request
+body, which needs a channel from the interpreter's stream into the
+request and a recording of a consumed stream; and reading uploads from
+disk, which first needs `corvid serve` to stop reading them into memory.
+
+Tests: three end-to-end requests, covering an upload's exact bytes and
+content type with its content absent from the trace (even as base64) and
+replayed by digest, `Bytes` as octet-stream, and a multipart record with
+text, repeated, absent and file parts sending identical bytes and
+digests twice; and the checker's body and response rules.
+
+---
+
 ## 2026-11-25 - Streamed connector responses and cancellation (B05, slice 5)
 
 `-> Stream<Delta>` with `streams: server_sent_events` or
