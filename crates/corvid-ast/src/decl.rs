@@ -1482,6 +1482,10 @@ pub struct DatabaseDecl {
     /// holds at most, with the span of the count. Required for Postgres,
     /// refused for SQLite.
     pub connections: Option<(i64, Span)>,
+    /// `public database library:` lets other modules import it and put
+    /// their tables in it with `table Shelf in library:` (B09 P11).
+    #[serde(default)]
+    pub visibility: Visibility,
     pub span: Span,
 }
 

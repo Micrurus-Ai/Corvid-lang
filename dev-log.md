@@ -459,6 +459,39 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - One database, many modules (B09 P11b)
+
+A database can now be declared once, `public database library:`, and
+imported wherever tables live: `import "./storage" use library`, then
+`table Shelf in library:`. The program treats it as one database. The
+module system exports databases like any public declaration. One
+function, `table_ops::imported_database`, follows a `use` name to the
+declaring module. It reads the root's imports from the program's module
+resolution, and an imported module's from its own `import` lines,
+because the resolution keeps only the root's. The checker and IR
+lowering place tables through it.
+
+`atomic:` blocks needed the most care. The checker refused any call to
+an imported agent inside a block, because it could not see into other
+modules. The IR lowerer found a block's database only from tables named
+in the block's own module. So a block that wrote only through imported
+agents would have been lowered with no database and run without a
+transaction, silently losing atomicity. Both now use one cross-module
+walk, `table_ops::atomic_databases`, over a `ModuleView` of each module's
+file and bindings. The checker reads an imported agent's body in its own
+module and refuses there what the database cannot undo, naming the
+agent. A test inserts rows through two imported agents inside one block,
+fails the block, and finds both modules' rows rolled back.
+
+`corvid migrate plan` and `migrate up --program` now cover every
+module's tables (`placed_tables` in the driver), so planning
+`src/main.cor` writes one migration for a database whose tables live in
+three files. The derived index for a query in another module is
+included, and two modules declaring a table of the same name is an
+error.
+
+---
+
 ## 2026-11-25 - A table says where it lives (B09 P11a)
 
 A `database` block listed its tables with `tables:`, and since tables are

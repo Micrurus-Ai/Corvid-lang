@@ -1341,12 +1341,17 @@ impl<'a> Lowerer<'a> {
                 span: *span,
             },
             Stmt::Atomic { body, span } => {
-                // The checker proved every table here lives in one database.
-                let tables = corvid_types::table_ops::atomic_tables(body, self.file, self.symbols, self.bindings);
-                let database = tables
+                // The checker proved every table here, in this module or in
+                // the agents it calls in others, lives in one database.
+                let view = corvid_types::table_ops::ModuleView {
+                    file: self.file,
+                    symbols: self.symbols,
+                    bindings: self.bindings,
+                    module: self.current_module,
+                };
+                let database = corvid_types::table_ops::atomic_databases(body, view, self.module_resolution)
                     .first()
-                    .and_then(|table| corvid_types::table_ops::table_database(self.file, &table.name().name))
-                    .and_then(ir_database);
+                    .and_then(|database| ir_database(database));
                 IrStmt::Atomic { database, body: self.lower_block(body), span: *span }
             }
             Stmt::Break { span } => IrStmt::Break { span: *span },
@@ -2360,10 +2365,18 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// The database a table of this module lives in, following an `in`
+    /// that names a database imported from another module (B09 P11).
+    fn table_database(&self, table: &str) -> Option<&'a corvid_ast::DatabaseDecl> {
+        let (modules, current) = (self.module_resolution, self.current_module);
+        let imported = |database: &str| modules.and_then(|m| corvid_types::table_ops::imported_database(m, current, database));
+        corvid_types::table_ops::table_database_with(self.file, table, &imported)
+    }
+
     /// What a table's operations need: its row type, key, columns and database.
     fn ir_table(&self, table: &corvid_ast::TableDecl) -> Option<crate::types::IrTable> {
         let def_id = self.remap_def_id(self.symbols.lookup_def(&table.name().name)?);
-        let database = corvid_types::table_ops::table_database(self.file, &table.name().name)?;
+        let database = self.table_database(&table.name().name)?;
         Some(crate::types::IrTable {
             def_id,
             name: table.name().name.clone(),

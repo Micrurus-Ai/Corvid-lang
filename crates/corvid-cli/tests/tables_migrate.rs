@@ -252,6 +252,43 @@ fn indexes_follow_the_queries() {
     assert!(plan().contains("already match every declared table"));
 }
 
+/// One database shared by import (B09 P11): planning the program from
+/// its entry point writes one migration for the tables of every module
+/// that lives in the database, and the program then runs against it.
+#[test]
+fn tables_from_several_modules_are_planned_into_one_database() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "library.sqlite".into() };
+    std::fs::write(root.join("src/storage.cor"), "public database library:\n    engine: sqlite\n    location: \"library.sqlite\"\n").unwrap();
+    std::fs::write(
+        root.join("src/shelves.cor"),
+        "import \"./storage\" use library\n\ntable Shelf in library:\n    key id: Int\n    title: String\n\npublic agent shelve(id: Int, title: String) -> Int:\n    return match Shelf.insert(Shelf(id, title)):\n        Ok(row) -> row.id\n        Err(_) -> 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/notes.cor"),
+        "import \"./storage\" use library\n\ntable Note in library:\n    key id: Int\n    owner: String\n\npublic agent note(id: Int, owner: String) -> Int:\n    return match Note.insert(Note(id, owner)):\n        Ok(row) -> row.id\n        Err(_) -> 0\n\npublic agent count_for(owner: String) -> Int:\n    count = 0\n    for row in Note.where(fn (n) -> n.owner == owner):\n        count = count + 1\n    return count\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cor"),
+        "import \"./shelves\" use shelve\nimport \"./notes\" use note, count_for\n\nagent main() -> Int:\n    a = shelve(1, \"Novels\")\n    b = note(1, \"ana\")\n    c = note(2, \"ana\")\n    return a + b + c + count_for(\"ana\")\n",
+    )
+    .unwrap();
+    let planned = ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(planned.contains("plan: wrote") && planned.contains("Note") && planned.contains("Shelf"), "{planned}");
+    let migration = std::fs::read_dir(root.join("migrations")).unwrap().next().unwrap().unwrap().path();
+    let sql = std::fs::read_to_string(migration).unwrap();
+    assert!(sql.contains("CREATE TABLE \"Shelf\"") && sql.contains("CREATE TABLE \"Note\""), "{sql}");
+    // The query in another module still gets its index.
+    assert!(sql.contains("\"Note_by_owner\""), "{sql}");
+    assert!(ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine)).contains("already match every declared table"));
+    ok(&corvid(&["migrate", "up", "--dir", "migrations", "--database", "library.sqlite"], root, &engine));
+    assert_eq!(ok(&corvid(&["run", "--target", "interp", "src/main.cor"], root, &engine)).trim(), "6");
+}
+
 /// A `unique` line is planned as a unique index, and adding one to a
 /// table whose rows already repeat the value fails `migrate up` by name
 /// rather than picking a row to keep (B09 P10).

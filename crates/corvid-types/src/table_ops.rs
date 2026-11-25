@@ -385,7 +385,16 @@ pub fn called_agent<'a>(
 
 /// The `database` block that lists `table`.
 pub fn table_database<'a>(file: &'a File, table: &str) -> Option<&'a DatabaseDecl> {
-    match table_placement(file, table) {
+    table_database_with(file, table, &|_| None)
+}
+
+/// [`table_database`], following an `in` that names an imported database.
+pub fn table_database_with<'a>(
+    file: &'a File,
+    table: &str,
+    imported: &dyn Fn(&str) -> Option<&'a DatabaseDecl>,
+) -> Option<&'a DatabaseDecl> {
+    match table_placement_with(file, table, imported) {
         TablePlacement::In(database) => Some(database),
         _ => None,
     }
@@ -408,6 +417,16 @@ pub enum TablePlacement<'a> {
 }
 
 pub fn table_placement<'a>(file: &'a File, table: &str) -> TablePlacement<'a> {
+    table_placement_with(file, table, &|_| None)
+}
+
+/// [`table_placement`], following an `in` that names a database imported
+/// from another module through `imported` (see [`imported_database`]).
+pub fn table_placement_with<'a>(
+    file: &'a File,
+    table: &str,
+    imported: &dyn Fn(&str) -> Option<&'a DatabaseDecl>,
+) -> TablePlacement<'a> {
     let Some(decl) = file.decls.iter().find_map(|decl| match decl {
         Decl::Table(t) if t.name().name == table => Some(t),
         _ => None,
@@ -425,7 +444,10 @@ pub fn table_placement<'a>(file: &'a File, table: &str) -> TablePlacement<'a> {
     match &decl.database {
         Some(named) => match databases.iter().find(|db| db.name.name == named.name) {
             Some(db) => TablePlacement::In(db),
-            None => TablePlacement::UnknownDatabase(named),
+            None => match imported(&named.name) {
+                Some(db) => TablePlacement::In(db),
+                None => TablePlacement::UnknownDatabase(named),
+            },
         },
         None => match databases.as_slice() {
             [] => TablePlacement::NoDatabase,
@@ -433,6 +455,142 @@ pub fn table_placement<'a>(file: &'a File, table: &str) -> TablePlacement<'a> {
             _ => TablePlacement::Ambiguous(databases),
         },
     }
+}
+
+/// The `public database` that `name` imports into a module (B09 P11).
+/// `current` is the module being checked or lowered; `None` is the root,
+/// whose `use` names are in `modules.imported_uses`. An imported module's
+/// own `use` names are read from its `import` lines, because a program's
+/// module resolution keeps only the root's.
+pub fn imported_database<'m>(
+    modules: &'m corvid_resolve::ModuleResolution,
+    current: Option<&corvid_resolve::ResolvedModule>,
+    name: &str,
+) -> Option<&'m DatabaseDecl> {
+    let (declaring, original) = importing_module(modules, current, name)?;
+    declaring.file.decls.iter().find_map(|decl| match decl {
+        Decl::Database(db) if db.name.name == original && !matches!(db.visibility, corvid_ast::Visibility::Private) => Some(db),
+        _ => None,
+    })
+}
+
+/// The module a `use` name in `current` (the root when `None`) imports
+/// from, and the name the declaration has there.
+pub fn importing_module<'m>(
+    modules: &'m corvid_resolve::ModuleResolution,
+    current: Option<&corvid_resolve::ResolvedModule>,
+    name: &str,
+) -> Option<(&'m corvid_resolve::ResolvedModule, String)> {
+    Some(match current {
+        None => {
+            let target = modules.lookup_imported_use(name)?;
+            (modules.all_modules.get(&target.module_path)?, target.export.name.clone())
+        }
+        Some(module) => {
+            let (import, item) = module.file.decls.iter().find_map(|decl| match decl {
+                Decl::Import(import) => import
+                    .use_items
+                    .iter()
+                    .find(|item| item.alias.as_ref().map_or(&item.name.name, |a| &a.name) == name)
+                    .map(|item| (import, item)),
+                _ => None,
+            })?;
+            let wanted = corvid_resolve::resolve_import_path(&module.path, &import.module);
+            let declaring = modules.all_modules.values().find(|m| same_file(&m.path, &wanted))?;
+            (declaring, item.name.name.clone())
+        }
+    })
+}
+
+/// A module as a walk over calls sees it: its declarations and name
+/// bindings, and which loaded module it is (`None` for the root).
+#[derive(Clone, Copy)]
+pub struct ModuleView<'m> {
+    pub file: &'m File,
+    pub symbols: &'m SymbolTable,
+    pub bindings: &'m HashMap<Span, Binding>,
+    pub module: Option<&'m corvid_resolve::ResolvedModule>,
+}
+
+/// The public agent an imported `use` name calls, with the view of the
+/// module that declares it.
+pub fn imported_agent<'m>(
+    modules: &'m corvid_resolve::ModuleResolution,
+    from: ModuleView<'m>,
+    callee: &Expr,
+) -> Option<(ModuleView<'m>, &'m corvid_ast::AgentDecl)> {
+    let Expr::Ident { name, .. } = callee else { return None };
+    let Binding::Decl(id) = from.bindings.get(&name.span)? else { return None };
+    if from.symbols.get(*id).kind != DeclKind::ImportedUse {
+        return None;
+    }
+    let (declaring, original) = importing_module(modules, from.module, &name.name)?;
+    let agent = declaring.file.decls.iter().find_map(|decl| match decl {
+        Decl::Agent(agent) if agent.name.name == original && !matches!(agent.visibility, corvid_ast::Visibility::Private) => Some(agent),
+        _ => None,
+    })?;
+    let view = ModuleView {
+        file: declaring.file.as_ref(),
+        symbols: &declaring.resolved.symbols,
+        bindings: &declaring.resolved.bindings,
+        module: Some(declaring),
+    };
+    Some((view, agent))
+}
+
+/// The databases an `atomic:` block writes to, following the agents it
+/// calls into other modules, each found once. An `atomic:` block's
+/// transaction is on one database, so the checker refuses more than one,
+/// and IR lowering opens the transaction on the one it finds.
+pub fn atomic_databases<'m>(
+    body: &'m Block,
+    view: ModuleView<'m>,
+    modules: Option<&'m corvid_resolve::ModuleResolution>,
+) -> Vec<&'m DatabaseDecl> {
+    let mut databases: Vec<&'m DatabaseDecl> = Vec::new();
+    let mut visited: Vec<(usize, String)> = Vec::new();
+    collect_atomic_databases(body, view, modules, &mut databases, &mut visited);
+    databases
+}
+
+fn collect_atomic_databases<'m>(
+    body: &'m Block,
+    view: ModuleView<'m>,
+    modules: Option<&'m corvid_resolve::ModuleResolution>,
+    databases: &mut Vec<&'m DatabaseDecl>,
+    visited: &mut Vec<(usize, String)>,
+) {
+    let mut followed: Vec<(ModuleView<'m>, &'m corvid_ast::AgentDecl)> = Vec::new();
+    corvid_ast::visit::walk_block(body, &mut |_| {}, &mut |expr| {
+        let Expr::Call { callee, args, .. } = expr else { return };
+        let table = table_call_target(callee, view.file, view.symbols, view.bindings)
+            .map(|(table, _)| table)
+            .or_else(|| table_query_call(callee, args, view.file, view.symbols, view.bindings).map(|query| query.table));
+        if let Some(table) = table {
+            let imported = |database: &str| modules.and_then(|m| imported_database(m, view.module, database));
+            if let Some(database) = table_database_with(view.file, &table.name().name, &imported) {
+                if !databases.iter().any(|known| std::ptr::eq(*known, database)) {
+                    databases.push(database);
+                }
+            }
+        } else if let Some(agent) = called_agent(callee, view.file, view.symbols, view.bindings) {
+            followed.push((view, agent));
+        } else if let Some(found) = modules.and_then(|m| imported_agent(m, view, callee)) {
+            followed.push(found);
+        }
+    });
+    for (next, agent) in followed {
+        let key = (next.file as *const File as usize, agent.name.name.clone());
+        if visited.contains(&key) {
+            continue;
+        }
+        visited.push(key);
+        collect_atomic_databases(&agent.body, next, modules, databases, visited);
+    }
+}
+
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// The table declared at `span`, if the type there is a table.

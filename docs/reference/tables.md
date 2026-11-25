@@ -90,6 +90,44 @@ table PageView in analytics:
 A table without `in` in a module with several databases is a compile
 error that names them, and so is a table in a module with none.
 
+### One database, many modules
+
+An application has one database and many modules. Declare the database
+once as `public database` and import it where tables live:
+
+```corvid
+# storage.cor
+public database library:
+    engine: postgres
+    location: env("LIBRARY_DATABASE_URL")
+    tls: required
+    connections: 10
+
+# shelves.cor
+import "./storage" use library
+
+table Shelf in library:
+    key shelf: Int
+    title: String
+
+public agent rename(shelf: Int, title: String) -> Result<Shelf, String>:
+    ...
+```
+
+Every module's tables in `library` are one database:
+
+- An `atomic:` block may call agents in other modules, and their writes
+  join the block's transaction. Each one is checked in its own module, so
+  an imported agent that calls a tool is refused inside the block, by
+  name.
+- `corvid migrate plan src/main.cor` plans every table of the program,
+  from every module, in one migration history, with the indexes their
+  queries need. Two modules declaring a table of the same name is an
+  error, because a database stores one table under each name.
+- Tables stay private: other modules reach the rows only through the
+  agents a table's module exports. Sharing the database shares where rows
+  live, not access to them.
+
 ### Postgres
 
 ```corvid
