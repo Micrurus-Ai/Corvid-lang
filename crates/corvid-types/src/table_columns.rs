@@ -35,6 +35,9 @@ pub enum ColumnKind {
     Currency,
     /// A `Locale`, as its canonical BCP 47 tag.
     Locale,
+    /// B09 P8c — `Bytes`, as the bytes themselves: `BLOB` on SQLite,
+    /// `bytea` on Postgres. Compared bytewise, with no order.
+    Bytes,
 }
 
 impl ColumnKind {
@@ -60,11 +63,12 @@ impl ColumnKind {
             Self::TimeZone => "TIME ZONE TEXT",
             Self::Currency => "CURRENCY TEXT",
             Self::Locale => "LOCALE TEXT",
+            Self::Bytes => "BLOB",
         }
     }
 
     /// Every kind, for reading a stored column's declared type back.
-    pub const ALL: [ColumnKind; 12] = [
+    pub const ALL: [ColumnKind; 13] = [
         Self::Integer,
         Self::Real,
         Self::Text,
@@ -77,6 +81,7 @@ impl ColumnKind {
         Self::TimeZone,
         Self::Currency,
         Self::Locale,
+        Self::Bytes,
     ];
 
     /// The kind a stored column's declared type names, if Corvid
@@ -108,9 +113,10 @@ impl ColumnKind {
 
     /// Whether the type stored has an order in Corvid, so `order_by` may
     /// sort by it. A zoned time compares only by equality, since two in
-    /// different zones can be the same instant.
+    /// different zones can be the same instant, and `Bytes` only by
+    /// equality, as in Corvid.
     pub fn is_ordered(self) -> bool {
-        !matches!(self, Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale | Self::Json)
+        !matches!(self, Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale | Self::Bytes | Self::Json)
     }
 
     /// The Corvid type a column of this kind holds, for messages.
@@ -128,6 +134,7 @@ impl ColumnKind {
             Self::TimeZone => "TimeZone",
             Self::Currency => "Currency",
             Self::Locale => "Locale",
+            Self::Bytes => "Bytes",
         }
     }
 }
@@ -160,9 +167,7 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         Type::TimeZone => (ColumnKind::TimeZone, false),
         Type::Currency => (ColumnKind::Currency, false),
         Type::Locale => (ColumnKind::Locale, false),
-        // A decision, not a fallthrough: `Bytes` may want a BLOB column
-        // (B09 P8c); the checker refuses `Bytes` table columns until then.
-        Type::Bytes => (ColumnKind::Json, false),
+        Type::Bytes => (ColumnKind::Bytes, false),
         // A `Secret` is never stored: the checker refuses a `Secret`
         // column (hash it, or wait for an encrypted column). Named here
         // so no default arm decides its storage.
@@ -204,7 +209,7 @@ mod tests {
     fn money_and_time_get_their_own_columns() {
         assert_eq!(column_kind(&Type::Decimal), (ColumnKind::Decimal, false));
         assert_eq!(column_kind(&Type::Option(Box::new(Type::Instant))), (ColumnKind::Instant, true));
-        assert_eq!(column_kind(&Type::Bytes).0, ColumnKind::Json);
-        assert!(!ColumnKind::ZonedTime.is_ordered() && ColumnKind::Duration.is_ordered());
+        assert_eq!(column_kind(&Type::Bytes), (ColumnKind::Bytes, false));
+        assert!(!ColumnKind::ZonedTime.is_ordered() && !ColumnKind::Bytes.is_ordered() && ColumnKind::Duration.is_ordered());
     }
 }

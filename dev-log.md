@@ -177,6 +177,34 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-24 - Byte strings as table columns (B09 P8c)
+
+A table can now hold a `Bytes` field, stored as the bytes themselves:
+`BLOB` on SQLite, `bytea` on Postgres. The motivating program stores API
+keys as the SHA-256 of their tokens and finds the owner of a presented
+token with `ApiKey.where(fn (k) -> k.token_hash == digest)`. Equality in
+`where` is allowed and `order_by` is refused, because `Bytes` has no
+order. Database equality is not constant-time the way `==` on `Bytes`
+is, which does not matter for a hash of a random token; the reference
+says to compare hashes, never secrets. Both engines pass the same test.
+
+The runtime's `DbValue` had no binary variant. `std.db`'s reader turned
+every blob into `"<blob:redacted>"` text, so raw query results handed to
+agents as JSON never carried bytes. Redacting at each JSON conversion
+instead would have spread one guarantee over several places. So the
+registry's query now takes a cell converter. `std.db` passes the
+redacting one, unchanged, and tables call `query_table_rows`, which
+keeps the bytes. A test pins that a raw query still redacts. The trace
+records a binary column as `{"bytes_base64url": ...}`, an object a
+replay cannot mistake for text.
+
+With `Bytes` stored, the checker's table-column walk refused nothing, so
+it is gone. That also removed `PendingJsonFormAtBoundary` and `NoForm`'s
+pending marker. The only column refusal left is P8a's money and time
+types on Postgres.
+
+---
+
 ## 2026-11-24 - Money and time as table columns (B09 P8a)
 
 A table can now hold a `Decimal`, `Duration`, `Instant`, `ZonedTime`,

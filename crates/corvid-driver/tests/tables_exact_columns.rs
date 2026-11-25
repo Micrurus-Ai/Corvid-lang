@@ -184,22 +184,3 @@ agent main() -> Int:
     // A decimal inside a JSON-stored column is its exact text on any engine.
     assert!(!refused.contains("`lines`"), "{refused}");
 }
-
-#[test]
-fn bytes_columns_still_wait_for_a_binary_column() {
-    let source = r#"
-database vault:
-    engine: sqlite
-    location: "vault.sqlite"
-    tables: Blob
-
-table Blob:
-    key name: String
-    data: Bytes
-
-agent main() -> Int:
-    return 0
-"#;
-    let refused = errors(source);
-    assert!(refused.contains("a `Bytes` cannot be a table column yet"), "{refused}");
-}

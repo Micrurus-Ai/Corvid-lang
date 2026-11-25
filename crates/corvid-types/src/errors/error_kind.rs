@@ -127,9 +127,6 @@ pub enum TypeErrorKind {
     /// `ask` answering with, or `choose` offering, a `Secret`.
     SecretShownToPerson { builtin: String, at: String },
 
-    /// B06 — a `Decimal`, `Duration` or `Instant` in a type that leaves
-    /// the program as JSON before B06's JSON slice gives it a form.
-    PendingJsonFormAtBoundary { type_name: String, boundary: String },
 
     /// A tool or agent referenced without `()`.
     /// E.g. `x = get_order` instead of `x = get_order(id)`.
@@ -701,9 +698,6 @@ impl TypeErrorKind {
                 "ask" => format!("`ask` cannot answer with a `Secret`{at}: a person's answer is recorded in the trace"),
                 _ => format!("`{builtin}` cannot offer a `Secret`{at}: its options are shown to a person"),
             },
-            Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
-                "a `{type_name}` cannot be {boundary} yet: its storage mapping, which decides how queries compare it, arrives with B09"
-            ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
             }
@@ -1184,12 +1178,6 @@ impl TypeErrorKind {
             ),
             Self::UnknownCurrencyOrLocale { .. } => Some(
                 "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
-            ),
-            Self::PendingJsonFormAtBoundary { type_name, .. } if type_name == "Bytes" => Some(
-                "store `to_base64_url()` in a `String` column and read it back with `Bytes.from_base64_url(text)`".into(),
-            ),
-            Self::PendingJsonFormAtBoundary { .. } => Some(
-                "store its exact text with `to_string()` in a `String` column and read it back with the matching `parse_` method".into(),
             ),
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"

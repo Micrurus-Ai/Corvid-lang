@@ -1,17 +1,13 @@
 //! The table columns a database cannot store yet.
 //!
 //! B09 P8a stores `Decimal`, the time types, `Currency` and `Locale` in
-//! columns that SQLite compares exactly as Corvid does (see
-//! [`crate::table_columns`]). Two cases still wait, and are compile
-//! errors that name what they wait for:
-//!
-//! - `Bytes`, anywhere in a column, until B09 P8c gives it a binary
-//!   column. The walk is `to_json`'s, so a record column holding one is
-//!   caught too.
-//! - Those exact columns on a Postgres database, until B09 P8b gives
-//!   each a Postgres type that compares it exactly. Inside a JSON-stored
-//!   column they are fine on either engine: JSON holds their exact text,
-//!   and the database never compares inside it.
+//! columns that SQLite compares exactly as Corvid does, and P8c stores
+//! `Bytes` as binary on both engines (see [`crate::table_columns`]). One
+//! case still waits and is a compile error that names what it waits for:
+//! the money and time columns on a Postgres database, until B09 P8b gives
+//! each a Postgres type that compares it exactly. Inside a JSON-stored
+//! column they are fine on either engine: JSON holds their exact text,
+//! and the database never compares inside it.
 
 use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
@@ -31,25 +27,18 @@ impl<'a> Checker<'a> {
                 }
                 _ => false,
             });
+            if !on_postgres {
+                continue;
+            }
             for field in &table.record.fields {
                 let Some(ty) = self.type_refs.get(&field.ty.span()).cloned() else { continue };
                 let kind = column_kind(&ty).0;
-                if on_postgres && kind.is_exact_text() {
+                if kind.is_exact_text() {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::ExactColumnNotYetOnPostgres {
                             table: table_name.clone(),
                             column: field.name.name.clone(),
                             type_name: kind.type_name().to_string(),
-                        },
-                        field.ty.span(),
-                    ));
-                    continue;
-                }
-                if let Some(type_name) = self.unstored_column_type_reached(&ty) {
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::PendingJsonFormAtBoundary {
-                            type_name: type_name.to_string(),
-                            boundary: "a table column".to_string(),
                         },
                         field.ty.span(),
                     ));

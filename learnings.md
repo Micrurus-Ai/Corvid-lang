@@ -8203,6 +8203,8 @@ When no single field identifies a row, mark several fields `key`: `key proposal:
 
 A table field may be a `Decimal`, `Duration`, `Instant`, `ZonedTime`, `TimeZone`, `Currency` or `Locale` on SQLite, and the database compares it exactly as Corvid does: `Invoice.where(fn (i) -> i.total > 1000.00).order_by(fn (i) -> i.issued)` finds `10 == 10.0` equal, sorts `9.50` before `10.0`, orders instants to the nanosecond whatever offset they were written with, and reads `19.90` back as `19.90`. Zoned times, zones, currencies and locales compare only by equality, so `order_by` on one, or on a JSON-stored column, is a compile error. Decimal and duration columns compare through collations Corvid registers on its own connections; another SQLite tool can read them but refuses to compare them. On Postgres these columns are still a compile error. [Money and time](docs/reference/tables.md#money-and-time)
 
+A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a table can keep a token's hash and find its row with `ApiKey.where(fn (k) -> k.token_hash == token.utf8().sha256())`. `Bytes` has no order, so `order_by` on one is a compile error. Store and compare a hash, never the secret: the database's lookup is not constant-time as `==` in Corvid is. A raw `std.db` query still shows a binary cell as `<blob:redacted>`. [Binary values](docs/reference/tables.md#binary-values)
+
 `corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. Name the module that declares the tables: the planner plans that module's tables, not those of modules it imports.
 
 ### Encoding text and parsing UUIDs

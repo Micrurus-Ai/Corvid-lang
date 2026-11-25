@@ -320,9 +320,31 @@ Decisions, and the simpler alternatives considered:
   a query an assistant triggers through an action compares money and
   time as exactly as one a person triggers.
 
-Slices: P8a, SQLite (this change). P8b, Postgres through domains.
-P8c, `Bytes` as a binary column (`BLOB`, `bytea`), which needs a binary
-value in the runtime's database layer.
+Slices: P8a, SQLite. P8b, Postgres through domains. P8c, `Bytes` as a
+binary column.
+
+**`Bytes` columns (P8c).** A `Bytes` field is a `BLOB` on SQLite and a
+`bytea` on Postgres. Both store the bytes themselves and compare them
+bytewise, so unlike P8a this works on Postgres at once, and the planner
+tells the two apart by type. Decisions:
+
+- **Raw queries keep redacting binary cells.** The runtime's database
+  layer gained a binary value, but only table reads produce one:
+  `query_table_rows` keeps a blob's bytes, while `std.db`'s `query`, whose
+  rows go to agents as JSON, still reports `<blob:redacted>`. Splitting
+  the reader rather than redacting at each JSON conversion keeps the one
+  guarantee in one place.
+- **Equality is allowed in `where`, ordering is not.** `Bytes` has no
+  order in Corvid. Equality in the database is not constant-time as `==`
+  in Corvid is. Finding a row by a hash is the common need (API keys
+  stored as `sha256` of the token), and its timing reveals nothing about
+  the token. The reference says to compare hashes, never secrets.
+- **The trace holds bytes as `{"bytes_base64url": ...}`,** an object of
+  its own so a replay never mistakes them for a text column's value.
+- **Across the tiers:** a `Bytes` field already crosses JSON as base64url
+  text for the frontend and assistants, so a form or tool sees the same
+  value the table stores. Nothing new is exposed: the bytes leave the
+  database only through a table's declared type.
 
 ## Open questions for review
 
