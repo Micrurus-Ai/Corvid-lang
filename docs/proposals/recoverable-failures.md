@@ -96,10 +96,10 @@ three, decides what counts as an outage.
 - Seeing which failure happened in the fallback (`else (error) -> ...`).
   It can follow once a failure type is agreed.
 - A failure in the middle of a stream is settled by B05, not here: a
-  streamed operation that declares  returns
-  , its events arrive as , and an outage
-  becomes one final  after which the stream ends
+  streamed operation that declares `on failure` returns
+  `Stream<Result<T, E>>`, its events arrive as `Ok(T)`, and an outage
+  becomes one final `Err(Variant(reason))` after which the stream ends
   ([HTTP client decision 7](http-client.md#decisions)). The loop reading
-  it never raises for an outage, so there is nothing for 
+  it never raises for an outage, so there is nothing for `try ... else`
   to catch and no loop form is needed. A budget exceeded mid-stream and
-  a replay divergence are still raised, never folded into the .
+  a replay divergence are still raised, never folded into the `Err`.
