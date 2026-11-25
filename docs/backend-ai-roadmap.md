@@ -206,6 +206,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] P5. MySQL, after B10 (see the order note).
 - [ ] P6. Native target, after B10 (see the order note).
 
+**B10 shared actions** (proposal awaiting frontend agreement). [Proposal](proposals/shared-actions.md)
+
+- [ ] Agree the grammar with frontend development (F15): the `action` declaration, the `assistants:` line, `ui.form(action)` and `ui.button(label, action, value)` by name, one endpoint per action, and the typed refusal shape.
+- [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
+- [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
+
 **Test infrastructure**
 
 - [x] `corvid-driver`'s HTTP policy loader tests set and restored the process-wide `CORVID_HTTP_ALLOW`, so one could fail when another test read it at the same time. `load_http_egress_policy` now reads the variable once and passes it to `http_egress_policy_from`, which the tests call with the value directly; no test changes the environment.
