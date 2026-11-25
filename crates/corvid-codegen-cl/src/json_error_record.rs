@@ -44,6 +44,7 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::ResumeToken(inner)
         | Type::Upload(inner)
         | Type::Page(inner)
+        | Type::Response(inner)
         | Type::Weak(inner, _) => rewrite(inner),
         Type::Map(a, b) | Type::Result(a, b) => rewrite(a) | rewrite(b),
         Type::Function { params, ret, .. } => {

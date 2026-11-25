@@ -276,6 +276,15 @@ pub enum BuiltinMethodKind {
     /// `Upload<Format>.size() -> Int` — the byte length of the upload.
     UploadSize,
 
+    // ----- Response<Body> accessors (B05) -------------------------
+    /// `Response<Body>.status() -> Int` — the HTTP status.
+    ResponseStatus,
+    /// `Response<Body>.body() -> Body` — the decoded body.
+    ResponseBody,
+    /// `Response<Body>.header(name) -> Option<String>` — the first
+    /// response header with that name, compared without case.
+    ResponseHeader,
+
     // ----- typed JSON (B01) ---------------------------------------
     //
     // One public JSON mapping (`corvid_vm::public_json`) serves HTTP
@@ -759,6 +768,16 @@ pub fn regex_match_fields() -> [(&'static str, Type); 4] {
 /// [`JSON_ERROR_TYPE_ID`].
 pub const REGEX_MATCH_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1);
 
+/// The type id runtime `Response` records carry, reserved like
+/// [`JSON_ERROR_TYPE_ID`].
+pub const RESPONSE_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 2);
+
+/// The fields of a runtime `Response` record, in order: the status, the
+/// response headers as `[name, value]` pairs with lower-cased names, and
+/// the decoded body. Programs read them through the accessors, never as
+/// fields; the interpreter builds and reads records from this one list.
+pub const RESPONSE_FIELDS: [&str; 3] = ["status", "headers", "body"];
+
 /// The fields of the compiler-known `JsonError` record, in display
 /// order. The checker types `error.path` from this list and the
 /// runtime builds `JsonError` values from it.
@@ -1087,6 +1106,13 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
         (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
         (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),
+
+        // ----- Response<Body> accessors (B05) ---------------------
+        (Type::Response(_), "status") => sig(ResponseStatus, vec![], Type::Int),
+        (Type::Response(body), "body") => sig(ResponseBody, vec![], (**body).clone()),
+        (Type::Response(_), "header") => {
+            sig(ResponseHeader, vec![Type::String], Type::Option(Box::new(Type::String)))
+        }
 
         // Every receiver is offered `to_json`; the checker then
         // refuses types with no JSON form (it can see record fields,

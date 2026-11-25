@@ -661,6 +661,7 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // stance the application contract already documents.
         | T::Upload(_)
         | T::Page(_)
+        | T::Response(_)
         | T::Unknown => "object".into(),
         // `Result<T, E>` and `Weak<T, ...>` stay `object` until the
         // Python backend picks a concrete representation (wrapper

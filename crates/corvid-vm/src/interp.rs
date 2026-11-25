@@ -434,7 +434,7 @@ impl<'ir> Interpreter<'ir> {
                 if let Some(protocol) = &op.protocol {
                     self.validate_protocol_mock(protocol, connector, op, &value, span)?;
                 }
-                Ok(value)
+                Ok(connector_json::mock_response(value, &tool.return_ty))
             }
             Err(_propagated) => Err(InterpError::new(
                 InterpErrorKind::Other(format!(

@@ -186,6 +186,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
             generic_type("Upload", vec![type_to_type_ref(inner, symbols)], span)
         }
         Type::Page(inner) => generic_type("Page", vec![type_to_type_ref(inner, symbols)], span),
+        Type::Response(inner) => generic_type("Response", vec![type_to_type_ref(inner, symbols)], span),
         Type::TraceId => named_type("TraceId", span),
         Type::DbHandle => named_type("DbHandle", span),
         Type::JsonValue => named_type("JsonValue", span),

@@ -840,6 +840,8 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             HttpMethod::Put => "PUT",
             HttpMethod::Patch => "PATCH",
             HttpMethod::Delete => "DELETE",
+            HttpMethod::Head => "HEAD",
+            HttpMethod::Options => "OPTIONS",
         };
         out.push_str(method);
         out.push(' ');

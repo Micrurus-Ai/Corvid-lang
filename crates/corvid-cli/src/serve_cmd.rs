@@ -2121,6 +2121,10 @@ fn method_filter(m: HttpMethod) -> MethodFilter {
         HttpMethod::Put => MethodFilter::PUT,
         HttpMethod::Patch => MethodFilter::PATCH,
         HttpMethod::Delete => MethodFilter::DELETE,
+        // The checker refuses `HEAD` and `OPTIONS` routes; the mapping is
+        // still exact rather than a guess.
+        HttpMethod::Head => MethodFilter::HEAD,
+        HttpMethod::Options => MethodFilter::OPTIONS,
     }
 }
 

@@ -164,6 +164,16 @@ impl<'a> Checker<'a> {
                     route.span,
                 ));
             }
+            if matches!(route.method, HttpMethod::Head | HttpMethod::Options) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::RouteMethodAnsweredByServer {
+                        server: server.name.name.clone(),
+                        method: route.method.as_str().into(),
+                        path: route.path.clone(),
+                    },
+                    route.span,
+                ));
+            }
             if matches!(route.method, HttpMethod::Get) && route.body_ty.is_some() {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::GetRouteBody {
@@ -583,6 +593,7 @@ impl<'a> Checker<'a> {
             }
 
             self.check_operation_query_and_headers(decl, op, &param_names);
+            self.check_operation_response_shape(decl, op);
 
             if let Some(secs) = op.timeout_secs {
                 let subject = format!("operation `{}`", op.name.name);
@@ -606,12 +617,14 @@ impl<'a> Checker<'a> {
             match &op.mock {
                 Some(mock_expr) => {
                     self.bind_params(&op.params);
-                    let ret_ty = self.type_ref_to_type(&op.return_ty);
+                    // A `Response<Body>` operation's mock is the body: mock
+                    // mode answers with status 200 and no headers.
+                    let ret_ty = mock_payload_type(self.type_ref_to_type(&op.return_ty));
                     let got = self.check_expr_as(mock_expr, Some(&ret_ty));
                     if !got.is_assignable_to(&ret_ty) {
                         self.errors.push(invalid(
                             format!(
-                                "operation `{}` mock has type `{}`, but the operation returns `{}`",
+                                "operation `{}` mock has type `{}`, but the operation's mock is `{}`",
                                 op.name.name,
                                 got.display_name(),
                                 ret_ty.display_name()
@@ -1696,6 +1709,55 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+    }
+}
+
+/// What an operation's `mock:` must produce: its return type, with a
+/// `Response<Body>` replaced by its body (inside a `Result` too).
+fn mock_payload_type(ret: Type) -> Type {
+    match ret {
+        Type::Response(body) => *body,
+        Type::Result(ok, err) => match *ok {
+            Type::Response(body) => Type::Result(body, err),
+            ok => Type::Result(Box::new(ok), err),
+        },
+        other => other,
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A `Response` is an operation's whole result or its `Result`'s
+    /// success type, and its body holds no `Response`. A `HEAD` answer
+    /// has no body, so a `HEAD` operation returns `Response<Nothing>`.
+    fn check_operation_response_shape(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.return_ty.span(),
+            )
+        };
+        let operation = &op.name.name;
+        let ret = self.type_ref_to_type(&op.return_ty);
+        let (response_body, rest_mentions) = match &ret {
+            Type::Response(body) => (Some(body.as_ref()), body.mentions_response()),
+            Type::Result(ok, err) => match ok.as_ref() {
+                Type::Response(body) => (Some(body.as_ref()), body.mentions_response() || err.mentions_response()),
+                ok => (None, ok.mentions_response() || err.mentions_response()),
+            },
+            other => (None, other.mentions_response()),
+        };
+        if rest_mentions {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` returns `{}`; a `Response` is the operation's whole result or its `Result`'s success type, never inside another type",
+                ret.display_name()
+            )));
+        }
+        if matches!(op.method, corvid_ast::HttpMethod::Head) && !matches!(response_body, Some(Type::Nothing)) {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` is a HEAD request, whose answer has no body, so it returns `Response<Nothing>` (or a `Result` of one), not `{}`",
+                ret.display_name()
+            )));
         }
     }
 }

@@ -225,7 +225,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] 3a. Connector bodies and responses through B01's public mapping (an `Option` is its value or `null`), field-path errors naming the declared type, undeclared response fields ignored, a non-JSON 2xx body refused instead of read as `null`.
 - [x] 3b. `query <param>` records (a `None` field omitted, a `List` repeated, flat fields only) and `header "Name": value` lines from a `String` parameter or a fixed string, kept off the credential, body and transport headers, each set once, a line break refused.
 - [ ] A per-call credential for calls made on a user's behalf: an operation-level `auth: bearer(token)` taking a `Secret` parameter, recorded as `<redacted>`, refused on `async:` operations whose arguments are persisted. Decided against `Secret` header lines in B05 slice 3b. [Decision 4](proposals/http-client.md#decisions)
-- [ ] 3c. `Response<T>`, `HEAD` and `OPTIONS`.
+- [x] 3c. `Response<T>` (`status()`, `body()`, `header(name)`; `Set-Cookie` never passed on; mock answers 200 with the body; kept off records, routes, tools, prompts, JSON and `main`), `HEAD` operations returning `Response<Nothing>`, and `OPTIONS`; routes refuse both methods, which the server answers itself.
 - [ ] 3d. Request, query and response types in the Application Contract from the same schema code routes use, with a test that the runtime's encoding matches it.
 - [ ] 4. A dynamic-host connector replaces `http_get` and `http_post_json`, with every surface that names them. Until then the two tools keep a 30-second timeout and redirects to allowed hosts, written at their call site.
 - [ ] 5. Streamed responses, cancellation, and caller disconnect closing the upstream connection.

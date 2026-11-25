@@ -229,6 +229,14 @@ Use `None` for an absent option. Pass a type name as the second argument to `ask
 - `Upload<Format>.content_type() -> String`
 - `Upload<Format>.size() -> Int`
 
+## Response
+
+- `Response<Body>.status() -> Int`
+- `Response<Body>.body() -> Body`
+- `Response<Body>.header(name: String) -> Option<String>`
+
+A connector operation that declares `-> Response<Body>` (or `Result<Response<Body>, E>`) returns one: the decoded body, the HTTP status and the response headers. `header` compares names without case and returns the first match. `Set-Cookie` is never passed on. A `HEAD` operation returns `Response<Nothing>`. In mock mode, the operation's `mock:` is the body, answered with status 200 and no headers. A `Response` stays in the program that made the call: it cannot be a record field, a route, tool or prompt type, JSON, or part of `main`'s signature. See [connector declarations](grammar.md#connector-declarations).
+
 ## Every type
 
 - `T.from_json(text: String) -> Result<T, JsonError>`

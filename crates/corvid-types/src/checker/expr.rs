@@ -315,6 +315,8 @@ impl<'a> Checker<'a> {
                 // error like the other type constructors.
                 | BuiltIn::Upload
                 | BuiltIn::Page
+                // B05 — a `Response` comes only from a connector call.
+                | BuiltIn::Response
                 // B03 — a `RegexMatch` comes only from the regex methods.
                 | BuiltIn::RegexMatch => {
                     self.errors.push(TypeError::new(
