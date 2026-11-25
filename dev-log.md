@@ -23,6 +23,15 @@ public decoder. The recorded result keeps its shape, so replay goes
 through the same function. A mismatch names the declared type and the
 path.
 
+Replay compares a recorded call's arguments with the live call's
+exactly, so a connector trace recorded before this slice with an
+`Option` argument now stops with a `ReplayDivergence` naming the
+operation and both argument lists. Normalising the old form is not
+possible at that point: replay sees JSON only, without the parameter
+types that tell an internal envelope from a record that happens to
+have a `tag` field. The break is loud, and `learnings.md` says to
+re-record such traces.
+
 Found on the way: the runtime turned a 2xx body that was not JSON into
 `null`, which the program would then read as an answer. It now fails,
 naming the status; an empty body is still `null`.
