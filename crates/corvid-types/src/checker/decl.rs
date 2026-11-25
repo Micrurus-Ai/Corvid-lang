@@ -1857,6 +1857,16 @@ impl<'a> Checker<'a> {
             )
         };
         let operation = &op.name.name;
+        // A protocol's submit and polls fail through its own lifecycle
+        // (deadline target, circuit breaker), not a single request, so
+        // `on failure` would map only some of its failures. Refused
+        // rather than applied partly.
+        if op.protocol.is_some() {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` has an `async:` protocol, which handles its failures through its deadline target and circuit breaker; `on failure` maps one request's failures and cannot apply to it"
+            )));
+            return;
+        }
         let Type::Result(_, err) = self.type_ref_to_type(&op.return_ty) else {
             self.errors.push(invalid(format!(
                 "operation `{operation}` maps failures to `{}`, so it returns a `Result` whose error type declares that variant",

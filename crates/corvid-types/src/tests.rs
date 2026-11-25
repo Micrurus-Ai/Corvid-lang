@@ -2905,6 +2905,42 @@ connector web:
     assert!(unknown.iter().any(|m| m.contains("not a variant of its error type `FetchError`")), "{unknown:?}");
     let coded = messages(program("Result<String, FetchError>").replace("-> Unreachable", "-> Coded"));
     assert!(coded.iter().any(|m| m.contains("one `String` field for the reason")), "{coded:?}");
+
+    let with_protocol = r#"
+effect http_write:
+    cost: 1.0
+
+type Job:
+    status: String
+    id: String
+
+type JobError:
+    | Unreachable(reason: String)
+
+connector jobs:
+    base_url: "https://jobs.example.com"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation submit(input: String) -> Result<Job, JobError> dangerous uses http_write:
+        POST "/jobs" body input
+        on failure -> Unreachable
+        async:
+            statuses: [queued, done]
+            initial: queued
+            terminal: [done]
+            deadline: 60s
+            deadline_target: done
+            idempotency: intent via header "Idempotency-Key"
+            poll GET "/jobs/{id}"
+            every: 2s
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on done -> done
+"#;
+    let refused = messages(with_protocol.to_string());
+    assert!(refused.iter().any(|m| m.contains("cannot apply to it")), "{refused:?}");
 }
 
 #[test]
