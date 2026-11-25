@@ -112,7 +112,7 @@ PROBE = """(() => {
         if (requested !== undefined && bins && bins !== shipmentSamples.at(-1)?.bins) {
             shipmentSamples.push({bins, elapsed: performance.now() - requested});
         }
-    }).observe(document, {subtree: true, childList: true});
+    }).observe(document, {subtree: true, childList: true, characterData: true});
     window.addEventListener('pageshow', () => { last = undefined; });
     function frame(now) {
         if (last !== undefined) framesMs.push(now - last);
