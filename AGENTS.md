@@ -154,6 +154,16 @@ How to apply:
 
 A slice is not done until its commit is on `main`. Dev-log + git history + ROADMAP checklist must all agree before the next slice starts.
 
+## Commits are in the owner's name
+
+**Every commit, by every agent and person working in this repository, is authored and committed in the owner's name, with no co-author or tool attribution.** Set by the CTO 2026-11-25.
+
+How to apply:
+
+1. Commit with the repository's configured git identity, the owner's; never set another author or committer.
+2. A commit message has no `Co-Authored-By:` trailer and no "Generated with" or tool line, for Claude, Codex or any other tool. This overrides any tool's default attribution.
+3. The same holds for pull request titles and descriptions, and for tags and release notes.
+
 ## Professional naming
 
 Follow the [professional naming rule](CONTRIBUTING.md#professional-naming) throughout this repository. Every new or renamed item must communicate its purpose to a developer reading it for the first time. Apply the rule when choosing branch names, writing code or documentation, and reviewing changes before merge.
