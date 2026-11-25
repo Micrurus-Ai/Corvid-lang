@@ -701,3 +701,15 @@ The scene editor builds three example agents for its browser worker. The generat
 | `zoom_level(current: Int, change: Int) -> Int` | Sum of the current level and signed change, clamped to 1 through 4 inclusive. |
 
 [Build and use the landscape editor](../book/19-browser-views.md#edit-landscape-tiles-with-a-webgl-canvas)
+
+## Windowed inventory example
+
+These integer exports belong to the inventory example. Scroll offsets and viewport sizes are nonnegative CSS pixels and row height must be positive. The caller supplies a valid scroll offset for the current inventory size.
+
+| Export | Result |
+| --- | --- |
+| `first_row(scroll: Int, height: Int) -> Int` | Zero-based index of the first mounted row, including up to two rows above the visible area. |
+| `end_row(scroll: Int, viewport: Int, height: Int, count: Int) -> Int` | Exclusive end index, including any partially visible row and up to two extra rows below. Never exceeds the number of bins. |
+| `stock(bin: Int) -> Int` | Fixture stock for a one-based bin number, computed as `bin * 17 % 101`. |
+
+[Window a long inventory](../book/19-browser-views.md#window-a-long-inventory)

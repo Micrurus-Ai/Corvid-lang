@@ -45,6 +45,13 @@ Offline edits can synchronize through ordinary request/response routes. Server r
 
 ### Running the frontend loop
 
+F17 regression checklist for the [windowed inventory trial](proposals/frontend-windowed-collections.md)
+
+- [x] Build and test the Corvid model through the public CLI, check TypeScript model parity and verify the startup asset body budget and shipment fixture over HTTP.
+- [x] Run the paired cold/warm load, keyboard, history, stream, frame and memory checks on Chromium, Firefox and WebKit. Record the host command, revision and results.
+
+Hosted Windows passed F17 at `a36ead0f46d486847d2fbd89cfb261592f1cf072`. The host built the CLI with `cargo build --locked -p corvid-cli --bin corvid` and ran `python -B scripts/verify_windowed_inventory.py --cli target/debug/corvid.exe --channel msedge`. Edge (Chromium), Firefox and WebKit passed the keyboard and scroll-restoration checks and all regression budgets for both the Corvid and TypeScript list and table. [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45585464423)
+
 Run `python scripts/run_frontend.py --status` to inspect the queue and `python -u scripts/run_frontend.py --run` to start or resume it. The runner works in a separate checkout and publishes verified increments to a task branch. A verified completed task advances GitHub main by fast-forward and its task branch is removed. If main advances concurrently, the runner integrates it and calls for verification again. A blocked task leaves independent tasks eligible. Use `--retry-blocked` after the missing input becomes available. The runner keeps local reports and logs under the repository's Git directory in `corvid-frontend`.
 
 If the worker cannot run the last acceptance check, it records the command and the task waits for verification. A host operator can run that command against the exact Git revision and save the command, environment, and result in `corvid-frontend/verification-<full-commit-sha>.txt` under the common Git directory. On resume with `--retry-blocked`, the worker receives that revision's result and checks the outstanding criteria before starting more implementation.

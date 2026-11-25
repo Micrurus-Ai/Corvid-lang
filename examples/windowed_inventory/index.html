@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Parts inventory</title>
+<style>
+  #viewport { height: 320px; overflow: auto; overflow-anchor: none; }
+  #rows { display: block; position: relative; padding: 0; margin: 0; }
+  [data-row] { position: absolute; display: flex; align-items: center; gap: 1rem; width: 100%; }
+  table { border-spacing: 0; width: 100%; }
+</style>
+<main>
+  <h1>Parts inventory</h1>
+  <nav><a href="?view=list" tabindex="0">Bin list</a> · <a href="?view=table" tabindex="0">Stock table</a></nav>
+  <p>Use the arrow keys, Home or End to choose a bin. Press Enter to open it.</p>
+  <div id="viewport" tabindex="-1"></div>
+  <button id="receive" type="button">Receive shipment</button>
+  <output id="status" aria-live="polite"></output>
+</main>
+<script type="module" src="inventory.js"></script>
+</html>
