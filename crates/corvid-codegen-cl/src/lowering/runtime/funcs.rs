@@ -270,7 +270,7 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// calls them through `corvid_runtime_call`, which runs
     /// `Runtime::call_tool` and so records, replays, redacts and applies
     /// the HTTP policy exactly as the interpreter does.
-    pub connector_ops: std::collections::HashSet<DefId>,
+    pub runtime_call_ops: std::collections::HashSet<DefId>,
     /// `corvid_runtime_call(name, args, arg_count, plan, plan_len,
     /// typeinfos, payload) -> tag`: a runtime-owned call.
     pub runtime_call: FuncId,

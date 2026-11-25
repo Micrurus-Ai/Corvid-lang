@@ -1,4 +1,5 @@
-//! A connector operation called from native code (native dispatch N1).
+//! A runtime-owned call from native code (native dispatch): a connector
+//! operation, or a tool the runtime implements.
 //!
 //! Native code does not send the request itself. It encodes each
 //! argument with the public JSON mapping, the form the interpreter's
@@ -14,7 +15,7 @@ use super::expr::lower_container_maybe_borrowed;
 use super::public_json::{json_plan, lower_json_encode, native_public_json_type};
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn lower_connector_call(
+pub(super) fn lower_runtime_call(
     builder: &mut FunctionBuilder,
     tool: &corvid_ir::IrTool,
     args: &[IrExpr],

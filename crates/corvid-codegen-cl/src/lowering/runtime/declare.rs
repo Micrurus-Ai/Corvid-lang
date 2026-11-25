@@ -1450,7 +1450,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         result_typeinfos: HashMap::new(),
         option_typeinfos: HashMap::new(),
         ir_types: HashMap::new(),
-        connector_ops: std::collections::HashSet::new(),
+        runtime_call_ops: std::collections::HashSet::new(),
         ir_tools: HashMap::new(),
         tool_wrapper_ids: std::cell::RefCell::new(HashMap::new()),
         ir_prompts: HashMap::new(),

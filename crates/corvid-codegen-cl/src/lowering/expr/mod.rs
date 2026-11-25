@@ -841,8 +841,8 @@ pub(super) fn lower_expr(
                 }
                 // A connector operation is a runtime-owned call: the
                 // runtime sends it, records it and replays it.
-                if runtime.connector_ops.contains(def_id) {
-                    return super::connector_call::lower_connector_call(
+                if runtime.runtime_call_ops.contains(def_id) {
+                    return super::runtime_call::lower_runtime_call(
                         builder, &tool, args, expr, current_return_ty, env, scope_stack,
                         func_ids_by_def, module, runtime,
                     );

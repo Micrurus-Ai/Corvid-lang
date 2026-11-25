@@ -53,7 +53,7 @@ use agent::*;
 mod entry;
 use entry::*;
 mod public_json;
-mod connector_call;
+mod runtime_call;
 pub use public_json::native_public_json_type;
 use public_json::{lower_json_decode, lower_json_encode};
 
@@ -98,7 +98,7 @@ pub fn lower_file(
     }
     for connector in &ir.connectors {
         for op in &connector.operations {
-            runtime.connector_ops.insert(op.tool_id);
+            runtime.runtime_call_ops.insert(op.tool_id);
         }
     }
 
