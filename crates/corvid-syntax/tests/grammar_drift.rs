@@ -429,6 +429,7 @@ extend Customer:
     operation generate(input: String, request_id: String) -> String dangerous:
         POST "/reports" body input
         header "X-Request-Id": request_id
+        on failure -> Failed
         timeout: 30s
         async:
             statuses: [queued, completed, failed]

@@ -483,6 +483,9 @@ impl<'a> Lowerer<'a> {
                     encoding: b.encoding,
                 }),
                 query: op.query.as_ref().map(|q| q.name.clone()),
+                url_param: op.url_param.as_ref().map(|u| u.name.clone()),
+                response_text: op.response_text,
+                on_failure: op.on_failure.as_ref().map(|v| v.name.clone()),
                 headers: op
                     .headers
                     .iter()

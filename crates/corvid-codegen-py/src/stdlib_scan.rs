@@ -36,9 +36,6 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "path_filename",
     "path_extension",
     "path_is_absolute",
-    // std/http
-    "http_get",
-    "http_post_json",
     // std/db
     "db_open",
     "db_query",

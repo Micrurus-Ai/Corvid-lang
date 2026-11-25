@@ -364,12 +364,13 @@ impl<'ir> Interpreter<'ir> {
                         .call_protocol_operation(callee_name, protocol, wire_args)
                         .await
                     {
-                        Ok(result) => self.decode_connector_result(callee_name, result, result_decode_ty, span),
+                        Ok(result) => self.decode_connector_result(callee_name, None, result, result_decode_ty, span),
                         Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
                     }
                 } else {
                     self.dispatch_connector_via_runtime(
                         callee_name,
+                        op.on_failure.as_deref(),
                         wire_args,
                         result_decode_ty,
                         span,
@@ -503,6 +504,7 @@ impl<'ir> Interpreter<'ir> {
     async fn dispatch_connector_via_runtime(
         &self,
         callee_name: &str,
+        on_failure: Option<&str>,
         wire_args: Vec<serde_json::Value>,
         result_decode_ty: &Type,
         span: Span,
@@ -512,7 +514,7 @@ impl<'ir> Interpreter<'ir> {
             .call_tool(callee_name, wire_args)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-        self.decode_connector_result(callee_name, result, result_decode_ty, span)
+        self.decode_connector_result(callee_name, on_failure, result, result_decode_ty, span)
     }
 
     /// Read a connector result through the public JSON mapping; a
@@ -520,16 +522,24 @@ impl<'ir> Interpreter<'ir> {
     fn decode_connector_result(
         &self,
         callee_name: &str,
+        on_failure: Option<&str>,
         result: serde_json::Value,
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
-        connector_json::connector_result(result, result_decode_ty, &self.types_by_id).map_err(|e| {
-            InterpError::new(
-                InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
-                span,
-            )
-        })
+        match connector_json::connector_result(result, result_decode_ty, &self.types_by_id) {
+            Ok(value) => Ok(value),
+            // A response that does not match the declared type is a
+            // failure too: with `on failure`, the typed error says why.
+            Err(problem) => match on_failure {
+                Some(variant) => connector_json::failure_value(variant, &problem, result_decode_ty, &self.types_by_id)
+                    .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span)),
+                None => Err(InterpError::new(
+                    InterpErrorKind::Marshal(format!("connector `{callee_name}`: {problem}")),
+                    span,
+                )),
+            },
+        }
     }
 
     fn env_snapshot(&self) -> step::EnvSnapshot {

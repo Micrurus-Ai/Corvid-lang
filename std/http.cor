@@ -44,54 +44,34 @@ public agent http_ok(response: HttpResponseEnvelope) -> Bool:
     return response.status >= 200 and response.status < 300
 
 # ----------------------------------------------------------------
-# Phase 33S2 — executing HTTP-client surface.
+# Making HTTP requests.
 #
-# These two `tool` declarations are the user-facing entry points
-# for actual HTTP egress. They flow through the typed effect
-# system (`uses http_get` / `uses http_post`) so the checker
-# tracks `io_source: net.egress` on every caller, and the runtime
-# enforces:
+# A program calls another service through a `connector`, which
+# declares where requests go, how long they may take, which
+# redirects they follow and how they authenticate. To call a URL
+# the program learns at run time, declare
 #
-#   * SSRF block (always on) — private RFC1918 ranges
-#     (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback
-#     (127.0.0.0/8 + ::1), and link-local (169.254.0.0/16 +
-#     fe80::/10) hosts are refused regardless of allowlist
-#     contents. This is a STRUCTURAL property of the language,
-#     not a configurable setting.
-#   * [http] allow allowlist — every reachable host must appear
-#     in corvid.toml's `[http] allow = [...]` (or the
-#     CORVID_HTTP_ALLOW env override). When the allowlist is
-#     empty, every executing HTTP call fails closed — same
-#     fail-closed contract as [io] root for the file surface.
-#   * Replay quarantine — POSTs through replay refuse to escape
-#     the process; GETs go through the replay substitution path
-#     (read from recorded trace or diverge), never reaching the
-#     live network.
+#     connector web:
+#         hosts: allowed_hosts
+#         timeout: 10s
+#         redirects: allowed_hosts
+#         modes: [real, replay]
+#         operation fetch(url: String) -> Response<String> uses http_egress_get:
+#             GET url
+#             response: text
 #
-# Both are tools (not agents), so they are automatically
-# rejected inside `@deterministic` bodies by the checker's
-# declaration-kind classifier — calling any HTTP from a
-# `@deterministic` agent is a compile error.
+# Every request runs the structural SSRF block and the project's
+# `[http] allow` list, and replay never reaches the network. The
+# `http_get` and `http_post_json` tools this module once declared
+# are replaced by connectors (B05); see the HTTP client proposal.
 # ----------------------------------------------------------------
 
-# The two HTTP effect rows. Registered as built-ins by
-# `crates/corvid-types/src/effects.rs::register_http_effects` so
-# a composing checker can compose them across calls; declared
-# inline here so the resolver in standalone-module compilation
-# sees them as named identifiers. Named `http_egress_*` so the
-# tool names (`http_get` / `http_post_json`) don't collide with
-# the effect names — effects and tools share a namespace at
-# the resolver level.
+# The two built-in network-egress effects, for connector operations
+# that do not declare their own. Registered as built-ins by
+# `crates/corvid-types/src/effects.rs::register_http_effects`;
+# declared here so standalone-module compilation resolves the names.
 public effect http_egress_get:
     reversible: true
 
 public effect http_egress_post:
     reversible: false
-
-# Slice 47h: honest Result envelopes. Policy rejections (SSRF
-# block, allowlist misses) and network failures are Err VALUES
-# whose message names the cause — never traps. Note: an HTTP error
-# STATUS (4xx/5xx) is still an Ok(envelope) — the request
-# succeeded; inspect `status` yourself.
-public tool http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get
-public tool http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post

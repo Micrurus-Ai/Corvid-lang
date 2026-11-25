@@ -676,12 +676,13 @@ fn encode_hex(bytes: &[u8]) -> String {
 // ============================================================================
 // Phase 33S2a — HttpEgressPolicy.
 //
-// The executing `http_get` / `http_post_json` stdlib tools
-// (declared in `std/http.cor`) carry their security boundary in
-// this policy struct. The `Runtime` holds one `HttpEgressPolicy`;
-// the `Runtime::call_tool` interception path for `http_*` tool
-// names runs each call's `url` argument through `check` before
-// the actual `HttpClient::send` runs.
+// Every outbound request a connector sends carries its security
+// boundary in this policy struct. The `Runtime` holds one
+// `HttpEgressPolicy`; the connector dispatcher runs each request URL
+// through `check` before `HttpClient::send` runs, the redirect loop
+// runs every `allowed_hosts` hop through it, and startup runs each
+// `base_url` through it in `real` mode. (Until B05 slice 4 the
+// `http_get` / `http_post_json` tools were checked here too.)
 //
 // The policy enforces TWO independent properties:
 //
@@ -695,8 +696,8 @@ fn encode_hex(bytes: &[u8]) -> String {
 //
 //   2. Allowlist — `[http] allow = [...]` in corvid.toml (or
 //      the `CORVID_HTTP_ALLOW` env override). REQUIRED: when
-//      the list is empty, every executing HTTP call fails
-//      closed with the missing-config diagnostic.
+//      the list is empty, every request fails closed with the
+//      missing-config diagnostic.
 //
 // Composition: a URL passes only when BOTH the SSRF check
 // passes AND its host appears verbatim (case-insensitive) in
@@ -728,12 +729,10 @@ pub const GUARANTEE_ID_IO_SOURCE_HTTP_ALLOWLIST_ENFORCEMENT: &str =
 
 /// Phase 33S2c — anchor for the replay-quarantine guarantee.
 /// `HttpClient::send` returns QuarantineViolation when the
-/// `quarantined` flag is set (the floor); the
-/// `Runtime::call_tool("http_post_json", ...)` /
-/// `Runtime::call_tool("http_get", ...)` dispatch paths go
-/// through the replay-substitution path FIRST, so dispatch-path
-/// HTTP calls either substitute from the recorded trace OR
-/// diverge — they never reach the live network.
+/// `quarantined` flag is set (the floor); a connector operation's
+/// call goes through the replay-substitution path FIRST, so it
+/// either substitutes from the recorded trace OR diverges — it never
+/// reaches the live network.
 pub const GUARANTEE_ID_IO_SOURCE_HTTP_QUARANTINE_ON_REPLAY: &str =
     "io_source.http_quarantine_on_replay";
 

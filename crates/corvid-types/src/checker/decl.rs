@@ -444,14 +444,13 @@ impl<'a> Checker<'a> {
         };
 
         // `base_url` must be an absolute `http(s)://` URL.
-        if !(decl.base_url.starts_with("https://") || decl.base_url.starts_with("http://")) {
-            self.errors.push(invalid(
-                format!(
-                    "`base_url` must be an absolute `http(s)://` URL, got `{}`",
-                    decl.base_url
-                ),
-                decl.span,
-            ));
+        if let Some(base_url) = &decl.base_url {
+            if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
+                self.errors.push(invalid(
+                    format!("`base_url` must be an absolute `http(s)://` URL, got `{base_url}`"),
+                    decl.span,
+                ));
+            }
         }
 
         // Auth credentials are `secret(...)` references — their names must
@@ -559,7 +558,8 @@ impl<'a> Checker<'a> {
                     op.span,
                 ));
             }
-            if !op.path.starts_with('/') {
+            self.check_operation_target(decl, op);
+            if op.url_param.is_none() && !op.path.starts_with('/') {
                 self.errors.push(invalid(
                     format!("operation `{}` path must start with `/`, got `{}`", op.name.name, op.path),
                     op.span,
@@ -594,6 +594,7 @@ impl<'a> Checker<'a> {
 
             self.check_operation_query_and_headers(decl, op, &param_names);
             self.check_operation_response_shape(decl, op);
+            self.check_operation_on_failure(decl, op);
 
             if let Some(secs) = op.timeout_secs {
                 let subject = format!("operation `{}`", op.name.name);
@@ -1623,7 +1624,7 @@ impl<'a> Checker<'a> {
                                 self.errors.push(invalid(
                                     format!(
                                         "operation `{operation}` query field `{field}` is `{}`; a query field is a number, text, `Bool`, a decimal or time value, an `Option` of one (omitted when `None`) or a `List` of one (the name repeated)",
-                                        ty.display_name()
+                                        self.json_type_name(&ty)
                                     ),
                                     field_ty.span(),
                                 ));
@@ -1702,7 +1703,7 @@ impl<'a> Checker<'a> {
                         Some(other) => self.errors.push(invalid(
                             format!(
                                 "operation `{operation}` header `{}` takes `{}`, which is `{}`; a header's value is a `String` parameter or a fixed string",
-                                header.name, param.name, other.display_name()
+                                header.name, param.name, self.json_type_name(&other)
                             ),
                             param.span,
                         )),
@@ -1757,6 +1758,130 @@ impl<'a> Checker<'a> {
             self.errors.push(invalid(format!(
                 "operation `{operation}` is a HEAD request, whose answer has no body, so it returns `Response<Nothing>` (or a `Result` of one), not `{}`",
                 ret.display_name()
+            )));
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A `base_url` connector's operations name paths; a `hosts:
+    /// allowed_hosts` connector's operations name a `String` URL
+    /// parameter, carry no `async:` protocol (its poll path is relative to
+    /// one base URL), and declare `response: text` only for a `String`
+    /// body.
+    fn check_operation_target(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String, span| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                span,
+            )
+        };
+        let operation = &op.name.name;
+        match (&connector.base_url, &op.url_param) {
+            (Some(_), Some(url)) => self.errors.push(invalid(
+                format!(
+                    "operation `{operation}` names its URL with `{}`, but the connector has a `base_url`; give a path such as `\"/v1/items\"`, or declare `hosts: allowed_hosts` instead of `base_url`",
+                    url.name
+                ),
+                url.span,
+            )),
+            (None, None) => self.errors.push(invalid(
+                format!(
+                    "operation `{operation}` gives a path, but the connector declares `hosts: allowed_hosts`, so its operations take the whole URL as a parameter: `GET url`"
+                ),
+                op.span,
+            )),
+            (None, Some(url)) => {
+                match op.params.iter().find(|p| p.name.name == url.name) {
+                    None => self.errors.push(invalid(
+                        format!("operation `{operation}` takes its URL from `{}`, which is not a declared parameter", url.name),
+                        url.span,
+                    )),
+                    Some(param) => {
+                        let ty = self.type_ref_to_type(&param.ty);
+                        if ty != Type::String {
+                            self.errors.push(invalid(
+                                format!(
+                                    "operation `{operation}` takes its URL from `{}`, which is `{}`; a URL is a `String`",
+                                    url.name,
+                                    self.json_type_name(&ty)
+                                ),
+                                url.span,
+                            ));
+                        }
+                    }
+                }
+                if op.protocol.is_some() {
+                    self.errors.push(invalid(
+                        format!(
+                            "operation `{operation}` declares an `async:` protocol, whose poll path is relative to one base URL; a `hosts: allowed_hosts` connector has none"
+                        ),
+                        op.span,
+                    ));
+                }
+            }
+            (Some(_), None) => {}
+        }
+        if op.response_text {
+            let body = match self.type_ref_to_type(&op.return_ty) {
+                Type::Response(body) => *body,
+                Type::Result(ok, _) => match *ok {
+                    Type::Response(body) => *body,
+                    ok => ok,
+                },
+                other => other,
+            };
+            if body != Type::String {
+                self.errors.push(invalid(
+                    format!(
+                        "operation `{operation}` reads its response as text, so its body is a `String`, not `{}`",
+                        self.json_type_name(&body)
+                    ),
+                    op.return_ty.span(),
+                ));
+            }
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// `on failure -> Variant` turns every failure into a typed error, so
+    /// the operation returns a `Result` whose error type declares the
+    /// variant, with no fields or one `String` field for the reason.
+    fn check_operation_on_failure(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let Some(variant) = &op.on_failure else { return };
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                variant.span,
+            )
+        };
+        let operation = &op.name.name;
+        let Type::Result(_, err) = self.type_ref_to_type(&op.return_ty) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` maps failures to `{}`, so it returns a `Result` whose error type declares that variant",
+                variant.name
+            )));
+            return;
+        };
+        let decl = match err.as_ref() {
+            Type::Struct(id) => self.types_by_id.get(id).copied(),
+            _ => None,
+        };
+        let Some(found) = decl.and_then(|d| d.variants.iter().find(|v| v.name.name == variant.name)) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` maps failures to `{}`, which is not a variant of its error type `{}`",
+                variant.name,
+                self.json_type_name(&err)
+            )));
+            return;
+        };
+        let fields: Vec<Type> = found.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>()
+            .iter().map(|ty| self.type_ref_to_type(ty)).collect();
+        if !(fields.is_empty() || fields == [Type::String]) {
+            self.errors.push(invalid(format!(
+                "`{}` receives failures, so it has no fields or one `String` field for the reason",
+                variant.name
             )));
         }
     }

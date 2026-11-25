@@ -8,10 +8,10 @@ property — SSRF block, structural SQL injection-resistance,
 parameter-bound writes, replay quarantine, opaque handles — holds
 end-to-end at the language level.
 
-This chapter weaves together the three executing I/O surfaces shipped
-in Phase 33S + 33R5b:
+This chapter weaves together three ways a program reaches the outside
+world:
 
-- **`std/http`** — `http_get` / `http_post_json` (Phase 33S2)
+- **Connectors** — a `connector` declares the service a program calls, with its timeout, redirect policy and failure type (B05)
 - **JSON** — the `std/json` opaque path (Phase 33R5b) and `T.from_json` typed decoding (B01)
 - **`std/db`** — `db_open` / `db_query` / `db_execute` (Phase 33S3)
 
@@ -51,24 +51,43 @@ type User:
     id: Int
     email: String
 
-import "std:http" use http_get
+type FetchError:
+    | Unreachable(reason: String)
+
+effect http_read:
+    cost: $0.0
+
 import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    # 1. HTTP GET. The URL host must appear in `[http] allow`.
-    #    The always-on SSRF block refuses RFC1918 / loopback / link-local
-    #    regardless of allowlist contents. Every executing tool returns
-    #    `Result` — a policy refusal or transport failure is an Err
-    #    VALUE `?` propagates, never a crash. (An error HTTP STATUS
-    #    like 404 is still `Ok` — inspect `response.status`.)
-    response = http_get(url)?
+# 1. The service. `hosts: allowed_hosts` lets each call name its URL; the
+#    host must appear in `[http] allow`, and the always-on SSRF block
+#    refuses private, loopback and link-local addresses whatever the list
+#    says. A request takes at most 10 seconds and follows no redirect.
+#    `on failure` turns a refused URL, a timeout, a network error, an
+#    error status or a body that is not a `User` into an `Unreachable`
+#    VALUE carrying the reason, never a crash.
+connector users:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    modes: [real, replay]
+    operation user_at(url: String) -> Result<User, FetchError> uses http_read:
+        GET url
+        on failure -> Unreachable
 
-    # 2. Typed JSON. `User.from_json` decodes the body into the
-    #    declared record, or returns a `JsonError` naming the field
-    #    that did not match. `map_err` keeps its message so `?` can
-    #    pass it to the caller. Shape mismatches are Err values,
-    #    never panics.
-    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
+agent reason_of(e: FetchError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+# 2. Typed JSON. The connector decodes the response into `User` itself;
+#    a field of the wrong kind is an `Unreachable` naming the field.
+agent fetch_user(url: String) -> Result<User, String> uses http_read:
+    return match user_at(url):
+        Ok(user) -> Ok(user)
+        Err(e) -> Err(reason_of(e))
+
+agent ingest_user(url: String, db_path: String) -> Result<Int, String> uses http_read:
+    user = fetch_user(url)?
 
     # 3. SQLite write. `db_open` resolves the path through the same
     #    `[io] root` boundary the file-I/O tools enforce. `db_execute`
@@ -88,7 +107,7 @@ agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
     rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])?
     return Ok(rows[0].rows_affected)
 
-agent main() -> Result<Int, String>:
+agent main() -> Result<Int, String> uses http_read:
     return ingest_user("http://api.example.com/users/1", ":memory:")
 ```
 
@@ -116,10 +135,11 @@ Corvid does too.
 ## Step 4 — Run it
 
 ```sh
-corvid run src/main.cor
+corvid run --mode real src/main.cor
 ```
 
-`main()` returns `Ok(0)` — the SELECT envelope's `rows_affected` field
+`--mode real` lets the connector reach the network; `--mode replay` with
+a recorded trace runs the same file without it. `main()` returns `Ok(0)` — the SELECT envelope's `rows_affected` field
 (0 for read paths). The row exists; the program reached the read-back
 step without any of the safety boundaries firing.
 
@@ -135,19 +155,19 @@ just as hard; the failure mode is honest.
 
 ### SSRF block (always on)
 
-Change the URL to `http://127.0.0.1:8080/users/1` and re-run. `http_get`
-returns `Err` with a diagnostic naming the structural SSRF property —
-not the allowlist. Even if you add `127.0.0.1` to `[http] allow`, the
+Change the URL to `http://127.0.0.1:8080/users/1` and re-run. `user_at`
+returns `Err(Unreachable(...))` whose reason names the structural SSRF
+property, not the allowlist. Even if you add `127.0.0.1` to `[http] allow`, the
 structural block still fires. The block is the security floor; the
 allowlist is the layer on top.
 
 ### `[http] allow` allowlist (fail-closed)
 
 Change the URL to `http://api.attacker.com/users/1` and re-run.
-`http_get` returns `Err` with a diagnostic naming the missing allowlist
-entry and the `CORVID_HTTP_ALLOW` env override pathway. Empty
-allowlists fail-close on every executing HTTP call — the security
-boundary is visible from day one.
+`user_at` returns `Err(Unreachable(...))` whose reason names the host and
+the allowlist. Empty allowlists fail closed on every request, and a
+connector with a fixed `base_url` whose host is not allowed refuses to
+start at all — the security boundary is visible from day one.
 
 ### `[io] root` confinement (reused by SQLite)
 

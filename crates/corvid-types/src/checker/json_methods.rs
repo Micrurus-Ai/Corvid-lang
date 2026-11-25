@@ -358,9 +358,10 @@ fn receiver_display_name(target: &Expr) -> String {
 }
 
 impl<'a> Checker<'a> {
-    /// A type name for JSON diagnostics that names records by their
-    /// declaration rather than `struct`.
-    fn json_type_name(&self, ty: &Type) -> String {
+    /// A type name for diagnostics that names records by their
+    /// declaration rather than `struct`. Used for JSON and connector
+    /// diagnostics.
+    pub(super) fn json_type_name(&self, ty: &Type) -> String {
         match ty {
             Type::Struct(id) => self
                 .types_by_id

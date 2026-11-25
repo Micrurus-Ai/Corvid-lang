@@ -67,7 +67,13 @@ pub struct ApplicationContract {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConnector {
     pub name: String,
-    pub base_url: String,
+    /// The API root, for a connector that calls one API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// `allowed_hosts` for a connector whose operations take a URL and may
+    /// call any host the project's `[http] allow` permits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosts: Option<String>,
     /// The execution modes this connector is allowed to run in
     /// (`mock`/`replay`/`real`). The deployment selects exactly one at
     /// start; there is no default.
@@ -593,6 +599,7 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
     ContractConnector {
         name: c.name.name.clone(),
         base_url: c.base_url.clone(),
+        hosts: c.base_url.is_none().then(|| "allowed_hosts".to_string()),
         modes: c.modes.iter().map(|m| m.as_str().to_string()).collect(),
         redirects: c.redirects.map(|policy| policy.as_str().to_string()),
         operations: c
@@ -1252,7 +1259,8 @@ connector github:
             .iter()
             .find(|c| c.name == "github")
             .expect("github connector in contract");
-        assert_eq!(c.base_url, "https://api.github.com");
+        assert_eq!(c.base_url.as_deref(), Some("https://api.github.com"));
+        assert_eq!(c.hosts, None);
         assert_eq!(c.modes, vec!["mock", "replay", "real"]);
         // The declared bounds are part of the advertised surface: where a
         // request may be redirected, and how long each operation may take.

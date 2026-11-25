@@ -58,10 +58,10 @@ pub const SIGNED_CDYLIB_CLAIM_GUARANTEE_IDS: &[&str] = &[
     "io_source.fs_path_confinement",
     "io_source.fs_write_quarantine_on_replay",
     "io_source.fs_read_quarantine_on_replay",
-    // Slice 33S2c — the three executing HTTP-client guarantees.
-    // A signed cdylib whose source uses `http_get` /
-    // `http_post_json` (declared in std/http.cor) asserts these
-    // three RuntimeChecked properties in its claim manifest:
+    // Slice 33S2c — the three outbound HTTP guarantees. A signed
+    // cdylib whose source sends HTTP requests (through connectors
+    // since B05 slice 4) asserts these three RuntimeChecked
+    // properties in its claim manifest:
     // structural SSRF block (refuses private / loopback / link-
     // local hosts regardless of allowlist), required `[http] allow`
     // allowlist enforcement, and replay quarantine that refuses

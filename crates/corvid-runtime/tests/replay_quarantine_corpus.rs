@@ -391,102 +391,86 @@ async fn replay_rereads_secret_from_live_environment() {
     );
 }
 
-/// Slice 33S2b — the executing `http_post_json` tool dispatch
-/// (33S2a's interception inside `Runtime::call_tool` for any
-/// `http_*` name) is gated by the replay substitution path
-/// AND by the `HttpClient::quarantine` flag the builder flips
-/// on when entering Substitute-mode replay. Together these
-/// form two independent layers: the trace-substitution path
-/// runs FIRST (so even a hypothetical bypass of the policy
-/// check would land on it), and the quarantine flag is the
-/// floor underneath. This fixture proves the executing POST
-/// path cannot reach the network during replay, regardless of
-/// allowlist contents — the load-bearing safety property for
-/// the executing HTTP-client surface's replay claim. Mirrors
-/// `replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem`
-/// from 33S1b.
+/// A connector operation's request in replay (B05 slice 4 moved this
+/// from the retired `http_post_json` tool): the dispatcher reaches the
+/// replay-substitution path first, and the `HttpClient::quarantine`
+/// flag is the floor underneath, so a write cannot reach the network
+/// whatever the allowlist says. The connector spec is installed and the
+/// allowlist names its host, to prove neither opens a bypass.
+fn connector_replay_runtime(trace_path: &std::path::Path, operation: &str, method: &str) -> Runtime {
+    use corvid_runtime::connectors::ConnectorHttpSpec;
+    let spec = ConnectorHttpSpec {
+        connector: "web".to_string(),
+        operation: operation.to_string(),
+        base_url: None,
+        url_param: Some("url".to_string()),
+        response_text: false,
+        on_failure: None,
+        method: method.to_string(),
+        path: String::new(),
+        param_names: vec!["url".to_string()],
+        body: None,
+        query: None,
+        headers: Vec::new(),
+        auth: None,
+        error_map: Vec::new(),
+        returns_result: false,
+        returns_response: false,
+        retry: None,
+        rate_limit: None,
+        circuit_breaker: None,
+        timeout_secs: Some(10),
+        redirects: Some(corvid_runtime::http::RedirectPolicy::Never),
+        extra_headers: Vec::new(),
+    };
+    Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(MockAdapter::new("mock-1").reply("p", serde_json::json!("ok"))))
+        .replay_from(trace_path)
+        .http_policy(corvid_runtime::HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
+        .connector_mode(Some(corvid_ast::ConnectorMode::Replay))
+        .connector_calls(std::collections::HashMap::from([(operation.to_string(), spec)]))
+        .build()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network() {
+async fn replay_blocks_a_connector_write_from_escaping_to_network() {
     let dir = tempfile::tempdir().unwrap();
     let trace_path = write_minimal_trace(dir.path());
-    // Allowlist deliberately includes the host the test URL
-    // names — to prove that even a fully-configured policy
-    // cannot bypass the replay quarantine. The safety property
-    // here is "replay refuses the network call regardless of
-    // allowlist," not "the policy blocks every test URL."
-    let policy = corvid_runtime::HttpEgressPolicy::new(Some(&[
-        "api.example.com".to_string(),
-    ]));
-    let runtime = Runtime::builder()
-        .approver(Arc::new(ProgrammaticApprover::always_yes()))
-        .llm(Arc::new(
-            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
-        ))
-        .replay_from(&trace_path)
-        .http_policy(policy)
-        .build();
+    let runtime = connector_replay_runtime(&trace_path, "send", "POST");
     assert!(runtime.is_replay_mode());
     assert!(runtime.http().is_quarantined());
 
     let err = runtime
-        .call_tool(
-            "http_post_json",
-            vec![
-                serde_json::json!("https://api.example.com/should-not-reach"),
-                serde_json::json!(r#"{"payload":"blocked"}"#),
-            ],
-        )
+        .call_tool("send", vec![serde_json::json!("https://api.example.com/should-not-reach")])
         .await
-        .expect_err("executing dispatch POST must refuse during replay");
-    // The dispatch reaches the replay-substitution path first;
-    // with no recorded tool_call in the minimal trace the
-    // substitution diverges. EITHER divergence (no recorded
-    // event) OR quarantine (HttpClient flag) is acceptable —
-    // both prove the call doesn't escape to the network, which
-    // is the load-bearing safety property.
+        .expect_err("a connector write must refuse during replay");
+    // With no recorded call in the minimal trace the substitution
+    // diverges; a divergence or the client's quarantine both prove the
+    // request never left the process.
     match err {
         RuntimeError::ReplayDivergence(_) => {}
         RuntimeError::QuarantineViolation { surface, .. } => assert_eq!(surface, "http"),
-        other => panic!(
-            "expected ReplayDivergence or http QuarantineViolation, got {other:?}"
-        ),
+        other => panic!("expected ReplayDivergence or http QuarantineViolation, got {other:?}"),
     }
 }
 
-/// Slice 33S2b — companion: executing `http_get` is also
-/// gated by the replay path. With the minimal trace lacking a
-/// recorded tool_call event, the call diverges (no GET
-/// happens). This proves reads (GETs) ALSO don't open a
-/// network bypass during replay — same contract as POST,
-/// without the additional `HttpClient::quarantine` test on
-/// the response side.
+/// Companion: a connector read is gated by the replay path the same way;
+/// with no recorded call it diverges, and no GET is sent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replay_blocks_executing_http_get_tool_dispatch_without_recorded_event() {
+async fn replay_blocks_a_connector_read_without_a_recorded_event() {
     let dir = tempfile::tempdir().unwrap();
     let trace_path = write_minimal_trace(dir.path());
-    let policy = corvid_runtime::HttpEgressPolicy::new(Some(&[
-        "api.example.com".to_string(),
-    ]));
-    let runtime = Runtime::builder()
-        .approver(Arc::new(ProgrammaticApprover::always_yes()))
-        .llm(Arc::new(
-            MockAdapter::new("mock-1").reply("p", serde_json::json!("ok")),
-        ))
-        .replay_from(&trace_path)
-        .http_policy(policy)
-        .build();
+    let runtime = connector_replay_runtime(&trace_path, "fetch", "GET");
     assert!(runtime.is_replay_mode());
 
     let err = runtime
-        .call_tool(
-            "http_get",
-            vec![serde_json::json!("https://api.example.com/probe")],
-        )
+        .call_tool("fetch", vec![serde_json::json!("https://api.example.com/probe")])
         .await
-        .expect_err("executing GET must go through replay substitution, not the live network");
+        .expect_err("a connector read must go through replay substitution, not the network");
     match err {
         RuntimeError::ReplayDivergence(_) => {}
-        other => panic!("expected ReplayDivergence (no recorded http_get event), got {other:?}"),
+        other => panic!("expected ReplayDivergence (no recorded call), got {other:?}"),
     }
 }
 
@@ -501,8 +485,8 @@ async fn replay_blocks_executing_http_get_tool_dispatch_without_recorded_event()
 /// program in replay mode cannot mutate the database, full stop.
 ///
 /// Mirrors `replay_blocks_executing_io_write_tool_dispatch_from_escaping_to_filesystem`
-/// (33S1b) and `replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network`
-/// (33S2b). The fixture uses the runtime's typed-Value path
+/// (33S1b) and `replay_blocks_a_connector_write_from_escaping_to_network`
+/// (B05). The fixture uses the runtime's typed-Value path
 /// directly (`runtime.db_execute_tool(&handle, sql, params)`)
 /// rather than the `call_tool` JSON dispatch — that's where the
 /// executing SQLite tools live by design, since DbHandle can't
@@ -605,8 +589,8 @@ async fn replay_does_not_block_executing_json_parse_or_builder_dispatch() {
 ///
 /// The companion shape mirrors
 /// `replay_blocks_executing_io_read_tool_dispatch_without_recorded_event`
-/// (33S1b) and `replay_blocks_executing_http_get_tool_dispatch_without_recorded_event`
-/// (33S2b) — except for SQLite, the local read DOES complete
+/// (33S1b) and `replay_blocks_a_connector_read_without_a_recorded_event`
+/// (B05) — except for SQLite, the local read DOES complete
 /// (the registry doesn't gate reads), because there's no
 /// recorded-event substitution path yet. When the
 /// trace-substitution layer lands for db_query, this test

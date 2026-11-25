@@ -1,5 +1,21 @@
 # Corvid — learnings
 
+`http_get` and `http_post_json` are gone; make requests through a connector. To fetch a URL the program learns at run time, declare a connector with `hosts: allowed_hosts` and an operation that takes the URL:
+
+```corvid
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_egress_get:
+        GET url
+        response: text
+        on failure -> Unreachable
+```
+
+Where you wrote `response = http_get(url)?`, call `page(url)` and read `status()` and `body()`; `response: text` keeps the body as text. Where you wrote `http_post_json(url, json_text)`, declare `POST url body message` with a typed record instead of hand-built JSON. `on failure -> Unreachable` gives back what the tools' `Result` gave: a refused URL, a timeout, a network error, an error status or a body that does not match the type arrives as `Err(Unreachable(reason))` instead of stopping the program. Run with `corvid run --mode real` (or `--mode replay`). The `[http] allow` list and the SSRF block apply exactly as before. [Making HTTP requests](docs/reference/stdlib/http.md)
+
 The compiler now keeps a description of what each connector operation sends and reads (its body, query and return types and header names) next to the Application Contract, but never inside what `corvid serve` publishes: a private record a connector sends to a provider does not appear at `/.well-known/corvid` or `/openapi.json`. A test sends a real request and checks what the provider received against that description's JSON Schema. [HTTP client](docs/proposals/http-client.md#typed-json-through-b01)
 
 When a connector call needs more than the body, declare `-> Response<Charge>`: read `r.status()`, `r.body()` and `r.header("ETag")`, which returns an `Option<String>` and ignores case. `Result<Response<Charge>, ChargeError>` works too. A `HEAD` operation returns `Response<Nothing>`, and `OPTIONS` is also available for operations; a route cannot declare either, because the server answers both. `Set-Cookie` never reaches the program or the trace. In mock mode a `Response` operation's `mock:` is just the body. Keep a `Response` where the call is made, and pass on the values you need: it cannot be stored in a record, returned from a route or tool, or turned into JSON. [Response](docs/reference/functions.md#response)

@@ -422,8 +422,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `agent http_with_retry(request: HttpRequestEnvelope, max_retries: Int) -> HttpRequestEnvelope`
 - `agent http_with_timeout(request: HttpRequestEnvelope, timeout_ms: Int) -> HttpRequestEnvelope`
 - `agent http_ok(response: HttpResponseEnvelope) -> Bool`
-- `tool http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get`
-- `tool http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post`
+- `effect http_egress_get`, `effect http_egress_post` — the built-in network effects; requests are made through a `connector` ([Making HTTP requests](stdlib/http.md))
 
 ### [std/io](../../std/io.cor)
 

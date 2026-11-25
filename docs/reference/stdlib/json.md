@@ -358,14 +358,36 @@ type User:
     id: Int
     email: String
 
-import "std:http" use http_get
+type FetchError:
+    | Unreachable(reason: String)
+
+effect http_read:
+    cost: $0.0
+
 import "std:db" use db_open, db_execute, db_param_int, db_param_text
 
-agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    # Fetch the JSON (Result: transport/policy failures are Err values).
-    response = http_get(url)?
-    # Decode into the typed record; a mismatch names the field.
-    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
+# A connector decodes the response into `User` through the public
+# mapping; a field of the wrong kind is an `Unreachable` naming it.
+connector users:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    modes: [real, replay]
+    operation user_at(url: String) -> Result<User, FetchError> uses http_read:
+        GET url
+        on failure -> Unreachable
+
+agent fetch_user(url: String) -> Result<User, String> uses http_read:
+    return match user_at(url):
+        Ok(user) -> Ok(user)
+        Err(e) -> Err(reason_of(e))
+
+agent reason_of(e: FetchError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+agent ingest_user(url: String, db_path: String) -> Result<Int, String> uses http_read:
+    user = fetch_user(url)?
     # Persist via parameterised SQL (Result: SQL errors are Err values).
     handle = db_open(db_path)?
     db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?

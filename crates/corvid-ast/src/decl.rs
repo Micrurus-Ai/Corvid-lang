@@ -466,8 +466,11 @@ pub enum HttpMethod {
 pub struct ConnectorDecl {
     pub name: Ident,
     /// `base_url: "https://api.example.com"` — the API root every
-    /// operation path is joined to.
-    pub base_url: String,
+    /// operation path is joined to. `None` when the connector declares
+    /// `hosts: allowed_hosts` instead: each operation then takes its URL
+    /// as a parameter, and any host the project's `[http] allow` permits
+    /// may be called. The parser requires exactly one of the two.
+    pub base_url: Option<String>,
     /// `auth: ...` — how each request authenticates. `None` = an
     /// unauthenticated (public) API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -613,7 +616,17 @@ pub struct OperationDecl {
     pub method: HttpMethod,
     /// The request path, joined to the connector `base_url`. May contain
     /// `{param}` placeholders bound from the operation's parameters.
+    /// Empty when the request line names a URL parameter instead.
     pub path: String,
+    /// `GET url` — the `String` parameter holding the whole URL, on a
+    /// connector that declares `hosts: allowed_hosts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_param: Option<Ident>,
+    /// `response: text` — read the response body as text rather than
+    /// JSON, for pages and other non-JSON answers; the body type is
+    /// `String`.
+    #[serde(default)]
+    pub response_text: bool,
     /// `body <param>` (JSON) or `form <param>` (form-encoded) — the
     /// parameter carrying the request body, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -629,6 +642,13 @@ pub struct OperationDecl {
     /// error variant instead of the success return.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_map: Vec<StatusErrorMapping>,
+    /// `on failure -> Variant` — every way the call can fail without an
+    /// answer the operation maps (a refused URL, a timeout, a network
+    /// error, an unmapped status, a response that does not match the
+    /// declared type) becomes this variant of the `Result`'s error type,
+    /// carrying the reason when the variant has one `String` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<Ident>,
     /// `timeout: <n>s` on the operation — overrides the connector's
     /// timeout for this operation only (a slow upload, a long report).
     #[serde(default, skip_serializing_if = "Option::is_none")]

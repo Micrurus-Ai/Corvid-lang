@@ -3847,6 +3847,32 @@ fn parses_operation_query_and_headers() {
     assert!(format!("{:?}", errors.first().map(|e| &e.kind)).contains("before `body` or `form`"), "{errors:?}");
 }
 
+/// `hosts: allowed_hosts` replaces `base_url`; an operation then names
+/// its URL parameter, and `response: text` reads a page.
+#[test]
+fn parses_an_any_host_connector() {
+    let src = "connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    modes: [real]
+    operation fetch(url: String) -> Response<String>:
+        GET url
+        response: text
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.base_url, None);
+    let op = &c.operations[0];
+    assert_eq!(op.url_param.as_ref().map(|u| u.name.as_str()), Some("url"));
+    assert!(op.response_text);
+
+    let (_, both) = parse_file_errs(&src.replace("hosts: allowed_hosts", "hosts: allowed_hosts\n    base_url: \"https://a.example\""));
+    assert!(format!("{:?}", both.first().map(|e| &e.kind)).contains("both `base_url` and `hosts`"), "{both:?}");
+    let (_, neither) = parse_file_errs(&src.replace("    hosts: allowed_hosts\n", ""));
+    assert!(format!("{:?}", neither.first().map(|e| &e.kind)).contains("without `base_url` or `hosts`"), "{neither:?}");
+}
+
 #[test]
 fn parses_connector_with_config_and_operations() {
     let src = "connector github:
@@ -3876,7 +3902,7 @@ fn parses_connector_with_config_and_operations() {
         })
         .unwrap();
     assert_eq!(c.name.name, "github");
-    assert_eq!(c.base_url, "https://api.github.com");
+    assert_eq!(c.base_url.as_deref(), Some("https://api.github.com"));
     assert!(matches!(
         c.auth.as_ref().unwrap(),
         corvid_ast::ConnectorAuth::Bearer(s) if s.name == "GITHUB_TOKEN"

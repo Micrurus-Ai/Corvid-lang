@@ -1,67 +1,48 @@
-# `std.http` — Executing HTTP-client surface
+# Making HTTP requests
 
-> **Status:** Phase 33S2 (closed 2026-06-09). Two tools execute
-> real HTTP requests; three RuntimeChecked guarantees govern
-> their behavior. Earlier slices shipped the envelope types and
-> envelope-builder agents only; 33S2 promotes the module to
-> executing. Since the stdlib Result-envelope migration, both
-> tools return `Result<HttpResponseEnvelope, String>` —
-> recoverable failures are Err values.
+> **Status:** B05 (2026-11-25). Every HTTP request goes through a
+> `connector`. The `http_get` and `http_post_json` tools this page
+> once documented are replaced by connectors; their three
+> RuntimeChecked guarantees now govern every connector request.
+> `std/http.cor` keeps the request and response envelope types, the
+> pure envelope-builder agents, and the built-in network effects
+> `http_egress_get` and `http_egress_post`.
 
 ## Quick reference
 
 ```corvid
-import "std:http" use http_get, http_post_json
+effect http_read:
+    cost: $0.0
 
-agent fetch_status(url: String) -> Result<Int, String>:
-    response = http_get(url)?
-    return Ok(response.status)
+type FetchError:
+    | Unreachable(reason: String)
 
-agent publish_event(url: String, event_json: String) -> Result<Int, String>:
-    response = http_post_json(url, event_json)?
-    return Ok(response.status)
+type Event:
+    kind: String
+
+type Receipt:
+    id: String
+
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+    operation publish(url: String, event: Event) -> Result<Receipt, FetchError> dangerous uses http_egress_post:
+        POST url body event
+        on failure -> Unreachable
+
+agent status_of(url: String) -> Int uses http_read:
+    return match page(url):
+        Ok(answer) -> answer.status()
+        Err(e) -> 0
 ```
 
-When this agent runs through `corvid run`, both calls flow through
-the configured `[http] allow` allowlist (after the always-on SSRF
-block) and return a `Result`-wrapped `HttpResponseEnvelope`. A
-policy refusal (SSRF block, missing/unlisted allowlist entry) or a
-transport failure (DNS, connect, timeout) is an `Err(String)`
-VALUE naming the cause. **An error HTTP STATUS (4xx/5xx) is still
-`Ok`** — the request succeeded at the transport layer; inspect
-`response.status` (or `http_ok`) to branch on it:
-
-```corvid
-public type HttpResponseEnvelope:
-    status: Int
-    body: String
-    attempts: Int
-    elapsed_ms: Int
-    effect_meta: EffectEnvelope
-```
-
-## The two tools
-
-### `http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get`
-
-Performs an HTTP GET. The `http_egress_get` effect carries
-`io_source: net.egress` and `reversible: true` — composes
-correctly with `@reversible` constraints elsewhere in the call
-graph.
-
-### `http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post`
-
-Performs an HTTP POST with the supplied UTF-8 body and
-`Content-Type: application/json`. The `http_egress_post` effect
-carries `io_source: net.egress` and `reversible: false` so callers
-can reason about side effects in trace + budget constraints.
-
-For composing requests with custom timeouts, retry policies, or
-header sets, the envelope-builder agents in `std/http.cor`
-(`http_request_get`, `http_request_post_json`, `http_with_retry`,
-`http_with_timeout`, `http_ok`) construct `HttpRequestEnvelope`
-values — those are still pure agents that BUILD a request; the
-two `tool` declarations above PERFORM the request.
+A connector calling one API declares `base_url: "https://api.example.com"` and gives each operation a path; `hosts: allowed_hosts`, as here, lets each call name its URL. Either way the request runs through the always-on SSRF block and the `[http] allow` list below, takes at most its declared `timeout`, and follows only the redirects its `redirects:` policy allows. With `on failure -> Unreachable`, a refused URL, a timeout, a network error, an unmapped error status or a body that does not match the declared type is an `Err(Unreachable(reason))` value; without it, the failure stops the program. `response: text` reads a page as a `String` instead of JSON, and `Response<Body>` gives the status and headers. The full grammar is in [connector declarations](../grammar.md#connector-declarations); the design is in the [HTTP client proposal](../../proposals/http-client.md).
 
 ## Security model — `[http] allow` + always-on SSRF
 
@@ -143,29 +124,27 @@ control (retry, fall back, log, or `?`-propagate).
 
 ## Determinism
 
-Both tools are non-deterministic. The checker rejects calls
-inside a `@deterministic` body — this is the existing
+A connector operation is a tool, so it is non-deterministic. The
+checker rejects calls inside a `@deterministic` body — the existing
 `decl_replayability.rs::is_deterministic_compatible` rule that
 treats every tool call as non-deterministic by declaration kind.
-Programs that need both deterministic logic AND HTTP egress must
-factor egress into a separate, non-deterministic agent.
+Programs that need both deterministic logic and HTTP egress factor
+the egress into a separate, non-deterministic agent.
 
 ## Replay quarantine
 
 When a Corvid program runs in Substitute-mode replay (replaying a
-recorded trace), the executing HTTP-client surface honors the
-same quarantine the existing `HttpClient::quarantine` hook
-provides. Two layers:
+recorded trace), every request honors the quarantine the
+`HttpClient::quarantine` hook provides. Two layers:
 
 1. **Low-level `HttpClient::send`** returns
    `QuarantineViolation { surface: "http", .. }` if called during
    replay. The detail names the method + URL so the operator can
    see exactly what was refused.
-2. **Dispatch path**
-   (`Runtime::call_tool("http_get" | "http_post_json", ...)`) goes
-   through the replay-substitution path FIRST. POST and GET both
-   substitute from the recorded trace OR diverge — they never
-   reach the live network.
+2. **Dispatch path**: a connector operation's call goes through the
+   replay-substitution path FIRST. Reads and writes both substitute
+   from the recorded trace or diverge; they never reach the live
+   network.
 
 Together the two layers prove the network is provably untouched
 during replay, regardless of allowlist contents (a fully-
@@ -180,7 +159,7 @@ Three RuntimeChecked rows in the canonical guarantee registry
 |---|---|---|
 | `io_source.http_ssrf_structural_block` | RuntimeChecked | Private / loopback / link-local hosts refused regardless of allowlist. Structural floor. |
 | `io_source.http_allowlist_enforcement` | RuntimeChecked | URL host must appear in `[http] allow`; missing allowlist fails closed. |
-| `io_source.http_quarantine_on_replay` | RuntimeChecked | POST / GET dispatch during replay substitutes from trace or diverges; never reaches the network. |
+| `io_source.http_quarantine_on_replay` | RuntimeChecked | Connector calls during replay substitute from the trace or diverge; never reach the network. |
 
 The `@deterministic`-rejection property is covered by the
 existing `replay.deterministic_pure_path` guarantee — it applies
@@ -189,11 +168,23 @@ to all tool calls regardless of effect.
 ## Worked example — webhook fan-out with allowlist scoping
 
 ```corvid
-import "std:http" use http_post_json, http_ok
+type Event:
+    kind: String
 
-agent notify_webhook(url: String, event_json: String) -> Result<Bool, String>:
-    response = http_post_json(url, event_json)?
-    return Ok(http_ok(response))
+type Receipt:
+    id: String
+
+type DeliveryError:
+    | Undelivered(reason: String)
+
+connector hooks:
+    hosts: allowed_hosts
+    timeout: 5s
+    redirects: never
+    modes: [real, replay]
+    operation notify(url: String, event: Event) -> Result<Receipt, DeliveryError> dangerous uses http_egress_post:
+        POST url body event
+        on failure -> Undelivered
 ```
 
 With `corvid.toml`:
@@ -203,12 +194,12 @@ With `corvid.toml`:
 allow = ["hooks.example.com", "audit.example.com"]
 ```
 
-`notify_webhook("https://hooks.example.com/new-order", "...")`
-succeeds; `notify_webhook("https://hooks.attacker.example/...", "...")`
-returns `Err` from the dispatch boundary with a diagnostic naming
-the unlisted host and the configured allowlist. Even if a future
-configuration mistake adds `127.0.0.1` to the allowlist, calls to
-loopback are still refused by the structural SSRF block.
+`notify("https://hooks.example.com/new-order", event)` succeeds;
+`notify("https://hooks.attacker.example/...", event)` returns
+`Err(Undelivered(reason))` whose reason names the unlisted host and
+the configured allowlist. Even if a configuration mistake adds
+`127.0.0.1` to the allowlist, calls to loopback are still refused by
+the structural SSRF block.
 
 ## Related references
 
@@ -221,11 +212,12 @@ loopback are still refused by the structural SSRF block.
   + inline guarantee anchors (`GUARANTEE_ID_IO_SOURCE_HTTP_*`).
 - `crates/corvid-driver/src/run.rs::load_http_egress_policy` —
   CLI loader: env > corvid.toml > unset.
-- `std/http.cor` — the tool declarations + envelope types.
+- `std/http.cor` — the envelope types, envelope-builder agents and
+  built-in network effects.
 
 
 ### Deadlines in a served route
 
-Add the destination host to `[http] allow` in the project manifest. Both `http_get` and `http_post_json` check redirect destinations against that policy. A successful response reports the transport's attempt count and elapsed milliseconds.
+Add the destination host to `[http] allow` in the project manifest. Under `redirects: allowed_hosts`, a redirect destination is checked against that policy too, and the trace records each attempt and hop with its elapsed time.
 
 `return try wait_for_reply() timeout 300` gives the call a 300 ms deadline. If it expires, the server returns HTTP 504 with error code `handler_timeout` and cancels the pending request. Closing the client connection also cancels an outstanding request. For a stream, the start deadline covers waiting for the first chunk.

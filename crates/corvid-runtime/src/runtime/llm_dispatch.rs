@@ -143,8 +143,6 @@ impl Runtime {
             self.dispatch_stdlib_io_tool(name, implementation_args.to_vec()).await
         } else if let Some(result) = super::path::dispatch(&self.io, name, implementation_args) {
             result
-        } else if is_stdlib_http_tool(name) {
-            self.dispatch_stdlib_http_tool(name, implementation_args.to_vec()).await
         } else if is_stdlib_time_tool(name) {
             dispatch_stdlib_time_tool(name, implementation_args)
         } else if is_stdlib_random_tool(name) {
@@ -165,7 +163,19 @@ impl Runtime {
             // request (strict no-real-fallback). The credential is
             // resolved and attached to a header here and never enters the
             // recorded ToolCall args or ToolResult body.
-            self.dispatch_connector_http(spec, implementation_args).await
+            match (self.dispatch_connector_http(spec, implementation_args).await, &spec.on_failure) {
+                // `on failure -> Variant`: the failure becomes the typed
+                // error the operation declares, recorded like any answer,
+                // so the program handles it and replay reproduces it.
+                (Err(error), Some((variant, takes_reason))) if spec.returns_result => {
+                    let reason = match &error {
+                        RuntimeError::ToolFailed { message, .. } => message.clone(),
+                        other => other.to_string(),
+                    };
+                    Ok(crate::connectors::failure_result(variant, *takes_reason, &reason))
+                }
+                (result, _) => result,
+            }
         } else {
             self.tools.call(name, implementation_args.to_vec()).await
         };
@@ -663,65 +673,6 @@ impl Runtime {
                 Ok(stdlib_result_ok(serde_json::Value::Array(json_entries)))
             }
             other => Err(RuntimeError::UnknownTool(other.to_string())),
-        }
-    }
-
-    /// Slice 33S2a: dispatch handler for the two executing
-    /// stdlib HTTP tools (`http_get` / `http_post_json`).
-    /// Receives the full tool name; entry is gated by
-    /// `is_stdlib_http_tool`. Each branch:
-    ///
-    ///   1. Extracts + validates args as JSON values.
-    ///   2. Checks the URL through `self.http_policy` (always-on
-    ///      SSRF block + required `[http] allow` allowlist; fails
-    ///      closed when allowlist is unconfigured).
-    ///   3. Calls `HttpClient::send` with the constructed
-    ///      `HttpRequest`.
-    ///   4. Marshals the typed `HttpResponse` back to a JSON
-    ///      value matching the `HttpResponseEnvelope` schema
-    ///      declared in `std/http.cor`.
-    async fn dispatch_stdlib_http_tool(
-        &self,
-        name: &str,
-        args: Vec<serde_json::Value>,
-    ) -> Result<serde_json::Value, RuntimeError> {
-        use crate::http::{HttpRequest, RedirectPolicy};
-        let url = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
-            tool: name.into(),
-            message: "expected a String URL".into(),
-        })?;
-        // These two tools predate declared HTTP policy and have always
-        // used a 30-second timeout and followed redirects to allowed
-        // hosts. They are replaced by a dynamic-host connector, which
-        // declares both, in the HTTP client's fourth slice; until then
-        // their limits are written here, at the one place they apply.
-        let request = |method: &str| {
-            HttpRequest::new(method, url, std::time::Duration::from_secs(30), RedirectPolicy::AllowedHosts)
-        };
-        let request = match name {
-            "http_get" => request("GET"),
-            "http_post_json" => {
-                let body = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
-                    tool: name.into(),
-                    message: "expected a String JSON body".into(),
-                })?;
-                request("POST").json_body(body)
-            }
-            other => return Err(RuntimeError::UnknownTool(other.to_string())),
-        };
-        if let Err(error) = self.http_policy.check(url) {
-            return Ok(stdlib_result_err(error));
-        }
-        let record = |observation| self.record_http_exchange(None, name, observation);
-        match self.http.send_observed(&request.effect_tag("std.http.request"), &record).await {
-            Ok(response) => Ok(stdlib_result_ok(serde_json::json!({
-                "status": response.status,
-                "body": response.body,
-                "attempts": response.attempts,
-                "elapsed_ms": response.elapsed_ms,
-                "effect_meta": stdlib_http_effect_envelope(),
-            }))),
-            Err(error) => Ok(stdlib_result_err(error)),
         }
     }
 
@@ -2076,30 +2027,8 @@ fn is_stdlib_io_tool(name: &str) -> bool {
     matches!(name, "io_read_image" | "io_read_text" | "io_write_text" | "io_list_dir")
 }
 
-/// Slice 33S2a: exact-match gate for the stdlib HTTP tools.
-/// Same rationale as `is_stdlib_io_tool` — exact names only,
-/// no prefix sweep.
-fn is_stdlib_http_tool(name: &str) -> bool {
-    matches!(name, "http_get" | "http_post_json")
-}
-
-/// Slice 33S2a: marshal an `EffectEnvelope` for the executing
-/// HTTP tools. The runtime side doesn't carry a per-call
-/// effect-tag structure for HTTP (the request/response cycle
-/// is the unit), so we emit a fixed `std.http.request` tag
-/// matching what `std/http.cor` programs already expect.
-fn stdlib_http_effect_envelope() -> serde_json::Value {
-    serde_json::json!({
-        "effect_name": "std.http.request",
-        "provenance_key": "",
-        "approval_label": "",
-        "cache_key": "",
-        "replay_key": "std.http.request",
-    })
-}
-
 /// Slice 33S3b — marshal an `EffectEnvelope` for the executing
-/// SQLite tools. Mirrors `stdlib_http_effect_envelope` — the
+/// SQLite tools. The
 /// runtime side doesn't carry a per-call effect-tag structure
 /// for SQLite (each statement is a unit), so we emit a fixed
 /// `std.db.execute` tag matching what `std/db.cor` programs

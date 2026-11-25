@@ -771,10 +771,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
     out.push_str(":\n");
 
     push_indent(indent + 1, out);
-    out.push_str(&format!(
-        "base_url: {}\n",
-        render_string_literal(&connector.base_url)
-    ));
+    match &connector.base_url {
+        Some(base_url) => out.push_str(&format!("base_url: {}\n", render_string_literal(base_url))),
+        None => out.push_str("hosts: allowed_hosts\n"),
+    }
     let secret = |s: &corvid_ast::SecretRef| format!("secret({})", render_string_literal(&s.name));
     if let Some(auth) = &connector.auth {
         push_indent(indent + 1, out);
@@ -845,7 +845,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
         };
         out.push_str(method);
         out.push(' ');
-        out.push_str(&render_string_literal(&op.path));
+        match &op.url_param {
+            Some(url) => out.push_str(&url.name),
+            None => out.push_str(&render_string_literal(&op.path)),
+        }
         if let Some(query) = &op.query {
             out.push_str(&format!(" query {}", query.name));
         }
@@ -856,6 +859,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             }
         }
         out.push('\n');
+        if op.response_text {
+            push_indent(indent + 2, out);
+            out.push_str("response: text\n");
+        }
         for header in &op.headers {
             push_indent(indent + 2, out);
             let value = match &header.value {

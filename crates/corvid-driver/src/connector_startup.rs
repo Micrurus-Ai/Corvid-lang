@@ -265,12 +265,16 @@ pub fn check_connector_startup(
                     errors.push(ConnectorStartupError::RealMissingEgress {
                         connector: connector.name.clone(),
                     });
-                } else if let Some(reason) = (ctx.egress_refusal)(&connector.base_url) {
-                    errors.push(ConnectorStartupError::RealHostNotAllowed {
-                        connector: connector.name.clone(),
-                        base_url: connector.base_url.clone(),
-                        reason,
-                    });
+                } else if let Some(base_url) = &connector.base_url {
+                    // A `hosts: allowed_hosts` connector names no host to
+                    // check here; each URL it is given is checked per call.
+                    if let Some(reason) = (ctx.egress_refusal)(base_url) {
+                        errors.push(ConnectorStartupError::RealHostNotAllowed {
+                            connector: connector.name.clone(),
+                            base_url: base_url.clone(),
+                            reason,
+                        });
+                    }
                 }
                 for secret in connector_secret_names(connector) {
                     if !(ctx.secret_present)(&secret) {

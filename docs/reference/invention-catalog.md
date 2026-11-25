@@ -647,34 +647,39 @@ Roadmap: [Phase 33S1](../../ROADMAP.md)
 Proof: [executing I/O tests](../../crates/corvid-runtime/tests/executing_io_tools.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs) + [path-confinement tests](../../crates/corvid-runtime/src/io.rs)
 Non-scope: Confines paths to the declared root; does not police what user code does with the contents.
 
-#### Executing HTTP-Client Surface
+#### Declared HTTP Client
 
-Corvid's `std/http` module ships two executing tools — `http_get`, `http_post_json` — that flow through typed effect rows (`http_egress_get`, `http_egress_post`) and a **two-layer security boundary**: an always-on structural SSRF block that refuses RFC1918 / loopback / link-local hosts regardless of allowlist, plus a required `[http] allow` allowlist that fails closed when unconfigured.
+A program calls another service through a `connector`, and every consequential choice about the request is written in source: how long it may take (`timeout: 10s`), which redirects it follows (`redirects: never | same_host | allowed_hosts`), and how its failures are typed (`on failure -> Unreachable`). Omitting the timeout or the redirect policy is a compile error. A `hosts: allowed_hosts` connector takes the URL as a parameter, for pages and callbacks a program learns at run time.
 
-The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement`, and `io_source.http_quarantine_on_replay` in its claim manifest, so a host can verify the binary refuses to reach private networks AND can only reach explicitly approved hosts AND cannot escape replay quarantine.
+Under every connector sits a **two-layer security boundary**: an always-on structural SSRF block that refuses RFC1918, loopback and link-local hosts regardless of allowlist, and the project's `[http] allow` list, which fails closed when unconfigured. A redirect never carries the credential to another host, and a `POST` is never silently re-sent as a `GET`. A signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement` and `io_source.http_quarantine_on_replay` in its claim manifest.
 
 ```corvid
-import "std:http" use http_get, http_post_json, http_ok
+type FetchError:
+    | Unreachable(reason: String)
 
-agent ship_event(url: String, body: String) -> Result<Bool, String>:
-    response = http_post_json(url, body)?
-    return Ok(http_ok(response))
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s                          # omit → compile error
+    redirects: allowed_hosts              # never | same_host | allowed_hosts
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable         # refused, timed out, unreachable → a typed value
 ```
-
-Both tools return `Result` — policy refusals and transport failures are Err VALUES the program observes (an error HTTP status like 404 is still Ok; inspect `status`).
 
 ```toml
 [http]
 allow = ["hooks.example.com"]
 ```
 
-A URL whose host is not in `[http] allow` is refused with a structured diagnostic naming the host AND the configured allowlist. A URL whose host resolves to a private range is refused by the structural SSRF block before the allowlist is consulted — even a misconfigured `[http] allow = ["127.0.0.1"]` cannot reach loopback. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during Substitute-mode replay either substitute from the recorded trace or diverge — the network is provably untouched.
+A URL whose host is not in `[http] allow` is refused with a diagnostic naming the host and the allowlist; a host in a private range is refused before the allowlist is consulted, so even `[http] allow = ["127.0.0.1"]` cannot reach loopback. The trace records every attempt and redirect with header names only, and replay answers from the recording without touching the network. The `http_get` and `http_post_json` tools this entry once described are replaced by connectors.
 
-Spec: [`std.http` reference](../../docs/reference/stdlib/http.md)
+Spec: [HTTP client proposal](../../docs/proposals/http-client.md) · [connector grammar](../../docs/reference/grammar.md#connector-declarations)
 Tour: `corvid tour --topic http-client`
-Roadmap: [Phase 33S2](../../ROADMAP.md)
-Proof: [end-to-end HTTP tests](../../crates/corvid-driver/tests/executing_http_through_driver.rs) + [policy tests](../../crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
-Non-scope: Enforces SSRF + allowlist + replay quarantine on the URL host; does not police response-body content or rewrite request headers.
+Roadmap: [B05 complete HTTP client](../../docs/backend-ai-roadmap.md)
+Proof: [any-host connectors and `on failure`](../../crates/corvid-driver/tests/connector_any_host.rs) + [redirect, timeout and policy tests](../../crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: Enforces the declared timeout, redirect policy, SSRF block, allowlist and replay quarantine; does not police what the program does with a response, resolve hostnames before the SSRF check, or run on the native target yet.
 
 #### Executing SQLite Surface
 

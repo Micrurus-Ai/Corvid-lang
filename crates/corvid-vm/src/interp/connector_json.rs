@@ -160,3 +160,26 @@ fn declared_name(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> String {
         other => other.display_name(),
     }
 }
+
+/// `Err(Variant)` or `Err(Variant(reason))` for an `on failure` operation
+/// whose answer could not be read, built from the runtime's own failure
+/// envelope so every failure path produces the same value.
+pub(super) fn failure_value(
+    variant: &str,
+    reason: &str,
+    return_ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Result<Value, String> {
+    let takes_reason = match return_ty {
+        Type::Result(_, err) => match err.as_ref() {
+            Type::Struct(id) => types_by_id
+                .get(id)
+                .and_then(|t| t.variants.iter().find(|v| v.name == variant))
+                .is_some_and(|v| !v.fields.is_empty()),
+            _ => false,
+        },
+        _ => false,
+    };
+    let envelope = corvid_runtime::connectors::failure_result(variant, takes_reason, reason);
+    connector_result(envelope, return_ty, types_by_id)
+}

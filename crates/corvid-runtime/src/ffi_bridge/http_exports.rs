@@ -1,11 +1,11 @@
 //! C-ABI bridge module for the executing HTTP-client surface.
 //!
-//! Phase 33S0 — module scaffold only. The actual extern "C" entry
-//! points (`corvid_http_get`, `corvid_http_post_json`) and their
-//! codegen-cl declarations land in slice 33S2. This file exists
-//! in 33S0 so the per-surface work in 33S2 has a settled home;
-//! the registry-side (effect profiles, `io_source` dimension,
-//! `SurfaceNotImplemented` error variant) is all wired in 33S0.
+//! Phase 33S0 — module scaffold only. Native code has no HTTP entry
+//! points yet: connector calls run on the interpreter until native
+//! dispatch of runtime-owned calls lands (B05 slice 7). This file
+//! keeps the per-surface `SurfaceNotImplemented` helper the registry
+//! side (effect profiles, `io_source` dimension) was wired against
+//! in 33S0.
 //!
 //! Note: the SSRF-block + `[http] allow` allowlist enforcement
 //! lives in 33S2 alongside the runtime wiring, since both need

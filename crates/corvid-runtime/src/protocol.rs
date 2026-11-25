@@ -175,7 +175,10 @@ pub fn provider_canonical_encoding(spec: &crate::connectors::ConnectorHttpSpec) 
         "encoding={}\nconnector={}\nbase_url={}\nmethod={}\npath={}\nauth={}",
         PROVIDER_CANONICAL_ENCODING,
         spec.connector,
-        spec.base_url,
+        // Protocol operations always have a base URL (the checker refuses
+        // `async:` on a `hosts: allowed_hosts` connector), so these bytes
+        // are exactly what earlier fingerprints were computed from.
+        spec.base_url.as_deref().unwrap_or_default(),
         spec.method,
         spec.path,
         auth
@@ -991,7 +994,10 @@ mod tests {
             extra_headers: Vec::new(),
             connector: "ups".to_string(),
             operation: "ship".to_string(),
-            base_url: "https://api.ups.com".to_string(),
+            base_url: Some("https://api.ups.com".to_string()),
+            url_param: None,
+            response_text: false,
+            on_failure: None,
             method: "POST".to_string(),
             path: "/ship".to_string(),
             param_names: vec![],
@@ -1027,7 +1033,7 @@ mod tests {
         );
 
         let mut moved = base.clone();
-        moved.base_url = "https://staging.ups.com".to_string();
+        moved.base_url = Some("https://staging.ups.com".to_string());
         assert_ne!(encoded, provider_canonical_encoding(&moved));
     }
 

@@ -738,22 +738,33 @@ agent record_user(email: String) -> Result<Int, String>:
     },
     TourTopic {
         name: "http-client",
-        title: "Executing HTTP-Client Surface",
+        title: "Declared HTTP Client",
         category: "Executing I/O",
-        pitch: "Corvid's std/http tools perform real HTTP requests through a two-layer security boundary: an always-on structural SSRF block that refuses private / loopback / link-local hosts regardless of allowlist, plus a required [http] allow allowlist that fails closed when unconfigured. Calls from @deterministic agents are rejected at typecheck; Substitute-mode replay refuses every executing HTTP call regardless of allowlist contents. Transport failures and policy refusals return honest Err values (error HTTP statuses like 404 are still Ok envelopes — inspect `status`). The allowlist is declared in corvid.toml (or overridden by CORVID_HTTP_ALLOW) and signable through the cdylib's claim manifest. The same source compiles, type-checks, and runs identically whether the configured network endpoint is real or a loopback test responder — production behavior never branches on a test-only flag.",
-        spec: "docs/reference/stdlib/http.md",
-        roadmap: "Phase 33S2 executing HTTP-client surface",
-        test: "crates/corvid-driver/tests/executing_http_through_driver.rs + crates/corvid-runtime/src/http.rs HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_http_* fixtures",
-        non_scope: "Enforces SSRF + allowlist + replay quarantine on the URL host; does not police what user code does with the response body, and does not inspect or rewrite request headers.",
-        source: r#"import "./std/http" use http_get, http_post_json, http_ok, HttpResponseEnvelope
+        pitch: "Every HTTP request goes through a `connector` that declares how long it may take, which redirects it follows and how its failures are typed; omitting the timeout or the redirect policy is a compile error. A `hosts: allowed_hosts` connector takes the URL as a parameter and reaches any host the project's [http] allow permits, under an always-on structural SSRF block that refuses private, loopback and link-local addresses whatever the allowlist says. `on failure -> Unreachable` turns a refused URL, a timeout, a network error, an error status or a body that does not match the declared type into a typed Err value carrying the reason. A redirect never carries the credential to another host, the trace records every attempt without a header value or body text, and replay answers each call from the recording without touching the network.",
+        spec: "docs/proposals/http-client.md",
+        roadmap: "B05 complete HTTP client",
+        test: "crates/corvid-driver/tests/connector_any_host.rs + connector_modes.rs + connector_json_bodies.rs + connector_responses.rs + crates/corvid-runtime/src/http.rs redirect, timeout and HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs connector fixtures",
+        non_scope: "Enforces the declared timeout, redirect policy, SSRF block, allowlist and replay quarantine; it does not police what the program does with a response, resolve a hostname before the SSRF check, or run on the native target yet.",
+        source: r#"effect http_read:
+    cost: $0.0
 
-agent fetch_status(url: String) -> Result<Int, String>:
-    response: HttpResponseEnvelope = http_get(url)?
-    return Ok(response.status)
+type FetchError:
+    | Unreachable(reason: String)
 
-agent ship_event(url: String, body: String) -> Result<Bool, String>:
-    response: HttpResponseEnvelope = http_post_json(url, body)?
-    return Ok(http_ok(response))
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+
+agent status_of(url: String) -> Int uses http_read:
+    return match page(url):
+        Ok(answer) -> answer.status()
+        Err(e) -> 0
 "#,
     },
     TourTopic {

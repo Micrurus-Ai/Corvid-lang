@@ -353,9 +353,8 @@ fn run_via_interpreter_tier(
     builder = corvid_runtime::browser::with_browser_tools(builder);
 
     // Slice 33S2b: install the [http] allow policy parsed from
-    // corvid.toml (33S0) onto the runtime so the executing
-    // http_get / http_post_json tools gate every URL through the
-    // allowlist + always-on SSRF block. CORVID_HTTP_ALLOW env
+    // corvid.toml (33S0) onto the runtime so every connector
+    // request goes through the allowlist + always-on SSRF block. CORVID_HTTP_ALLOW env
     // override (comma-separated host list) takes precedence over
     // the corvid.toml value — same env-override pattern as
     // CORVID_IO_ROOT / CORVID_MODEL.

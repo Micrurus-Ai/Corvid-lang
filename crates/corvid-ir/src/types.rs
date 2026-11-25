@@ -48,7 +48,9 @@ pub struct IrFile {
 pub struct IrConnector {
     pub name: String,
     /// Absolute `http(s)://` base URL. Operation paths are appended.
-    pub base_url: String,
+    /// `None` for a `hosts: allowed_hosts` connector, whose operations
+    /// take the whole URL as a parameter.
+    pub base_url: Option<String>,
     /// Credential material, always as `secret(...)` reference NAMES —
     /// never literal values (the parser rejects literals). Resolved to
     /// live secrets by the runtime at dispatch, never embedded in a
@@ -110,6 +112,13 @@ pub struct IrOperation {
     pub query: Option<String>,
     /// `header "Name": value` lines, in source order.
     pub headers: Vec<IrOperationHeader>,
+    /// The `String` parameter holding the whole URL, on a `hosts:
+    /// allowed_hosts` connector; `path` is empty then.
+    pub url_param: Option<String>,
+    /// `response: text` — the body is read as text, not JSON.
+    pub response_text: bool,
+    /// `on failure -> Variant`: the error variant every failure becomes.
+    pub on_failure: Option<String>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,

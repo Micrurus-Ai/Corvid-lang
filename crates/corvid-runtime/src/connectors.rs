@@ -68,7 +68,17 @@ pub struct ConnectorHttpSpec {
     pub connector: String,
     pub operation: String,
     /// Absolute `http(s)://` base URL. The operation path is appended.
-    pub base_url: String,
+    /// `None` for a `hosts: allowed_hosts` connector: the URL is the
+    /// `url_param` argument, checked against the project's HTTP policy
+    /// like every request.
+    pub base_url: Option<String>,
+    /// The parameter holding the whole URL, when `base_url` is `None`.
+    pub url_param: Option<String>,
+    /// `response: text` — the body is passed on as text, not parsed as JSON.
+    pub response_text: bool,
+    /// `on failure -> Variant`: the error variant every failure becomes,
+    /// and whether it carries the reason (one `String` field).
+    pub on_failure: Option<(String, bool)>,
     /// HTTP method, upper-case (`GET`, `POST`, …).
     pub method: String,
     /// Path template appended to `base_url`; `{name}` placeholders bind
@@ -205,6 +215,12 @@ pub fn connector_calls_from_ir(
                         },
                     }),
                     query: op.query.clone(),
+                    url_param: op.url_param.clone(),
+                    response_text: op.response_text,
+                    on_failure: op.on_failure.as_ref().map(|variant| {
+                        let takes_reason = failure_variant_takes_reason(ir, &tool.return_ty, variant);
+                        (variant.clone(), takes_reason)
+                    }),
                     headers: op
                         .headers
                         .iter()
@@ -242,6 +258,29 @@ pub fn connector_calls_from_ir(
         }
     }
     specs
+}
+
+/// Whether the `on failure` variant of an operation's error type has a
+/// field for the reason (the checker allows none or one `String`).
+fn failure_variant_takes_reason(ir: &corvid_ir::IrFile, return_ty: &corvid_types::Type, variant: &str) -> bool {
+    let corvid_types::Type::Result(_, err) = return_ty else { return false };
+    let corvid_types::Type::Struct(id) = err.as_ref() else { return false };
+    ir.types
+        .iter()
+        .find(|t| t.id == *id)
+        .and_then(|t| t.variants.iter().find(|v| v.name == variant))
+        .is_some_and(|v| !v.fields.is_empty())
+}
+
+/// The recorded result an `on failure` operation answers with when its
+/// call fails: `Err(Variant)` or `Err(Variant(reason))`, in the envelope
+/// mapped statuses use, so replay reproduces it exactly.
+pub fn failure_result(variant: &str, takes_reason: bool, reason: &str) -> serde_json::Value {
+    let fields = if takes_reason { vec![serde_json::json!(reason)] } else { Vec::new() };
+    serde_json::json!({
+        "tag": "err",
+        "err": { "tag": "variant", "variant": variant, "fields": fields },
+    })
 }
 
 fn auth_from_ir(auth: &corvid_ir::IrConnectorAuth) -> ConnectorAuthSpec {
@@ -283,8 +322,29 @@ pub fn build_connector_request(
         .collect();
 
     // Fill `{placeholder}` path segments from the arguments.
-    let filled_path = fill_path(&spec.path, &by_name, &spec.operation)?;
-    let mut url = format!("{}{}", spec.base_url.trim_end_matches('/'), filled_path);
+    let mut url = match (&spec.base_url, &spec.url_param) {
+        (Some(base_url), _) => {
+            let filled_path = fill_path(&spec.path, &by_name, &spec.operation)?;
+            format!("{}{}", base_url.trim_end_matches('/'), filled_path)
+        }
+        // A `hosts: allowed_hosts` operation: the argument is the URL. The
+        // dispatcher runs the SSRF block and `[http] allow` on it before
+        // anything is sent.
+        (None, Some(param)) => by_name
+            .get(param.as_str())
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| ConnectorRequestError::BadArgument {
+                operation: spec.operation.clone(),
+                param: param.clone(),
+            })?,
+        (None, None) => {
+            return Err(ConnectorRequestError::BadArgument {
+                operation: spec.operation.clone(),
+                param: "url".to_string(),
+            })
+        }
+    };
     if let Some(query_param) = &spec.query {
         let value = by_name.get(query_param.as_str()).copied().ok_or_else(|| {
             ConnectorRequestError::MissingArgument {
@@ -544,7 +604,10 @@ mod tests {
             extra_headers: Vec::new(),
             connector: "github".to_string(),
             operation: "get_repo".to_string(),
-            base_url: "https://api.github.com".to_string(),
+            base_url: Some("https://api.github.com".to_string()),
+            url_param: None,
+            response_text: false,
+            on_failure: None,
             method: "GET".to_string(),
             path: "/repos/{owner}/{repo}".to_string(),
             param_names: vec!["owner".to_string(), "repo".to_string()],

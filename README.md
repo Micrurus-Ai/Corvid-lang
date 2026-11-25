@@ -181,7 +181,7 @@ Each entry has a runnable tour, a specification and tests. The [full catalog](do
 | Verification | [Proof-Carrying Dimension Registry](./docs/reference/invention-catalog.md#proof-carrying-dimension-registry) | `corvid tour --topic effect-registry` |
 | Verification | [Adversarial Bypass Testing](./docs/reference/invention-catalog.md#adversarial-bypass-testing) | `corvid tour --topic adversarial-tests` |
 | Verification | [Executing File-I/O Surface](./docs/reference/invention-catalog.md#executing-file-io-surface) | `corvid tour --topic file-io` |
-| Verification | [Executing HTTP-Client Surface](./docs/reference/invention-catalog.md#executing-http-client-surface) | `corvid tour --topic http-client` |
+| Verification | [Declared HTTP Client](./docs/reference/invention-catalog.md#declared-http-client) | `corvid tour --topic http-client` |
 | Verification | [Executing SQLite Surface](./docs/reference/invention-catalog.md#executing-sqlite-surface) | `corvid tour --topic sqlite` |
 | Verification | [Executing JSON Surface (Opaque + Typed)](./docs/reference/invention-catalog.md#executing-json-surface-opaque--typed) | `corvid tour --topic json` |
 | Verification | [Governed Retrieval](./docs/reference/invention-catalog.md#governed-retrieval) | `corvid tour --topic governed-retrieval` |

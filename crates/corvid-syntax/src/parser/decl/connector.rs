@@ -35,6 +35,7 @@ impl<'a> Parser<'a> {
         self.bump(); // Indent
 
         let mut base_url: Option<String> = None;
+        let mut any_allowed_host = false;
         let mut auth: Option<ConnectorAuth> = None;
         let mut retry: Option<u64> = None;
         let mut rate_limit: Option<RateLimitConfig> = None;
@@ -66,6 +67,19 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Colon, "`:` after a connector key")?;
             match key.as_str() {
                 "base_url" => base_url = Some(self.expect_string_literal("base_url")?.0),
+                "hosts" => {
+                    let (value, value_span) = self.expect_ident()?;
+                    if value != "allowed_hosts" {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: format!("`hosts: {value}`"),
+                                expected: "`hosts: allowed_hosts`, for a connector that calls any host `[http] allow` permits".into(),
+                            },
+                            span: value_span,
+                        });
+                    }
+                    any_allowed_host = true;
+                }
                 "auth" => auth = Some(self.parse_connector_auth()?),
                 "rate_limit" => rate_limit = Some(self.parse_rate_limit()?),
                 "circuit_breaker" => {
@@ -88,7 +102,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("connector key `{key}`"),
-                            expected: "`base_url`, `auth`, `timeout`, `redirects`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
+                            expected: "`base_url`, `hosts`, `auth`, `timeout`, `redirects`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
                         },
                         span: key_span,
                     });
@@ -101,13 +115,27 @@ impl<'a> Parser<'a> {
             self.bump();
         }
 
-        let base_url = base_url.ok_or_else(|| ParseError {
-            kind: ParseErrorKind::UnexpectedToken {
-                got: "a `connector` block without `base_url`".into(),
-                expected: "`base_url: \"https://...\"`".into(),
-            },
-            span: start.merge(end),
-        })?;
+        match (&base_url, any_allowed_host) {
+            (None, false) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "a `connector` block without `base_url` or `hosts`".into(),
+                        expected: "`base_url: \"https://...\"`, or `hosts: allowed_hosts` for a connector whose operations take a URL".into(),
+                    },
+                    span: start.merge(end),
+                });
+            }
+            (Some(_), true) => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "both `base_url` and `hosts`".into(),
+                        expected: "one of them: `base_url` for one API, `hosts: allowed_hosts` for operations that take a URL".into(),
+                    },
+                    span: start.merge(end),
+                });
+            }
+            _ => {}
+        }
 
         Ok(ConnectorDecl {
             name: Ident::new(name, name_span),
@@ -345,7 +373,19 @@ impl<'a> Parser<'a> {
         // The request line: `<METHOD> "<path>" [query <param>]
         // [body <param> | form <param>]`.
         let method = self.parse_http_method()?;
-        let path = self.expect_string_literal("operation path")?.0;
+        let (path, url_param) = match self.peek().clone() {
+            TokKind::StringLit(_) => (self.expect_string_literal("operation path")?.0, None),
+            _ => {
+                let (param, param_span) = self.expect_ident().map_err(|_| ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(self.peek()),
+                        expected: "a path such as `\"/v1/items\"`, or the URL parameter of a `hosts: allowed_hosts` connector".into(),
+                    },
+                    span: self.peek_span(),
+                })?;
+                (String::new(), Some(Ident::new(param, param_span)))
+            }
+        };
         let mut query: Option<Ident> = None;
         if self.peek_ident_is("query") {
             self.bump();
@@ -389,6 +429,8 @@ impl<'a> Parser<'a> {
         let mut protocol = None;
         let mut timeout_secs: Option<u64> = None;
         let mut headers = Vec::new();
+        let mut response_text = false;
+        let mut on_failure: Option<Ident> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -410,6 +452,27 @@ impl<'a> Parser<'a> {
                     });
                 }
                 mock = Some(self.parse_expr()?);
+                self.expect_newline()?;
+                continue;
+            }
+            if self.peek_ident_is("response") {
+                let key_span = self.peek_span();
+                self.bump(); // response
+                self.expect(TokKind::Colon, "`:` after `response`")?;
+                let (format, format_span) = self.expect_ident()?;
+                if format != "text" {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`response: {format}`"),
+                            expected: "`response: text` (a JSON response needs no line)".into(),
+                        },
+                        span: format_span,
+                    });
+                }
+                if response_text {
+                    return Err(duplicate_connector_key("response", key_span));
+                }
+                response_text = true;
                 self.expect_newline()?;
                 continue;
             }
@@ -442,6 +505,21 @@ impl<'a> Parser<'a> {
                 protocol = Some(self.parse_provider_protocol()?);
                 continue;
             }
+            if matches!(self.peek(), TokKind::KwOn)
+                && matches!(self.peek_ahead(1), TokKind::Ident(word) if word == "failure")
+            {
+                let key_span = self.peek_span();
+                self.bump(); // on
+                self.bump(); // failure
+                self.expect(TokKind::Arrow, "`->` after `on failure`")?;
+                let (variant, variant_span) = self.expect_ident()?;
+                if on_failure.is_some() {
+                    return Err(duplicate_connector_key("on failure", key_span));
+                }
+                on_failure = Some(Ident::new(variant, variant_span));
+                self.expect_newline()?;
+                continue;
+            }
             error_map.push(self.parse_status_mapping()?);
             self.expect_newline()?;
         }
@@ -458,10 +536,13 @@ impl<'a> Parser<'a> {
             effect_row,
             method,
             path,
+            url_param,
+            response_text,
             body,
             query,
             headers,
             error_map,
+            on_failure,
             timeout_secs,
             mock,
             protocol,

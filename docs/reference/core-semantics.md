@@ -290,7 +290,7 @@ A Substitute-mode replay runtime gates every executing file-read call (read_text
 - **class**: runtime_checked
 - **phase**: runtime
 
-Every call to an executing HTTP tool (http_get / http_post_json, from std/http.cor) parses the request URL and refuses any host that lexically resolves to a private RFC1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8 + ::1), link-local (169.254.0.0/16 + fe80::/10), unspecified (0.0.0.0/8 + ::), ULA (fc00::/7), or the `localhost` DNS alias. The block is a STRUCTURAL property of the language: it runs regardless of `[http] allow` contents — even a fully-misconfigured allowlist containing `127.0.0.1` cannot bypass it. This is the security floor underneath the configurable allowlist. At the language surface the refusal is an honest Err value (the http tools return Result), so programs observe the diagnostic without the floor weakening.
+Every outbound HTTP request a connector sends, to its `base_url` or to a URL a `hosts: allowed_hosts` operation is given, parses the request URL and refuses any host that lexically resolves to a private RFC1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), loopback (127.0.0.0/8 + ::1), link-local (169.254.0.0/16 + fe80::/10), unspecified (0.0.0.0/8 + ::), ULA (fc00::/7), or the `localhost` DNS alias. The block is a STRUCTURAL property of the language: it runs regardless of `[http] allow` contents — even a fully-misconfigured allowlist containing `127.0.0.1` cannot bypass it. This is the security floor underneath the configurable allowlist. The refusal fails the call with a diagnostic naming the host, and nothing is sent.
 
 **Positive tests:**
 
@@ -301,20 +301,20 @@ Every call to an executing HTTP tool (http_get / http_post_json, from std/http.c
 - `crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_all_private_loopback_ipv4_ranges`
 - `crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_ipv6_loopback_and_link_local`
 - `crates/corvid-runtime/src/http.rs::http_egress_policy_ssrf_block_refuses_localhost_dns_alias`
-- `crates/corvid-driver/tests/executing_http_through_driver.rs::ssrf_block_rejects_loopback_url_even_when_allowlist_contains_it`
+- `crates/corvid-driver/tests/connector_any_host.rs::a_url_on_a_private_address_is_refused_even_when_allowed`
 
 #### `io_source.http_allowlist_enforcement`
 - **class**: runtime_checked
 - **phase**: runtime
 
-Every call to an executing HTTP tool checks the request URL's host against the project's configured `[http] allow = [...]` list (or the `CORVID_HTTP_ALLOW` env override). Case-insensitive exact-host comparison. When no allowlist is configured (missing `[http]` section, empty `allow`, or unset env), every call fails closed with a structured diagnostic naming the requested URL, the missing config, and the env-override pathway. This is the configurable layer on top of the always-on SSRF block. At the language surface the refusal is an honest Err value (the http tools return Result), so programs observe the diagnostic without the gate weakening.
+Every outbound HTTP request a connector sends checks the request URL's host against the project's configured `[http] allow = [...]` list (or the `CORVID_HTTP_ALLOW` env override). Case-insensitive exact-host comparison. When no allowlist is configured (missing `[http]` section, empty `allow`, or unset env), every call fails closed with a structured diagnostic naming the requested URL, the missing config, and the env-override pathway. This is the configurable layer on top of the always-on SSRF block. In `real` mode a connector whose own `base_url` host is not allowed refuses to start.
 
 **Positive tests:**
 
 - `crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_permits_matching_host`
 - `crates/corvid-driver/src/run.rs::corvid_toml_with_http_allow_produces_configured_policy`
 - `crates/corvid-driver/src/run.rs::env_var_overrides_corvid_toml_http_allow`
-- `crates/corvid-driver/tests/executing_http_through_driver.rs::real_corvid_program_performs_get_through_executing_http_dispatch`
+- `crates/corvid-driver/tests/connector_any_host.rs::a_connector_url_reaches_an_allowed_host`
 
 **Adversarial tests:**
 
@@ -323,7 +323,9 @@ Every call to an executing HTTP tool checks the request URL's host against the p
 - `crates/corvid-runtime/src/http.rs::http_egress_policy_allowlist_refuses_unlisted_host_with_clear_diagnostic`
 - `crates/corvid-driver/src/run.rs::corvid_toml_with_empty_http_allow_produces_unconfigured_policy`
 - `crates/corvid-driver/src/run.rs::corvid_toml_without_http_section_produces_unconfigured_policy`
-- `crates/corvid-driver/tests/executing_http_through_driver.rs::missing_http_allowlist_fails_closed_with_actionable_diagnostic`
+- `crates/corvid-driver/tests/connector_any_host.rs::a_connector_url_fails_closed_without_an_allow_list`
+- `crates/corvid-driver/tests/connector_any_host.rs::an_unlisted_host_is_refused`
+- `crates/corvid-driver/src/connector_startup.rs::real_mode_refuses_to_start_when_the_connector_host_is_not_allowed`
 
 #### `io_source.sqlite_parameter_binding_only`
 - **class**: runtime_checked
@@ -375,7 +377,7 @@ A Substitute-mode replay runtime passes `db_query` calls through to the live `Db
 - **class**: runtime_checked
 - **phase**: runtime
 
-A Substitute-mode replay runtime refuses every executing HTTP call. POST calls through the `Runtime::call_tool("http_post_json", ...)` dispatch path go through the replay-substitution path first (so they substitute from the recorded trace OR diverge — they never reach the live network); the `HttpClient::quarantine` flag is the floor underneath that returns QuarantineViolation from any direct `HttpClient::send` call. GET calls through dispatch are also gated by the substitution path (read-quarantine equivalent — they substitute OR diverge, never reaching the live network).
+A Substitute-mode replay runtime refuses every outbound HTTP request. A connector operation's call goes through the replay-substitution path first (so they substitute from the recorded trace OR diverge — they never reach the live network); the `HttpClient::quarantine` flag is the floor underneath that returns QuarantineViolation from any direct `HttpClient::send` call. Reads and writes alike substitute or diverge, never reaching the live network.
 
 **Positive tests:**
 
@@ -383,8 +385,8 @@ A Substitute-mode replay runtime refuses every executing HTTP call. POST calls t
 
 **Adversarial tests:**
 
-- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_post_tool_dispatch_from_escaping_to_network`
-- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_executing_http_get_tool_dispatch_without_recorded_event`
+- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_a_connector_write_from_escaping_to_network`
+- `crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_blocks_a_connector_read_without_a_recorded_event`
 
 #### `json.parse_safety_no_panic`
 - **class**: runtime_checked

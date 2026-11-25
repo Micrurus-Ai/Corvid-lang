@@ -145,7 +145,11 @@ impl Runtime {
             // nothing) is `null`. Anything else must be JSON: a body that
             // is not is a failure naming the operation, never a silent
             // `null` the program would mistake for an answer.
-            let body: serde_json::Value = if response.body.trim().is_empty() {
+            let body: serde_json::Value = if spec.response_text {
+                // `response: text` — a page or any other non-JSON answer,
+                // passed on as the `String` the operation declares.
+                serde_json::Value::String(response.body.clone())
+            } else if response.body.trim().is_empty() {
                 serde_json::Value::Null
             } else {
                 serde_json::from_str(&response.body).map_err(|err| RuntimeError::ToolFailed {

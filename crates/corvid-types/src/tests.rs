@@ -2802,6 +2802,111 @@ agent main() -> Int uses http_read:
     assert!(has(&to_json, "a connector response has no JSON form"), "{to_json:?}");
 }
 
+/// A `base_url` connector's operations give paths; a `hosts:
+/// allowed_hosts` connector's operations take a `String` URL parameter
+/// and carry no `async:` protocol; `response: text` reads a `String`.
+#[test]
+fn connector_targets_and_text_responses_are_checked() {
+    let program = |connector: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Page:
+    title: String
+
+{connector}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+    let any_host = |operation: &str| {
+        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    modes: [real]\n{operation}")
+    };
+
+    let fine = messages(program(&any_host(
+        "    operation fetch(url: String) -> Response<String> uses http_read:\n        GET url\n        response: text\n",
+    )));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let path_on_any_host = messages(program(&any_host(
+        "    operation fetch(url: String) -> String uses http_read:\n        GET \"/x\"\n",
+    )));
+    assert!(has(&path_on_any_host, "take the whole URL as a parameter"), "{path_on_any_host:?}");
+
+    let url_on_base = messages(program(
+        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
+    ));
+    assert!(has(&url_on_base, "but the connector has a `base_url`"), "{url_on_base:?}");
+
+    let int_url = messages(program(&any_host(
+        "    operation fetch(url: Int) -> String uses http_read:\n        GET url\n",
+    )));
+    assert!(has(&int_url, "a URL is a `String`"), "{int_url:?}");
+
+    let text_record = messages(program(&any_host(
+        "    operation fetch(url: String) -> Page uses http_read:\n        GET url\n        response: text\n",
+    )));
+    assert!(has(&text_record, "its body is a `String`, not `Page`"), "{text_record:?}");
+}
+
+/// `on failure -> Variant` needs a `Result` whose error type declares the
+/// variant, with no fields or one `String` field for the reason.
+#[test]
+fn on_failure_is_checked() {
+    let program = |ret: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type FetchError:
+    | Unreachable(reason: String)
+    | Gone
+    | Coded(code: Int)
+
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation fetch(url: String) -> {ret} uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(messages(program("Result<String, FetchError>")).is_empty());
+    assert!(messages(program("Result<String, FetchError>").replace("Unreachable\n", "Gone\n")).is_empty());
+    let not_result = messages(program("String"));
+    assert!(not_result.iter().any(|m| m.contains("returns a `Result`")), "{not_result:?}");
+    let unknown = messages(program("Result<String, FetchError>").replace("-> Unreachable", "-> Missing"));
+    assert!(unknown.iter().any(|m| m.contains("not a variant of its error type `FetchError`")), "{unknown:?}");
+    let coded = messages(program("Result<String, FetchError>").replace("-> Unreachable", "-> Coded"));
+    assert!(coded.iter().any(|m| m.contains("one `String` field for the reason")), "{coded:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:

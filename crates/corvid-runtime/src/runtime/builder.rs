@@ -210,8 +210,8 @@ impl RuntimeBuilder {
     }
 
     /// Slice 33S2a: install the parsed `[http] allow` policy on
-    /// the runtime. The executing HTTP tools (`http_get` /
-    /// `http_post_json`) check every URL against the policy
+    /// the runtime. Every connector request checks its URL against
+    /// the policy
     /// (always-on SSRF block + allowlist) before any
     /// `HttpClient::send` runs. Default (when this setter isn't
     /// called) is an unconfigured policy that makes every

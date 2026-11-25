@@ -21,6 +21,55 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Connectors replace http_get and http_post_json (B05, slice 4)
+
+Corvid now has one way to make an HTTP request: a connector. The two
+tools carried a hidden 30-second timeout and a redirect limit, sent hand-
+built JSON, and duplicated what connectors do, so "one obvious way" and
+"no hidden defaults" both said to remove them (decision 2).
+
+**A connector for any allowed host.** `hosts: allowed_hosts` replaces
+`base_url`, and each operation names a `String` URL parameter: `GET url`.
+In the AST, IR, runtime spec and contract, `base_url` became an
+`Option`. The startup host check skips a connector with no base URL;
+every URL it is given is checked per call. Async protocols are refused
+there, because their poll paths are relative to a base URL. The
+protocol's persisted provider fingerprint keeps its exact bytes.
+`response: text` reads a page as a `String`.
+
+**`on failure`.** The book's pipeline relied on `http_get` returning
+`Result`, so a refused URL was a value, while a failing connector call
+stopped the program. `on failure -> Unreachable` maps every failure into
+the operation's declared error variant, with the reason in its `String`
+field: a policy refusal, a timeout, a network error, an unmapped status,
+or a body the interpreter cannot decode. The runtime answers with the
+same `Err` envelope a mapped status uses, so the trace records it and
+replay reproduces it. Decoding failures use the same envelope function
+in the interpreter.
+
+**The migration.**
+- The tools and their runtime dispatch are removed. `http_egress_get`
+  and `http_egress_post` stay as the built-in network effects.
+- The three guarantees are re-anchored: `connector_any_host.rs` covers
+  SSRF, allowlist and fail-closed; the replay-quarantine tests now call
+  a connector operation; `core-semantics.md` is regenerated.
+- The tour topic, the invention catalog entry (now "Declared HTTP
+  Client"), the README row, the proof matrix, book chapter 18 with its
+  pipeline test, the stdlib, JSON and function references, the Python
+  stdlib scan, and the `serve` relay fixture move with them. The served
+  relay's deadline and cancellation test passes on connectors.
+- A gap found on the way: the skills audit counted network access by
+  `http_`-prefixed names, so a skill using a connector did not report
+  `http`. A connector declaration now counts.
+
+Tests: parser and checker tests for the targets, `response: text` and
+`on failure`; six end-to-end tests. They cover an allowed host, private
+addresses refused even when listed, an unlisted host, no allowlist, a
+typed POST, and every failure kind mapped by `on failure` and replayed
+without a request.
+
+---
+
 ## 2026-11-25 - Connector wire shapes stay out of the published contract (B05, slice 3d fix)
 
 Slice 3d put every type a connector sends or reads into the contract's

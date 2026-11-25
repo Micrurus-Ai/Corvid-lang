@@ -384,6 +384,17 @@ operation cannot set `Authorization`, `Proxy-Authorization`, `Cookie`,
 header its connector's `auth:` uses, or its protocol's idempotency
 header, and sets each header at most once.
 
+A connector declares exactly one of `base_url` (one API, each operation
+a path) and `hosts: allowed_hosts` (each operation's request line names a
+`String` URL parameter, as in `GET url`, and any host `[http] allow`
+permits may be called; no `async:` protocol). `response: text` reads the
+body as text into a `String`, for pages. `on failure -> Variant` turns
+every failure without a mapped answer (a refused URL, a timeout, a
+network error, an unmapped status, a body that does not match the
+declared type) into that variant of the `Result`'s error type, which has
+no fields or one `String` field for the reason; without it a failure
+stops the program.
+
 `HEAD` and `OPTIONS` are connector methods; a route never declares them,
 because `corvid serve` answers `HEAD` from the route's `GET` and
 `OPTIONS` from its routes and CORS policy. An operation returning
@@ -393,6 +404,7 @@ operation returns `Response<Nothing>`. See [`Response`](functions.md#response).
 ```ebnf
 connector_decl    ::= 'connector' IDENT ':' INDENT connector_item+ DEDENT
 connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
+                    | 'hosts' ':' 'allowed_hosts' NEWLINE
                     | 'auth' ':' connector_auth NEWLINE
                     | 'timeout' ':' INT 's' NEWLINE
                     | 'redirects' ':' redirect_policy NEWLINE
@@ -407,11 +419,13 @@ connector_auth    ::= 'bearer' '(' secret_ref ')'
                     | 'basic' '(' secret_ref ',' secret_ref ')'
 secret_ref        ::= 'secret' '(' STRING_LITERAL ')'
 operation_decl    ::= 'operation' IDENT params '->' type_ref 'dangerous'? uses_clause? ':'
-                      INDENT http_method STRING_LITERAL ('query' IDENT)? (('body' | 'form') IDENT)? NEWLINE
+                      INDENT http_method (STRING_LITERAL | IDENT) ('query' IDENT)? (('body' | 'form') IDENT)? NEWLINE
                       operation_item* DEDENT
 operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEWLINE
                     | 'timeout' ':' INT 's' NEWLINE
                     | 'header' STRING_LITERAL ':' (IDENT | STRING_LITERAL) NEWLINE
+                    | 'response' ':' 'text' NEWLINE
+                    | 'on' 'failure' '->' IDENT NEWLINE
                     | 'async' ':' INDENT protocol_item+ DEDENT
 protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE
                     | ('initial' | 'deadline_target') ':' IDENT NEWLINE
