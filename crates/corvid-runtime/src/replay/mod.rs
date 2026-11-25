@@ -447,7 +447,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::RunCompleted {
                         ok: recorded_ok,
@@ -485,7 +485,7 @@ impl ReplaySource {
                 }
             }
             ReplayMode::Mutation(_) => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::RunCompleted {
                         ok: recorded_ok,
@@ -589,7 +589,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::ToolCall {
                         tool: expected_tool,
@@ -833,7 +833,7 @@ impl ReplaySource {
                             ),
                         )
                         .map_err(RuntimeError::ReplayDivergence)?;
-                    let result_step = display_step(cursor.current_step());
+                    let result_step = display_step(cursor.next_event_step(&self.events));
                     let recorded_result = match cursor.next_event(&self.events) {
                         TraceEvent::LlmResult {
                             prompt: expected_prompt,
@@ -975,7 +975,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::ApprovalRequest {
                         label: expected_label,
