@@ -159,6 +159,7 @@ impl<B: ValueBuilder> Decoder<'_, B> {
                     self.decode_variant(json, ir_type, path)
                 }
             }
+            Type::Conflict(row, _) => self.decode_variant(json, &crate::conflict_decl(row), path),
             Type::JsonValue => Ok(self.builder.json(json)),
             Type::Grounded(_) => Err(JsonDecodeError::new(
                 path,

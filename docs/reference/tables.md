@@ -196,6 +196,36 @@ agent store(renamed: Shelf) -> String:
         Err(current) -> "someone else changed the shelf first"
 ```
 
+### Conflicts
+
+`Conflict<Row>` names why a write did not happen, one case per reason:
+
+| Case | Meaning |
+| --- | --- |
+| `Changed(current)` | The row changed since it was read; `current` is the row now. |
+| `Deleted` | The row is gone. |
+| `Taken(holder)` | Another row holds its key or one of its unique values. |
+
+```corvid
+agent explain(conflict: Conflict<Member>) -> String:
+    return match conflict:
+        Changed(current) -> "someone else edited this member first"
+        Deleted -> "this member was removed"
+        Taken(holder) -> holder.email + " already has that value"
+```
+
+A `match` covers the cases the value can be. A written `Conflict<Row>`
+can be any of the three, so its match needs all three arms, or `_`. An
+arm naming a case the value can never be is a compile error. Code can
+build each case, `Changed(row)`, `Deleted` and `Taken(row)`, so a test
+or a fake store returns the same value a table does. A conflict crosses
+JSON as a sum type: `{"tag": "variant", "type": "Conflict", "variant":
+"Taken", "fields": [holder]}`.
+
+The operations above still return `Option<Row>` and `Row` errors; they
+move to `Conflict<Row>`, each returning only the cases it can produce,
+in the next slice ([proposal](../proposals/write-conflicts.md)).
+
 ## Atomic writes
 
 An `atomic:` block's table writes commit together when the block reaches

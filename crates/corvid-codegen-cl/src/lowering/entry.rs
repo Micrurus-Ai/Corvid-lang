@@ -528,6 +528,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
                 span,
             ))
         }
+        Type::Conflict(_, _) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - a table write's conflict runs on the interpreter until tables compile natively (B09 P6)",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Response(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - a connector response never crosses the command-line boundary; return its `body()` or `status()`",

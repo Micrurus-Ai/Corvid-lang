@@ -503,6 +503,32 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The conflict type (B09 Conflict-1a)
+
+`Conflict<Row>` is a compiler-known type with three cases. Its cases are
+part of the type (`Type::Conflict(row, ConflictCases)`), so the coverage
+algorithm offers only the cases a value can be, a narrower conflict
+assigns to a wider one, and `Type::join` unions the cases when match
+arms disagree. A written `Conflict<Row>` and a case built in code can
+be any case; only the table operations, in Conflict-2, will produce
+narrower ones. An arm naming a case the value cannot be is
+`ImpossibleConflictCase`, because an arm that can never run is a bug
+in the program, not a harmless extra.
+
+At run time a conflict is an ordinary sum-type value with the reserved
+type id `CONFLICT_TYPE_ID` (`u32::MAX - 3`, listed in `RESERVED_TYPE_IDS`
+so its test refuses a clash; the first draft took `u32::MAX - 1`, which
+`RegexMatch` already holds, caught in review by the Mac session), and
+`ConflictCase::ALL` is the one place that gives each case its name,
+index and payload field: the lowerer, `Value::conflict` and the public
+JSON mapping's `conflict_decl` all read it. Considered: adding a
+synthetic `Conflict` declaration to every IR file, which would have put
+a type into every consumer of `ir.types` (the ABI, the Python backend,
+native typeinfo) for programs that never use one. Contract and SDK
+naming is split out as Conflict-1b.
+
+---
+
 ## 2026-11-25 - Decided: one conflict type for table writes (B09)
 
 A `save` that another row's unique value blocks returned `Err(Some(holder))`,

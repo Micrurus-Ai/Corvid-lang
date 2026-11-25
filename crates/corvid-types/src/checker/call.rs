@@ -655,6 +655,36 @@ impl<'a> Checker<'a> {
                 Type::Unknown
             }
             BuiltIn::Page => self.check_page_call(name, args),
+            // `Changed(current)` and `Taken(holder)` build a conflict
+            // that can be any case, as a written `Conflict<Row>` can.
+            BuiltIn::Changed | BuiltIn::Taken => {
+                if args.len() != 1 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ArityMismatch { callee: name.name.clone(), expected: 1, got: args.len() },
+                        name.span,
+                    ));
+                    for arg in args {
+                        let _ = self.check_expr(arg);
+                    }
+                    return Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL);
+                }
+                let row_hint = match expected {
+                    Some(Type::Conflict(row, _)) => Some(&**row),
+                    _ => None,
+                };
+                let row = self.check_expr_as(&args[0], row_hint);
+                Type::Conflict(Box::new(row), crate::types::ConflictCases::ALL)
+            }
+            BuiltIn::Deleted => {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::NotCallable { got: "the conflict case `Deleted`, which carries no row".into() },
+                    name.span,
+                ));
+                for arg in args {
+                    let _ = self.check_expr(arg);
+                }
+                Type::Unknown
+            }
             _ => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::NotCallable {

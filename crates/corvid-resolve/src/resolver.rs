@@ -1013,9 +1013,13 @@ impl Resolver {
                         return;
                     }
                 }
-                if name.name == "None" {
-                    self.bindings
-                        .insert(name.span, Binding::BuiltIn(crate::scope::BuiltIn::None));
+                let unit = match name.name.as_str() {
+                    "None" => Some(crate::scope::BuiltIn::None),
+                    "Deleted" => Some(crate::scope::BuiltIn::Deleted),
+                    _ => None,
+                };
+                if let Some(unit) = unit {
+                    self.bindings.insert(name.span, Binding::BuiltIn(unit));
                     return;
                 }
                 self.bind_pattern_local(name);
@@ -1081,6 +1085,9 @@ impl Resolver {
             "None" => BuiltIn::None,
             "Ok" => BuiltIn::Ok,
             "Err" => BuiltIn::Err,
+            "Changed" => BuiltIn::Changed,
+            "Deleted" => BuiltIn::Deleted,
+            "Taken" => BuiltIn::Taken,
             _ => return None,
         })
     }

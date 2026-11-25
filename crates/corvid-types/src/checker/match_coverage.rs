@@ -100,6 +100,11 @@ impl<'a> Checker<'a> {
             Type::Tainted(inner) => return self.constructors(inner),
             Type::Option(inner) => vec![named("Some", vec![(**inner).clone()]), named("None", Vec::new())],
             Type::Result(ok, err) => vec![named("Ok", vec![(**ok).clone()]), named("Err", vec![(**err).clone()])],
+            // Only the cases this conflict can be need covering.
+            Type::Conflict(row, cases) => cases
+                .cases()
+                .map(|case| named(case.name(), case.field().map(|_| (**row).clone()).into_iter().collect()))
+                .collect(),
             Type::Bool => vec![
                 Constructor { kind: ConstructorKind::Bool(true), fields: Vec::new() },
                 Constructor { kind: ConstructorKind::Bool(false), fields: Vec::new() },

@@ -200,6 +200,27 @@ fn schema_for_inner(
                 "additionalProperties": false,
             })
         }
+        // A conflict has the sum-type shape, one alternative per case it
+        // can be.
+        Type::Conflict(row, cases) => {
+            let alternatives: Vec<_> = cases
+                .cases()
+                .map(|case| {
+                    let payload: Vec<_> = case.field().map(|_| schema_for_inner(row, types_by_id, visiting)).into_iter().collect();
+                    let mut fields = json!({ "type": "array", "minItems": payload.len(), "maxItems": payload.len() });
+                    if !payload.is_empty() {
+                        fields["prefixItems"] = Value::Array(payload);
+                    }
+                    json!({
+                        "type": "object",
+                        "properties": { "variant": { "type": "string", "const": case.name() }, "fields": fields },
+                        "required": ["variant", "fields"],
+                        "additionalProperties": false
+                    })
+                })
+                .collect();
+            json!({ "oneOf": alternatives })
+        }
         Type::ImportedStruct(_) | Type::RouteParams(_) => json!({ "type": "object" }),
         // `Function` and `Unknown` shouldn't appear as prompt return
         // types in well-typed programs. Emit a permissive schema so the

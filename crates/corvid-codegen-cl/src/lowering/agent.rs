@@ -480,6 +480,10 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,
         )),
+        Type::Conflict(_, _) => Err(CodegenError::not_supported(
+            "`Conflict<Row>` - a conflict comes from a table write, and tables run on the interpreter until they compile natively (B09 P6); `corvid run` picks the interpreter for them.",
+            span,
+        )),
         Type::Response(_) => Err(CodegenError::not_supported(
             "`Response<Body>` - a connector response comes from a connector call, which runs on the interpreter until native dispatch of runtime-owned calls lands; `corvid run` picks the interpreter for it.",
             span,

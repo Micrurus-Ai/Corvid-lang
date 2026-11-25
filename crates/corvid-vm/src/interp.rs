@@ -2161,6 +2161,17 @@ impl<'ir> Interpreter<'ir> {
             }
             // Sum-variant construction (45h): positional payload,
             // variant metadata from the owning IrType.
+            // A table write's conflict (B09): compiler-known, so its
+            // cases come from `ConflictCase` rather than a declaration.
+            IrCallKind::EnumConstructor { def_id, variant_index } if *def_id == corvid_types::CONFLICT_TYPE_ID => {
+                let case = corvid_types::ConflictCase::ALL.get(*variant_index as usize).copied().ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!("conflict case {variant_index} does not exist")),
+                        span,
+                    )
+                })?;
+                Ok(ExprFlow::Value(Value::conflict(case, arg_values.into_iter().next())))
+            }
             IrCallKind::EnumConstructor {
                 def_id,
                 variant_index,

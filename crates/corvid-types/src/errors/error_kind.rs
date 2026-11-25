@@ -6,6 +6,10 @@ pub enum TypeErrorKind {
     /// (slice 45i).
     NonExhaustiveMatch { missing: String },
 
+    /// A pattern names a conflict case the matched value can never be:
+    /// `Err(Changed(_))` on an `insert`, which only returns `Taken`.
+    ImpossibleConflictCase { case: String, possible: String },
+
     /// The target of a place assignment (`x.field = v`, `xs[i] = v`,
     /// compound `+=`) is not assignable — e.g. its root is not a
     /// local variable (slice 45b).
@@ -608,6 +612,9 @@ impl TypeErrorKind {
             Self::NonExhaustiveMatch { missing } => {
                 format!("non-exhaustive match: missing {missing}")
             }
+            Self::ImpossibleConflictCase { case, possible } => {
+                format!("this conflict is never `{case}`: it can only be {possible}")
+            }
             Self::InvalidAssignTarget { reason } => {
                 format!("invalid assignment target: {reason}")
             }
@@ -1137,6 +1144,9 @@ impl TypeErrorKind {
         match self {
             Self::NonExhaustiveMatch { .. } => Some(
                 "add the missing arm(s), or a final `_ -> ...` catch-all".into(),
+            ),
+            Self::ImpossibleConflictCase { .. } => Some(
+                "remove the arm: each table write returns only the conflicts it can produce".into(),
             ),
             Self::InvalidAssignTarget { .. } => Some(
                 "assign through a path rooted at a local variable, e.g. `x.field = v` or `xs[i] = v`".into(),

@@ -187,7 +187,8 @@ impl<'a> Checker<'a> {
             | Type::JsonValue
             | Type::Unknown => Ok(false),
             Type::Tainted(inner) => self.json_form(inner, direction, seen).map(|_| true),
-            Type::Option(inner) | Type::List(inner) => self.json_form(inner, direction, seen),
+            // A conflict crosses JSON as a sum type whose payload is its row.
+            Type::Option(inner) | Type::List(inner) | Type::Conflict(inner, _) => self.json_form(inner, direction, seen),
             Type::Map(a, b) | Type::Result(a, b) => {
                 let first = self.json_form(a, direction, seen)?;
                 Ok(self.json_form(b, direction, seen)? || first)

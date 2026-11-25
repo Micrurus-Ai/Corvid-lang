@@ -609,6 +609,7 @@ fn type_label(t: &Type) -> String {
         Type::Upload(inner) => format!("Upload<{}>", type_label(inner)),
         Type::Page(inner) => format!("Page<{}>", type_label(inner)),
         Type::Response(inner) => format!("Response<{}>", type_label(inner)),
+        Type::Conflict(row, _) => format!("Conflict<{}>", type_label(row)),
         Type::TraceId => "TraceId".into(),
         Type::DbHandle => "DbHandle".into(),
         Type::JsonValue => "JsonValue".into(),

@@ -69,6 +69,37 @@ pub fn lower_with_modules(
     ir
 }
 
+/// The conflict case a built-in names, for `Changed`, `Deleted` and
+/// `Taken` (B09). A case is a sum-type variant of the reserved
+/// [`corvid_types::CONFLICT_TYPE_ID`] at run time.
+fn conflict_case(builtin: BuiltIn) -> Option<corvid_types::ConflictCase> {
+    Some(match builtin {
+        BuiltIn::Changed => corvid_types::ConflictCase::Changed,
+        BuiltIn::Deleted => corvid_types::ConflictCase::Deleted,
+        BuiltIn::Taken => corvid_types::ConflictCase::Taken,
+        _ => return None,
+    })
+}
+
+/// The pattern for one conflict case.
+fn conflict_pattern(case: corvid_types::ConflictCase, args: Vec<IrPattern>) -> IrPattern {
+    IrPattern::Variant {
+        owner: corvid_types::CONFLICT_TYPE_ID,
+        variant_index: case.index(),
+        variant_name: case.name().to_string(),
+        args,
+    }
+}
+
+/// Building one conflict case.
+fn conflict_constructor(case: corvid_types::ConflictCase, args: Vec<IrExpr>) -> IrExprKind {
+    IrExprKind::Call {
+        kind: IrCallKind::EnumConstructor { def_id: corvid_types::CONFLICT_TYPE_ID, variant_index: case.index() },
+        callee_name: case.name().to_string(),
+        args,
+    }
+}
+
 /// The revision of a table row that has never been stored (B09).
 fn zero_revision(span: Span) -> IrExpr {
     IrExpr { kind: IrExprKind::Literal(IrLiteral::Int(0)), ty: Type::Int, span }
@@ -1802,7 +1833,10 @@ impl<'a> Lowerer<'a> {
                         args: Vec::new(),
                     }
                 }
-                Some(Binding::BuiltIn(_)) => IrPattern::None_,
+                Some(Binding::BuiltIn(b)) => match conflict_case(*b) {
+                    Some(case) => conflict_pattern(case, Vec::new()),
+                    None => IrPattern::None_,
+                },
                 Some(Binding::Local(local_id)) => IrPattern::Bind {
                     local_id: *local_id,
                     name: name.name.clone(),
@@ -1836,6 +1870,9 @@ impl<'a> Lowerer<'a> {
                             variant_name: name.name.clone(),
                             args: lowered_args,
                         }
+                    }
+                    Some(Binding::BuiltIn(b)) if conflict_case(*b).is_some() => {
+                        conflict_pattern(conflict_case(*b).expect("a conflict case"), lowered_args)
                     }
                     Some(Binding::BuiltIn(b)) => {
                         let first = Box::new(
@@ -1903,6 +1940,7 @@ impl<'a> Lowerer<'a> {
                 name: id.name.clone(),
             },
             Some(Binding::BuiltIn(BuiltIn::None)) => IrExprKind::OptionNone,
+            Some(Binding::BuiltIn(BuiltIn::Deleted)) => conflict_constructor(corvid_types::ConflictCase::Deleted, Vec::new()),
             Some(Binding::BuiltIn(_)) => IrExprKind::Local {
                 local_id: LocalId(u32::MAX),
                 name: id.name.clone(),
@@ -2010,6 +2048,10 @@ impl<'a> Lowerer<'a> {
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::None)) => return IrExprKind::OptionNone,
+                Some(Binding::BuiltIn(b @ (BuiltIn::Changed | BuiltIn::Taken))) => {
+                    let case = conflict_case(*b).expect("a conflict case");
+                    return conflict_constructor(case, args.iter().map(|arg| self.lower_expr(arg)).collect());
+                }
                 Some(Binding::BuiltIn(BuiltIn::Page)) => {
                     // `Page(items, next_cursor)` (slice 52c-2).
                     let mut lowered = args.iter().map(|a| self.lower_expr(a));

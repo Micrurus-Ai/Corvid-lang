@@ -668,7 +668,9 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // classes vs `typing.Union[T, E]` vs `T | None`-ish shapes).
         // Promoting these to richer annotations is its own slice and
         // out of 20l-B scope.
-        T::Result(_, _) | T::Weak(_, _) => "object".into(),
+        // B09 — a table write's conflict is interpreter-tier like the
+        // tables that produce it.
+        T::Result(_, _) | T::Weak(_, _) | T::Conflict(_, _) => "object".into(),
         T::Grounded(inner) => python_type_hint_of(inner, types),
         T::Tainted(inner) => python_type_hint_of(inner, types),
         T::TraceId => "str".into(),

@@ -8249,7 +8249,9 @@ You never declare a table index: `corvid migrate plan` reads every query the tab
 
 A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a table can keep a token's hash and find its row with `ApiKey.where(fn (k) -> k.token_hash == token.utf8().sha256())`. `Bytes` has no order, so `order_by` on one is a compile error. Store and compare a hash, never the secret: the database's lookup is not constant-time as `==` in Corvid is. A raw `std.db` query still shows a binary cell as `<blob:redacted>`. [Binary values](docs/reference/tables.md#binary-values)
 
-`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. A program with several databases keeps one migration history each, in `migrations/<database>/`, and `corvid migrate plan` and `migrate up --program` handle every database in one command. A program with one database keeps `migrations/` as before.
+`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. `Conflict<Row>` says why a table write did not happen: `Changed(current)`, `Deleted` or `Taken(holder)`. Match on the cases by name; a match on a written `Conflict<Row>` needs all three, and a conflict crosses JSON as a sum type. [Conflicts](docs/reference/tables.md#conflicts)
+
+A program with several databases keeps one migration history each, in `migrations/<database>/`, and `corvid migrate plan` and `migrate up --program` handle every database in one command. A program with one database keeps `migrations/` as before.
 
 Plan the program from its entry point: the planner covers the tables of every module it imports, so a database shared by several modules gets one migration history.
 

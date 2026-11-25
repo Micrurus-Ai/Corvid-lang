@@ -111,6 +111,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::Upload(inner) => format!("Upload_{}", mangle_type_name(inner)),
         Type::Page(inner) => format!("Page_{}", mangle_type_name(inner)),
         Type::Response(inner) => format!("Response_{}", mangle_type_name(inner)),
+        Type::Conflict(row, _) => format!("Conflict_{}", mangle_type_name(row)),
         Type::RouteParams(_) => "RouteParams".into(),
         Type::Unknown => "Unknown".into(),
     }
@@ -642,6 +643,9 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // runs on the interpreter until native dispatch of runtime-owned
         // calls lands.
         Type::Response(_) => false,
+        // A conflict comes from a table write, which runs on the
+        // interpreter until tables compile natively (B09 P6).
+        Type::Conflict(_, _) => false,
         Type::Function { .. } => crate::native_callback_type(ty),
         Type::Nothing
         | Type::RouteParams(_)

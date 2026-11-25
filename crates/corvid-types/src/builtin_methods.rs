@@ -794,14 +794,21 @@ pub fn json_error_fields() -> [(&'static str, Type); 4] {
 /// compiler-known, so it has no declaration id; this one is reserved.
 pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX);
 
+/// The type id a table write's conflict carries at run time (B09).
+/// `Conflict` is compiler-known, so it has no declaration id. Its
+/// variants are [`crate::ConflictCase::ALL`], each case's index its
+/// variant index.
+pub const CONFLICT_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 3);
+
 /// Every type id reserved for a compiler-known record, by name. A new
 /// compiler-known record takes the next free id below these and joins
 /// this list; the test beside it fails if two share an id, which would
 /// make the interpreter mistake one record for the other.
-pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 3] = [
+pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 4] = [
     ("JsonError", JSON_ERROR_TYPE_ID),
     ("RegexMatch", REGEX_MATCH_TYPE_ID),
     ("Response", RESPONSE_TYPE_ID),
+    ("Conflict", CONFLICT_TYPE_ID),
 ];
 
 #[cfg(test)]

@@ -286,6 +286,19 @@ impl Clone for Value {
 }
 
 impl Value {
+    /// A table write's conflict (B09): a sum-type value of the reserved
+    /// [`corvid_types::CONFLICT_TYPE_ID`], with `row` the payload of
+    /// `Changed` and `Taken` and absent for `Deleted`.
+    pub fn conflict(case: corvid_types::ConflictCase, row: Option<Value>) -> Value {
+        Value::Enum(EnumValue::new(
+            corvid_types::CONFLICT_TYPE_ID,
+            "Conflict".to_string(),
+            case.index(),
+            case.name().to_string(),
+            row.into_iter().collect(),
+        ))
+    }
+
     pub fn type_name(&self) -> String {
         match self {
             Value::Int(_) => "Int".into(),

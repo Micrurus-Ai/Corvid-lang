@@ -67,6 +67,33 @@ pub fn json_error_decl() -> corvid_ir::IrType {
     }
 }
 
+/// The sum-type declaration of a `Conflict<Row>` (B09): the reserved
+/// [`corvid_types::CONFLICT_TYPE_ID`] and one variant per
+/// [`corvid_types::ConflictCase`], in order, whose one field, if it has
+/// one, is the row. Encoding and decoding read a conflict through it, so
+/// it crosses JSON exactly as a declared sum type does.
+pub fn conflict_decl(row: &corvid_types::Type) -> corvid_ir::IrType {
+    let span = corvid_ast::Span::new(0, 0);
+    corvid_ir::IrType {
+        id: corvid_types::CONFLICT_TYPE_ID,
+        name: "Conflict".into(),
+        fields: Vec::new(),
+        variants: corvid_types::ConflictCase::ALL
+            .into_iter()
+            .map(|case| corvid_ir::IrEnumVariant {
+                name: case.name().into(),
+                fields: case
+                    .field()
+                    .map(|name| corvid_ir::IrField { name: name.into(), ty: row.clone(), refinement: None, span })
+                    .into_iter()
+                    .collect(),
+                span,
+            })
+            .collect(),
+        span,
+    }
+}
+
 /// Parse JSON text. Text that is not JSON fails at the root path,
 /// naming where the text stopped making sense.
 pub fn parse_json_text(text: &str) -> Result<J, JsonDecodeError> {

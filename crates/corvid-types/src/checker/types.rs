@@ -311,7 +311,7 @@ impl<'a> Checker<'a> {
 
         match name {
             "List" | "Stream" | "Option" | "Grounded" | "Tainted" | "Partial" | "ResumeToken"
-            | "Upload" | "Page" | "Response" => {
+            | "Upload" | "Page" | "Response" | "Conflict" => {
                 if args.len() != 1 {
                     if matches!(context, TypeContext::Root) {
                         self.errors.push(TypeError::new(
@@ -337,6 +337,8 @@ impl<'a> Checker<'a> {
                     "Upload" => Type::Upload(inner),
                     "Page" => Type::Page(inner),
                     "Response" => Type::Response(inner),
+                    // A written conflict can be any of its cases.
+                    "Conflict" => Type::Conflict(inner, crate::types::ConflictCases::ALL),
                     _ => unreachable!(),
                 }
             }

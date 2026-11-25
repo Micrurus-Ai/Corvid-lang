@@ -134,6 +134,14 @@ pub enum BuiltIn {
     /// connector call produces one; programs read it with `status()`,
     /// `body()` and `header(name)`.
     Response,
+    /// B09 — `Conflict<Row>`, why a table write did not happen.
+    Conflict,
+    /// Call: `Changed(current: Row) -> Conflict<Row>`.
+    Changed,
+    /// The unit case `Deleted` of `Conflict<Row>`.
+    Deleted,
+    /// Call: `Taken(holder: Row) -> Conflict<Row>`.
+    Taken,
     /// B03 — `RegexMatch`, the compiler-known record `find_regex` and
     /// `find_all_regex` return. Nameable so helper agents can take a
     /// match as a parameter; only the regex methods construct one.
@@ -249,6 +257,11 @@ impl SymbolTable {
         self.builtins.insert("Upload".into(), BuiltIn::Upload);
         self.builtins.insert("Page".into(), BuiltIn::Page);
         self.builtins.insert("Response".into(), BuiltIn::Response);
+        // B09 — a table write's conflict and its cases.
+        self.builtins.insert("Conflict".into(), BuiltIn::Conflict);
+        self.builtins.insert("Changed".into(), BuiltIn::Changed);
+        self.builtins.insert("Deleted".into(), BuiltIn::Deleted);
+        self.builtins.insert("Taken".into(), BuiltIn::Taken);
         // B03 — see the `BuiltIn::RegexMatch` docstring.
         self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
     }

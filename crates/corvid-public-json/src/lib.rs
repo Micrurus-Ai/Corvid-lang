@@ -38,5 +38,5 @@ pub mod text_scalar;
 
 pub use decode::{decode, decode_text, ValueBuilder};
 pub use encode::{encode, encode_text, ValueReader};
-pub use error::{json_error_decl, parse_json_text, JsonDecodeError, UnknownFields};
+pub use error::{conflict_decl, json_error_decl, parse_json_text, JsonDecodeError, UnknownFields};
 pub use plan::{builder_shapes, reachable_types, DecodePlan, Shape};

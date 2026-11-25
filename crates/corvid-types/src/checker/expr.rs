@@ -50,9 +50,14 @@ impl<'a> Checker<'a> {
             },
             Expr::Ident { name, .. } => {
                 let ty = self.type_of_ident(name);
-                match (&ty, expected) {
-                    (Type::Option(inner), Some(expected @ Type::Option(_)))
-                        if **inner == Type::Unknown && matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::None))) => expected.clone(),
+                // A bare `None` or `Deleted` takes its payload type from
+                // where it goes.
+                match (&ty, expected, self.bindings.get(&name.span)) {
+                    (Type::Option(inner), Some(expected @ Type::Option(_)), Some(Binding::BuiltIn(BuiltIn::None)))
+                        if **inner == Type::Unknown => expected.clone(),
+                    (Type::Conflict(..), Some(Type::Conflict(row, _)), Some(Binding::BuiltIn(BuiltIn::Deleted))) => {
+                        Type::Conflict(row.clone(), crate::types::ConflictCases::ALL)
+                    }
                     _ => ty,
                 }
             }
@@ -317,6 +322,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Page
                 // B05 — a `Response` comes only from a connector call.
                 | BuiltIn::Response
+                | BuiltIn::Conflict
                 // B03 — a `RegexMatch` comes only from the regex methods.
                 | BuiltIn::RegexMatch => {
                     self.errors.push(TypeError::new(
@@ -341,6 +347,8 @@ impl<'a> Checker<'a> {
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor
                 | BuiltIn::Range
+                | BuiltIn::Changed
+                | BuiltIn::Taken
                 | BuiltIn::Choose => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::BareFunctionReference {
@@ -351,6 +359,7 @@ impl<'a> Checker<'a> {
                     Type::Unknown
                 }
                 BuiltIn::None => Type::Option(Box::new(Type::Unknown)),
+                BuiltIn::Deleted => Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL),
             },
         }
     }
@@ -811,6 +820,7 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
                 "ResumeToken" => Type::ResumeToken(Box::new(inner)),
                 "Upload" => Type::Upload(Box::new(inner)),
                 "Page" => Type::Page(Box::new(inner)),
+                "Conflict" => Type::Conflict(Box::new(inner), crate::types::ConflictCases::ALL),
                 _ => Type::Unknown,
             }
         }
