@@ -1115,6 +1115,38 @@ pub struct RouteResponse {
 pub enum RouteResponseKind {
     Json,
     Html,
+    /// A `live` declaration (B14): `live "/boards/{board}/cards" -> Card`.
+    /// Its body returns one table query; a subscriber receives the
+    /// matching rows, then each committed change. The response type is
+    /// `List<Row>`, the snapshot, so the body is checked as a route's
+    /// is, and [`RouteResponse::live_row`] gives the declared `Row`.
+    Live,
+}
+
+impl RouteResponse {
+    /// The row type a `live` declaration delivers: `Card` in `-> Card`.
+    pub fn live_row(&self) -> Option<&TypeRef> {
+        match (&self.kind, &self.ty) {
+            (RouteResponseKind::Live, TypeRef::Generic { args, .. }) => args.first(),
+            _ => None,
+        }
+    }
+}
+
+impl HttpRouteDecl {
+    pub fn is_live(&self) -> bool {
+        self.response.kind == RouteResponseKind::Live
+    }
+
+    /// The name a `live` declaration is reached by, from the client and
+    /// the contract: its path's last fixed segment, `cards` in
+    /// `/boards/{board}/cards`.
+    pub fn live_name(&self) -> Option<&str> {
+        if !self.is_live() {
+            return None;
+        }
+        self.path.split('/').rev().find(|segment| !segment.is_empty() && !segment.starts_with('{'))
+    }
 }
 
 /// Visibility modifier on a method declared inside an `extend` block.

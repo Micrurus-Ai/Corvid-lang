@@ -1,6 +1,6 @@
 # Proposal: native dispatch of runtime-owned calls
 
-Status: **decided 2026-11-25; N1, N2 and N3a built 2026-11-25, N3b–N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
+Status: **decided 2026-11-25; N1, N2 and N3 built 2026-11-25, N4 and N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
 
 ## Problem
 

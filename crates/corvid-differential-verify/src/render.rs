@@ -201,6 +201,20 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                     out.push('\n');
                 }
                 push_indent(indent + 1, out);
+                if route.is_live() {
+                    // `live "/path" -> Row`, the form it was written in.
+                    out.push_str("live ");
+                    out.push_str(&render_string_literal(&route.path));
+                    out.push_str(" -> ");
+                    out.push_str(&route.response.live_row().map(render_type_ref).unwrap_or_default());
+                    if let Some(policy) = &route.policy {
+                        render_route_policy(policy, out);
+                    }
+                    out.push_str(":
+");
+                    render_block(&route.body, indent + 2, out);
+                    continue;
+                }
                 out.push_str("route ");
                 out.push_str(route.method.as_str());
                 out.push(' ');
@@ -215,7 +229,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 }
                 match route.response.kind {
                     corvid_ast::RouteResponseKind::Html => out.push_str(" -> html"),
-                    corvid_ast::RouteResponseKind::Json => {
+                    corvid_ast::RouteResponseKind::Json | corvid_ast::RouteResponseKind::Live => {
                         out.push_str(" -> json ");
                         out.push_str(&render_type_ref(&route.response.ty));
                     }

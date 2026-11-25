@@ -53,7 +53,7 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
     let unknown_fields = if strict != 0 { UnknownFields::Reject } else { UnknownFields::Ignore };
-    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false };
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
     let text = unsafe { text.as_str() };
     match corvid_public_json::decode_text(text, &plan.root, &types_by_id, unknown_fields, &mut builder) {
         Ok(value) => {
@@ -80,7 +80,9 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
 /// # Safety
 /// `name` and the `arg_count` strings at `args` must be live Corvid
 /// strings; `plan`, `plan_len` and `typeinfos` as for
-/// [`corvid_json_decode_typed`]; `payload` a writable, aligned slot.
+/// [`corvid_json_decode_typed`]; `payload` a writable, aligned slot;
+/// `revealed` null, or `arg_count` live Corvid strings holding the
+/// revealed arguments of a tool that takes a secret.
 #[no_mangle]
 pub unsafe extern "C" fn corvid_runtime_call(
     name: CorvidString,
@@ -90,22 +92,35 @@ pub unsafe extern "C" fn corvid_runtime_call(
     plan_len: i64,
     typeinfos: *const *const c_void,
     payload: *mut i64,
+    revealed: *const CorvidString,
 ) -> i64 {
     let name = unsafe { name.as_str() }.to_string();
-    let mut values = Vec::with_capacity(arg_count.max(0) as usize);
-    for index in 0..arg_count.max(0) as usize {
-        let text = unsafe { (*args.add(index)).as_str() };
-        values.push(serde_json::from_str::<J>(text).unwrap_or_else(|err| {
-            panic!("internal compiler error: native code encoded an argument of `{name}` that is not JSON: {err}")
-        }));
-    }
+    let parse = |texts: *const CorvidString| -> Vec<J> {
+        (0..arg_count.max(0) as usize)
+            .map(|index| {
+                let text = unsafe { (*texts.add(index)).as_str() };
+                serde_json::from_str::<J>(text).unwrap_or_else(|err| {
+                    panic!("internal compiler error: native code encoded an argument of `{name}` that is not JSON: {err}")
+                })
+            })
+            .collect()
+    };
+    let values = parse(args);
+    // A tool that takes a secret gets the revealed form; every record of
+    // the call holds `values`, as on the interpreter.
+    let revealed = (!revealed.is_null()).then(|| crate::RevealedToolArguments::new(&values, parse(revealed)));
     let state = crate::ffi_bridge::bridge();
     let runtime = state.corvid_runtime();
     let call_name = name.clone();
     let call_runtime = runtime.clone();
     let answer = state
         .tokio_handle()
-        .block_on(async move { call_runtime.call_tool(&call_name, values).await });
+        .block_on(async move {
+            match revealed {
+                Some(revealed) => call_runtime.call_tool_revealing_secrets(&call_name, values, revealed).await,
+                None => call_runtime.call_tool(&call_name, values).await,
+            }
+        });
     let answer = match answer {
         Ok(answer) => answer,
         Err(err) => {
@@ -118,7 +133,7 @@ pub unsafe extern "C" fn corvid_runtime_call(
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
     let accepts_secrets = crate::runtime::is_stdlib_secret_value_tool(&name);
-    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets };
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets, secret_form: None };
     let decoded = match corvid_public_json::decode(&answer, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder) {
         Ok(value) => value,
         Err(error) => match runtime.connector_failure_variant(&name) {
@@ -181,6 +196,17 @@ struct NativeValues<'a> {
     /// Whether a `Secret` position may be built: only for the answer of a
     /// tool the runtime implements whose result it holds as a secret.
     accepts_secrets: bool,
+    /// How a `Secret` position is written, when this reads a tool
+    /// argument (N3c); `None` refuses it, as `to_json` must.
+    secret_form: Option<SecretForm>,
+}
+
+/// The two forms of a tool argument that holds a secret: what every
+/// record of the call holds, and what the implementation receives.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SecretForm {
+    Recorded,
+    Revealed,
 }
 
 impl NativeValues<'_> {
@@ -345,11 +371,44 @@ pub unsafe extern "C" fn corvid_json_encode_typed(
 ) -> CorvidString {
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
-    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false };
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
     match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
         Ok(text) => crate::ffi_bridge::string_from_rust(text),
         Err(reason) => {
             eprintln!("corvid: to_json: {reason}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// One argument of a runtime call whose tool takes a secret (N3c), as
+/// public JSON: with `<redacted>` at every `Secret` position when
+/// `revealed` is 0, the form every record of the call holds, or with the
+/// secrets' texts when it is 1, the form only the implementation
+/// receives. A key made by `decode_base64_after` has no text, so the
+/// revealed form stops the program with the interpreter's message.
+///
+/// # Safety
+/// As for [`corvid_json_encode_typed`]; `name` must be a live Corvid
+/// string.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_json_encode_tool_argument(
+    name: CorvidString,
+    value: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+    revealed: i64,
+) -> CorvidString {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let secret_form = Some(if revealed != 0 { SecretForm::Revealed } else { SecretForm::Recorded });
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form };
+    match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
+        Ok(text) => crate::ffi_bridge::string_from_rust(text),
+        Err(reason) => {
+            let name = unsafe { name.as_str() };
+            eprintln!("corvid: tool `{name}`: {reason}");
             std::process::exit(1);
         }
     }
@@ -364,6 +423,17 @@ unsafe fn slot_at(pointer: i64, first_offset: i32, index: usize) -> i64 {
 
 impl corvid_public_json::ValueReader for NativeValues<'_> {
     type Value = Slot;
+
+    fn secret(&mut self, value: &Slot) -> Result<J, String> {
+        match self.secret_form {
+            None => Err("`Secret` has no JSON form".to_string()),
+            Some(SecretForm::Recorded) => Ok(J::String(crate::REDACTED_SECRET.to_string())),
+            Some(SecretForm::Revealed) => {
+                let secret = unsafe { super::secret_object::secret_of(value.bits as *const c_void) };
+                secret.expose_text().map(|text| J::String(text.to_string())).ok_or_else(|| crate::DECODED_KEY_TO_TOOL.to_string())
+            }
+        }
+    }
 
     fn int(&mut self, value: &Slot) -> Result<i64, String> {
         Ok(value.bits)

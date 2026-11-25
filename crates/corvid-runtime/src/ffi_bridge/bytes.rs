@@ -30,12 +30,12 @@ use corvid_crypto::{Bytes, HmacKey};
 /// # Safety
 /// `value` must be a live Corvid string written by this module or by a
 /// native JSON decode.
-unsafe fn bytes_of(value: &CorvidString) -> Bytes {
+pub(super) unsafe fn bytes_of(value: &CorvidString) -> Bytes {
     unsafe { canonical(value, "Bytes", Bytes::from_base64_url) }
 }
 
 /// The native slot for `bytes`: its canonical text.
-fn text_of(bytes: &Bytes) -> CorvidString {
+pub(super) fn text_of(bytes: &Bytes) -> CorvidString {
     string_from_rust(bytes.to_base64_url())
 }
 
@@ -131,8 +131,8 @@ bytes_digest!(corvid_bytes_sha512, sha512);
 
 macro_rules! bytes_hmac {
     ($symbol:ident, $mac:ident) => {
-        #[doc = concat!("`message.", stringify!($mac), "(key)` with a `Bytes` key. Native code")]
-        /// holds no `Secret`, so a secret key never reaches this call.
+        #[doc = concat!("`message.", stringify!($mac), "(key)` with a `Bytes` key; a `Secret`")]
+        /// key goes to `secret_object`'s entry point.
         ///
         /// # Safety
         /// Both operands must be live native Bytes strings.

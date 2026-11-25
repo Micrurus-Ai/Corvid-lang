@@ -28,7 +28,7 @@ table Card:
 
 server board_app:
     live "/boards/{board}/cards" -> Card requires permission("board.view"):
-        return Card.where(fn (c) -> c.board == board).order_by(fn (c) -> c.card)
+        return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
 ```
 
 `live` is one new word, written beside `route` in a `server` block. It has a path with parameters, the row type it delivers, the same `requires` clause routes use, and a body that returns one table query. The query uses the same `where` and `order_by` forms the database already runs.
@@ -136,6 +136,17 @@ role changes, expiry and logout even while the socket is idle. RT-2 owns
 coalescing and replacement snapshots. The transport polls the handles
 directly so a slow socket does not accumulate a second queue of changes.
 [Adapter interface](../../crates/corvid-cli/src/serve_cmd/live/source.rs)
+
+## Built in RT-1, and two points to agree
+
+RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. `corvid serve` refuses to start a program that declares one (`E5204`, `live /boards/{board}/cards needs live subscriptions over the WebSocket transport`) until RT-3 sets `RuntimeCapabilities::live_subscriptions`.
+
+**The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
+
+Two corrections to the example agreed above, both written so a first-time reader sees one way:
+
+1. **Path parameters are read as `path.board`**, as a route reads them. The agreed example's bare `board` would make `live` the one place a path parameter is a bare name.
+2. **Typed path placeholders, proposed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. Not built until agreed, since the frontend parses route paths too.
 
 ## Non-scope
 

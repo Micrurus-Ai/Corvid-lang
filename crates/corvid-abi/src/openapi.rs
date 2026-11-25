@@ -566,6 +566,7 @@ mod tests {
                 pagination: None,
                 policy: None,
             }],
+            live: vec![],
             agents: vec![ContractCallable {
                 name: "chat".into(),
                 inputs: vec![ContractParam { name: "m".into(), type_name: "String".into() }],

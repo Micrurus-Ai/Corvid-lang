@@ -36,6 +36,15 @@ pub trait ValueReader {
     fn json(&mut self, value: &Self::Value) -> Result<J, String>;
     /// B06 — a `Decimal`, time or currency value of type `ty`.
     fn text_scalar(&mut self, ty: &Type, value: &Self::Value) -> Result<crate::text_scalar::TextScalar, String>;
+    /// A `Secret`, which has no JSON form, so every reader refuses by
+    /// default and `to_json` can never write one. Only the native runtime
+    /// call's reader accepts one, for a tool argument: `<redacted>` in
+    /// the form every record of the call holds, the text in the form the
+    /// tool's implementation receives (native dispatch N3c).
+    fn secret(&mut self, value: &Self::Value) -> Result<J, String> {
+        let _ = value;
+        Err(no_json_form(&Type::Secret))
+    }
 }
 
 /// Encode `value`, of type `ty`, as public JSON.
@@ -145,6 +154,7 @@ impl<R: ValueReader> Encoder<'_, R> {
                 json!({ "value": self.encode(&payload, inner)?, "sources": sources })
             }
             Type::JsonValue => self.reader.json(value)?,
+            Type::Secret => self.reader.secret(value)?,
             // B06 — exact text, printed by the type's own crate.
             ty if crate::text_scalar::name(ty).is_some() => J::String(self.reader.text_scalar(ty, value)?.to_text()),
             other => return Err(no_json_form(other)),

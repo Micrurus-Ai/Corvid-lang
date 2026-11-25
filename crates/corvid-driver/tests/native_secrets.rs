@@ -195,3 +195,176 @@ fn a_tool_of_the_programs_own_that_takes_a_secret_stays_on_the_interpreter() {
         assert!(reason.contains("tool of the program's own"), "{reason}");
     }
 }
+
+const WEBHOOK_ENV: &str = "CORVID_TEST_NATIVE_SECRET_WEBHOOK";
+/// A Standard Webhooks signing secret: `whsec_` and the base64 of the key.
+const WEBHOOK_TEXT: &str = "whsec_c2lnbmluZy1rZXktYnl0ZXM=";
+
+/// The cryptography a secret keys (native dispatch N3b): HMAC keyed by a
+/// secret's text and by a key decoded from `whsec_` base64, a decoding
+/// failure's message, and a password checked against a stored hash.
+fn crypto_program(hash: &str) -> String {
+    format!(
+        r#"
+import "./std/secrets" use secret
+import "./std/crypto" use random_token
+
+agent fallback() -> Secret:
+    return random_token(16)
+
+agent must(name: String) -> Secret:
+    return match secret(name):
+        Ok(key) -> key
+        Err(problem) -> fallback()
+
+agent signed_with_decoded(key: Secret, body: String) -> String:
+    return match key.decode_base64_after("whsec_"):
+        Ok(decoded) -> body.utf8().hmac_sha256(decoded).to_hex()
+        Err(message) -> message
+
+agent decode_message(key: Secret) -> String:
+    return match key.decode_base64_after("nope_"):
+        Ok(decoded) -> "decoded"
+        Err(message) -> message
+
+agent main() -> String:
+    key = must("CORVID_TEST_NATIVE_SECRET_KEY")
+    other = must("CORVID_TEST_NATIVE_SECRET_OTHER")
+    webhook = must("CORVID_TEST_NATIVE_SECRET_WEBHOOK")
+    body = "order.paid"
+    by_text = body.utf8().hmac_sha256(key).to_hex()
+    by_text_512 = body.utf8().hmac_sha512(key).to_hex()
+    by_decoded = signed_with_decoded(webhook, body)
+    by_bytes = body.utf8().hmac_sha256("signing-key-bytes".utf8()).to_hex()
+    checks = [key.verify_password("{hash}"), other.verify_password("{hash}"), key.verify_password("not a hash")]
+    return by_text + " " + by_text_512 + " " + by_decoded + " " + by_bytes + " " + checks.to_json() + " " + decode_message(key)
+"#
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn secret_cryptography_gives_the_same_answers_on_both_tiers() {
+    std::env::set_var(WEBHOOK_ENV, WEBHOOK_TEXT);
+    let hash = corvid_crypto::hash_password(KEY_TEXT.as_bytes(), corvid_crypto::PasswordCost::OWASP_2023).expect("hash");
+    let program = crypto_program(&hash);
+    let project = project(&program);
+
+    let runtime = Runtime::builder().build();
+    let interpreted = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect("interpreter run");
+    let Value::String(interpreted) = interpreted else { panic!("expected a String, got {interpreted:?}") };
+    let parts: Vec<&str> = interpreted.split(' ').collect();
+    // A key decoded from `whsec_` base64 keys the HMAC with its bytes,
+    // exactly as a `Bytes` key holding them does.
+    assert_eq!(parts[2], parts[3], "{interpreted}");
+    assert!(interpreted.contains("[true,false,false]"), "{interpreted}");
+    assert!(interpreted.ends_with("the secret does not start with `nope_`"), "{interpreted}");
+
+    let binary = native_binary(&project, &program);
+    let mut command = Command::new(&binary);
+    command.env(KEY_ENV, KEY_TEXT).env(OTHER_ENV, OTHER_TEXT).env(WEBHOOK_ENV, WEBHOOK_TEXT).env("CORVID_DEBUG_ALLOC", "1");
+    let output = command.output().expect("run native binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), &*interpreted, "both tiers give the same tags, verdicts and message");
+    let count = |name: &str| -> i64 {
+        stderr.lines().find_map(|line| line.strip_prefix(&format!("{name}="))).unwrap().trim().parse().unwrap()
+    };
+    assert_eq!(count("ALLOCS"), count("RELEASES"), "every secret, including the decoded key, is freed: {stderr}");
+}
+
+/// Sign-up and log-in (native dispatch N3c): `hash_password` runs through
+/// the runtime call, which records the password as `<redacted>` and
+/// reveals it only to the implementation, as the interpreter does.
+const PASSWORD_PROGRAM: &str = r#"
+import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+agent fallback() -> Secret:
+    return random_token(16)
+
+agent must(name: String) -> Secret:
+    return match secret(name):
+        Ok(key) -> key
+        Err(problem) -> fallback()
+
+agent sign_up(password: Secret) -> String:
+    return hash_password(password, owasp_2023())
+
+agent log_in(password: Secret, hash: String) -> Bool:
+    return password.verify_password(hash)
+
+agent main() -> String:
+    password = must("CORVID_TEST_NATIVE_SECRET_KEY")
+    wrong = must("CORVID_TEST_NATIVE_SECRET_OTHER")
+    hash = sign_up(password)
+    return [log_in(password, hash), log_in(wrong, hash), hash.length() > 60].to_json()
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn passwords_hash_and_verify_alike_on_both_tiers_with_the_password_redacted() {
+    let project = project(PASSWORD_PROGRAM);
+    let traces = tempfile::tempdir().unwrap();
+
+    let runtime = Runtime::builder().trace_to(traces.path()).build();
+    let interpreted = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect("interpreter run");
+    let Value::String(interpreted) = interpreted else { panic!("expected a String, got {interpreted:?}") };
+    assert_eq!(&*interpreted, "[true,false,true]");
+
+    let binary = native_binary(&project, PASSWORD_PROGRAM);
+    let native_trace = traces.path().join("native.jsonl");
+    let native = run_native(&binary, &[("CORVID_TRACE_PATH", &native_trace)]);
+    assert_eq!(native, *interpreted);
+
+    let raw = std::fs::read_to_string(&native_trace).unwrap();
+    assert!(!raw.contains(KEY_TEXT) && !raw.contains(OTHER_TEXT), "the native trace never holds a password");
+    let call = raw
+        .lines()
+        .find(|line| line.contains("\"tool_call\"") && line.contains("\"hash_password\""))
+        .expect("the hash_password call is recorded");
+    let call: serde_json::Value = serde_json::from_str(call).unwrap();
+    assert_eq!(call["args"][0], "<redacted>", "the password argument is recorded as `<redacted>`: {call}");
+    assert_eq!(call["args"][1]["memory_kib"], 19456, "the declared cost is recorded: {call}");
+
+    // Replay substitutes the recorded hash and re-reads the password, so
+    // the log-in verdicts come back the same.
+    let replayed = run_native(&binary, &[("CORVID_REPLAY_TRACE_PATH", &native_trace)]);
+    assert_eq!(replayed, native);
+}
+
+/// A key made by `decode_base64_after` is bytes and has no text, so no
+/// tool can receive it: both tiers stop with the same message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_decoded_key_cannot_reach_a_tool_on_either_tier() {
+    std::env::set_var(WEBHOOK_ENV, WEBHOOK_TEXT);
+    let program = r#"
+import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+agent fallback() -> Secret:
+    return random_token(16)
+
+agent must(name: String) -> Secret:
+    return match secret(name):
+        Ok(key) -> key
+        Err(problem) -> fallback()
+
+agent hash_of(key: Secret) -> String:
+    return hash_password(key, owasp_2023())
+
+agent main() -> String:
+    webhook = must("CORVID_TEST_NATIVE_SECRET_WEBHOOK")
+    return match webhook.decode_base64_after("whsec_"):
+        Ok(key) -> hash_of(key)
+        Err(message) -> message
+"#;
+    let project = project(program);
+    let runtime = Runtime::builder().build();
+    let error = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect_err("the interpreter refuses");
+    assert!(error.to_string().contains(corvid_runtime::DECODED_KEY_TO_TOOL), "{error}");
+
+    let binary = native_binary(&project, program);
+    let output = Command::new(&binary).env(WEBHOOK_ENV, WEBHOOK_TEXT).output().expect("run native binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains(corvid_runtime::DECODED_KEY_TO_TOOL), "{stderr}");
+}

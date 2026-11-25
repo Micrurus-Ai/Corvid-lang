@@ -29,6 +29,86 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Serve tests no longer share ports
+
+`approval_transition_endpoints_approve_re_executes_and_deny_drops_pending`
+failed in every parallel gate run and passed alone. The cause was not
+the approval code: `serve_smoke.rs` gave each served app a fixed port,
+and 8196, 8198 and 8204 to 8207 were each used by two tests, so under
+parallel load one test's requests reached another test's server. Every
+served app in the file now takes an OS-assigned port from `free_port()`,
+as the newer tests in the file and in `serve_public_json.rs` already
+did, including the two refusal tests that named a fixed address. Five
+parallel runs of the file passed. The unused `TcpListener` import the
+file carried is removed in its own commit. Desktop handed both over.
+
+---
+
+## 2026-11-25 - Hashing passwords in native code (native dispatch N3c)
+
+`hash_password(password, cost)` now runs in native code, so the sign-up
+and log-in programs from the cryptography reference build into a native
+binary. N3 is complete: native code does everything with a secret that
+the interpreter does, except pass one to a tool of the program's own.
+
+**Recorded and revealed arguments.** A tool whose parameters hold a
+secret needs two forms of its arguments: the recorded one, with
+`<redacted>` in a secret's place, which the trace, replay and approvals
+use, and the revealed one, which only the implementation receives. The
+public JSON encoder gained an opt-in `ValueReader::secret`, refused by
+default so `to_json` can never write a secret. The native reader writes
+`<redacted>` or the text, and `corvid_json_encode_tool_argument` encodes
+each argument in either form. `corvid_runtime_call` takes the revealed
+array, null for a tool that takes no secret, and calls
+`call_tool_revealing_secrets`, the interpreter's path, so redaction and
+echo scrubbing are one implementation.
+
+A key made by `decode_base64_after` has no text, so passing it to a tool
+stops both tiers with `DECODED_KEY_TO_TOOL`, a message that moved from
+the interpreter into the runtime so the two say the same thing.
+
+**Left.** A tool of the program's own is called directly by native code,
+which records its arguments without redaction, so one that takes or
+returns a secret keeps the program on the interpreter. Moving user tools
+onto the runtime call is now a roadmap item.
+
+**Found, and on the roadmap.** A native `match` arm cannot call a tool,
+so `Err(problem) -> random_token(16)` keeps a program off native code
+for where a call is written. And a native build links whatever runtime
+staticlib is on disk without checking that it matches the compiler,
+which made three builds in this work fail to link a new export. Both
+are written up as roadmap items with what stronger looks like.
+
+**Tests.** Native sign-up and log-in give the same verdicts as the
+interpreter, the recorded `hash_password` call holds `<redacted>` and the
+declared cost, replay gives the same verdicts, and a decoded key stops
+both tiers with the same message.
+
+---
+
+## 2026-11-25 - The cryptography a secret keys, in native code (native dispatch N3b)
+
+`body.utf8().hmac_sha256(key)` and `hmac_sha512` with a `Secret` key,
+`password.verify_password(hash)` and `key.decode_base64_after("whsec_")`
+now compile to native code, so a webhook receiver that verifies
+signatures with a key it reads as a secret builds into a native binary.
+Each is one runtime call that opens the secret object and calls the
+`corvid_crypto::Secret` method the interpreter calls. They join the
+operation table the `Bytes` methods use; an HMAC switches to its
+secret-keyed entry point when the key's type is `Secret`.
+`decode_base64_after` writes a new secret object into the `Result`
+payload, or the message, which never quotes the secret.
+
+The parity test checks that a key decoded from `whsec_` base64 gives the
+same tag as HMAC with those bytes as a `Bytes` key, and that both tiers
+give the same tags, password verdicts (right, wrong, malformed hash) and
+decode error message, with balanced allocations.
+
+Only `hash_password` and tools of the program's own still keep a
+secret on the interpreter; that is N3c.
+
+---
+
 ## 2026-11-25 - Secrets in native code (native dispatch N3a)
 
 A native program can now read a secret with `secret(name)`, draw one with
@@ -647,6 +727,36 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-25 - `live` declarations (B14 RT-1)
+
+A `live` declaration is held as a route whose response kind is `Live`
+and whose response type is `List<Row>`, the snapshot. That one choice
+gives it every route rule for free, from one implementation: the
+resolver binds `path` and `actor`, the checker types the body against
+`List<Row>` and enforces `requires`, and IR lowering builds the handler
+agent `corvid serve` runs. On top, `check_live` requires the body to be
+one `return` of a query on the delivered table, without `take`, and
+names each live by its path's last fixed segment, unique per server.
+The contract lists lives apart from routes, and the source renderer,
+the grammar and the drift test know the form. Considered: a separate
+`LiveDecl` beside `HttpRouteDecl`, which would have needed its own
+copy of path binding, actor binding and policy checking in the
+resolver, the checker and lowering, the drift the single-source rule
+forbids.
+
+Two things found against the agreed example. It read the path
+parameter as a bare `board`, where routes read `path.board`; RT-1 uses
+`path.board` so there is one way. And a path parameter is a `String`,
+so `c.board == path.board` against an `Int` column does not check. The
+fix is typed placeholders, `{board: Int}`, for routes and lives alike,
+proposed to frontend development rather than built, because the
+frontend parses paths too. A handler agent for a live is named
+`__live__<path>` so a GET route on the same path keeps its own.
+`corvid serve` refuses to start a program with a live until RT-3 serves
+it, so nothing advertises a subscription no socket answers.
 
 ---
 

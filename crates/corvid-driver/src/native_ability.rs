@@ -91,9 +91,8 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
-    /// A secret used where native code cannot keep its guarantees yet:
-    /// a tool other than the runtime's own that takes or returns one, or
-    /// a cryptography method keyed by one. See
+    /// A secret passed to or returned by a tool other than the runtime's
+    /// own, where native code cannot keep it out of the record. See
     /// `corvid_codegen_cl::secret_boundary`.
     SecretNotNative,
 }
@@ -452,14 +451,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             receiver,
             ..
         } if is_native_option_type(&expr.ty) => scan_expr(receiver, current_return_ty, context),
-        // `secret.verify_password(hash)` and `decode_base64_after`, and an
-        // HMAC keyed by a secret, run on the interpreter until N3b.
-        IrExprKind::BuiltinMethod { kind, receiver, args }
-            if kind.is_crypto()
-                && std::iter::once(&**receiver).chain(args).any(|arg| arg.ty.mentions_secret()) =>
-        {
-            Err(NotNativeReason::SecretNotNative)
-        }
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
         } => scan_expr(receiver, current_return_ty, context),
@@ -498,9 +489,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             if corvid_codegen_cl::native_public_json_type(&receiver.ty, context.types) =>
         {
             scan_expr(receiver, current_return_ty, context)
-        }
-        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() && !corvid_codegen_cl::is_native_bytes_method(*kind) => {
-            Err(NotNativeReason::SecretNotNative)
         }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
@@ -543,9 +531,10 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                     }
                     return Ok(());
                 }
-                // A tool of the program's own, or `hash_password`, whose
-                // signature holds a secret: native code would record its
-                // arguments without redaction.
+                // A tool of the program's own whose signature holds a
+                // secret: native code would record its arguments without
+                // redaction. The runtime's tools (`hash_password`) passed
+                // the arm above.
                 IrCallKind::Tool { def_id, .. } if tool_takes_or_returns_secret(*def_id, context) => {
                     return Err(NotNativeReason::SecretNotNative)
                 }
@@ -789,7 +778,7 @@ agent main() -> Decimal:
     }
 
     #[test]
-    fn secrets_are_native_except_at_tool_boundaries_and_in_cryptography() {
+    fn secrets_are_native_except_at_tool_boundaries() {
         // Native dispatch N3: reading a secret through the runtime,
         // holding one in a record and comparing two compile natively.
         for src in [
@@ -807,11 +796,17 @@ agent main() -> Decimal:
         // the secret methods wait for native secret cryptography.
         for src in [
             "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
+        ] {
+            let ir = crate::compile_to_ir(src).expect("valid secret program");
+            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
+        }
+        // N3b: the cryptography a secret keys runs natively.
+        for src in [
             "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
             "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"x\")\n\nagent main() -> Int:\n    return 1\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
-            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
+            assert_eq!(native_ability(&ir), Ok(()), "{src}");
         }
         let reason = NotNativeReason::SecretNotNative.to_string();
         assert!(reason.contains("tool of the program's own") && reason.contains("records its arguments without redaction"), "{reason}");

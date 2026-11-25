@@ -296,26 +296,19 @@ agent main() -> Bytes:
 }
 
 /// Native code holds a `Secret` as the runtime's object (native dispatch
-/// N3), so a program that compares secrets builds. Keying an HMAC with
-/// one and the secret methods wait for native secret cryptography, and a
-/// native build says why. The driver's tier picker routes such programs
-/// to the interpreter before codegen runs (`NotNativeReason::SecretNotNative`).
+/// N3), so a program that compares secrets, keys an HMAC with one or
+/// checks a password builds. The driver's `native_secrets.rs` runs such
+/// programs on both tiers and compares the answers.
 #[test]
-fn a_native_build_compares_secrets_and_names_what_waits() {
-    let ir = ir_of("agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n");
-    let tmp = tempfile::tempdir().expect("tempdir");
-    corvid_codegen_cl::build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[])
-        .expect("secret comparison compiles natively");
+fn a_native_build_compares_secrets_and_keys_cryptography_with_them() {
     for src in [
+        "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
         "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
+        "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaA\")\n\nagent main() -> Int:\n    return 1\n",
     ] {
         let ir = ir_of(src);
         let tmp = tempfile::tempdir().expect("tempdir");
-        let error = corvid_codegen_cl::build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[])
-            .expect_err("native code has no Secret");
-        assert!(
-            error.to_string().contains(corvid_codegen_cl::secret_boundary::SECRET_REQUIREMENT),
-            "{error}; src=\n{src}"
-        );
+        corvid_codegen_cl::build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[])
+            .unwrap_or_else(|error| panic!("{error}; src=\n{src}"));
     }
 }

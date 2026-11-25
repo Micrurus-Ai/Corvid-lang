@@ -47,10 +47,7 @@ pub fn tool_argument_json(v: &Value) -> Result<serde_json::Value, String> {
     let decoded_key = std::cell::Cell::new(false);
     let json = to_json(v, SecretForm::Revealed(&decoded_key));
     if decoded_key.get() {
-        return Err(
-            "a key made by `decode_base64_after` is bytes, not text, so no tool can receive it; pass the secret `secret(name)` read, or use the key only for `hmac_sha256` and `hmac_sha512`"
-                .to_string(),
-        );
+        return Err(corvid_runtime::DECODED_KEY_TO_TOOL.to_string());
     }
     Ok(json)
 }

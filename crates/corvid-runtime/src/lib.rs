@@ -295,7 +295,7 @@ pub use review_queue::{
     ReviewStatus,
 };
 pub use runtime::{Runtime, RuntimeBuilder};
-pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, REDACTED_SECRET};
+pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, DECODED_KEY_TO_TOOL, REDACTED_SECRET};
 pub use secrets::{SecretAuditMetadata, SecretRead, SecretRuntime};
 #[cfg(feature = "python")]
 pub use python_ffi::{PythonRuntime, PythonSandboxProfile};
