@@ -307,7 +307,7 @@ impl<'a> CostAnalyzer<'a> {
                 iter, body, span, ..
             } => {
                 let iter_est = self.analyze_expr(iter, agent_name);
-                if let Some(iterations) = static_loop_bound(iter) {
+                if let Some(iterations) = self.static_loop_bound(iter) {
                     let body_est = self.analyze_block(body, agent_name);
                     let loop_tree = scale_tree(body_est.tree.clone(), iterations, *span);
                     let sequence = sequence_tree(
@@ -354,6 +354,24 @@ impl<'a> CostAnalyzer<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// The most times a `for` loop over `expr` runs, when that is known
+    /// before it runs: the items of a list literal, or the literal count
+    /// a table query ends with (`Shelf.all().take(10)`, B09), which
+    /// returns at most that many rows.
+    fn static_loop_bound(&self, expr: &corvid_ast::Expr) -> Option<u64> {
+        match expr {
+            corvid_ast::Expr::List { items, .. } => Some(items.len() as u64),
+            corvid_ast::Expr::Call { callee, args, .. } => {
+                let query = crate::table_ops::table_query_call(callee, args, self.file, &self.resolved.symbols, &self.resolved.bindings)?;
+                match query.take? {
+                    corvid_ast::Expr::Literal { value: corvid_ast::Literal::Int(count), .. } => u64::try_from(*count).ok(),
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 
@@ -878,12 +896,6 @@ fn collect_warnings(chunks: &[Vec<CostWarning>]) -> Vec<CostWarning> {
     warnings
 }
 
-fn static_loop_bound(expr: &corvid_ast::Expr) -> Option<u64> {
-    match expr {
-        corvid_ast::Expr::List { items, .. } => Some(items.len() as u64),
-        _ => None,
-    }
-}
 
 fn effect_node_for_decl(
     name: &str,

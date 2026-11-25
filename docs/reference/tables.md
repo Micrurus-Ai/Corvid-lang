@@ -280,6 +280,11 @@ A pure `fn` cannot call a table operation, and neither can a
 handles as `std.db`, so they share its one-writer-per-file lock and its
 parameter-only binding.
 
+A query returns at most its `take` count of rows, so a `@budget` agent
+that loops over `Member.all().take(3)` is charged three times the loop's
+body. A loop over a query without a literal `take` has no bound the
+compiler can prove, and the budget check warns rather than guessing.
+
 ## Replay
 
 Each table operation is recorded in the trace as a call named

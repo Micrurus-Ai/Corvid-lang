@@ -8217,6 +8217,8 @@ A table field may be a `Decimal`, `Duration`, `Instant`, `ZonedTime`, `TimeZone`
 
 Add `unique email` (or `unique tenant, slug` for a pair) to a table so no two rows share the value. A repeated value is an ordinary conflict: `insert` returns `Err(holder)`, the row that has it, and a `save` that would take another row's value writes nothing and returns `Err(Some(holder))`. A missing value never conflicts. Adding the line over rows that already repeat makes `corvid migrate up` fail by name. [Unique values](docs/reference/tables.md#unique-values)
 
+A `@budget` agent may loop over a query that ends in `take(n)` with a literal `n`: the loop is charged `n` times its body, so `for m in Member.all().take(3):` has a checked cost. Without `take` the budget check warns that the cost cannot be proven.
+
 You never declare a table index: `corvid migrate plan` reads every query the table's module makes and creates the index each one needs (its `==` columns, then the `order_by` or range column), replacing or dropping it when the queries change. The migration says which agents each index serves, and indexes you add by hand are left alone. [Indexes](docs/reference/tables.md#indexes)
 
 A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a table can keep a token's hash and find its row with `ApiKey.where(fn (k) -> k.token_hash == token.utf8().sha256())`. `Bytes` has no order, so `order_by` on one is a compile error. Store and compare a hash, never the secret: the database's lookup is not constant-time as `==` in Corvid is. A raw `std.db` query still shows a binary cell as `<blob:redacted>`. [Binary values](docs/reference/tables.md#binary-values)

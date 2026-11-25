@@ -339,6 +339,23 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - A query's `take` bounds a budgeted loop
+
+`@budget` charged a loop only when it iterated a list literal. A loop
+over `Member.all().take(3)`, which returns at most three rows, warned
+that its cost could not be proven, so a budgeted agent that notified the
+first few members had no checked cost at all. The cost analyzer's loop
+bound now also recognises a table query ending in a literal `take(n)`
+and charges the body `n` times. It finds the query through
+`table_query_call`, the recogniser the checker and IR lowering use, so a
+method named `take` on a user type, or a function in an imported module,
+is never mistaken for one. The test charges three $0.30 notices under a
+$1.00 budget as fitting, four as exceeding it, and still warns for a
+query with no `take`. A count from a constant or a refined parameter is
+recorded as the next step.
+
+---
+
 ## 2026-11-25 - Unique values in tables (B09 P10)
 
 A table can now say that no two rows share a value: `unique email`, or

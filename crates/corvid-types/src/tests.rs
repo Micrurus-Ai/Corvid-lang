@@ -1610,6 +1610,49 @@ agent bad(id: String, amount: Float) -> Receipt:
     assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
 }
 
+/// B09: a loop over a table query that ends in a literal `take(n)` runs
+/// at most `n` times, so `@budget` charges its body `n` times instead of
+/// warning that the cost cannot be proven; without `take` it still warns.
+#[test]
+fn a_query_loop_is_bounded_by_its_take() {
+    let program = |query: &str| {
+        format!(
+            "\
+effect paid_notice:
+    cost: $0.30
+
+tool notify(name: String) -> String uses paid_notice
+
+database site:
+    engine: sqlite
+    location: \"site.sqlite\"
+    tables: Member
+
+table Member:
+    key id: Int
+    name: String
+
+@budget($1.00)
+agent notify_members() -> String:
+    sent = \"\"
+    for member in {query}:
+        sent = notify(member.name)
+    return sent
+"
+        )
+    };
+    let unbounded = |c: &crate::Checked| c.warnings.iter().any(|w| matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. }));
+
+    let three = check(&program("Member.all().take(3)"));
+    assert!(!has_effect_violation(&three, "cost") && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let four = check(&program("Member.where(fn (m) -> m.name != \"\").take(4)"));
+    assert!(has_effect_violation(&four, "cost"), "four notices at $0.30 exceed $1.00: {:?}", four.errors);
+
+    let all = check(&program("Member.all()"));
+    assert!(unbounded(&all), "a query without take has no bound: {:?}", all.warnings);
+}
+
 #[test]
 fn a_connector_operations_cost_counts_toward_the_budget() {
     // Regression (slice 52h-3): a connector `operation` resolves as a
