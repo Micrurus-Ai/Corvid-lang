@@ -106,6 +106,10 @@ pub struct IrOperation {
     /// The request body: which param supplies it and how it encodes.
     /// `None` = no body (e.g. a GET).
     pub body: Option<IrOperationBody>,
+    /// The record parameter whose fields become the query, if any.
+    pub query: Option<String>,
+    /// `header "Name": value` lines, in source order.
+    pub headers: Vec<IrOperationHeader>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
@@ -120,6 +124,22 @@ pub struct IrOperation {
     /// The exact temporal graph accepted by the checker.
     pub protocol: Option<corvid_ast::ProviderProtocolDecl>,
     pub span: Span,
+}
+
+/// One `header` line of an operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrOperationHeader {
+    pub name: String,
+    pub value: IrOperationHeaderValue,
+}
+
+/// Where an operation header's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrOperationHeaderValue {
+    /// The named `String` parameter.
+    Param(String),
+    /// The same text on every call.
+    Literal(String),
 }
 
 /// Which param supplies an operation's request body, and its encoding.

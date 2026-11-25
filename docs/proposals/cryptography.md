@@ -91,7 +91,7 @@ Slice 1 (`Bytes` and hashing on the interpreter) differs from the design above i
 - **Constant-time everywhere a value compares.** The interpreter's value equality calls `Bytes::constant_time_eq`, so a record or list holding bytes, and `list.contains(bytes)`, compare in constant time too, not only a bare `==`.
 - **Decoder messages.** `Bytes.from_hex`, `from_base64` and `from_base64_url` return the text decoders' messages unchanged. `to_utf8()` says `the bytes are not UTF-8 text (byte N starts an invalid sequence)`.
 - **JSON schema.** OpenAPI and prompt schemas publish `type: string`, `contentEncoding: base64url` (JSON Schema 2020-12's keyword for binary data in a string) and a pattern of the URL-safe alphabet with optional padding.
-- **Table columns.** A `Bytes` column is refused, with the B06 types, until B09 maps its storage; the hint says to store `to_base64_url()` in a `String` column.
+- **Table columns.** A `Bytes` column was refused, with the B06 types, until B09 mapped its storage. B09 P8c stores it as `BLOB` on SQLite and `bytea` on Postgres; see [binary values](../reference/tables.md#binary-values).
 - **Native code.** Any program that mentions `Bytes`, in a declared field, a signature or an expression, runs on the interpreter until the native slice, which must keep `==` constant-time rather than reuse native string equality. Native code's list of text-held scalars leaves `Bytes` out for the same reason.
 - **`Upload.bytes()`** still returns `List<Int>`; moving it to `Bytes` changes existing programs and is a roadmap item.
 

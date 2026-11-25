@@ -2566,6 +2566,95 @@ connector svc:
     assert!(has(&too_long, "durable job"), "{too_long:?}");
 }
 
+/// A query is a record of flat fields; a header is one the operation may
+/// set, once, from a `String` parameter or a fixed value.
+#[test]
+fn operation_query_and_headers_are_checked() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Address:
+    city: String
+
+type Filter:
+    customer: String
+    limit: Option<Int>
+    tags: List<String>
+
+type Nested:
+    address: Address
+
+connector svc:
+    base_url: "https://svc.example.com"
+    auth: header("X-Api-Key", secret("SVC_KEY"))
+    timeout: 10s
+    redirects: never
+    modes: [real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        r#"    operation list(filter: Filter, request_id: String) -> String uses http_read:
+        GET "/items" query filter
+        header "X-Request-Id": request_id
+        header "Accept": "application/json"
+"#,
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let nested = messages(program(
+        r#"    operation list(filter: Nested) -> String uses http_read:
+        GET "/items" query filter
+"#,
+    ));
+    assert!(has(&nested, "query field `address` is `"), "{nested:?}");
+
+    let not_record = messages(program(
+        r#"    operation list(filter: String) -> String uses http_read:
+        GET "/items" query filter
+"#,
+    ));
+    assert!(has(&not_record, "must be a record"), "{not_record:?}");
+
+    let managed = messages(program(
+        r#"    operation list(token: String, key: String) -> String uses http_read:
+        GET "/items"
+        header "Authorization": token
+        header "x-api-key": key
+"#,
+    ));
+    assert!(has(&managed, "cannot set `Authorization` with `header`: the connector's `auth:` sets it"), "{managed:?}");
+    assert!(has(&managed, "cannot set `x-api-key` with `header`: the connector's `auth:` sends its credential"), "{managed:?}");
+
+    let wrong = messages(program(
+        r#"    operation list(count: Int) -> String uses http_read:
+        GET "/items"
+        header "X-Count": count
+        header "X-Trace": "a"
+        header "x-trace": "b"
+        header "Bad Name": "c"
+"#,
+    ));
+    assert!(has(&wrong, "takes `count`, which is `Int`"), "{wrong:?}");
+    assert!(has(&wrong, "sets header `x-trace` twice"), "{wrong:?}");
+    assert!(has(&wrong, "is not a valid HTTP header name"), "{wrong:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:

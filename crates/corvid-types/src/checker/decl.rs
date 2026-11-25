@@ -582,6 +582,8 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            self.check_operation_query_and_headers(decl, op, &param_names);
+
             if let Some(secs) = op.timeout_secs {
                 let subject = format!("operation `{}`", op.name.name);
                 if let Some(message) = connector_timeout_problem(&subject, secs) {
@@ -1509,4 +1511,191 @@ fn connector_timeout_problem(subject: &str, secs: u64) -> Option<String> {
         ));
     }
     None
+}
+
+/// Headers an operation cannot set with `header`: the credential headers
+/// (`auth:` owns `Authorization`, and a cookie is a credential), and the
+/// ones the transport writes from the request itself.
+const CONNECTOR_MANAGED_HEADERS: [(&str, &str); 7] = [
+    ("authorization", "the connector's `auth:` sets it"),
+    ("proxy-authorization", "it carries a credential"),
+    ("cookie", "it carries a credential"),
+    ("host", "the request's URL sets it"),
+    ("content-type", "the operation's `body` or `form` sets it"),
+    ("content-length", "the transport sets it from the body"),
+    ("transfer-encoding", "the transport sets it"),
+];
+
+/// A query parameter's value: one scalar written as text.
+fn is_query_scalar(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Decimal
+            | Type::Duration
+            | Type::Instant
+            | Type::ZonedTime
+            | Type::TimeZone
+            | Type::Currency
+            | Type::Locale
+    )
+}
+
+/// Whether `name` is an HTTP header token (RFC 9110 `tchar`s).
+fn is_header_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+}
+
+impl<'a> Checker<'a> {
+    /// `query <param>` names a record of scalar, optional or list fields,
+    /// and each `header` line names a header the operation may set, once,
+    /// with a `String` parameter or a fixed value.
+    fn check_operation_query_and_headers(
+        &mut self,
+        connector: &ConnectorDecl,
+        op: &corvid_ast::OperationDecl,
+        param_names: &HashSet<&str>,
+    ) {
+        let invalid = |message: String, span| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid {
+                    connector: connector.name.name.clone(),
+                    message,
+                },
+                span,
+            )
+        };
+        let operation = &op.name.name;
+        let param_type = |checker: &mut Self, name: &str| {
+            op.params
+                .iter()
+                .find(|p| p.name.name == name)
+                .map(|p| checker.type_ref_to_type(&p.ty))
+        };
+
+        if let Some(query) = &op.query {
+            let used_elsewhere = op.body.as_ref().is_some_and(|b| b.param.name == query.name)
+                || path_placeholders(&op.path).iter().any(|p| p == &query.name);
+            if !param_names.contains(query.name.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` query references `{}`, which is not a declared parameter", query.name),
+                    query.span,
+                ));
+            } else if used_elsewhere {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` sends `{}` both as its query and in its path or body; a parameter goes in one place", query.name),
+                    query.span,
+                ));
+            } else {
+                match param_type(self, &query.name) {
+                    Some(Type::Struct(id)) if self.types_by_id.get(&id).is_some_and(|d| d.variants.is_empty()) => {
+                        let fields: Vec<(String, corvid_ast::TypeRef)> = self.types_by_id[&id]
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.name.clone(), f.ty.clone()))
+                            .collect();
+                        for (field, field_ty) in fields {
+                            let ty = self.type_ref_to_type(&field_ty);
+                            let ok = match &ty {
+                                Type::Option(inner) | Type::List(inner) => is_query_scalar(inner),
+                                other => is_query_scalar(other),
+                            };
+                            if !ok {
+                                self.errors.push(invalid(
+                                    format!(
+                                        "operation `{operation}` query field `{field}` is `{}`; a query field is a number, text, `Bool`, a decimal or time value, an `Option` of one (omitted when `None`) or a `List` of one (the name repeated)",
+                                        ty.display_name()
+                                    ),
+                                    field_ty.span(),
+                                ));
+                            }
+                        }
+                    }
+                    _ => self.errors.push(invalid(
+                        format!("operation `{operation}` query `{}` must be a record whose fields become the query parameters", query.name),
+                        query.span,
+                    )),
+                }
+            }
+        }
+
+        let auth_header = match &connector.auth {
+            Some(ConnectorAuth::Header { name, .. }) => Some(name.to_ascii_lowercase()),
+            _ => None,
+        };
+        let idempotency_header = op.protocol.as_ref().map(|p| match &p.idempotency.transport {
+            corvid_ast::ProtocolIdempotencyTransport::Header(name) => name.to_ascii_lowercase(),
+        });
+        let mut seen = HashSet::new();
+        for header in &op.headers {
+            let lower = header.name.to_ascii_lowercase();
+            if !is_header_token(&header.name) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` header name `{}` is not a valid HTTP header name (letters, digits and `-`, no spaces or `:`)", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if let Some((_, why)) = CONNECTOR_MANAGED_HEADERS.iter().find(|(name, _)| *name == lower) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: {why}", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if auth_header.as_deref() == Some(lower.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: the connector's `auth:` sends its credential in it", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if idempotency_header.as_deref() == Some(lower.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: its `async:` protocol sends the intent key in it", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if !seen.insert(lower) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` sets header `{}` twice", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            match &header.value {
+                corvid_ast::OperationHeaderValue::Literal(text) => {
+                    if text.is_empty() || text.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+                        self.errors.push(invalid(
+                            format!("operation `{operation}` header `{}` needs a non-empty value on one line", header.name),
+                            header.span,
+                        ));
+                    }
+                }
+                corvid_ast::OperationHeaderValue::Param(param) => {
+                    match param_type(self, &param.name) {
+                        None => self.errors.push(invalid(
+                            format!("operation `{operation}` header `{}` references `{}`, which is not a declared parameter", header.name, param.name),
+                            param.span,
+                        )),
+                        Some(Type::String) => {}
+                        Some(other) => self.errors.push(invalid(
+                            format!(
+                                "operation `{operation}` header `{}` takes `{}`, which is `{}`; a header's value is a `String` parameter or a fixed string",
+                                header.name, param.name, other.display_name()
+                            ),
+                            param.span,
+                        )),
+                    }
+                }
+            }
+        }
+    }
 }

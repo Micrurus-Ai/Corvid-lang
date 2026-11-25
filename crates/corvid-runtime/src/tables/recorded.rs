@@ -103,8 +103,12 @@ pub(super) fn value_json(value: &DbValue) -> J {
         DbValue::Float(f) => serde_json::Number::from_f64(*f).map(J::Number).unwrap_or(J::Null),
         DbValue::Text(text) => J::String(text.clone()),
         DbValue::Bool(b) => J::Bool(*b),
+        DbValue::Bytes(bytes) => serde_json::json!({ RECORDED_BYTES: corvid_crypto::Bytes::new(bytes).to_base64_url() }),
     }
 }
+
+/// The key a recorded `Bytes` column value is held under.
+const RECORDED_BYTES: &str = "bytes_base64url";
 
 fn json_value(json: &J) -> Result<DbValue, RuntimeError> {
     Ok(match json {
@@ -115,6 +119,12 @@ fn json_value(json: &J) -> Result<DbValue, RuntimeError> {
             None => DbValue::Float(n.as_f64().unwrap_or_default()),
         },
         J::String(text) => DbValue::Text(text.clone()),
+        J::Object(fields) if fields.len() == 1 && fields.contains_key(RECORDED_BYTES) => {
+            let text = fields[RECORDED_BYTES].as_str().unwrap_or_default();
+            let bytes = corvid_crypto::Bytes::from_base64_url(text)
+                .map_err(|e| RuntimeError::Other(format!("a recorded `Bytes` column value is not base64url: {e}")))?;
+            DbValue::Bytes(bytes.as_slice().to_vec())
+        }
         other => return Err(RuntimeError::Other(format!("a recorded column value `{other}` is not a scalar"))),
     })
 }

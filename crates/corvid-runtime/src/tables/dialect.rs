@@ -148,7 +148,7 @@ impl TableEngine {
     pub fn kind_of(self, sql_type: &str) -> Option<ColumnKind> {
         match self {
             Self::Sqlite => ColumnKind::from_sql_type(sql_type),
-            Self::Postgres { .. } => [ColumnKind::Integer, ColumnKind::Real, ColumnKind::Text, ColumnKind::Boolean, ColumnKind::Json]
+            Self::Postgres { .. } => ColumnKind::ALL
                 .into_iter()
                 .find(|kind| postgres_type(*kind).eq_ignore_ascii_case(sql_type.trim())),
         }
@@ -168,6 +168,7 @@ fn postgres_type(kind: ColumnKind) -> &'static str {
         ColumnKind::Text => "text",
         ColumnKind::Boolean => "boolean",
         ColumnKind::Json => "jsonb",
+        ColumnKind::Bytes => "bytea",
         // B09 P8b gives each a Postgres type that compares it exactly; the
         // checker refuses these columns on Postgres until then, and these
         // names, which no Postgres database defines yet, keep any other

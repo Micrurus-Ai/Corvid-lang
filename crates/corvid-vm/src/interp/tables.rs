@@ -281,6 +281,8 @@ impl<'ir> Interpreter<'ir> {
             (ColumnKind::TimeZone, Value::TimeZone(z)) => DbValue::Text(z.name().to_string()),
             (ColumnKind::Currency, Value::Currency(c)) => DbValue::Text(c.to_string()),
             (ColumnKind::Locale, Value::Locale(l)) => DbValue::Text(l.to_string()),
+            // B09 P8c — the bytes themselves.
+            (ColumnKind::Bytes, Value::Bytes(b)) => DbValue::Bytes(b.as_slice().to_vec()),
             (_, other) => return Err(format!("{} where the column holds {}", other.type_name(), ty.display_name())),
         })
     }
@@ -307,6 +309,7 @@ impl<'ir> Interpreter<'ir> {
             // SQLite stores a Bool as an integer.
             (ColumnKind::Boolean, DbValue::Integer(n)) => Value::Bool(n != 0),
             (kind, DbValue::Text(text)) if kind.is_exact_text() => exact_value(kind, &text)?,
+            (ColumnKind::Bytes, DbValue::Bytes(bytes)) => Value::Bytes(corvid_crypto::Bytes::from(bytes)),
             (_, column) => {
                 return Err(format!("the database holds {column:?} where the declaration says {}", ty.display_name()))
             }

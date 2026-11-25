@@ -1,11 +1,12 @@
 //! A connector speaks public JSON (B05 slice 3): what `T.to_json()`
-//! writes and `T.from_json(text)` reads. These run a compiled program in
+//! writes and `T.from_json(text)` reads, for bodies, responses and the
+//! query a record parameter becomes. These run a compiled program in
 //! real mode against a wiremock provider reached under a public name.
 
 use corvid_driver::{compile_to_ir_with_config_at_path, run_ir_with_runtime};
 use corvid_runtime::{HttpClient, HttpEgressPolicy, Runtime};
 use corvid_vm::Value;
-use wiremock::matchers::{body_json, method, path};
+use wiremock::matchers::{body_json, header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TYPES: &str = r#"
@@ -230,4 +231,54 @@ agent main() -> String:
     let result = run_ir_with_runtime(&ir, None, vec![], &runtime(&ir, &server)).await.expect("runs");
 
     assert_eq!(result, text("none declined"));
+}
+
+/// A `query` record becomes the query string through the same mapping:
+/// a `None` field is left out and a list repeats its name. `header`
+/// lines send a parameter and a fixed value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_query_record_and_header_lines_reach_the_provider() {
+    let src = format!(
+        r#"{TYPES}
+type ChargeQuery:
+    customer: String
+    limit: Option<Int>
+    status: List<String>
+
+connector payments:
+    base_url: "http://api.payments.example"
+    timeout: 10s
+    redirects: never
+    modes: [real]
+    operation charges(filter: ChargeQuery, request_id: String) -> List<Charge> uses http_write:
+        GET "/v1/charges" query filter
+        header "X-Request-Id": request_id
+        header "Accept": "application/json"
+
+agent main() -> Int:
+    found = charges(ChargeQuery("cus 1", None, ["paid", "refunded"]), "req-42")
+    return found.length()
+"#
+    );
+    let (_dir, ir) = compile(&src);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/charges"))
+        .and(query_param("customer", "cus 1"))
+        .and(query_param("status", "paid"))
+        .and(query_param("status", "refunded"))
+        .and(query_param_is_missing("limit"))
+        .and(header("x-request-id", "req-42"))
+        .and(header("accept", "application/json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"[{"id":"ch_1","amount":5,"receipt_url":null},{"id":"ch_2","amount":6,"receipt_url":null}]"#,
+        ))
+        .mount(&server)
+        .await;
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime(&ir, &server)).await.expect("lists");
+
+    assert_eq!(result, Value::Int(2));
+    let sent = &server.received_requests().await.unwrap()[0];
+    assert_eq!(sent.url.query(), Some("customer=cus%201&status=paid&status=refunded"));
 }

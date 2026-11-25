@@ -13,6 +13,44 @@ the required arguments. [Design](docs/proposals/frontend-web-starter.md)
 
 ---
 
+## 2026-11-25 - Connector queries and headers (B05, slice 3b)
+
+`GET "/v1/charges" query filter` sends a record parameter as the query
+string. The interpreter already encodes the record by its declared type
+with the public JSON mapping (3a), so the runtime turns that object into
+`name=value` pairs: `null` is left out, an array repeats the name, and
+names and values are percent-encoded. The checker keeps query fields
+flat, because nested records have no query form every API reads the
+same way. `query` comes before `body` on the request line, one order, so
+a reader never wonders whether both orders mean the same thing.
+
+`header "Name": value` takes a `String` parameter or a fixed string. The
+checker refuses the headers another declaration owns: `Authorization`
+and `auth:`'s own header, cookies, the body's `Content-Type`, the
+transport's `Host`, `Content-Length` and `Transfer-Encoding`, and an
+`async:` protocol's idempotency header. Each error names the owner. A
+header is set once, its name must be an HTTP token, and the runtime
+refuses a value with a line break before sending, so a parameter cannot
+split the header block.
+
+**Changed from the proposal: no `Secret` headers.** The proposal let a
+header take a `Secret`, for calls made with a user's own token. That
+token travels as `Authorization: Bearer <token>`: a header line cannot
+build that from a `Secret`, which never joins text, and `Authorization`
+belongs to `auth:`. The form would have fitted almost no real call, so
+B04's rule stays and the roadmap names the real design, an
+operation-level `auth: bearer(token)` taking a `Secret`. Proposal
+decision 4 records it.
+
+Tests: parsing both items and the order rule; the checker on flat and
+nested queries, a non-record query, owned, duplicate, misnamed and
+non-`String` headers; the request builder's query string and header
+values, including a refused line break; and end to end, a provider that
+matches only the exact query (`customer=cus%201&status=paid&status=refunded`,
+no `limit`) and both headers.
+
+---
+
 ## 2026-11-25 - Connectors speak public JSON (B05, slice 3a)
 
 A connector sent its arguments and read its responses in the trace's
@@ -183,6 +221,34 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-24 - Byte strings as table columns (B09 P8c)
+
+A table can now hold a `Bytes` field, stored as the bytes themselves:
+`BLOB` on SQLite, `bytea` on Postgres. The motivating program stores API
+keys as the SHA-256 of their tokens and finds the owner of a presented
+token with `ApiKey.where(fn (k) -> k.token_hash == digest)`. Equality in
+`where` is allowed and `order_by` is refused, because `Bytes` has no
+order. Database equality is not constant-time the way `==` on `Bytes`
+is, which does not matter for a hash of a random token; the reference
+says to compare hashes, never secrets. Both engines pass the same test.
+
+The runtime's `DbValue` had no binary variant. `std.db`'s reader turned
+every blob into `"<blob:redacted>"` text, so raw query results handed to
+agents as JSON never carried bytes. Redacting at each JSON conversion
+instead would have spread one guarantee over several places. So the
+registry's query now takes a cell converter. `std.db` passes the
+redacting one, unchanged, and tables call `query_table_rows`, which
+keeps the bytes. A test pins that a raw query still redacts. The trace
+records a binary column as `{"bytes_base64url": ...}`, an object a
+replay cannot mistake for text.
+
+With `Bytes` stored, the checker's table-column walk refused nothing, so
+it is gone. That also removed `PendingJsonFormAtBoundary` and `NoForm`'s
+pending marker. The only column refusal left is P8a's money and time
+types on Postgres.
 
 ---
 
