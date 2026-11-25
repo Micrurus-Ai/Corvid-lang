@@ -212,6 +212,16 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
 
+**B05 complete HTTP client** (proposal awaiting agreement, macOS session). [Proposal](proposals/http-client.md)
+
+- [ ] Agree the proposal, including its three open questions: frontend agreement for the new connector items, retiring `http_get` and `http_post_json`, and native dispatch.
+- [ ] 1. Declared `timeout:` and `redirects:` on every connector, startup refusal of a connector host outside `[http] allow`, `HEAD` and `OPTIONS`.
+- [ ] 2. An `HttpExchange` record for every attempt, with credentials redacted, replayed exactly.
+- [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`.
+- [ ] 4. Streamed responses, cancellation, and caller disconnect closing the upstream connection.
+- [ ] 5. Streamed request bodies and multipart upload.
+- [ ] 6. Native code, after the native-dispatch decision.
+
 **Test infrastructure**
 
 - [x] `corvid-driver`'s HTTP policy loader tests set and restored the process-wide `CORVID_HTTP_ALLOW`, so one could fail when another test read it at the same time. `load_http_egress_policy` now reads the variable once and passes it to `http_egress_policy_from`, which the tests call with the value directly; no test changes the environment.
