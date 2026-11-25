@@ -3433,7 +3433,6 @@ server api:
 #[cfg(unix)]
 #[test]
 fn sigterm_drains_an_inflight_route_before_exiting() {
-    use std::net::TcpListener;
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("main.cor");
     std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
