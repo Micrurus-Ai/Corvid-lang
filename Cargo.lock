@@ -802,17 +802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "corvid-codegen-py"
-version = "0.0.1"
-dependencies = [
- "corvid-ast",
- "corvid-ir",
- "corvid-resolve",
- "corvid-syntax",
- "corvid-types",
-]
-
-[[package]]
 name = "corvid-codegen-wasm"
 version = "0.0.1"
 dependencies = [
@@ -913,7 +902,6 @@ dependencies = [
  "corvid-ast",
  "corvid-c-header",
  "corvid-codegen-cl",
- "corvid-codegen-py",
  "corvid-codegen-wasm",
  "corvid-crypto",
  "corvid-guarantees",

@@ -1,15 +1,17 @@
-//! Source-to-Python compile path.
+//! The check pipeline: lex, parse, resolve, typecheck and lower, with
+//! every diagnostic collected.
 //!
-//! `compile_with_config_at_path` is the production entry point —
-//! it can resolve sibling `.cor` imports because it has a real
-//! file path. `compile_with_config` is the embedded variant for
-//! callers that have only a string. `compile` is the no-config
-//! convenience wrapper.
+//! `analyze_with_config_at_path` is the production entry point; it can
+//! resolve sibling `.cor` imports because it has a real file path.
+//! `compile_with_config` is the embedded variant for callers that have
+//! only a string, and `compile` the no-config wrapper. None of them
+//! emits code: a program runs on the interpreter (`corvid run`,
+//! `corvid serve`) or builds natively (`corvid build`). The Python
+//! transpile target was retired on 2026-11-25.
 
 use std::path::Path;
 
 use corvid_ir::lower;
-use corvid_codegen_py::emit;
 use corvid_syntax::{lex, parse_file};
 use corvid_resolve::resolve;
 use corvid_types::{typecheck_with_config, CorvidConfig};
@@ -18,10 +20,8 @@ use crate::diagnostic::Diagnostic;
 
 use super::{lower_driver_file, typecheck_with_sources};
 
-/// Outcome of a compile. Always contains the Python source (even
-/// partial) when possible, and any diagnostics found.
+/// Outcome of a check: the diagnostics found, and warnings apart.
 pub struct CompileResult {
-    pub python_source: Option<String>,
     pub diagnostics: Vec<Diagnostic>,
     /// Self-trial round 4 (Gap A): non-blocking warnings surfaced
     /// during typecheck — e.g. `ScheduleNotExecutable` flagging
@@ -39,8 +39,7 @@ impl CompileResult {
     }
 }
 
-/// Run the full frontend on `source`. Stops collecting output when
-/// errors before codegen would make it misleading.
+/// Check `source` through the whole front end, lowering included.
 pub fn compile(source: &str) -> CompileResult {
     compile_with_config(source, None)
 }
@@ -58,7 +57,6 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
         Err(errs) => {
             diagnostics.extend(errs.into_iter().map(Diagnostic::from));
             return CompileResult {
-                python_source: None,
                 diagnostics,
                 warnings: Vec::new(),
             };
@@ -87,75 +85,23 @@ pub fn compile_with_config(source: &str, config: Option<&CorvidConfig>) -> Compi
 
     if !diagnostics.is_empty() {
         return CompileResult {
-            python_source: None,
             diagnostics,
             warnings,
         };
     }
 
-    // 5. Lower + 6. Codegen. Only when everything before is clean.
-    let ir = lower(&file, &resolved, &checked);
-    if let Some(diags) = stdlib_transpile_refusal(&ir) {
-        return CompileResult {
-            python_source: None,
-            diagnostics: diags,
-            warnings,
-        };
-    }
-    let py = emit(&ir);
+    // 5. Lower, so a program that checks also lowers.
+    let _ir = lower(&file, &resolved, &checked);
 
     CompileResult {
-        python_source: Some(py),
         diagnostics: Vec::new(),
         warnings,
     }
 }
 
-/// The Python transpile tier has no dispatch for the stdlib's
-/// executing tools — a transpiled `tool_call("io_read_text", ...)`
-/// would reach an empty registry and fail at runtime far from the
-/// cause (and opaque stdlib types would degrade to `object` hints).
-/// Refuse LOUDLY at transpile time instead, naming each call and the
-/// tier that runs it.
-fn stdlib_transpile_refusal(ir: &corvid_ir::IrFile) -> Option<Vec<Diagnostic>> {
-    if let Some(tool) = ir.tools.iter().find(|tool| tool.python.is_some()) {
-        return Some(vec![Diagnostic {
-            origin: None,
-            span: tool.span,
-            message: "typed Python imports require the interpreter".into(),
-            hint: Some("run the application with corvid run".into()),
-        }]);
-    }
-    let hits = corvid_codegen_py::find_stdlib_executing_tool_calls(ir);
-    if hits.is_empty() {
-        return None;
-    }
-    Some(
-        hits.into_iter()
-            .map(|hit| Diagnostic {
-                origin: None,
-                span: hit.span,
-                message: format!(
-                    "stdlib tool `{}` cannot be transpiled to Python — the transpile tier has no stdlib dispatch, so the generated code would fail at runtime far from this call",
-                    hit.tool
-                ),
-                hint: Some(
-                    "run the program through the interpreter tier instead (`corvid run`), which dispatches every stdlib executing tool with tracing, policies, and replay. See the execution-tier matrix in docs/book/16-building.md."
-                        .to_string(),
-                ),
-            })
-            .collect(),
-    )
-}
-
-/// Compile a source string that came from `source_path`. Unlike
-/// [`compile_with_config`], this path can resolve sibling `.cor`
-/// imports because the driver still has a filesystem anchor.
-/// Type-check pipeline (`corvid check`): lex → parse → resolve →
-/// typecheck → lower, WITHOUT the Python-transpile-tier stdlib
-/// refusal and without emission. A program that calls stdlib
-/// executing tools is perfectly valid Corvid (the interpreter tier
-/// runs it); only the transpile pipeline may refuse it.
+/// Check a source string that came from `source_path` (`corvid check`).
+/// Unlike [`compile_with_config`], this path resolves sibling `.cor`
+/// imports, because the driver has a filesystem anchor.
 pub fn analyze_with_config_at_path(
     source: &str,
     source_path: &Path,
@@ -174,28 +120,8 @@ pub fn analyze_with_open_sources(
     compile_front_at_path(source, source_path, config, open_source).0
 }
 
-/// Transpile pipeline (`corvid build --target=python`): the shared
-/// front half plus the stdlib-transpile refusal and Python emission.
-pub fn compile_with_config_at_path(
-    source: &str,
-    source_path: &Path,
-    config: Option<&CorvidConfig>,
-) -> CompileResult {
-    let (mut result, ir) = compile_front_at_path(source, source_path, config, &|_| None);
-    let Some(ir) = ir else {
-        return result;
-    };
-    if let Some(diags) = stdlib_transpile_refusal(&ir) {
-        result.diagnostics = diags;
-        result.python_source = None;
-        return result;
-    }
-    result.python_source = Some(emit(&ir));
-    result
-}
-
-/// Shared front half for the two pipelines above. Returns the
-/// lowered IR alongside the (emission-free) result; `None` IR means
+/// The check pipeline for a file. Returns the lowered IR alongside the
+/// result; `None` IR means
 /// diagnostics stopped the pipeline before lowering.
 fn compile_front_at_path(
     source: &str,
@@ -210,8 +136,7 @@ fn compile_front_at_path(
             diagnostics.extend(errs.into_iter().map(Diagnostic::from));
             return (
                 CompileResult {
-                    python_source: None,
-                    diagnostics,
+                        diagnostics,
                     warnings: Vec::new(),
                 },
                 None,
@@ -250,7 +175,6 @@ fn compile_front_at_path(
     if !diagnostics.is_empty() {
         return (
             CompileResult {
-                python_source: None,
                 diagnostics,
                 warnings,
             },
@@ -261,7 +185,6 @@ fn compile_front_at_path(
     let ir = lower_driver_file(&file, &resolved, &typechecked.result);
     (
         CompileResult {
-            python_source: None,
             diagnostics: Vec::new(),
             warnings,
         },
