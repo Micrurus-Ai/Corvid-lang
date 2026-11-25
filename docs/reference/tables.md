@@ -71,6 +71,7 @@ database library:
     engine: postgres
     location: env("LIBRARY_DATABASE_URL")
     tls: required
+    connections: 10
     tables: Shelf
 ```
 
@@ -84,7 +85,18 @@ string usually holds a password. `tls:` is required:
 | `required` | Encrypted, and the server's certificate must verify against the standard web roots; a server whose certificate does not verify is refused. |
 | `disabled` | Not encrypted, for a database on the same machine or a private network. |
 
-A SQLite database is a file, so a SQLite block refuses `tls:`.
+`connections:` is required too: how many connections the program may
+open to the database, from 1 to 1000. A managed Postgres caps its
+connections, so going over is an outage, and how many to use is a
+decision about cost and capacity, not a default. Every table operation
+borrows a connection for its one statement and returns it, and an
+`atomic:` block holds one until it ends. When all are in use, the next
+operation or block waits its turn rather than opening another, so a
+burst of agents queues in the program instead of failing at the
+database. A connection the server closed is replaced on the next borrow.
+
+A SQLite database is a file, so a SQLite block refuses `tls:` and
+`connections:`; Corvid opens the file as needed and queues its writers.
 
 Every operation, query, conflict and replay behaves the same on both
 engines; only the SQL differs. A program moves from SQLite to Postgres by

@@ -183,8 +183,22 @@ database library:
     engine: postgres
     location: env("LIBRARY_DATABASE_URL")
     tls: required
+    connections: 10
     tables: Shelf
 ```
+
+- **A declared, bounded pool.** Until this slice every non-atomic
+  operation shared one connection, so concurrent agents queued on one
+  server backend, and each `atomic:` block opened a connection of its
+  own, with a TLS handshake each time and no limit, enough to exhaust a
+  managed database's connection cap under load. Each database now has a
+  pool of `connections:` connections: an operation borrows one for its
+  statement, an `atomic:` block for its whole body, and callers wait for
+  a turn when all are out. The size is required because it is a cost and
+  availability decision (No hidden defaults); a default of, say, 10
+  would silently be too many for a small plan and too few for a busy
+  service. A connection discarded mid-transaction or closed by the
+  server is never handed out again.
 
 - **The location comes from the environment.** A Postgres connection
   string usually carries a password, so `location:` must be `env("NAME")`;

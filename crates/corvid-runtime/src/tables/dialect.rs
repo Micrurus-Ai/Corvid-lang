@@ -16,16 +16,19 @@ use crate::db::DbValue;
 pub enum TableEngine {
     Sqlite,
     /// `tls` is whether the connection must be encrypted, as the
-    /// `database` block's `tls:` setting declares.
-    Postgres { tls: bool },
+    /// `database` block's `tls:` setting declares, and `connections` how
+    /// many connections its pool holds at most.
+    Postgres { tls: bool, connections: u32 },
 }
 
 impl TableEngine {
-    /// The engine a `database` block names, with its `tls:` setting.
-    pub fn from_declaration(engine: &str, tls: Option<&str>) -> Option<Self> {
+    /// The engine a `database` block names, with its `tls:` and
+    /// `connections:` settings. The checker requires both for Postgres,
+    /// so a Postgres block without a pool size names no engine.
+    pub fn from_declaration(engine: &str, tls: Option<&str>, connections: Option<u32>) -> Option<Self> {
         match engine {
             "sqlite" => Some(Self::Sqlite),
-            "postgres" => Some(Self::Postgres { tls: tls != Some("disabled") }),
+            "postgres" => Some(Self::Postgres { tls: tls != Some("disabled"), connections: connections? }),
             _ => None,
         }
     }

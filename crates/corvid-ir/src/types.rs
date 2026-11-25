@@ -1243,6 +1243,8 @@ pub struct IrDatabase {
     pub location: corvid_ast::DatabaseLocation,
     /// The `tls:` setting, for a networked engine.
     pub tls: Option<String>,
+    /// The `connections:` setting, for a networked engine.
+    pub connections: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

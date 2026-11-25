@@ -13,7 +13,7 @@
 //! replay shows where a transaction started and how it ended; a replay
 //! serves them from the trace and never opens the database.
 
-use super::{named_database, resolve_location, PostgresTables, TableConnection, TableEngine};
+use super::{named_database, resolve_location, TableConnection, TableEngine};
 use crate::errors::RuntimeError;
 use crate::Runtime;
 use corvid_ast::DatabaseLocation;
@@ -82,10 +82,18 @@ impl Runtime {
                 self.db_registry().execute(handle.handle_id, "BEGIN IMMEDIATE", &[])?;
                 Ok((TableConnection::Sqlite(handle), turn))
             }
-            TableEngine::Postgres { tls } => {
-                let connection = PostgresTables::connect(location, tls).await?;
-                connection.execute("BEGIN", &[]).await?;
-                Ok((TableConnection::Postgres(Arc::new(connection)), None))
+            TableEngine::Postgres { .. } => {
+                // A connection from the database's pool, held until the
+                // block ends; a block waits its turn when all are in use.
+                let TableConnection::Postgres(pool) = self.shared_connection(location, engine)? else {
+                    return Err(RuntimeError::Other("a Postgres database has no connection pool".into()));
+                };
+                let mut borrowed = pool.borrow().await?;
+                if let Err(error) = borrowed.connection().execute("BEGIN", &[]).await {
+                    borrowed.discard();
+                    return Err(error);
+                }
+                Ok((TableConnection::PostgresHeld(Arc::new(tokio::sync::Mutex::new(borrowed))), None))
             }
         }
     }
@@ -97,8 +105,16 @@ impl Runtime {
                 Some(TableConnection::Sqlite(handle)) => {
                     self.db_registry().execute(handle.handle_id, sql, &[]).map_err(|e| named_database(&database, e))?;
                 }
-                Some(TableConnection::Postgres(connection)) => {
-                    connection.execute(sql, &[]).await.map_err(|e| named_database(&database, e))?;
+                Some(TableConnection::PostgresHeld(held)) => {
+                    let mut borrowed = held.lock().await;
+                    if let Err(error) = borrowed.connection().execute(sql, &[]).await {
+                        // The transaction may still be open on it.
+                        borrowed.discard();
+                        return Err(named_database(&database, error));
+                    }
+                }
+                Some(TableConnection::Postgres(_)) => {
+                    return Err(RuntimeError::Other(format!("the `atomic:` block on `{database}` holds no connection")));
                 }
                 None => {}
             }

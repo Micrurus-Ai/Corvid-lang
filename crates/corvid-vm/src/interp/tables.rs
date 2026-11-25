@@ -189,7 +189,7 @@ impl<'ir> Interpreter<'ir> {
         if self.table_transaction.is_some() {
             return Err(fail("an `atomic:` block runs inside another one".into()));
         }
-        let engine = TableEngine::from_declaration(&database.engine, database.tls.as_deref())
+        let engine = TableEngine::from_declaration(&database.engine, database.tls.as_deref(), database.connections)
             .ok_or_else(|| fail(format!("database `{}` names engine `{}`, which the runtime does not run", database.name, database.engine)))?;
         let transaction = self
             .runtime
@@ -352,7 +352,7 @@ fn table_target<'t>(
     kinds: &'t [ColumnKind],
     transaction: Option<&'t corvid_runtime::tables::TableTransaction>,
 ) -> Result<TableRef<'t>, String> {
-    let engine = TableEngine::from_declaration(&table.database.engine, table.database.tls.as_deref())
+    let engine = TableEngine::from_declaration(&table.database.engine, table.database.tls.as_deref(), table.database.connections)
         .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
     Ok(TableRef {
         name: &table.name,

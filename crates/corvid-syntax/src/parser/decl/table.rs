@@ -164,13 +164,14 @@ impl<'a> Parser<'a> {
         let mut engine = None;
         let mut location = None;
         let mut tls = None;
+        let mut connections = None;
         let mut tables = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
             }
-            if let Err(e) = self.parse_database_setting(&mut engine, &mut location, &mut tls, &mut tables) {
+            if let Err(e) = self.parse_database_setting(&mut engine, &mut location, &mut tls, &mut connections, &mut tables) {
                 self.errors.push(e);
                 self.sync_to_statement_boundary();
             }
@@ -179,7 +180,7 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), TokKind::Dedent) {
             self.bump();
         }
-        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, tables, span: start.merge(end) })
+        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, tables, span: start.merge(end) })
     }
 
     fn parse_database_setting(
@@ -187,6 +188,7 @@ impl<'a> Parser<'a> {
         engine: &mut Option<Ident>,
         location: &mut Option<DatabaseLocation>,
         tls: &mut Option<Ident>,
+        connections: &mut Option<(i64, corvid_ast::Span)>,
         tables: &mut Vec<Ident>,
     ) -> Result<(), ParseError> {
         let (setting, setting_span) = self.expect_ident()?;
@@ -201,6 +203,24 @@ impl<'a> Parser<'a> {
                 let (value, span) = self.expect_ident()?;
                 *tls = Some(Ident::new(value, span));
             }
+            "connections" => {
+                let span = self.peek_span();
+                match self.peek().clone() {
+                    TokKind::Int(count) => {
+                        self.bump();
+                        *connections = Some((count, span));
+                    }
+                    other => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(&other),
+                                expected: "how many connections the pool holds, such as `connections: 10`".into(),
+                            },
+                            span,
+                        })
+                    }
+                }
+            }
             "tables" => loop {
                 let (table, span) = self.expect_ident()?;
                 tables.push(Ident::new(table, span));
@@ -213,7 +233,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError {
                     kind: ParseErrorKind::UnexpectedToken {
                         got: format!("database setting `{other}`"),
-                        expected: "`engine`, `location`, `tls` or `tables`".into(),
+                        expected: "`engine`, `location`, `tls`, `connections` or `tables`".into(),
                     },
                     span: setting_span,
                 })

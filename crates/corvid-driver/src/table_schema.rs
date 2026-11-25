@@ -44,7 +44,7 @@ pub fn declared_databases(source: &str, source_path: &Path) -> Result<Vec<Declar
         .filter_map(|db| {
             Some(DeclaredDatabase {
                 name: db.name.name.clone(),
-                engine: TableEngine::from_declaration(&db.engine.as_ref()?.name, db.tls.as_ref().map(|t| t.name.as_str()))?,
+                engine: TableEngine::from_declaration(&db.engine.as_ref()?.name, db.tls.as_ref().map(|t| t.name.as_str()), declared_connections(db))?,
                 location: db.location.clone()?,
                 tables: db.tables.iter().map(|t| t.name.clone()).collect(),
             })
@@ -76,6 +76,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
             let engine = TableEngine::from_declaration(
                 &database.engine.as_ref()?.name,
                 database.tls.as_ref().map(|tls| tls.name.as_str()),
+                declared_connections(database),
             )?;
             Some(TableSchema {
                 name: record.name.clone(),
@@ -132,4 +133,10 @@ fn read_conjuncts(filter: &IrTableFilter, shape: &mut QueryShape) {
         }
         _ => {}
     }
+}
+
+/// A `database` block's pool size, which the checker proved is declared
+/// for Postgres and from 1 to 1000.
+fn declared_connections(database: &corvid_ast::DatabaseDecl) -> Option<u32> {
+    database.connections.and_then(|(count, _)| u32::try_from(count).ok())
 }

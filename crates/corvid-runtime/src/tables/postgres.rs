@@ -44,6 +44,11 @@ impl PostgresTables {
         Ok(Self { client })
     }
 
+    /// Whether the server or the network closed the connection.
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
+
     /// Run a statement; the number of rows it changed.
     pub async fn execute(&self, sql: &str, params: &[DbValue]) -> Result<u64, RuntimeError> {
         let params = params.iter().map(db_value_to_postgres_param).collect::<Vec<_>>();

@@ -2665,5 +2665,6 @@ fn ir_database(database: &corvid_ast::DatabaseDecl) -> Option<crate::types::IrDa
         engine: database.engine.as_ref()?.name.clone(),
         location: database.location.clone()?,
         tls: database.tls.as_ref().map(|tls| tls.name.clone()),
+        connections: database.connections.and_then(|(count, _)| u32::try_from(count).ok()),
     })
 }

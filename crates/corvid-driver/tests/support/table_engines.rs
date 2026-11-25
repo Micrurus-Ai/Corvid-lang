@@ -60,7 +60,7 @@ impl TestDatabase {
     pub fn engine(&self) -> TableEngine {
         match self {
             TestDatabase::Sqlite { .. } => TableEngine::Sqlite,
-            TestDatabase::Postgres { .. } => TableEngine::Postgres { tls: false },
+            TestDatabase::Postgres { .. } => TableEngine::Postgres { tls: false, connections: 4 },
         }
     }
 
@@ -72,7 +72,7 @@ impl TestDatabase {
                 format!("    engine: sqlite\n    location: \"{}\"", path.to_string_lossy().replace('\\', "/"))
             }
             TestDatabase::Postgres { env, .. } => {
-                format!("    engine: postgres\n    location: env(\"{env}\")\n    tls: disabled")
+                format!("    engine: postgres\n    location: env(\"{env}\")\n    tls: disabled\n    connections: 4")
             }
         }
     }

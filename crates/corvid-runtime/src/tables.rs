@@ -25,6 +25,7 @@ mod dialect;
 pub mod exact_columns;
 mod indexes;
 mod migration;
+mod pool;
 mod postgres;
 mod query;
 mod recorded;
@@ -37,7 +38,6 @@ pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{query_sql, TableFilter, TableQuery};
 pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
-use postgres::PostgresTables;
 pub use postgres::VerifiedTls;
 use recorded::{call_name, json_row, row_json, value_json};
 use schema::{create_table_named, quote};
@@ -74,7 +74,10 @@ pub struct TableDatabases {
 #[derive(Clone)]
 enum TableConnection {
     Sqlite(Arc<DbHandleInner>),
-    Postgres(Arc<PostgresTables>),
+    /// The pool each operation borrows a connection from.
+    Postgres(Arc<pool::PostgresPool>),
+    /// The connection an `atomic:` block holds until it ends.
+    PostgresHeld(Arc<tokio::sync::Mutex<pool::BorrowedPostgres>>),
 }
 
 /// Where a declared location points now.
@@ -105,12 +108,22 @@ impl Runtime {
                 RuntimeError::Other("an `atomic:` block has no connection outside a replay".into())
             });
         }
+        self.shared_connection(&location, table.engine)
+    }
+
+    /// The connection every operation on a database shares: SQLite's
+    /// handle, or Postgres's pool. `atomic:` blocks borrow from the same
+    /// pool, so the declared `connections:` bounds them too.
+    fn shared_connection(&self, location: &str, engine: TableEngine) -> Result<TableConnection, RuntimeError> {
+        let id = format!("{}:{location}", engine.name());
         if let Some(connection) = self.table_databases.connections.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
             return Ok(connection.clone());
         }
-        let connection = match table.engine {
-            TableEngine::Sqlite => TableConnection::Sqlite(self.db_registry().open(&location)?),
-            TableEngine::Postgres { tls } => TableConnection::Postgres(Arc::new(PostgresTables::connect(&location, tls).await?)),
+        let connection = match engine {
+            TableEngine::Sqlite => TableConnection::Sqlite(self.db_registry().open(location)?),
+            TableEngine::Postgres { tls, connections } => {
+                TableConnection::Postgres(Arc::new(pool::PostgresPool::new(location.to_string(), tls, connections)))
+            }
         };
         let mut connections = self.table_databases.connections.lock().unwrap_or_else(|e| e.into_inner());
         Ok(connections.entry(id).or_insert(connection).clone())
@@ -122,7 +135,8 @@ impl Runtime {
             TableConnection::Sqlite(handle) => {
                 self.db_registry().execute_queued(&handle, sql, params).await.map(|r| r.rows_affected)
             }
-            TableConnection::Postgres(connection) => connection.execute(sql, params).await,
+            TableConnection::Postgres(pool) => pool.borrow().await?.connection().execute(sql, params).await,
+            TableConnection::PostgresHeld(held) => held.lock().await.connection().execute(sql, params).await,
         };
         changed.map_err(|e| named(table, e))
     }
@@ -134,7 +148,8 @@ impl Runtime {
                 .db_registry()
                 .query_table_rows(handle.handle_id, sql, params)
                 .map(|rows| rows.rows.into_iter().map(|cells| ordered_row(table, cells)).collect()),
-            TableConnection::Postgres(connection) => connection.select(sql, params, table.columns).await,
+            TableConnection::Postgres(pool) => pool.borrow().await?.connection().select(sql, params, table.columns).await,
+            TableConnection::PostgresHeld(held) => held.lock().await.connection().select(sql, params, table.columns).await,
         };
         rows.map_err(|e| named(table, e))
     }

@@ -22,7 +22,7 @@ impl Engine {
     fn settings(&self) -> String {
         match self {
             Engine::Sqlite { database } => format!("    engine: sqlite\n    location: \"{database}\""),
-            Engine::Postgres { env, .. } => format!("    engine: postgres\n    location: env(\"{env}\")\n    tls: disabled"),
+            Engine::Postgres { env, .. } => format!("    engine: postgres\n    location: env(\"{env}\")\n    tls: disabled\n    connections: 4"),
         }
     }
 
@@ -353,7 +353,7 @@ fn planned_migrations_follow_a_postgres_table_through_its_changes() {
     scratch.batch_execute("CREATE TABLE corvid_migrate_test_data (id int)").unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    let settings = "    engine: postgres\n    location: env(\"CORVID_TEST_LIBRARY_URL\")\n    tls: disabled";
+    let settings = "    engine: postgres\n    location: env(\"CORVID_TEST_LIBRARY_URL\")\n    tls: disabled\n    connections: 4";
     std::fs::write(dir.path().join("src/main.cor"), source(settings, "    title: String", "    return \"x\"")).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_corvid"))
         .args(["migrate", "plan", "src/main.cor", "--scratch", SCRATCH_ENV])

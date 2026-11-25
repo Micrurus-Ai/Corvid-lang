@@ -81,7 +81,7 @@ async fn bytes_columns_store_find_and_read_back_exactly() {
 fn bytes_columns_are_blob_and_bytea() {
     for (settings, column) in [
         ("    engine: sqlite\n    location: \"keys.sqlite\"", "\"token_hash\" BLOB NOT NULL"),
-        ("    engine: postgres\n    location: env(\"KEYS_URL\")\n    tls: required", "\"token_hash\" bytea NOT NULL"),
+        ("    engine: postgres\n    location: env(\"KEYS_URL\")\n    tls: required\n    connections: 4", "\"token_hash\" bytea NOT NULL"),
     ] {
         let source = program(settings);
         let schemas = corvid_driver::table_schemas(&source, std::path::Path::new("keys.cor")).expect("compiles");

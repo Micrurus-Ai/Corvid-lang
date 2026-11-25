@@ -27,7 +27,7 @@ const MIGRATION_LOCK: i64 = 0x636f_7276_6964; // "corvid"
 
 /// Connect to a Postgres database with the declared TLS policy.
 pub(crate) fn connect(url: &str, engine: TableEngine) -> Result<Client> {
-    let TableEngine::Postgres { tls } = engine else { bail!("not a Postgres database") };
+    let TableEngine::Postgres { tls, .. } = engine else { bail!("not a Postgres database") };
     let client = if tls {
         Client::connect(url, VerifiedTls::new().map_err(|e| anyhow::anyhow!("{e}"))?)
     } else {

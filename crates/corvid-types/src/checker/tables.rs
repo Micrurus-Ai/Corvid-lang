@@ -336,6 +336,9 @@ impl<'a> Checker<'a> {
     /// A networked engine's connection string comes from the
     /// environment and its encryption is stated; a file has neither.
     fn check_database_connection(&mut self, database: &DatabaseDecl) {
+        /// The most connections a pool may declare: more than any one
+        /// Postgres server is configured to accept by default (100).
+        const MAX_CONNECTIONS: i64 = 1000;
         let name = database.name.name.clone();
         let invalid = |setting: &str, message: &str, span| {
             TypeError::new(
@@ -372,10 +375,36 @@ impl<'a> Checker<'a> {
                         tls.span,
                     )),
                 }
+                // How many connections the database may be asked for is a
+                // cost and availability decision (a managed database caps
+                // them), so the source states it.
+                match database.connections {
+                    None => self.errors.push(TypeError::new(
+                        TypeErrorKind::DatabaseSettingRequired {
+                            database: name.clone(),
+                            setting: "connections".into(),
+                            allowed: format!("how many connections the pool holds at most, from 1 to {MAX_CONNECTIONS}"),
+                        },
+                        database.span,
+                    )),
+                    Some((count, span)) if !(1..=MAX_CONNECTIONS).contains(&count) => self.errors.push(invalid(
+                        "connections",
+                        &format!("is {count}; it is from 1 to {MAX_CONNECTIONS}"),
+                        span,
+                    )),
+                    Some(_) => {}
+                }
             }
             Some("sqlite") => {
                 if let Some(tls) = &database.tls {
                     self.errors.push(invalid("tls", "is set, but a SQLite database is a file and has no connection to encrypt", tls.span));
+                }
+                if let Some((_, span)) = database.connections {
+                    self.errors.push(invalid(
+                        "connections",
+                        "is set, but a SQLite database is a file: Corvid opens it as needed and queues its writers",
+                        span,
+                    ));
                 }
             }
             _ => {}
@@ -780,9 +809,9 @@ agent seen(shelf: Shelf) -> Int:
     #[test]
     fn a_postgres_connection_is_read_from_the_environment_and_its_tls_stated() {
         let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n{settings}\n    tables: T\n\ntable T:\n    key id: Int\n"));
-        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: required").is_empty());
-        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: disabled").is_empty());
-        let literal = block("    location: \"postgres://user:secret@db/app\"\n    tls: required");
+        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: required\n    connections: 10").is_empty());
+        assert!(block("    location: env(\"DATABASE_URL\")\n    tls: disabled\n    connections: 1").is_empty());
+        let literal = block("    location: \"postgres://user:secret@db/app\"\n    tls: required\n    connections: 10");
         assert!(literal.iter().any(|m| m.contains("read it from the environment")), "{literal:#?}");
         let silent = block("    location: env(\"DATABASE_URL\")");
         assert!(silent.iter().any(|m| m.contains("does not say `tls`")), "{silent:#?}");
@@ -790,6 +819,19 @@ agent seen(shelf: Shelf) -> Int:
         assert!(unknown.iter().any(|m| m.contains("`required` or `disabled`")), "{unknown:#?}");
         let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tls: required\n    tables: T\n\ntable T:\n    key id: Int\n");
         assert!(file.iter().any(|m| m.contains("no connection to encrypt")), "{file:#?}");
+    }
+
+    /// How many connections Postgres is asked for is a cost and
+    /// availability decision, so it is declared, never defaulted.
+    #[test]
+    fn a_postgres_pool_size_is_declared_and_bounded() {
+        let block = |settings: &str| messages(&format!("database d:\n    engine: postgres\n    location: env(\"DATABASE_URL\")\n    tls: required\n{settings}    tables: T\n\ntable T:\n    key id: Int\n"));
+        let silent = block("");
+        assert!(silent.iter().any(|m| m.contains("does not say `connections`") && m.contains("from 1 to 1000")), "{silent:#?}");
+        let none = block("    connections: 0\n");
+        assert!(none.iter().any(|m| m.contains("is 0; it is from 1 to 1000")), "{none:#?}");
+        let file = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    connections: 4\n    tables: T\n\ntable T:\n    key id: Int\n");
+        assert!(file.iter().any(|m| m.contains("queues its writers")), "{file:#?}");
     }
 
     #[test]

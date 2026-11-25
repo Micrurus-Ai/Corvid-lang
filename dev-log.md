@@ -414,6 +414,33 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - A declared connection pool for Postgres tables
+
+Postgres tables had two scale problems. Every non-atomic operation went
+through one shared client, so concurrent agents queued on one server
+backend. And each `atomic:` block opened a fresh connection, TLS
+handshake included, with no limit, so a burst of a hundred blocks meant
+a hundred connections, enough to exhaust a managed database's cap. Each
+Postgres database now has a bounded pool. An operation borrows a
+connection for its one statement, an `atomic:` block borrows one for its
+body, and when all are out the next caller waits for a turn instead of
+opening another.
+
+The size is declared, `connections: 10`, and omitting it is a compile
+error. It decides how many connections a managed database is asked for,
+which is cost and availability, so under No hidden defaults it is not
+the runtime's to pick. SQLite refuses the setting: Corvid already opens
+the file as needed and queues its writers. A connection that a failed
+`COMMIT` or `ROLLBACK` may have left mid-transaction is discarded, and
+so is one the server closed. The pool's own tests run against the local
+Postgres: with two connections, a third borrower waits until one is
+returned, the returned connections are reused, and a discarded one is
+never handed out again. The atomic and query suites now run through the
+pool on both engines. Measuring the pool under concurrent load belongs
+to B19 and is recorded there.
+
+---
+
 ## 2026-11-25 - A query's `take` bounds a budgeted loop
 
 `@budget` charged a loop only when it iterated a list literal. A loop

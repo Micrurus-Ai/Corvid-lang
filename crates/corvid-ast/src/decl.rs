@@ -1440,6 +1440,10 @@ pub struct DatabaseDecl {
     /// connection is encrypted. Required for Postgres, refused for
     /// SQLite (B09 P4).
     pub tls: Option<Ident>,
+    /// `connections: 10`: how many connections a networked engine's pool
+    /// holds at most, with the span of the count. Required for Postgres,
+    /// refused for SQLite.
+    pub connections: Option<(i64, Span)>,
     pub tables: Vec<Ident>,
     pub span: Span,
 }

@@ -166,7 +166,7 @@ fn ordering_by_a_type_without_an_order_or_by_json_is_refused() {
 
 #[test]
 fn postgres_declares_each_type_with_a_domain_created_first() {
-    let source = program("    engine: postgres\n    location: env(\"LEDGER_URL\")\n    tls: required");
+    let source = program("    engine: postgres\n    location: env(\"LEDGER_URL\")\n    tls: required\n    connections: 4");
     let schemas = corvid_driver::table_schemas(&source, std::path::Path::new("ledger.cor")).expect("compiles");
     let sql = corvid_runtime::tables::create_table_sql_on(&schemas[0], schemas[0].engine);
     for (domain, base) in [
