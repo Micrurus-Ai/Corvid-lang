@@ -11,16 +11,11 @@ function open() {
   return db;
 }
 function shelves(db: DatabaseSync) {
-  return db.prepare("SELECT shelf, title FROM shelves ORDER BY shelf").all();
+  return db.prepare("SELECT shelf, title FROM StoredShelf ORDER BY shelf").all();
 }
-function list(stamps?: number[]) {
+function list() {
   const db = open();
-  if (stamps) stamps.push(now());
-  try {
-    const rows = shelves(db);
-    if (stamps) stamps.push(now());
-    return rows;
-  }
+  try { return shelves(db); }
   finally { db.close(); }
 }
 function escape(value: string) {
@@ -74,27 +69,27 @@ createServer(async (req, res) => {
     }
     const begin = now();
     const db = open();
-    const opened = template.profile ? now() : 0;
-    let updated = 0;
     let sharedRows: ReturnType<typeof shelves> | undefined;
     try {
-      const result = db.prepare("UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?").run(title, shelf);
-      if (result.changes !== 1) throw Error("Shelf was not found");
-      if (template.profile) updated = now();
+      // The same work as the Corvid store's atomic rename: read the row and
+      // write it back only if its revision is unchanged, in one transaction.
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const current = db.prepare('SELECT revision FROM "StoredShelf" WHERE shelf = ?').get(shelf);
+        if (!current) throw Error("Shelf was not found");
+        const result = db.prepare('UPDATE "StoredShelf" SET title = ?, revision = revision + 1 WHERE shelf = ? AND revision = ?')
+          .run(title, shelf, current.revision);
+        if (result.changes !== 1) throw Error("The shelf changed while saving. Try again.");
+        db.exec("COMMIT");
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
       if (template.sharedConnection) sharedRows = shelves(db);
     } finally { db.close(); }
     const written = now();
-    const stamps = template.profile ? [] as number[] : undefined;
-    const rows = sharedRows ?? list(stamps);
+    const rows = sharedRows ?? list();
     const loaded = now();
     const html = screen(rows, shelf, true);
     const end = now();
     const timings = [written-begin, loaded-written, end-begin];
-    if (stamps) {
-      const [readerOpened, queried] = stamps;
-      // SQLite's all() returns JavaScript rows directly; no separate decode loop.
-      timings.push(opened-begin, updated-opened, readerOpened-written, queried-readerOpened, 0, end-loaded);
-    }
     res.end(html + "<!--bench " + timings.join(" ") + "-->");
   } catch (error) { res.writeHead(500).end(String(error)); }
 }).listen(Number(port), "127.0.0.1");

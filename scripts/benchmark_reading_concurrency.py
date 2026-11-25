@@ -35,35 +35,10 @@ def handler_ms(html):
     return int(match[1])
 
 
-def instrument_writer_transaction(source):
-    # Only the disposable benchmark app splits SQLite's implicit transaction.
-    path = source / "main.cor"
-    code = path.read_text(encoding="utf-8")
-    start = code.index("agent save_and_show(")
-    end = code.index("agent database_settings()", start)
-    handler = code[start:end]
-    call = "    saved = update_shelf(db, reading)?"
-    comment = 'html + "<!--bench "'
-    assert handler.count(call) == handler.count(comment) == 1
-    handler = handler.replace(
-        call,
-        """    before_begin = time_monotonic_ms()
-    db_execute(db, "BEGIN IMMEDIATE", [])?
-    acquired = time_monotonic_ms()
-    saved = update_shelf(db, reading)?
-    updated = time_monotonic_ms()
-    db_execute(db, "COMMIT", [])?
-    committed = time_monotonic_ms()
-    stages = [(acquired - before_begin).to_string(), (updated - acquired).to_string(), (committed - updated).to_string()]""",
-    )
-    handler = handler.replace(comment, 'html + "<!--writer " + stages.join(" ") + "--><!--bench "')
-    path.write_text(code[:start] + handler + code[end:], encoding="utf-8")
-
-
 def instrument_write_order(source):
     path = source / "main.cor"
     code = path.read_text(encoding="utf-8")
-    update = "    saved = update_shelf(db, reading)?"
+    update = "    saved = save(reading)?"
     comment = 'html + "<!--bench "'
     assert code.count(update) == code.count(comment) == 1
     code = code.replace(update, "    ready_to_write = time_monotonic_ms()\n" + update)
@@ -78,10 +53,7 @@ def writer_stages(html):
     order = re.search(r"<!--order (\d+) (\d+)--><!--bench ", html)
     if order:
         return {"entry_ms": int(order[1]), "before_update_ms": int(order[2])}
-    match = re.search(r"<!--writer ([0-9]+) ([0-9]+) ([0-9]+)--><!--bench ", html)
-    return (
-        dict(zip(("begin_ms", "update_ms", "commit_ms"), map(int, match.groups()))) if match else {}
-    )
+    return {}
 
 
 def peer_request(url, shelf, title, ready, start, read_only):
@@ -213,7 +185,7 @@ def verify_audit(url, path, expected, unconfirmed=None):
             "Unexpected durable edit"
         )
         html = read(url)
-        for shelf, title, revision in db.execute("SELECT shelf,title,revision FROM shelves"):
+        for shelf, title, revision in db.execute("SELECT shelf,title,revision FROM StoredShelf"):
             edits = [t for t, s in log if s == shelf]
             assert revision == len(edits) and (not edits or title == edits[-1])
             assert f"Shelf {shelf}: {title}" in html
@@ -280,7 +252,7 @@ def package_audited_app(cli, project, directory):
     )
     with closing(sqlite3.connect(directory / "reading.sqlite")) as db:
         db.executescript("""CREATE TABLE audit(title TEXT, shelf INTEGER);
-            CREATE TRIGGER record_edit AFTER UPDATE ON shelves BEGIN
+            CREATE TRIGGER record_edit AFTER UPDATE ON "StoredShelf" BEGIN
             INSERT INTO audit VALUES(new.title,new.shelf); END;""")
 
 
@@ -295,8 +267,6 @@ def run(args):
                 ROOT / "examples/reading_list" / folder, project / folder, dirs_exist_ok=True
             )
         instrument(project / "src")
-        if args.profile_writer:
-            instrument_writer_transaction(project / "src")
         if args.profile_order:
             instrument_write_order(project / "src")
         reference = "Corvid baseline" if args.compare_cli else "TypeScript"
@@ -377,14 +347,6 @@ def run(args):
                             args.read_only_peers,
                             args.mixed_peers,
                         )
-                        if args.profile_writer and name == "Corvid":
-                            if result["browser_ms"] is not None:
-                                assert "begin_ms" in result
-                            if not args.read_only_peers:
-                                assert all(
-                                    peer["read_only"] or "begin_ms" in peer or peer["error"]
-                                    for peer in result["peers"]
-                                )
                         if args.profile_order:
                             if result["browser_ms"] is not None:
                                 assert "before_update_ms" in result
@@ -416,7 +378,6 @@ def run(args):
                     "mixed_peers": args.mixed_peers,
                     "sqlite": settings,
                     "delay_ms": args.delay_ms,
-                    "profile_writer": args.profile_writer,
                     "profile_order": args.profile_order,
                     "recovered": recovered,
                     "samples": samples,
@@ -460,16 +421,10 @@ if __name__ == "__main__":
         action="store_true",
         help="have the other editors load edit forms while the browser saves",
     )
-    probes = parser.add_mutually_exclusive_group()
-    probes.add_argument(
+    parser.add_argument(
         "--profile-order",
         action="store_true",
         help="record Corvid handler entry and pre-update timestamps",
-    )
-    probes.add_argument(
-        "--profile-writer",
-        action="store_true",
-        help="time BEGIN IMMEDIATE, the update and COMMIT on Corvid",
     )
     args = parser.parse_args()
     if args.rounds < 1 or not 1 <= args.delay_ms <= 4000:

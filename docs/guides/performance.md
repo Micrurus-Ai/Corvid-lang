@@ -110,7 +110,9 @@ The 24-round repeat measured median handlers of 14, 12.5 and 11 ms respectively.
 
 A separate 40-round run timed the updated example handler and the existing TypeScript implementation. Median / p95 time from Save to visible confirmation was **42.75 / 54.90 ms** for Corvid and **42.95 / 55.00 ms** for TypeScript. The median handler took 14 ms for Corvid and 13 ms for TypeScript. The browser results were effectively tied on this machine. Both servers recovered revisions 15, 14 and 14 after restart. [40-round application results](../../benches/results/reading-save-reused-windows-chrome.json)
 
-Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25. Add `--profile --rounds 36` to compare the individual stages across all three variants.
+Run `python scripts/benchmark_reading_save.py PATH_TO_CORVID --output saves.json` with Python Playwright, Chrome and Node 25.
+
+The measurements in this section were taken before the example moved its shelves onto Corvid tables. The example now saves through `rename_shelf`, which reads the row and writes it back with a revision check inside one `atomic:` block, and the table runtime opens the connections. The TypeScript baseline does the same work in one `BEGIN IMMEDIATE` transaction. The stage profile timed hand-written connection steps that no longer exist in the source, so it was retired with the port. These figures have not been re-measured since.
 
 ### Saving while an agent is working
 
@@ -153,7 +155,7 @@ A ten-round diagnostic on the patched VM used the same concurrent-save benchmark
 
 For the 25 slowest handlers with 50 writers and a pending suggestion, 16,926 of their combined 17,229 ms elapsed inside `BEGIN IMMEDIATE` (98.2%). Without a suggestion, the same interval accounted for 98.4% of the slowest 25 handlers. These clocks include SQLite lock acquisition, tool dispatch and thread scheduling. The explicit transaction also adds tool calls relative to the shipped implicit transaction. Results pool the browser and peer requests, exclude warm-up and measure only time inside the handler. The next experiment is to queue competing writers per database before they enter SQLite and measure the full browser confirmation and both read and write tail latencies. [Per-save timings](../../benches/results/reading-writer-acquisition.json)
 
-Run `python scripts/benchmark_reading_concurrency.py PATH_TO_CORVID --rounds 10 --profile-writer --output writer.json`.
+This diagnostic predates the move to Corvid tables, and its `--profile-writer` option was retired with that port. Every write now goes through an `atomic:` block, which takes the database's writer turn before it opens its transaction, so the table runtime owns the step this diagnostic timed.
 
 ### Queueing SQLite writers
 

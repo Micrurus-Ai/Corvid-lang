@@ -45,60 +45,28 @@ PROBE = """() => {
 }"""
 
 
-STAGES = ("write_open_ms", "update_ms", "read_open_ms", "query_ms", "decode_ms", "render_ms")
-SHARED = "Corvid shared connection"
-
-
-def stage_probe(code, shared):
-    # Copy the operations from the app so its SQL, checks and row conversions stay identical.
-    start = code.index('    result = db_execute(db, "UPDATE shelves')
-    update = code[start:code.index("    return Ok(reading)", start)]
-    start = code.index("    rows = db_query_rows(db,")
-    select, decode = code[start:code.index("    return Ok(readings)", start)].split("    readings: ", 1)
-    read_handle = "db" if shared else 'db_open("reading.sqlite")?'
-    return f'''agent measured_save(reading: Reading) -> Result<String, String>:
-    started = time_monotonic_ms()
-    db = db_open("reading.sqlite")?
-    opened = time_monotonic_ms()
-{update}    written = time_monotonic_ms()
-    reader = {read_handle}
-    read_open = time_monotonic_ms()
-{select.replace("db_query_rows(db,", "db_query_rows(reader,")}    queried = time_monotonic_ms()
-    readings: {decode}    decoded = time_monotonic_ms()
-    html = screen(readings, reading.shelf, "Saved")
-    ended = time_monotonic_ms()
-    timings = [(written-started).to_string(), (decoded-written).to_string(), (ended-started).to_string(), (opened-started).to_string(), (written-opened).to_string(), (read_open-written).to_string(), (queried-read_open).to_string(), (decoded-queried).to_string(), (ended-decoded).to_string()]
-    return Ok(html + "<!--bench " + timings.join(" ") + "-->")
-'''
-
-
-def instrument(source, profile=False, shared=False):
+def instrument(source):
     path = source / "main.cor"
     code = path.read_text(encoding="utf-8")
-    if profile:
-        probe = stage_probe(code, shared)
-        code = code.replace("return match save_and_show(body):", "return match measured_save(body):")
-    else:
-        # Place clocks around the actual save handler's operations.
-        start = code.index("agent save_and_show(")
-        end = code.index("server library:", start)
-        handler = code[start:end]
-        for line, stamp in [
-            ('    db = db_open', 'started'),
-            ('    readings = read_shelves', 'written'),
-            ('    return Ok(screen', 'loaded'),
-        ]:
-            assert handler.count(line) == 1
-            handler = handler.replace(line, f"    {stamp} = time_monotonic_ms()\n{line}")
-        result = '    return Ok(screen(readings, saved.shelf, "Saved"))'
-        assert handler.count(result) == 1
-        handler = handler.replace(result, '''    html = screen(readings, saved.shelf, "Saved")
+    # Place clocks around the actual save handler's operations.
+    start = code.index("agent save_and_show(")
+    end = code.index("server library:", start)
+    handler = code[start:end]
+    for line, stamp in [
+        ('    saved = save(reading)', 'started'),
+        ('    readings = list_readings()', 'written'),
+        ('    return Ok(screen', 'loaded'),
+    ]:
+        assert handler.count(line) == 1
+        handler = handler.replace(line, f"    {stamp} = time_monotonic_ms()\n{line}")
+    result = '    return Ok(screen(readings, saved.shelf, "Saved"))'
+    assert handler.count(result) == 1
+    handler = handler.replace(result, '''    html = screen(readings, saved.shelf, "Saved")
     ended = time_monotonic_ms()
     timings = [(written - started).to_string(), (loaded - written).to_string(), (ended - started).to_string()]
     return Ok(html + "<!--bench " + timings.join(" ") + "-->")''')
-        code = code[:start] + handler + code[end:]
-        probe = ""
-    probe += '''
+    code = code[:start] + handler + code[end:]
+    probe = '''
 agent database_settings() -> Result<List<JsonValue>, String>:
     db = db_open("reading.sqlite")?
     return db_query_rows(db, "SETTINGS_SQL", [])
@@ -110,13 +78,14 @@ server library:
             Err(_) -> []
 '''
     code = code.replace("server library:", probe.replace("SETTINGS_SQL", SQL))
-    path.write_text('import "std:time" use time_monotonic_ms\n' + code, encoding="utf-8")
+    path.write_text('import "std:db" use db_open, db_query_rows\n'
+                    'import "std:time" use time_monotonic_ms\n' + code, encoding="utf-8")
 
 
 
 def template(url, db):
     data = {"settings": json.loads(read(url + "/settings"))[0], "settingsSql": SQL, "forms": {}}
-    for shelf, title in db.execute("SELECT shelf, title FROM shelves ORDER BY shelf"):
+    for shelf, title in db.execute("SELECT shelf, title FROM StoredShelf ORDER BY shelf"):
         page = read(url + f"/edit?shelf={shelf}")
         data["prefix"], content = page.split("<ul>", 1)
         _, data["suffix"] = content.split("</ul>", 1)
@@ -134,18 +103,13 @@ def verify(args):
         project = root / "app"
         shutil.copytree(ROOT / "examples/reading_list/src", project / "src", dirs_exist_ok=True)
         shutil.copytree(ROOT / "examples/reading_list/migrations", project / "migrations")
-        instrument(project / "src", args.profile)
+        instrument(project / "src")
         corvid = root / "Corvid"
         package(cli, project, corvid)
         subprocess.run([cli, "migrate", "up", "--dir", "migrations", "--database", "reading.sqlite"], cwd=corvid, check=True)
         node = root / "TypeScript"
         node.mkdir()
         shutil.copyfile(corvid / "reading.sqlite", node / "reading.sqlite")
-        if args.profile:
-            shutil.copyfile(ROOT / "examples/reading_list/src/main.cor", project / "src/main.cor")
-            instrument(project / "src", True, True)
-            package(cli, project, root / SHARED)
-            shutil.copyfile(corvid / "reading.sqlite", root / SHARED / "reading.sqlite")
         templates = root / "templates.json"
         env = os.environ.copy()
         samples = []
@@ -155,16 +119,12 @@ def verify(args):
             urls = {"Corvid": services.enter_context(serve(cli, corvid, env))}
             with closing(sqlite3.connect(corvid / "reading.sqlite")) as db:
                 layout = template(urls["Corvid"], db)
-            layout["profile"] = args.profile
             templates.write_text(json.dumps(layout), encoding="utf-8")
             urls["TypeScript"] = services.enter_context(node_server(node, ROOT / "benches/typescript/reading-save.mts", templates, "/settings"))
             node_settings = json.loads(read(urls["TypeScript"] + "/settings"))
             for key in ("journal", "sync", "fk", "page"):
                 assert node_settings[key] == layout["settings"][key], (node_settings, layout["settings"])
             assert layout["settings"]["sync"] >= 2
-            if args.profile:
-                urls[SHARED] = services.enter_context(serve(cli, root / SHARED, env))
-                assert json.loads(read(urls[SHARED] + "/settings"))[0] == layout["settings"]
             orders = list(permutations(urls))
             browser = pw.chromium.launch(channel=args.channel)
             try:
@@ -192,12 +152,11 @@ def verify(args):
                             const n = performance.getEntriesByType('navigation')[0];
                             return n.responseStart - n.requestStart;
                         })()]""")
-                        write, query, handler, *stages = map(int, timing[1].split())
-                        assert len(stages) == (len(STAGES) if args.profile else 0)
+                        write, query, handler = map(int, timing[1].split())
                         if i >= 3:
                             samples.append(dict(round=i-2, language=name, browser_ms=browser_ms,
                                                 request_to_first_byte_ms=ttfb, write_ms=write, read_ms=query,
-                                                handler_ms=handler, receipt_sha256=receipts[-1], **dict(zip(STAGES, stages))))
+                                                handler_ms=handler, receipt_sha256=receipts[-1]))
                     assert len(set(receipts)) == 1, (i, receipts)
                     expected[shelf] = (title, expected.get(shelf, ("", 0))[1] + 1)
                 version = browser.version
@@ -208,7 +167,7 @@ def verify(args):
             service = (node_server(node, ROOT / "benches/typescript/reading-save.mts", templates, "/settings")
                        if name == "TypeScript" else serve(cli, directory, env))
             with service as url, closing(sqlite3.connect(directory / "reading.sqlite")) as db:
-                rows = {s: (t, rev) for s, t, rev in db.execute("SELECT shelf, title, revision FROM shelves")}
+                rows = {s: (t, rev) for s, t, rev in db.execute("SELECT shelf, title, revision FROM StoredShelf")}
                 assert rows == expected
                 html = read(url)
                 for shelf, (title, _) in rows.items():
@@ -219,7 +178,7 @@ def verify(args):
                     restart_revisions={s:t[1] for s,t in expected.items()}, samples=samples)
         args.output.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
         for name in urls:
-            for key in ("browser_ms", "request_to_first_byte_ms", "handler_ms", "write_ms", "read_ms") + (STAGES if args.profile else ()):
+            for key in ("browser_ms", "request_to_first_byte_ms", "handler_ms", "write_ms", "read_ms"):
                 values = sorted(s[key] for s in samples if s["language"] == name)
                 print(name, key, "median / p95:", round(statistics.median(values), 2), round(values[math.ceil(.95*len(values))-1], 2))
 
@@ -230,7 +189,6 @@ if __name__ == "__main__":
     parser.add_argument("--channel", default="chrome")
     parser.add_argument("--rounds", type=int, default=40)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--profile", action="store_true", help="time save stages and compare one versus two request-local connections")
     args = parser.parse_args()
     if args.rounds < 1:
         parser.error("--rounds must be positive")

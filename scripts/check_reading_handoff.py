@@ -59,7 +59,7 @@ def check_handoff(cli, installed, env, provider, url, reviewer, peer, editor, pa
         assert expected in json.dumps(body["messages"]), body
 
     with closing(sqlite3.connect(installed / "reading.sqlite")) as db:
-        title, revision = db.execute("SELECT title,revision FROM shelves WHERE shelf=1").fetchone()
+        title, revision = db.execute("SELECT title,revision FROM StoredShelf WHERE shelf=1").fetchone()
     first = "Extract the first word"
     revised = "Extract the last word"
     if page:

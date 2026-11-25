@@ -37,7 +37,7 @@ public agent start_extraction(owner: String, request: ExtractionRequest) -> Resu
     if created.rows_affected == 0:
         db_execute(db, "ROLLBACK", [])?
         return Err("Finish the current job first.")
-    db_execute(db, "INSERT INTO extraction_items(job,shelf,source_title,source_revision) SELECT (SELECT max(id) FROM extraction_jobs WHERE owner=?), shelf, title, revision FROM shelves", [db_param_text(owner)])?
+    db_execute(db, "INSERT INTO extraction_items(job,shelf,source_title,source_revision) SELECT (SELECT max(id) FROM extraction_jobs WHERE owner=?), shelf, title, revision FROM StoredShelf", [db_param_text(owner)])?
     db_execute(db, "COMMIT", [])?
     return Ok("Started")
 

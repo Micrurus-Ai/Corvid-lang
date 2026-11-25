@@ -1,9 +1,9 @@
-import "std:db" use db_open, db_execute, db_query_rows, db_param_text, db_param_int
-import "std:json" use json_get_int, json_get_string
+import "std:uuid" use uuid_v4
 import "std:ui" as ui
 import "std:ui" use View
 
 import "./handoff" use ExtractionRequest, Checkpoint, Revision, start_extraction, checkpoint, revise, work_response, work_screen
+import "./library_store" use AppliedShelf, ReviewApply, apply_review, record_review, review_size, shelf_titles
 import "./main" use Reading, Selection, Search, SearchResult, find_titles, list_readings, save, search_page
 
 identity readers:
@@ -90,33 +90,25 @@ prompt recommend_three(first: String, second: String, third: String) -> Titles:
     user: "Shelf 1: {first}. Shelf 2: {second}. Shelf 3: {third}."
 
 agent review_three(owner: String) -> Result<String, String>:
-    db = db_open("reading.sqlite")?
-    rows = db_query_rows(db, "SELECT shelf, title, revision FROM shelves ORDER BY shelf", [])?
-    if rows.length() != 3:
+    shelves = shelf_titles()
+    if shelves.length() != 3:
         return Err("Expected three shelves.")
-    first = json_get_string(rows[0], "title")?
-    second = json_get_string(rows[1], "title")?
-    third = json_get_string(rows[2], "title")?
+    first = shelves[0].title
+    second = shelves[1].title
+    third = shelves[2].title
     titles = try recommend_three(first, second, third) timeout 30000
     if titles.first.trim() == "" or titles.second.trim() == "" or titles.third.trim() == "":
         return Err("Each shelf needs a proposed title.")
-    keys = db_query_rows(db, "SELECT lower(hex(randomblob(32))) AS token", [])?
-    key = json_get_string(keys[0], "token")?
-    db_execute(db, "BEGIN IMMEDIATE", [])?
-    for row in rows:
-        shelf = json_get_int(row, "shelf")?
-        revision = json_get_int(row, "revision")?
-        db_execute(db, "INSERT INTO proposal_items(proposal_key, shelf, base_revision, owner) VALUES (?, ?, ?, ?)", [db_param_text(key), db_param_int(shelf), db_param_int(revision), db_param_text(owner)])?
-    db_execute(db, "COMMIT", [])?
+    key = uuid_v4()
+    if record_review(key, owner, shelves) != 3:
+        return Err("The review could not be recorded.")
     return Ok(review_form(key, titles, first, second, third))
 
 type ProposalContext:
     proposal_key: String
 
 agent discover_review(context: ProposalContext, owner: String) -> Result<String, String>:
-    db = db_open("reading.sqlite")?
-    rows = db_query_rows(db, "SELECT shelf FROM proposal_items WHERE proposal_key = ? AND owner = ? ORDER BY shelf", [db_param_text(context.proposal_key), db_param_text(owner)])?
-    if rows.length() != 3:
+    if review_size(context.proposal_key, owner) != 3:
         return Ok(ui.page("Review unavailable", []))
     return Ok(review_form(context.proposal_key, Titles("", "", ""), "", "", ""))
 
@@ -133,36 +125,22 @@ fn review_form(key: String, titles: Titles, first: String, second: String, third
     ]
     return ui.page("Review three shelves", controls)
 
-agent apply_three(edit: ApplyTitles, owner: String) -> Result<ApplyResult, String>:
-    titles = [edit.first, edit.second, edit.third]
-    db = db_open("reading.sqlite")?
-    db_execute(db, "BEGIN IMMEDIATE", [])?
-    rows = db_query_rows(db, "SELECT shelf, base_revision, coalesce(applied_title, '') AS previous, coalesce(outcome, '') AS outcome FROM proposal_items WHERE proposal_key = ? AND owner = ? ORDER BY shelf", [db_param_text(edit.proposal_key), db_param_text(owner)])?
-    if rows.length() != 3:
-        return Ok(InvalidProposal)
+fn outcomes_of(shelves: List<AppliedShelf>) -> List<ShelfOutcome>:
     outcomes: List<ShelfOutcome> = []
-    for row in rows:
-        shelf = json_get_int(row, "shelf")?
-        title = titles[shelf - 1]
-        if title.trim() == "":
-            return Ok(InvalidProposal)
-        previous = json_get_string(row, "previous")?
-        outcome = json_get_string(row, "outcome")?
-        if outcome != "" and previous != title:
-            return Ok(KeyConflict)
-        if outcome == "":
-            revision = json_get_int(row, "base_revision")?
-            write = db_execute(db, "UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ? AND revision = ?", [db_param_text(title), db_param_int(shelf), db_param_int(revision)])?
-            outcome = "Conflict"
-            if write.rows_affected == 1:
-                outcome = "Saved"
-            db_execute(db, "UPDATE proposal_items SET applied_title = ?, outcome = ? WHERE proposal_key = ? AND shelf = ?", [db_param_text(title), db_param_text(outcome), db_param_text(edit.proposal_key), db_param_int(shelf)])?
-        if outcome == "Saved":
-            outcomes.append(SavedShelf(shelf))
+    for shelf in shelves:
+        if shelf.saved:
+            outcomes.append(SavedShelf(shelf.shelf))
         else:
-            outcomes.append(ChangedShelf(shelf))
-    db_execute(db, "COMMIT", [])?
-    return Ok(Reviewed(outcomes))
+            outcomes.append(ChangedShelf(shelf.shelf))
+    return outcomes
+
+agent apply_three(edit: ApplyTitles, owner: String) -> Result<ApplyResult, String>:
+    applied = apply_review(edit.proposal_key, owner, [edit.first, edit.second, edit.third])
+    if not applied.complete:
+        return Ok(InvalidProposal)
+    if not applied.consistent:
+        return Ok(KeyConflict)
+    return Ok(Reviewed(outcomes_of(applied.shelves)))
 
 agent apply_result(edit: ApplyTitles, owner: String) -> ApplyResult:
     return match apply_three(edit, owner):

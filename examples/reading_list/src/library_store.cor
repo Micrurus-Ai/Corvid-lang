@@ -1,0 +1,125 @@
+# The reading list's stored data, as Corvid tables. Pages and agents in
+# the other modules reach it through the agents exported here, so a
+# review's shelf writes and its record commit in one atomic block.
+
+database library:
+    engine: sqlite
+    location: "reading.sqlite"
+    tables: StoredShelf, ProposalItem
+
+# One of the three shelves, with the title currently on it.
+table StoredShelf:
+    key shelf: Int where between(1, 3)
+    title: String
+
+# One shelf of a review: the revision it was proposed against, and once
+# applied, the title written and whether the shelf had changed meanwhile.
+table ProposalItem:
+    key proposal_key: String
+    key shelf: Int
+    base_revision: Int
+    owner: Option<String>
+    applied_title: Option<String>
+    outcome: Option<String>
+
+public type ShelfTitle:
+    shelf: Int
+    title: String
+    revision: Int
+
+public type AppliedShelf:
+    shelf: Int
+    saved: Bool
+
+# What applying a review did. `complete` is false when a shelf is not
+# recorded or has no title; `consistent` is false when a shelf was
+# already applied with a different title. Variants of a sum type cannot
+# yet be matched across modules, so this is a record.
+public type ReviewApply:
+    complete: Bool
+    consistent: Bool
+    shelves: List<AppliedShelf>
+
+fn titled(row: StoredShelf) -> ShelfTitle:
+    return ShelfTitle(row.shelf, row.title, row.revision)
+
+public agent shelf_titles() -> List<ShelfTitle>:
+    found: List<ShelfTitle> = []
+    for row in StoredShelf.all():
+        found.append(titled(row))
+    return found
+
+# Rename a shelf. The read and the write share one transaction, so the
+# write cannot conflict with another writer.
+public agent rename_shelf(shelf: Int, title: String) -> Result<ShelfTitle, String>:
+    renamed = Err("Shelf was not found")
+    atomic:
+        current = StoredShelf.get(shelf)
+        renamed = match current:
+            Some(row) -> saved_title(StoredShelf.save(StoredShelf { title: title, ..row }))
+            None -> Err("Shelf was not found")
+    return renamed
+
+fn saved_title(outcome: Result<StoredShelf, Option<StoredShelf>>) -> Result<ShelfTitle, String>:
+    return match outcome:
+        Ok(row) -> Ok(titled(row))
+        Err(_) -> Err("The shelf changed while saving. Try again.")
+
+# Record a review of every shelf, proposed against the revisions it saw.
+public agent record_review(key: String, owner: String, shelves: List<ShelfTitle>) -> Int:
+    recorded = 0
+    atomic:
+        for shelf in shelves:
+            item = ProposalItem(key, shelf.shelf, shelf.revision, Some(owner), None, None)
+            added = match ProposalItem.insert(item):
+                Ok(_) -> 1
+                Err(_) -> 0
+            recorded = recorded + added
+    return recorded
+
+# How many shelves a review records for this owner.
+public agent review_size(key: String, owner: String) -> Int:
+    count = 0
+    for item in ProposalItem.where(fn (p) -> p.proposal_key == key and p.owner == Some(owner)):
+        count = count + 1
+    return count
+
+# Whether a review can be applied with these titles: every shelf
+# recorded, a title for each, and any shelf already applied applied with
+# the same title.
+fn review_verdict(items: List<ProposalItem>, titles: List<String>) -> String:
+    if items.length() != 3:
+        return "missing"
+    for item in items:
+        title = titles[item.shelf - 1]
+        if title.trim() == "":
+            return "missing"
+        if item.outcome != None and item.applied_title != Some(title):
+            return "differs"
+    return ""
+
+fn outcome_name(saved: Bool) -> String:
+    if saved:
+        return "Saved"
+    return "Conflict"
+
+# Apply a review. Each shelf is written only if it still has the revision
+# the review saw; either way its outcome is recorded, and every write
+# commits together.
+public agent apply_review(key: String, owner: String, titles: List<String>) -> ReviewApply:
+    verdict = "missing"
+    applied: List<AppliedShelf> = []
+    atomic:
+        items = ProposalItem.where(fn (p) -> p.proposal_key == key and p.owner == Some(owner)).order_by(fn (p) -> p.shelf)
+        verdict = review_verdict(items, titles)
+        if verdict == "":
+            for item in items:
+                title = titles[item.shelf - 1]
+                saved = item.outcome == Some("Saved")
+                if item.outcome == None:
+                    saved = match StoredShelf.save(StoredShelf(item.shelf, title, item.base_revision)):
+                        Ok(_) -> true
+                        Err(_) -> false
+                    noted = ProposalItem.save(ProposalItem { applied_title: Some(title), outcome: Some(outcome_name(saved)), ..item })
+                applied.append(AppliedShelf(item.shelf, saved))
+    return ReviewApply(verdict != "missing", verdict != "differs", applied)

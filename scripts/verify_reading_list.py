@@ -378,7 +378,7 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False,
 
     def shelves():
         with closing(sqlite3.connect(database)) as connection, connection:
-            return connection.execute("SELECT title, revision FROM shelves ORDER BY shelf").fetchall()
+            return connection.execute("SELECT title, revision FROM StoredShelf ORDER BY shelf").fetchall()
 
     state = installed / "sessions"
     state.mkdir()
@@ -590,12 +590,12 @@ def check_search_http(url, database):
     assert json.loads(read(url + "/search/results?term="))["fields"] == [[]]
     # Make the storage dependency unavailable in this disposable installation.
     with closing(sqlite3.connect(database)) as fixture, fixture:
-        fixture.execute("ALTER TABLE shelves RENAME TO shelves_offline")
+        fixture.execute("ALTER TABLE StoredShelf RENAME TO shelves_offline")
         try:
             assert json.loads(read(url + "/search/results?term=Od"))["variant"] == "Unavailable"
             assert "<p>Search unavailable. Try again.</p>" in read(url + "/search?term=Od")
         finally:
-            fixture.execute("ALTER TABLE shelves_offline RENAME TO shelves")
+            fixture.execute("ALTER TABLE shelves_offline RENAME TO StoredShelf")
     assert json.loads(read(url + "/search/results?term=Od")) == result
 
 
@@ -673,7 +673,7 @@ def verify(args):
         project = root / "reading-list"
         subprocess.run([cli, "new", project.name], cwd=root, env=env, check=True)
         shutil.copyfile(example / "src/main.cor", project / "src/main.cor")
-        for name in ("reviews.cor", "handoff.cor", "extract.cor"):
+        for name in ("library_store.cor", "reviews.cor", "handoff.cor", "extract.cor"):
             shutil.copyfile(example / "src" / name, project / "src" / name)
         subprocess.run([cli, "check", "src/extract.cor"], cwd=project, env=env, check=True)
         subprocess.run([cli, "check", "src/reviews.cor"], cwd=project, env=env, check=True)
@@ -735,7 +735,7 @@ def check_replay(cli, project, installed, regression, env):
 
     with closing(sqlite3.connect(installed / "reading.sqlite")) as db:
         def shelves():
-            return db.execute("SELECT * FROM shelves ORDER BY shelf").fetchall()
+            return db.execute("SELECT * FROM StoredShelf ORDER BY shelf").fetchall()
 
         before = shelves()
         probe = suite.with_name("replay-probe.cor")

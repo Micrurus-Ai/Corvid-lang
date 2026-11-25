@@ -1,5 +1,4 @@
-import "std:db" use db_open, db_execute, db_query_rows, db_param_text, db_param_int
-import "std:json" use json_get_int, json_get_string
+import "./library_store" use ShelfTitle, shelf_titles, rename_shelf
 import "std:ui" as ui
 import "std:ui" use View
 
@@ -139,28 +138,18 @@ cancel.onclick = () => {
 </script>"""
     return View(controls + script)
 
-public agent list_readings() -> Result<List<Reading>, String>:
-    db = db_open("reading.sqlite")?
-    return read_shelves(db)
-
-agent read_shelves(db: DbHandle) -> Result<List<Reading>, String>:
-    rows = db_query_rows(db, "SELECT shelf, title FROM shelves ORDER BY shelf", [])?
+fn as_readings(shelves: List<ShelfTitle>) -> List<Reading>:
     readings: List<Reading> = []
-    for row in rows:
-        shelf = json_get_int(row, "shelf")?
-        title = json_get_string(row, "title")?
-        readings.append(Reading(shelf, title))
-    return Ok(readings)
+    for shelf in shelves:
+        readings.append(Reading(shelf.shelf, shelf.title))
+    return readings
+
+public agent list_readings() -> Result<List<Reading>, String>:
+    return Ok(as_readings(shelf_titles()))
 
 public agent save(reading: Reading) -> Result<Reading, String>:
-    db = db_open("reading.sqlite")?
-    return update_shelf(db, reading)
-
-agent update_shelf(db: DbHandle, reading: Reading) -> Result<Reading, String>:
-    result = db_execute(db, "UPDATE shelves SET title = ?, revision = revision + 1 WHERE shelf = ?", [db_param_text(reading.title), db_param_int(reading.shelf)])?
-    if result.rows_affected != 1:
-        return Err("Shelf was not found")
-    return Ok(reading)
+    renamed = rename_shelf(reading.shelf, reading.title)?
+    return Ok(Reading(renamed.shelf, renamed.title))
 
 fn matching_titles(readings: List<Reading>, term: String) -> SearchResult:
     found: List<Reading> = []
@@ -266,9 +255,8 @@ agent show(selected: Int, message: String) -> String:
         Err(reason) -> failure(reason)
 
 agent save_and_show(reading: Reading) -> Result<String, String>:
-    db = db_open("reading.sqlite")?
-    saved = update_shelf(db, reading)?
-    readings = read_shelves(db)?
+    saved = save(reading)?
+    readings = list_readings()?
     return Ok(screen(readings, saved.shelf, "Saved"))
 
 server library:
