@@ -249,7 +249,11 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Typed per-event failures for streamed connector calls (`Stream<Result<T, E>>` with `on failure`), so a stream that breaks mid-way is a value the program handles, as `on failure` makes a request failure one. [Decision 7](proposals/http-client.md#decisions) gives the shape, with governance (budget, replay divergence) staying loud. Deferred in B05 slice 5. Queued on the macOS session after B05, with the two items below; it settles the open question in [recoverable failures](proposals/recoverable-failures.md), since `try ... else` wraps an expression and cannot reach a failure a `for` loop raises.
 - [x] 6. File bodies: `body file` sends a `Bytes` or `Upload` as itself and `multipart receipt` sends a record with file parts (a content-derived boundary, so a reproducible digest); files are recorded by name, type, size and SHA-256 and replay matches them by digest; a JSON body and a decoded response must have a JSON form. [Decision 8](proposals/http-client.md#decisions)
 - [ ] A `Stream<T>` request body sent as JSON lines, and an upload read from disk rather than memory once `corvid serve` keeps large uploads out of memory. Deferred in B05 slice 6.
-- [ ] 7. Native code, after the native-dispatch decision.
+- [ ] 7. Native code, decided 2026-11-25 by the user: native code reaches every runtime-owned call through one export that calls `Runtime::call_tool`, so both tiers share recording, replay, redaction, policy and failure mapping. [Proposal](proposals/native-dispatch.md)
+  - [ ] N1. Connector calls in native code (real and replay modes), the circuit breaker moved into the runtime for both tiers, parity tests.
+  - [ ] N2. `uuid_v4`, `uuid_v7`, `time_now`, the `random_*` tools and `secret_read` in native code.
+  - [ ] N3. Native `Secret` as an opaque runtime-owned handle.
+  - [ ] N4. `Response<T>` in native code.
 
 **Test infrastructure**
 
