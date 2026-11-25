@@ -231,11 +231,11 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
 
-**B14 real-time connections** (proposal awaiting frontend agreement; split between this session and Codex by the owner, 2026-11-25). [Proposal](proposals/real-time.md)
+**B14 real-time connections** (shared design agreed with F08; split between this session and Codex by the owner, 2026-11-25). [Proposal](proposals/real-time.md)
 
 Order amendment: B14 starts before B10 and B11 finish, because frontend F08 waits on it and B14 needs only B01. The `live` declaration is a read and B14's action calls over the socket (RT-5) wait for B10, so nothing in B10 changes.
 
-- [ ] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
+- [x] Agree the grammar and wire messages with frontend development (F08): `live`, the `Change<Row>` cases, `subscribe`/`unsubscribe`/`snapshot`/`change`, heartbeat and close codes, and the client binding.
 - [ ] RT-1. `live` declarations: parse, check and contract entry (this session).
 - [ ] RT-2. Committed writes produce `Change<Row>` events for matching subscriptions, coalesced by key, on SQLite and Postgres (this session).
 - [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
