@@ -14,7 +14,7 @@ B05's acceptance: every method, headers, bearer and basic auth, query building, 
 A survey before designing:
 
 - **`connector` declarations** ([grammar](../reference/grammar.md#connector-declarations)) are already Corvid's declared HTTP client. A connector fixes its `base_url` in source, takes credentials by secret *name* (`bearer(secret("KEY"))`, `basic(...)`, `header("X-Api-Key", ...)`), declares `retry`, `rate_limit` and `circuit_breaker`, maps statuses to typed error variants (`on status 404 -> NotFound`), runs in `mock`, `replay` or `real` mode, and carries verified async protocols (52h). The credential is resolved at the last moment and placed only in a header, never in the recorded call (`corvid-runtime/src/runtime/connector_dispatch.rs`). Connectors appear in the Application Contract (`ContractConnector`).
-- **`std/http.cor`** has two dynamic-URL tools, `http_get(url)` and `http_post_json(url, body)`, returning `Result<HttpResponseEnvelope, String>`. One test fixture uses them.
+- **`std/http.cor`** has two dynamic-URL tools, `http_get(url)` and `http_post_json(url, body)`, returning `Result<HttpResponseEnvelope, String>`. They are a documented invention with a tour demo and a book chapter (see [the dynamic-URL tools](#the-dynamic-url-tools)).
 - **Egress policy.** `HttpEgressPolicy` (`corvid-runtime/src/http.rs`) applies an always-on SSRF block and requires the host in `[http] allow` (or `CORVID_HTTP_ALLOW`), with redirect destinations checked too. Replay quarantines the client.
 - **Hidden defaults.** `HttpClient` silently uses a 30-second timeout and follows up to 10 redirects, for connectors and both tools. The parser accepts `GET`, `POST`, `PUT`, `PATCH` and `DELETE` only.
 - **Bodies use the wrong JSON.** A connector encodes its body with the internal trace envelope (`corvid-vm/src/conv.rs`), not B01's public mapping (`corvid-public-json`), so an `Option` field is sent in Corvid's internal shape rather than as the plain value or `null` a real API expects. Response decoding goes through the same envelope.
@@ -114,7 +114,9 @@ Existing connectors (the `orders_api` example and about 100 test sources) gain `
 
 ### Typed JSON through B01
 
-Request bodies are encoded, and response bodies decoded, through `corvid-public-json`, the mapping `T.from_json`, routes and prompts use. A response that does not match the declared type fails with B01's error naming the field path, the expected kind and what was found (`$.receipt_url: expected String or null, found 42`). Unknown fields are ignored, as in route bodies. The recorded result is unchanged in shape, so existing recordings still replay. This is a behavior change for any connector that sends an `Option` field, so the slice notes it for the main line.
+Request bodies are encoded, and response bodies decoded, through `corvid-public-json`, the mapping `T.from_json`, routes and prompts use. A response that does not match the declared type fails with B01's error naming the field path, the expected kind and what was found (`$.receipt_url: expected String or null, found 42`). Unknown fields are ignored, as in route bodies. The recorded result is unchanged in shape, so existing recordings still replay. This is a behavior change for any connector that sends an `Option` field, so the slice records it in `learnings.md`.
+
+**One description of the wire format.** The Application Contract's `ContractOperation` lists a connector operation's method, path, effects, status mapping and protocol, but not its body types, so nothing describes connector bodies today that could drift. Slice 3 adds the request body, query and response types to `ContractOperation`, described by the same schema code the contract already uses for route bodies, and the generated TypeScript and Swift clients read them from there. A test encodes a value with the runtime's connector encoder and checks it against the contract's schema for that operation, including an absent `Option` field and a `List`. The runtime, contract and SDK then share one mapping, and the test fails if they diverge. Slice 1 likewise adds `timeout` and `redirects` to the contract, so a client or an assistant can see an operation's declared bounds.
 
 ### Responses with status and headers
 
@@ -136,7 +138,26 @@ Every attempt records an `HttpExchange` trace event: connector, operation, metho
 
 ### The dynamic-URL tools
 
-`http_get(url)` and `http_post_json(url, body)` carry the hidden 30-second timeout and 10 redirects, and send bodies outside B01. Under the no-hidden-defaults rule they cannot stay as they are. The recommendation is to retire both. Their one caller, a test fixture, moves to a connector, and connectors become the one way to make a request. A program that must fetch a URL it learns at run time (a web-page loader in B45) gets a connector form with `hosts: allowed_hosts` in place of `base_url` when an example needs it. See open question 2.
+`http_get(url)` and `http_post_json(url, body)` carry the hidden 30-second timeout and 10 redirects, and send bodies outside B01. Under the no-hidden-defaults rule they cannot stay as they are.
+
+They are a public, documented surface. A search of code and docs finds them in:
+
+- `std/http.cor`;
+- the invention catalog's executing-HTTP entry;
+- the `corvid tour` catalog;
+- chapter 18 of the book;
+- the stdlib reference (`docs/reference/stdlib/http.md`, `README.md`, `json.md`), `functions.md` and `core-semantics.md`;
+- three guarantee IDs in `corvid-guarantees` (SSRF block, allowlist, replay quarantine) and their tests;
+- the skill audit in `corvid-driver/src/skills`;
+- the Python codegen's stdlib scan;
+- serve, build and driver integration tests, and one CLI fixture.
+
+A program that fetches a URL it learns at run time needs this surface; the book's example does exactly that. So the choice is between two ways to give it a declared policy:
+
+- **A. Replace them with a dynamic-host connector (recommended).** A connector declares `hosts: allowed_hosts` in place of `base_url`, and an operation takes the URL as a parameter: `operation fetch(url: Url) -> Response<String>` with `GET url`. It declares `timeout:` and `redirects:` like every connector and gets every other connector feature. The tools are removed, and every surface listed above moves to the connector form in the same slice: the catalog entry, the tour, the book chapter, the reference pages, the guarantees re-anchored to the connector dispatch (which already runs the same SSRF and allowlist check), and the tests. The removal is recorded in `learnings.md`, with the old and new form side by side. This leaves one way to make a request.
+- **B. Keep them with required policy arguments**: `http_get(url, timeout: 10s, redirects: never)`. A smaller change, but it keeps two ways to make a request, and the dynamic tools would lack headers, auth, typed bodies and streaming unless each feature is built twice.
+
+See open question 2.
 
 ### Across the tiers
 
@@ -162,7 +183,7 @@ Connectors run only on the interpreter today, for the same reason native `Secret
 
 Each slice ships with interpreter tests, its reference page and roadmap checklist, and `dev-log.md` and `learnings.md` entries.
 
-1. **Declared timeouts and redirects.** `timeout:` and `redirects:` are required on every connector, with per-operation `timeout:`; the runtime builds one client per policy; a cross-host redirect never carries the credential, and a `POST` turned into a `GET` is refused; startup refuses a connector whose host is not allowed; `HEAD` and `OPTIONS`. Existing connectors migrate. The dynamic-URL tools are retired or reworked (question 2).
+1. **Declared timeouts and redirects.** `timeout:` and `redirects:` are required on every connector, with per-operation `timeout:`; the runtime builds one client per policy; a cross-host redirect never carries the credential, and a `POST` turned into a `GET` is refused; startup refuses a connector whose host is not allowed; `HEAD` and `OPTIONS`; `timeout` and `redirects` in the contract. Existing connectors migrate. The dynamic-URL tools are replaced or reworked (question 2), with every doc, tour, guarantee and test that names them, and a `learnings.md` entry.
 2. **Each request recorded.** `HttpExchange` events for every attempt, with credentials, `Secret` headers and `Set-Cookie` redacted; replay tests over retries and redirects; a test that a key never reaches the trace file.
 3. **Typed requests and responses.** Bodies and responses through B01's public mapping with field-path errors; `query` records; `header` items, including from a `Secret`; `Response<T>`.
 4. **Streamed responses and cancellation.** `Stream<T>` with `server_sent_events` and `json_lines`, per-event timeouts, and the caller-disconnect acceptance test through `corvid serve`.
@@ -180,5 +201,5 @@ Each slice ships with interpreter tests, its reference page and roadmap checklis
 ## Open questions
 
 1. **Frontend agreement.** The new connector items (`timeout:`, `redirects:`, `header`, `query`, `multipart`, `streams:`) are grammar, but only backend code writes connectors. Does Codex need to agree them, or only the `HEAD` and `OPTIONS` change to the method rule routes share?
-2. **The dynamic-URL tools.** Retire `http_get` and `http_post_json` (recommended), or keep them with required `timeout` and `redirects` arguments?
+2. **The dynamic-URL tools.** Replace `http_get` and `http_post_json` with a dynamic-host connector, migrating the invention entry, tour, book chapter, guarantees and tests (A, recommended)? Or keep them with required `timeout` and `redirects` arguments (B)?
 3. **Native code.** B05's native slice needs native dispatch of runtime-owned tools and connectors through the runtime's recording, the same architecture native `Secret` waits on. Decide it now, or ship B05 on the interpreter and keep its native slice open behind that decision?

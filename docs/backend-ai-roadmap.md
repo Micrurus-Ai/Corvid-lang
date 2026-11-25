@@ -217,7 +217,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] Agree the proposal, including its three open questions: frontend agreement for the new connector items, retiring `http_get` and `http_post_json`, and native dispatch.
 - [ ] 1. Declared `timeout:` and `redirects:` on every connector, startup refusal of a connector host outside `[http] allow`, `HEAD` and `OPTIONS`.
 - [ ] 2. An `HttpExchange` record for every attempt, with credentials redacted, replayed exactly.
-- [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`.
+- [ ] 3. Bodies and responses through B01's public mapping, `query` records, `header` items, `Response<T>`; the contract and the generated clients describe connector bodies from the same schema, with a test that the runtime's encoding matches it.
 - [ ] 4. Streamed responses, cancellation, and caller disconnect closing the upstream connection.
 - [ ] 5. Streamed request bodies and multipart upload.
 - [ ] 6. Native code, after the native-dispatch decision.
