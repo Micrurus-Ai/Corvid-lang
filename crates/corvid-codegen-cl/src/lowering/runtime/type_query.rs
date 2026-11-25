@@ -558,6 +558,9 @@ pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
         | Type::ZonedTime
         | Type::Currency
         | Type::Locale
+        // B04 — a native `Bytes` value is a String holding its
+        // canonical base64url text.
+        | Type::Bytes
         | Type::Struct(_)
         | Type::ImportedStruct(_)
         | Type::List(_)
@@ -620,12 +623,14 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // String holding its canonical text; every operation calls the
         // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => true,
-        // `Bytes` has no native form until the native cryptography
-        // slice, whose equality must stay constant-time.
-        Type::Bytes => false,
-        // `Secret` has no native form until the native cryptography
-        // slice, which must keep `==` constant-time and the text out
-        // of native traces.
+        // B04 — a native `Bytes` value is a String holding its
+        // canonical base64url text; every operation, `==` included,
+        // calls the runtime's `corvid-crypto`, so equality stays
+        // constant-time.
+        Type::Bytes => true,
+        // `Secret` has no native form: every secret comes from a tool
+        // native binaries do not dispatch (see the driver's
+        // `NotNativeReason::SecretNotNative`).
         Type::Secret => false,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles

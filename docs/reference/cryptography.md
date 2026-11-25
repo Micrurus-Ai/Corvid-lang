@@ -2,7 +2,7 @@
 
 `Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes, HMAC and Ed25519 signature verification are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
 
-Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. A program that uses `Bytes` or `Secret` runs on the interpreter until the native cryptography slice, and a native build that refuses one names that slice. Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
+Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. `Bytes`, hashing, HMAC with a `Bytes` key and Ed25519 verification also compile to native code; a program that mentions `Secret` runs on the interpreter (see [Native code](#native-code)). Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
 
 ```corvid
 agent content_hash(body: String) -> String:
@@ -186,6 +186,16 @@ In JSON, at routes, tools, prompts, stores and `to_json`, a `Bytes` value is a s
 
 A tool that takes or returns `Bytes` receives and returns that base64url text, and the trace records it.
 
+## Native code
+
+A compiled program holds a `Bytes` value as its unpadded base64url text, the text its JSON form carries, and every method is one call into the runtime, which computes with `corvid-crypto`, the code the interpreter calls. Both tiers return the same digests, tags, verdicts and error messages, and `to_json` and `from_json` read and write the same text. `==` and `!=` compare the two texts in constant time; the text is one to one with the bytes, so that is the same answer the interpreter's byte comparison gives, without decoding a digest first. Records, lists, options and results holding bytes compare the same way. An entry agent may return `Bytes`, printed as `Bytes(<hex>)` on both tiers; it cannot take one from the command line, so take a `String` and decode it with `Bytes.from_hex(text)` or `Bytes.from_base64_url(text)`.
+
+These run on the interpreter, chosen automatically by `corvid run` and refused by name in a native build:
+
+- **A program that mentions `Secret`** anywhere: a field, a signature or an expression. A secret comes only from a tool (`secret(name)`, `random_token(bytes)`) and reaches tools as text. Native binaries do not dispatch the standard library's tools, and a native tool call has no path that hands the implementation a secret's text while every record holds `<redacted>`, or that scrubs an echoed secret from the record only. So `hash_password`, `verify_password`, `decode_base64_after` and an HMAC keyed by a `Secret`, which covers the webhook programs above, run on the interpreter. To verify natively, key the HMAC with `Bytes`; for a key that must stay out of traces, keep the program on the interpreter.
+- **A tool or prompt whose signature holds `Bytes`**, as for the B06 types: native tool and prompt bridges have no `Bytes` form.
+- **`Bytes` as a map value**, since native maps hold `String`, `Int` and record values, and **`list.contains(bytes)`**, since native code compiles `contains` on no list yet.
+
 ## Secrets
 
 A `Secret` is text the program needs but must never expose: a webhook signing key, a password, an API token. `secret(name)` from `std/secrets` reads one from the environment:
@@ -273,7 +283,7 @@ The application contract publishes no secret. A public type's field that holds a
 
 ### Not yet
 
-Native code refuses `Secret` until the native cryptography slice. Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
+Native code refuses `Secret` (see [Native code](#native-code)). Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
 
 ## Random tokens
 

@@ -4,6 +4,71 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Byte strings, hashing, HMAC and signatures in native code (B04, sixth slice)
+
+`Bytes` compiles to native code, with every method on it: `utf8()`,
+`to_utf8()`, `length()`, the hex and base64 conversions both ways,
+SHA-256, SHA-384 and SHA-512, HMAC-SHA256 and HMAC-SHA512 with a
+`Bytes` key, and `verify_ed25519`. A native byte string is held the way
+B06 holds a `Decimal`: a reference-counted Corvid String containing its
+JSON form, here the unpadded base64url text. That reuses string
+reference counting, record and list slots, options, results, JSON and
+the trace unchanged, and `to_base64_url()` is the value itself. Every
+other method is one call into a new runtime file,
+`ffi_bridge/bytes.rs`, which decodes with `corvid-crypto` and computes
+with it, so the two tiers cannot disagree on a digest, a tag, a verdict
+or a message. One table in the code generator, `bytes_methods.rs`,
+names each entry point; the imports, the lowering, the tier picker and
+the match support read it.
+
+The one thing that could not be reused is string equality. `==` on
+`Bytes` must stay constant-time, and native string comparison is not.
+It is a runtime call that compares the two canonical texts with
+`corvid_crypto::constant_time_eq`. The text is one to one with the
+bytes, because the base64url decoder refuses stray bits in the last
+character and the encoder never pads, so this is exactly the byte
+comparison's answer; a new `Bytes::canonical_texts_equal` holds the
+rule and a unit test checks it against `constant_time_eq` on the bytes.
+Comparing the texts also avoids decoding a computed digest before the
+comparison, which would branch on its characters. Structural equality
+gets an `EqualityLayout::Bytes` that calls the same function, so a
+record, list, option or result holding bytes compares in constant time
+too. A native JSON decode re-encodes padded input, so every native byte
+string is canonical. An entry agent may return `Bytes`; the runtime
+prints `Bytes(<hex>)` from the same `Debug` form the interpreter prints.
+
+`Secret` stays on the interpreter, and I want to be exact about why. A
+secret only ever comes from a tool, `secret(name)` or
+`random_token(bytes)`, and is only useful when it reaches a tool or a
+secret method. Native binaries do not dispatch the standard library's
+tools at all: a native tool call is a direct call into a linked
+`#[tool]` library, with its own trace and replay path that has no
+redacted position, no revealed-argument form and no scrubbing of an
+echoed secret. A native `Secret` type would therefore compile code that
+no native program can reach with a secret in hand, which could not be
+tested against the interpreter. The correct choice is the loud one: a
+program that mentions `Secret` anywhere keeps running on the
+interpreter, which keeps every guarantee, and a native build refuses it
+with one shared reason (`corvid_codegen_cl::secret_boundary`). That
+includes `hash_password`, `verify_password`, `decode_base64_after` and
+an HMAC keyed by a secret. Native secrets need the standard library's
+tools dispatched natively through the runtime's recording first, which
+is on the roadmap. A tool or prompt whose signature holds `Bytes` also
+stays on the interpreter, for the B06 reason.
+
+The parity tests run every program on both tiers with balanced
+allocations: the FIPS digests, encodings and decoder messages, equality
+inside every container, the RFC 4231 HMAC vectors, the two recorded
+webhooks with the key held as `Bytes`, the RFC 8032 vectors with six
+forgeries, JSON, a printed result, and the refusal of a secret.
+Writing the webhook test found two native bugs that have nothing to do
+with bytes: returning from inside a `for` loop leaks an allocation, and
+reassigning a string inside an `if` within a `for` loop double-frees.
+Both reproduce with programs that use only strings. The test avoids the
+two shapes and they are roadmap items, not fixed here.
+
+---
+
 ## 2026-11-25 - Ed25519 signature verification (B04, fifth slice)
 
 `message.verify_ed25519(signature, public_key)` is a pure method on

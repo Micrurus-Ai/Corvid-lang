@@ -46,6 +46,7 @@ use std::path::PathBuf;
 
 mod equality;
 mod approval_exports;
+mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.
 // The actual extern "C" entry points land in 33S1 (io), 33S2
 // (http), 33S3 (db). The modules exist now so the per-surface

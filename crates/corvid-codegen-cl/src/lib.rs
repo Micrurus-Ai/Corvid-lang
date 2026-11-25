@@ -17,6 +17,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bytes_methods;
+pub use bytes_methods::is_native_bytes_method;
 pub mod cdylib;
 pub mod dataflow;
 pub mod currency_methods;
@@ -32,6 +34,7 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
+pub mod secret_boundary;
 pub mod text_scalar;
 pub mod text_scalar_boundary;
 pub mod time_methods;

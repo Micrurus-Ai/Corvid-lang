@@ -166,6 +166,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     for operation in crate::currency_methods::CurrencyOperation::all() {
         currency_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
     }
+    // B04 `Bytes`: the same one-word shape.
+    let mut bytes_operations = HashMap::new();
+    for operation in crate::bytes_methods::BytesOperation::all() {
+        bytes_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
+    }
     // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
     let mut json_decode_sig = module.make_signature();
     for _ in 0..6 {
@@ -1303,6 +1308,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         decimal_operations,
         time_operations,
         currency_operations,
+        bytes_operations,
         json_decode_typed: json_decode_typed_id,
         json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,

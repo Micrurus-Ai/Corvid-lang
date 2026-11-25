@@ -1,5 +1,5 @@
 //! The parity harness for the text-held scalars (`Decimal`, the time
-//! types, `Currency` and `Locale`). Every program runs on the
+//! types, `Currency`, `Locale` and `Bytes`). Every program runs on the
 //! interpreter and as a compiled binary; both must return the same
 //! text, and the binary must release every allocation. Traps must stop
 //! both tiers with the same message.
@@ -38,6 +38,8 @@ pub(super) fn assert_parity_text(src: &str) -> String {
         Value::TimeZone(zone) => zone.to_string(),
         Value::Currency(currency) => currency.to_string(),
         Value::Locale(locale) => locale.to_string(),
+        // The interpreter prints a byte string as `Bytes(<hex>)`.
+        Value::Bytes(bytes) => format!("{bytes:?}"),
         Value::Int(n) => n.to_string(),
         other => panic!("interpreter returned {other:?}, not a String, Int or text-held scalar; src=\n{src}"),
     };

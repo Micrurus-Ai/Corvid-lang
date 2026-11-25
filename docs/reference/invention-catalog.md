@@ -238,7 +238,7 @@ Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
 Tour: `corvid tour --topic secrets`
 Roadmap: [B04 cryptography, slices 2 to 4](../../docs/backend-ai-roadmap.md)
 Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs), [tokens and passwords end to end](../../crates/corvid-driver/tests/tokens_and_passwords.rs)
-Non-scope: interpreter tier only until the native cryptography slice; secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
+Non-scope: interpreter tier only, because native binaries do not dispatch the standard library's tools that produce and take secrets, so a native build refuses `Secret` by name (a roadmap item); secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
 
 ### AI-Native Ergonomics
 

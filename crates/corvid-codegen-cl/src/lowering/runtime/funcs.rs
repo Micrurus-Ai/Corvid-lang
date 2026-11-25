@@ -53,6 +53,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub time_operations: HashMap<crate::time_methods::TimeOperation, FuncId>,
     /// B06 `Currency`, `Locale` and `format_currency`, by operation.
     pub currency_operations: HashMap<crate::currency_methods::CurrencyOperation, FuncId>,
+    /// B04 `Bytes` methods and `==`, by operation.
+    pub bytes_operations: HashMap<crate::bytes_methods::BytesOperation, FuncId>,
     /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.

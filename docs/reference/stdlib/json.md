@@ -108,8 +108,8 @@ and `message`, and encodes to the same text. A type the native target
 cannot hold runs on the interpreter: a map whose keys are not
 `String`, a `JsonValue`, a `Grounded` value, whose sources native
 code does not keep. `Decimal` and the time, zone, currency and locale
-types compile, each carried as its canonical text. `Bytes` runs on the
-interpreter until the native cryptography slice.
+types compile, each carried as its canonical text, and so does `Bytes`,
+carried as its unpadded base64url text.
 
 ## Public JSON mapping
 

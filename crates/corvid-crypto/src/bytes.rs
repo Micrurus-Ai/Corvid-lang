@@ -88,6 +88,19 @@ impl Bytes {
     pub fn constant_time_eq(&self, other: &Bytes) -> bool {
         crate::constant_time_eq(&self.0, &other.0)
     }
+
+    /// `==` on two byte strings given as the text [`Bytes::to_base64_url`]
+    /// wrote, which is how native code holds them. That text is one to
+    /// one with the bytes (the decoder refuses stray bits in the last
+    /// character, and the encoder never pads), so the texts are equal
+    /// exactly when the bytes are. Comparing the texts in constant time
+    /// gives [`Bytes::constant_time_eq`]'s answer without decoding a
+    /// digest first, which would branch on its characters. Texts of
+    /// different lengths are unequal at once, as byte strings of
+    /// different lengths are.
+    pub fn canonical_texts_equal(left: &str, right: &str) -> bool {
+        crate::constant_time_eq(left.as_bytes(), right.as_bytes())
+    }
 }
 
 impl From<Vec<u8>> for Bytes {
@@ -129,6 +142,27 @@ mod tests {
         assert_ne!(a, Bytes::new(&[1, 2]));
         assert_ne!(a, Bytes::new(&[1, 2, 3, 0]));
         assert_ne!(Bytes::new(&[]), Bytes::new(&[0]));
+    }
+
+    #[test]
+    fn canonical_texts_compare_as_their_bytes_do() {
+        let samples: Vec<Bytes> = (0..40u8)
+            .map(|n| Bytes::from((0..n).map(|i| i.wrapping_mul(37) ^ n).collect::<Vec<u8>>()))
+            .chain([Bytes::new(&[0]), Bytes::new(&[0, 0]), Bytes::new(&[0xff]), Bytes::new(&[0xfb, 0xff])])
+            .collect();
+        for a in &samples {
+            for b in &samples {
+                assert_eq!(
+                    Bytes::canonical_texts_equal(&a.to_base64_url(), &b.to_base64_url()),
+                    a.constant_time_eq(b),
+                    "{a:?} {b:?}"
+                );
+            }
+        }
+        // Padded or stray-bit spellings decode to the same bytes but
+        // are not canonical text; native code never holds them.
+        assert_eq!(Bytes::from_base64_url("AA=="), Ok(Bytes::new(&[0])));
+        assert!(Bytes::from_base64_url("AB").is_err(), "stray bits in the last character are refused");
     }
 
     #[test]

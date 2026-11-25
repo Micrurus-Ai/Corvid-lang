@@ -28,4 +28,7 @@ pub enum EqualityLayout {
     ZonedTime,
     Currency,
     Locale,
+    /// B04 — a `Bytes` value held as its canonical base64url text,
+    /// compared in constant time, never bytewise like a `String`.
+    Bytes,
 }

@@ -17,9 +17,10 @@ unsafe fn read_slot(layout: *const u32, slot: *const u64) -> u64 {
     }
 }
 
-/// B06 — how two slots of a text-held scalar compare by value, or
-/// `None` when `kind` is not one: `1.0` equals `1.00`, and an instant
-/// equals itself however its text writes the fraction.
+/// How two slots of a text-held scalar compare by value, or `None`
+/// when `kind` is not one: `1.0` equals `1.00` (B06), an instant equals
+/// itself however its text writes the fraction, and two byte strings
+/// compare in constant time (B04).
 fn text_scalar_equality(kind: u32) -> Option<unsafe fn(u64, u64) -> bool> {
     Some(match kind {
         k if k == Layout::Decimal as u32 => super::decimal::slots_equal,
@@ -29,6 +30,7 @@ fn text_scalar_equality(kind: u32) -> Option<unsafe fn(u64, u64) -> bool> {
         k if k == Layout::ZonedTime as u32 => super::time::zoned_time_slots_equal,
         k if k == Layout::Currency as u32 => super::currency::currency_slots_equal,
         k if k == Layout::Locale as u32 => super::currency::locale_slots_equal,
+        k if k == Layout::Bytes as u32 => super::bytes::slots_equal,
         _ => return None,
     })
 }

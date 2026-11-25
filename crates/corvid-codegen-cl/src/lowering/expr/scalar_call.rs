@@ -1,11 +1,13 @@
-//! Time and currency operators and methods (B06), each lowered to one
-//! call into the runtime entry points that [`crate::time_methods`] and
-//! [`crate::currency_methods`] name.
+//! Time, currency and byte-string operators and methods (B06, B04), each
+//! lowered to one call into the runtime entry points that
+//! [`crate::time_methods`], [`crate::currency_methods`] and
+//! [`crate::bytes_methods`] name.
 //!
-//! A native `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`
-//! or `Locale` is a String holding its canonical text, and every entry
-//! point takes one-word operands: those Strings, `Int`s, and a Result
-//! payload slot for the parsers. Operands are lowered in source order,
+//! A native `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`,
+//! `Locale` or `Bytes` is a String holding its canonical text, and every
+//! entry point takes one-word operands: those Strings, `Int`s, and a
+//! Result payload slot for the parsers. A `Bool` result comes back as
+//! one word, 1 or 0. Operands are lowered in source order,
 //! even when the call takes them swapped (`n * d`). Ownership follows
 //! the ownership pass: operator operands are consumed, so an owned
 //! operand is released after the call; method receivers and arguments
@@ -207,6 +209,9 @@ pub(super) fn lower_scalar_method<Operation: Copy + std::fmt::Debug>(
         let tag = call_import(builder, module, id, &call_args);
         builder.ins().store(MemFlags::trusted(), tag, result, RESULT_TAG_OFFSET);
         result
+    } else if matches!(scalar_of(&expr.ty), Type::Bool) {
+        let word = call_import(builder, module, id, &call_args);
+        builder.ins().icmp_imm(IntCC::NotEqual, word, 0)
     } else {
         call_import(builder, module, id, &call_args)
     };
@@ -214,11 +219,12 @@ pub(super) fn lower_scalar_method<Operation: Copy + std::fmt::Debug>(
     Ok(result)
 }
 
-/// `left op right` where either side is a time, `Currency` or `Locale`
-/// value. A combination the operator tables do not name is a compiler
-/// error, never integer arithmetic on the text pointers.
+/// `left op right` where either side is a time, `Currency`, `Locale` or
+/// `Bytes` value. A combination the operator tables do not name is a
+/// compiler error, never integer arithmetic on the text pointers or
+/// string equality on their texts.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn lower_time_or_currency_binop(
+pub(super) fn lower_text_scalar_binop(
     builder: &mut FunctionBuilder,
     op: BinaryOp,
     left: &IrExpr,
@@ -246,9 +252,15 @@ pub(super) fn lower_time_or_currency_binop(
             builder, func, binary, op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
         );
     }
+    if let Some(binary) = crate::bytes_methods::bytes_binary(op, &left.ty, &right.ty) {
+        let func = *runtime.bytes_operations.get(&binary.operation).ok_or_else(|| missing(&binary.operation))?;
+        return lower_scalar_binop(
+            builder, func, binary, op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+        );
+    }
     Err(CodegenError::cranelift(
         format!(
-            "`{op:?}` between `{}` and `{}` reached native lowering; the checker's time and currency tables refuse it",
+            "`{op:?}` between `{}` and `{}` reached native lowering; the checker's time, currency and byte-string rules refuse it",
             left.ty.display_name(),
             right.ty.display_name()
         ),

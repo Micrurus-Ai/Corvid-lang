@@ -389,10 +389,10 @@ pub(super) fn emit_entry_main(
                     Type::Int => Some(runtime.trace_run_completed_int),
                     Type::Bool => Some(runtime.trace_run_completed_bool),
                     Type::Float => Some(runtime.trace_run_completed_float),
-                    // B06 — a `Decimal`, time, currency or locale value is
-                    // traced as its canonical text, the JSON string the
-                    // interpreter records.
-                    Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Some(runtime.trace_run_completed_string),
+                    // B06, B04 — a `Decimal`, time, currency, locale or
+                    // `Bytes` value is traced as its canonical text, the
+                    // JSON string the interpreter records.
+                    Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Some(runtime.trace_run_completed_string),
                     Type::Grounded(inner) => match &**inner {
                         Type::Int => Some(runtime.trace_run_completed_int),
                         Type::Bool => Some(runtime.trace_run_completed_bool),
@@ -495,36 +495,34 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
-        Type::Bytes => Err(CodegenError::not_supported(
-            format!(
-                "entry agent {role} of type `Bytes` - byte strings run on the interpreter tier until the native cryptography slice lands; use the interpreter tier (`corvid run --tier interp`)."
-            ),
-            span,
-        )),
         Type::Secret => Err(CodegenError::not_supported(
             format!(
-                "entry agent {role} of type `Secret` - secret values run on the interpreter tier until the native cryptography slice lands; use the interpreter tier (`corvid run --tier interp`)."
+                "entry agent {role} of type `Secret` - {}; use the interpreter tier (`corvid run --tier interp`).",
+                crate::secret_boundary::SECRET_REQUIREMENT
             ),
             span,
         )),
         // B06 — a returned `Decimal`, time, currency or locale value
-        // prints its canonical text, as the interpreter prints it.
-        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale
+        // prints its canonical text, as the interpreter prints it. B04 —
+        // a returned `Bytes` prints `Bytes(<hex>)`, as the interpreter
+        // prints it.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes
             if role == "return" => Ok(()),
         // Neither tier reads these types from the command line.
-        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
-            let parser = match ty {
-                Type::Decimal => "parse_decimal",
-                Type::Duration => "parse_duration",
-                Type::Instant => "parse_instant",
-                Type::TimeZone => "parse_time_zone",
-                Type::ZonedTime => "parse_zoned_time",
-                Type::Currency => "parse_currency",
-                _ => "parse_locale",
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
+            let read = match ty {
+                Type::Decimal => "call `parse_decimal()` on it",
+                Type::Duration => "call `parse_duration()` on it",
+                Type::Instant => "call `parse_instant()` on it",
+                Type::TimeZone => "call `parse_time_zone()` on it",
+                Type::ZonedTime => "call `parse_zoned_time()` on it",
+                Type::Currency => "call `parse_currency()` on it",
+                Type::Bytes => "decode it with `Bytes.from_hex(text)` or `Bytes.from_base64_url(text)`",
+                _ => "call `parse_locale()` on it",
             };
             Err(CodegenError::not_supported(
                 format!(
-                    "entry agent {role} of type `{}` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and call `{parser}()` on it",
+                    "entry agent {role} of type `{}` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and {read}",
                     ty.display_name()
                 ),
                 span,
@@ -572,6 +570,21 @@ fn emit_entry_result_print(
             builder.declare_value_needs_stack_map(result_val);
             let r = module.declare_func_in_func(runtime.print_string, builder.func);
             builder.ins().call(r, &[result_val]);
+            emit_release(builder, module, runtime, result_val);
+        }
+        // B04 — `Bytes(<hex>)`, the interpreter's printed form, written
+        // by the runtime from the same `Debug` form.
+        Type::Bytes => {
+            let display = runtime.bytes_operations.get(&crate::bytes_methods::BytesOperation::Display).copied().ok_or_else(|| {
+                CodegenError::cranelift("the `Bytes` display operation was not declared", span)
+            })?;
+            let display = module.declare_func_in_func(display, builder.func);
+            let call = builder.ins().call(display, &[result_val]);
+            let text = builder.inst_results(call)[0];
+            builder.declare_value_needs_stack_map(text);
+            let r = module.declare_func_in_func(runtime.print_string, builder.func);
+            builder.ins().call(r, &[text]);
+            emit_release(builder, module, runtime, text);
             emit_release(builder, module, runtime, result_val);
         }
         Type::Struct(def_id) => {

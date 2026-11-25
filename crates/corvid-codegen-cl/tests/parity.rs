@@ -62,6 +62,8 @@ mod decimal;
 mod time;
 #[path = "parity/currency.rs"]
 mod currency;
+#[path = "parity/crypto.rs"]
+mod crypto;
 
 /// Path to the `corvid-test-tools` staticlib. The parity harness links
 /// this into every compiled Corvid binary so `#[tool]`-declared mocks

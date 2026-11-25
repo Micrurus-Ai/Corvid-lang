@@ -285,6 +285,20 @@ pub(super) fn lower_expr(
                 receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
         }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
+            // B04 — a native `Secret` does not exist, so an HMAC keyed by
+            // one never reaches here; refuse it by name if it does.
+            if let Some(key) = args.iter().find(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret)) {
+                return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, key.span));
+            }
+            let method = crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard");
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.bytes_operations.get(&operation).copied(),
+                crate::bytes_methods::BytesOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_decimal_method(*kind) => {
             let method = crate::decimal_methods::native_decimal_method(*kind).expect("checked by the guard");
             decimal::lower_decimal_method(
@@ -562,11 +576,13 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
-        // B06 — time, currency and locale operators are runtime calls;
-        // `@wrapping` does not apply to them.
+        // B06, B04 — time, currency, locale and `Bytes` operators are
+        // runtime calls; `@wrapping` does not apply to them, and `==` on
+        // `Bytes` is the runtime's constant-time comparison.
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if crate::time_methods::has_time_operand(&left.ty, &right.ty)
-                || crate::currency_methods::has_currency_operand(&left.ty, &right.ty) => scalar_call::lower_time_or_currency_binop(
+                || crate::currency_methods::has_currency_operand(&left.ty, &right.ty)
+                || crate::bytes_methods::has_bytes_operand(&left.ty, &right.ty) => scalar_call::lower_text_scalar_binop(
                 builder, *op, left, right, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             ),
         // B06 — `@wrapping` does not apply to decimals; both forms are checked.

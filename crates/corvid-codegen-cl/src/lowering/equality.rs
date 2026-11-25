@@ -68,6 +68,9 @@ impl LayoutTable<'_, '_> {
             Type::ZonedTime => (Layout::ZonedTime, vec![]),
             Type::Currency => (Layout::Currency, vec![]),
             Type::Locale => (Layout::Locale, vec![]),
+            // B04 — byte strings compare in constant time in the
+            // runtime, never bytewise as text.
+            Type::Bytes => (Layout::Bytes, vec![]),
             Type::List(item) => (Layout::List, vec![item.as_ref().clone()]),
             Type::Option(item) => (
                 if option_uses_wrapper(ty) {

@@ -289,6 +289,12 @@ pub(super) fn define_extern_c_wrapper(
 }
 
 pub(super) fn reject_unsupported_types(agent: &IrAgent) -> Result<(), CodegenError> {
+    // B04 — a signature holding a `Secret` gets the reason native code
+    // has none, not the generic shape message.
+    if let Some(span) = agent.params.iter().find(|p| p.ty.mentions_secret()).map(|p| p.span)
+        .or_else(|| agent.return_ty.mentions_secret().then_some(agent.span)) {
+        return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, span));
+    }
     for p in &agent.params {
         cl_type_for(&p.ty, p.span).map_err(|_| {
             CodegenError::not_supported(
@@ -463,15 +469,11 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
             span,
         )),
-        // B06 — a native `Decimal`, time, currency or locale value is a
-        // String holding its canonical text.
-        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => Ok(I64),
-        Type::Bytes => Err(CodegenError::not_supported(
-            "`Bytes` - byte strings run on the interpreter tier until the native cryptography slice lands",
-            span,
-        )),
+        // B06, B04 — a native `Decimal`, time, currency, locale or
+        // `Bytes` value is a String holding its canonical text.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Ok(I64),
         Type::Secret => Err(CodegenError::not_supported(
-            "`Secret` - secret values run on the interpreter tier until the native cryptography slice lands, which must keep their text out of native traces",
+            crate::secret_boundary::SECRET_REQUIREMENT,
             span,
         )),
         Type::Upload(_) => Err(CodegenError::not_supported(

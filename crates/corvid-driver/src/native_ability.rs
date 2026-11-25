@@ -72,10 +72,9 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
-    /// A program that mentions `Bytes` anywhere: a declared field, a
-    /// signature or an expression.
-    BytesNotNative,
-    /// A program that mentions `Secret` anywhere, in the same places.
+    /// B04 — a program that mentions `Secret` anywhere: a declared
+    /// field, a signature or an expression. See
+    /// `corvid_codegen_cl::secret_boundary`.
     SecretNotNative,
 }
 
@@ -119,11 +118,10 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
-            Self::BytesNotNative => f.write_str(
-                "program uses `Bytes` - byte strings and hashing run on the interpreter until the native cryptography slice lands; the auto-dispatcher runs the interpreter tier",
-            ),
-            Self::SecretNotNative => f.write_str(
-                "program uses `Secret` - secret values run on the interpreter, which keeps their text out of traces, until the native cryptography slice lands; the auto-dispatcher runs the interpreter tier",
+            Self::SecretNotNative => write!(
+                f,
+                "program uses `Secret` - {}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
+                corvid_codegen_cl::secret_boundary::SECRET_REQUIREMENT
             ),
             Self::TextScalarAtBoundary { name, type_name } => write!(
                 f,
@@ -176,9 +174,6 @@ struct ScanContext<'a> {
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
     let context = ScanContext { types: &ir.types, has_tools_lib };
-    if declared_types(ir).any(mentions_bytes) {
-        return Err(NotNativeReason::BytesNotNative);
-    }
     if declared_types(ir).any(Type::mentions_secret) {
         return Err(NotNativeReason::SecretNotNative);
     }
@@ -284,28 +279,6 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
         .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
-/// Whether `ty` is or contains `Bytes`, apart from record fields,
-/// which [`declared_types`] covers.
-fn mentions_bytes(ty: &Type) -> bool {
-    match ty {
-        Type::Bytes => true,
-        Type::List(inner)
-        | Type::Option(inner)
-        | Type::Tainted(inner)
-        | Type::Grounded(inner)
-        | Type::Stream(inner)
-        | Type::Partial(inner)
-        | Type::ResumeToken(inner)
-        | Type::Upload(inner)
-        | Type::Page(inner)
-        | Type::Weak(inner, _) => mentions_bytes(inner),
-        Type::Map(a, b) | Type::Result(a, b) => mentions_bytes(a) || mentions_bytes(b),
-        Type::Function { params, ret, .. } => mentions_bytes(ret) || params.iter().any(mentions_bytes),
-        Type::RouteParams(params) => params.iter().any(|(_, param)| mentions_bytes(param)),
-        _ => false,
-    }
-}
-
 /// Every type a declared record field, tool, prompt or agent signature names.
 fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
     let fields = ir.types.iter().flat_map(|decl| {
@@ -319,9 +292,6 @@ fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
-    if mentions_bytes(&expr.ty) {
-        return Err(NotNativeReason::BytesNotNative);
-    }
     if expr.ty.mentions_secret() {
         return Err(NotNativeReason::SecretNotNative);
     }
@@ -392,6 +362,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 || corvid_codegen_cl::is_native_decimal_method(*kind)
                 || corvid_codegen_cl::is_native_time_method(*kind)
                 || corvid_codegen_cl::is_native_currency_method(*kind)
+                || corvid_codegen_cl::is_native_bytes_method(*kind)
                 || matches!(kind, corvid_types::BuiltinMethodKind::StringParseInt | corvid_types::BuiltinMethodKind::ResultIsOk | corvid_types::BuiltinMethodKind::ResultIsErr) => {
             scan_expr(receiver, current_return_ty, context)?;
             args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
@@ -408,9 +379,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         {
             scan_expr(receiver, current_return_ty, context)
         }
-        // `bytes.to_hex()` returns a `String`, so the byte string it
-        // reads shows only in the method.
-        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() => Err(NotNativeReason::BytesNotNative),
+        // `secret.verify_password(hash)` returns a `Bool`, so the secret
+        // it reads shows only in the method.
+        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() => Err(NotNativeReason::SecretNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
@@ -646,17 +617,21 @@ agent main() -> Decimal:
     }
 
     #[test]
-    fn byte_string_programs_run_on_the_interpreter() {
+    fn byte_string_programs_are_native_except_at_tool_and_prompt_boundaries() {
         for src in [
             "agent main() -> String:\n    return \"abc\".utf8().sha256().to_hex()\n",
-            "agent main(a: Bytes, b: Bytes) -> Bool:\n    return a == b\n",
-            "type Signed:\n    body: String\n    signature: Bytes\n\nagent main() -> Int:\n    return 1\n",
-            "tool fetch() -> List<Bytes>\nagent main() -> Int:\n    return 1\n",
+            "agent same(a: Bytes, b: Bytes) -> Bool:\n    return a == b\n\nagent main() -> Bool:\n    return same(\"a\".utf8(), \"a\".utf8())\n",
+            "type Signed:\n    body: String\n    signature: Bytes\n\nagent main() -> Bool:\n    s = Signed(\"b\", \"b\".utf8().hmac_sha256(\"k\".utf8()))\n    return s.body.utf8().verify_ed25519(s.signature, s.signature)\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid bytes program");
-            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BytesNotNative), "{src}");
+            assert_eq!(native_ability(&ir), Ok(()), "{src}");
         }
-        assert!(NotNativeReason::BytesNotNative.to_string().contains("native cryptography slice"));
+        let ir = crate::compile_to_ir("tool fetch() -> List<Bytes>\nagent main() -> Int:\n    return fetch().length()\n")
+            .expect("valid bytes tool program");
+        assert_eq!(
+            native_ability_with_tools(&ir, true),
+            Err(NotNativeReason::TextScalarAtBoundary { name: "fetch".into(), type_name: "Bytes".into() })
+        );
     }
 
     #[test]
@@ -670,7 +645,17 @@ agent main() -> Decimal:
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
         }
-        assert!(NotNativeReason::SecretNotNative.to_string().contains("native cryptography slice"));
+        // An HMAC keyed by a secret, and the secret methods, are
+        // refused even though their results are `Bytes` and `Bool`.
+        for src in [
+            "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
+            "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"x\")\n\nagent main() -> Int:\n    return 1\n",
+        ] {
+            let ir = crate::compile_to_ir(src).expect("valid secret program");
+            assert_eq!(native_ability(&ir), Err(NotNativeReason::SecretNotNative), "{src}");
+        }
+        let reason = NotNativeReason::SecretNotNative.to_string();
+        assert!(reason.contains("do not dispatch the standard library's tools") || reason.contains("neither dispatch"), "{reason}");
     }
 
     #[test]

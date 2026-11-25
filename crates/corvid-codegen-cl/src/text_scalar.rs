@@ -1,24 +1,23 @@
-//! The scalars native code holds as their canonical text (B06), and the
-//! vocabulary their operation tables share.
+//! The scalars native code holds as their canonical text (B06, B04), and
+//! the vocabulary their operation tables share.
 //!
 //! `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`,
-//! `Currency` and `Locale` are each a refcounted String in one 8-byte
-//! slot, holding the exact text of the value's JSON form
-//! (`corvid_public_json::text_scalar`). That reuses string reference
-//! counting, list and record slots, option and result payloads,
-//! printing and JSON unchanged. Every operator and method is a call
-//! into the runtime, named by `decimal_methods`, `time_methods` and
-//! `currency_methods`.
+//! `Currency`, `Locale` and `Bytes` are each a refcounted String in one
+//! 8-byte slot, holding the exact text of the value's JSON form
+//! (`corvid_public_json::text_scalar`); a `Bytes` value is its unpadded
+//! base64url text. That reuses string reference counting, list and
+//! record slots, option and result payloads, printing and JSON
+//! unchanged. Every operator and method is a call into the runtime,
+//! named by `decimal_methods`, `time_methods`, `currency_methods` and
+//! `bytes_methods`; none compares the texts as strings, so `==` on
+//! `Bytes` stays constant-time.
 
 use corvid_types::Type;
 
 /// Whether native code holds `ty` as its canonical text. The public
-/// JSON crate's list of text-scalar types is the one list, less
-/// `Bytes`: its JSON form is text too, but native code has no form for
-/// it until the native cryptography slice, which must keep `==`
-/// constant-time rather than reuse string equality.
+/// JSON crate's list of text-scalar types is the one list.
 pub fn is_text_scalar(ty: &Type) -> bool {
-    !matches!(ty, Type::Bytes) && corvid_public_json::text_scalar::name(ty).is_some()
+    corvid_public_json::text_scalar::name(ty).is_some()
 }
 
 /// `ty` without the compile-time `Tainted` and `Grounded` wrappers,
@@ -64,12 +63,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_seven_b06_types_are_text_scalars() {
-        for ty in [Type::Decimal, Type::Duration, Type::Instant, Type::TimeZone, Type::ZonedTime, Type::Currency, Type::Locale] {
+    fn the_b06_types_and_bytes_are_text_scalars() {
+        for ty in [Type::Decimal, Type::Duration, Type::Instant, Type::TimeZone, Type::ZonedTime, Type::Currency, Type::Locale, Type::Bytes] {
             assert!(is_text_scalar(&ty), "{}", ty.display_name());
         }
         assert!(!is_text_scalar(&Type::String));
-        assert!(!is_text_scalar(&Type::Bytes));
+        assert!(!is_text_scalar(&Type::Secret));
         assert_eq!(scalar_of(&Type::Grounded(Box::new(Type::Tainted(Box::new(Type::Instant))))), &Type::Instant);
     }
 }
