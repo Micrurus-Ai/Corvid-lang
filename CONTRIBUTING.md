@@ -65,7 +65,7 @@ Concrete applications:
 - **No `.unwrap()` or `.expect()` outside tests.** If a value *can* be `None`, handle it. If it *cannot*, document why with a comment.
 - **No silent `Type::Unknown` when we could infer the real type.** Use `Unknown` only as a deliberate "graceful degradation" choice, not because inference was hard.
 - **No skipped tests.** If you added a feature, you added tests for it. If a test is hard to write, that's the test that proves the code actually works.
-- **No premature transpilation.** Where we can compile natively, we compile natively. Python transpile is a bootstrapping tactic, not a permanent answer.
+- **No premature transpilation.** Where we can compile natively, we compile natively. The bootstrapping Python transpiler was retired on 2026-11-25.
 - **No "just this once" feature additions.** If it's worth doing, it deserves a written proposal and a dev-log entry. If it's not worth that, it's not worth doing.
 - **No commits you don't understand.** Reading code from a collaborator, stop at the first line you can't explain to yourself. Ask. No rubber-stamp reviews.
 
@@ -203,7 +203,7 @@ git clone <repo>
 cd corvid
 cargo build --workspace
 cargo test --workspace                 # 134+ tests should pass
-pip install -e './runtime/python[dev]' # only needed for --target=python work
+pip install -e './runtime/python[dev]' # only needed to work on Python tool implementations (tools.py)
 ```
 
 ### Run the offline demo

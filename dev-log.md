@@ -767,6 +767,35 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The Python build target is retired
+
+`corvid build` defaulted to a Python transpiler from Corvid's first
+version. It predated tables, decimals, time, conflicts and most of the
+standard library, and degraded what it could not express to `object`,
+so a new user's first build looked successful and produced a partial
+translation. The owner decided to retire it. `corvid build` now
+defaults to `native`, which refuses by name what it cannot compile yet;
+`--target python` stops with a message saying why it is gone and where
+to go. The `corvid-codegen-py` crate is removed.
+
+The larger finding was in `corvid_driver::compile()`, which `corvid
+check`-style callers, the tour and the spec checks use. It translated
+every program to Python as a side effect and applied that target's
+refusals, so a program calling a standard-library tool that does real
+work, or a typed Python import, failed a check although the interpreter
+and native code run it. `compile()` is now check-only, and a test holds
+that it accepts what only the Python target refused. The CLI reference
+already said "default native", so the docs had drifted from the code;
+they agree now.
+
+Kept: the Python client SDK (`corvid contract sdk`), `corvid bind
+python` (native bindings), `corvid bench` against Python baselines, and
+`runtime/python`, which is how a project writes tools in Python
+(`tools.py`). Filed: trimming the parts of `runtime/python` that only
+generated code used.
+
+---
+
 ## 2026-11-25 - `live` declarations (B14 RT-1)
 
 A `live` declaration is held as a route whose response kind is `Live`

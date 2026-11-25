@@ -53,12 +53,9 @@ agent bad(id: String, amount: Float) -> Receipt:
     }
 
     #[test]
-    fn clean_source_produces_python() {
+    fn clean_source_checks() {
         let r = compile(OK_SRC);
-        assert!(r.diagnostics.is_empty(), "diagnostics: {:?}", r.diagnostics);
-        assert!(r.python_source.is_some());
-        let py = r.python_source.unwrap();
-        assert!(py.contains("async def fetch(id):"));
+        assert!(r.ok(), "diagnostics: {:?}", r.diagnostics);
     }
 
     #[test]
@@ -81,51 +78,22 @@ agent main() -> Int:
             "analyze must accept stdlib tool calls; got {:?}",
             r.diagnostics
         );
-        assert!(r.python_source.is_none(), "analyze never emits");
     }
 
+    /// The retired Python target refused programs that call the
+    /// standard library's executing tools or typed Python imports; the
+    /// check pipeline accepts both, since the interpreter and native
+    /// code run them.
     #[test]
-    fn stdlib_tool_call_refuses_python_transpile_loudly() {
-        // The Python transpile tier has no stdlib dispatch. A program
-        // calling a stdlib executing tool must refuse at transpile
-        // time with a diagnostic naming the call and pointing at the
-        // interpreter tier — never emit an unregistered
-        // `tool_call(\"time_now_utc\", ...)` stub that fails at
-        // runtime far from the cause.
-        let src = "tool time_now_utc() -> Int
-
-agent main() -> Int:
-    return time_now_utc()
-";
-        let r = compile(src);
-        assert!(
-            r.python_source.is_none(),
-            "stdlib-calling program must not transpile"
-        );
-        let diag = r
-            .diagnostics
-            .iter()
-            .find(|d| d.message.contains("time_now_utc"))
-            .expect("diagnostic names the stdlib tool");
-        assert!(
-            diag.message.contains("cannot be transpiled"),
-            "message states the refusal; got: {}",
-            diag.message
-        );
-        assert!(
-            diag.hint
-                .as_deref()
-                .unwrap_or("")
-                .contains("corvid run"),
-            "hint routes to the interpreter tier; got: {:?}",
-            diag.hint
-        );
+    fn check_accepts_what_only_the_python_target_refused() {
+        let r = compile("tool time_now_utc() -> Int\n\nagent main() -> Int:\n    return time_now_utc()\n");
+        assert!(r.ok(), "diagnostics: {:?}", r.diagnostics);
     }
 
     #[test]
     fn missing_approve_surfaces_as_diagnostic() {
         let r = compile(BAD_EFFECT_SRC);
-        assert!(r.python_source.is_none());
+        assert!(!r.ok());
         assert!(
             r.diagnostics
                 .iter()
@@ -139,53 +107,6 @@ agent main() -> Int:
             .find_map(|d| d.hint.clone())
             .expect("expected a hint for the UnapprovedDangerousCall");
         assert!(hint.contains("approve IssueRefund"), "hint was: {hint}");
-    }
-
-    #[test]
-    fn build_to_disk_writes_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src_path = tmp.path().join("hello.cor");
-        std::fs::write(&src_path, OK_SRC).unwrap();
-
-        let out = build_to_disk(&src_path).unwrap();
-        let path = out.output_path.expect("expected output path");
-        assert!(path.exists(), "expected {} to exist", path.display());
-        let py = std::fs::read_to_string(&path).unwrap();
-        assert!(py.contains("async def fetch"));
-    }
-
-    #[test]
-    fn build_to_disk_resolves_corvid_imports() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("types.cor"),
-            "\
-public type Receipt:
-    id: String
-",
-        )
-        .unwrap();
-        let src_path = tmp.path().join("main.cor");
-        std::fs::write(
-            &src_path,
-            "\
-import \"./types\" as t
-
-agent read(r: t.Receipt) -> String:
-    return r.id
-",
-        )
-        .unwrap();
-
-        let out = build_to_disk(&src_path).unwrap();
-        assert!(
-            out.diagnostics.is_empty(),
-            "build should resolve imported type: {:?}",
-            out.diagnostics
-        );
-        let path = out.output_path.expect("expected output path");
-        let py = std::fs::read_to_string(&path).unwrap();
-        assert!(py.contains("async def read"));
     }
 
     #[test]
@@ -1091,31 +1012,6 @@ agent main() -> Bool:
                     .contains("declaration `hidden` in the module imported as `p` is private")),
             "diagnostics: {diagnostics:?}"
         );
-    }
-
-    #[test]
-    fn build_to_disk_with_src_dir_places_output_in_sibling_target() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src_dir = tmp.path().join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
-        let src_path = src_dir.join("main.cor");
-        std::fs::write(&src_path, OK_SRC).unwrap();
-
-        let out = build_to_disk(&src_path).unwrap();
-        let path = out.output_path.expect("expected output path");
-        let expected = tmp.path().join("target").join("py").join("main.py");
-        assert_eq!(path, expected);
-    }
-
-    #[test]
-    fn build_emits_no_file_when_diagnostics_present() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src_path = tmp.path().join("bad.cor");
-        std::fs::write(&src_path, BAD_EFFECT_SRC).unwrap();
-
-        let out = build_to_disk(&src_path).unwrap();
-        assert!(out.output_path.is_none());
-        assert!(!out.diagnostics.is_empty());
     }
 
     #[test]

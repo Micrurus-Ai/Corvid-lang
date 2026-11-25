@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use corvid_driver::{
-    build_native_to_disk, build_server_to_disk, build_target_to_disk, build_to_disk,
+    build_native_to_disk, build_server_to_disk, build_target_to_disk,
     build_wasm_to_disk, render_all_pretty, BuildTarget,
 };
 use std::path::Path;
@@ -48,25 +48,13 @@ pub(crate) fn cmd_build(
     }
     let extra_libs_owned: Vec<&Path> = tools_lib.iter().copied().collect();
     match target {
-        "python" | "py" => {
-            if tools_lib.is_some() {
-                anyhow::bail!("`--with-tools-lib` is only valid for `native`, `cdylib`, and `staticlib` targets");
-            }
-            if header || abi_descriptor {
-                anyhow::bail!(
-                    "`--header`, `--abi-descriptor`, and `--all-artifacts` are only valid for library targets"
-                );
-            }
-            let out = build_to_disk(file)
-                .with_context(|| format!("failed to build `{}`", file.display()))?;
-            if let Some(path) = out.output_path {
-                println!("built: {} -> {}", file.display(), path.display());
-                Ok(0)
-            } else {
-                eprint!("{}", render_all_pretty(&out.diagnostics, file, &out.source));
-                Ok(1)
-            }
-        }
+        // Retired 2026-11-25: the Python transpiler predated most of the
+        // language and degraded what it could not express, so a build
+        // that looked successful was a partial translation.
+        "python" | "py" => anyhow::bail!(
+            "the `python` build target was retired: it could not express tables, decimals, time, conflicts or most of the standard library. Build natively with `corvid build {}`, run the program with `corvid run`, or serve it with `corvid serve`",
+            file.display()
+        ),
         "native" => {
             if header || abi_descriptor {
                 anyhow::bail!(
