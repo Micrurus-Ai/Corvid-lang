@@ -94,6 +94,18 @@ A 3,000-line file that does one thing cleanly is fine. A 400-line grab bag is no
 
 The hardest rule. No shortcuts anywhere. If a shipped surface conflicts with the spec, fix the surface rather than softening the spec (see `memory/project_phase_20_closed.md` for the canonical example).
 
+## Make what you find stronger
+
+**When you find a bug, a gap, or something weak or limited while working, improve it: make it stronger and more powerful, not merely patched.** Set by the CTO 2026-11-25. Nothing weak is walked past.
+
+How to apply:
+
+1. **Fix it properly.** Repair the cause, not the symptom, and hold it to the [hardest-work bar](#built-for-the-hardest-work-on-earth): a test that would have caught it, and the fix generalized to every place the same weakness lives.
+2. **Small and in reach: fix it now,** in its own commit on the current branch, before or after the slice's commit, named for what it fixes. A refactor commit stays a pure move (see [File responsibility discipline](#file-responsibility-discipline)); the fix goes in a commit of its own.
+3. **Too large for the current slice: put it on the roadmap where it belongs**, as a `- [ ]` item saying what is weak, why it matters and what stronger looks like, and take it up as soon as the roadmap order allows. Where it blocks or misleads users, amend the order to bring it forward and record why. Never leave it only in a chat or a commit message.
+4. **Say what you found.** Name it in the slice's `dev-log.md` entry and in the report to the owner, including what you strengthened and what you filed.
+5. A finding that touches another session's area is fixed there only after telling that session, or filed for it, so two sessions never change the same thing at once.
+
 ## No hidden defaults for consequential policy
 
 **Behavior with a security, privacy, tenancy, cost, or access consequence is NEVER a silently hardcoded default.** When such a choice has more than one reasonable policy, the developer's SOURCE must declare it explicitly, and OMITTING it is a compile error (or refuse-to-start) that names the missing decision and its allowed values — never a default the author didn't choose. The source is the forcing function; a program cannot back into a consequential posture by silence.
