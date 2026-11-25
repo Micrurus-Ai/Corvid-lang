@@ -861,6 +861,26 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - A native build refuses by name, before linking
+
+Making `native` the default build target exposed a gap the Mac session
+found on `main`: `corvid build` in `examples/refund_bot` failed in the
+linker with `undefined reference to __corvid_tool_issue_refund`. The
+program declares tools, and no tools library was given. `corvid run
+--target native` refuses that program by name through the native
+ability check, but the native build never ran the check, so the only
+signal was a raw link error. `build_native_entry` now runs
+`native_ability_with_tools` after the server wrapper drops its route
+handlers, and a refusal names the source file, the reason (here,
+`program calls tool issue_refund - pass --with-tools-lib ...`) and
+what runs the program instead. `demo_project_defaults` expected the
+retired Python output; it now expects that refusal from a plain
+`corvid build` and a working `corvid run`. My own default-target test
+had used a table program, which a later stage refuses, so it missed
+the tools case.
+
+---
+
 ## 2026-11-25 - Native code holds refinements too (B09 Refine-2)
 
 Refine-1 checked refined values on the interpreter and kept any program

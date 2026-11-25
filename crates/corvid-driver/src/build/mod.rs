@@ -70,6 +70,23 @@ fn build_native_entry(
                 ir.agents
                     .retain(|agent| !handlers.contains(&(agent.name.as_str(), agent.span)));
             }
+            // What `corvid run --target native` refuses, a native build
+            // refuses too, by name and before compiling, never as a link
+            // error after it.
+            if let Err(reason) = crate::native_ability::native_ability_with_tools(&ir, !extra_tool_libs.is_empty()) {
+                return Ok(NativeBuildOutput {
+                    source,
+                    output_path: None,
+                    diagnostics: vec![Diagnostic {
+                        origin: None,
+                        span: corvid_ast::Span::new(0, 0),
+                        message: format!("`{}` cannot be built as native code yet: {reason}", source_path.display()),
+                        hint: Some(
+                            "run it with `corvid run`, serve it with `corvid serve`, or package it with `corvid build --target web`".into(),
+                        ),
+                    }],
+                });
+            }
             let bin_dir = native_output_dir_for(source_path);
             let stem = source_path
                 .file_stem()
