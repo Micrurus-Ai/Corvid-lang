@@ -133,7 +133,7 @@ pub(super) fn lower_json_encode(
 }
 
 /// The embedded plan for `target`: its data, length and typeinfo table.
-fn json_plan(
+pub(super) fn json_plan(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
     target: &Type,

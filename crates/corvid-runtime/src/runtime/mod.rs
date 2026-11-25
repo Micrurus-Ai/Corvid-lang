@@ -285,6 +285,12 @@ impl Runtime {
         self.http_policy.is_configured()
     }
 
+    /// The `on failure` variant of connector operation `name`, and whether
+    /// it carries the reason; `None` for an operation without one.
+    pub(crate) fn connector_failure_variant(&self, name: &str) -> Option<(String, bool)> {
+        self.connector_calls.get(name).and_then(|spec| spec.on_failure.clone())
+    }
+
     /// Why the project's HTTP policy refuses `url`, or `None` when it is
     /// allowed. The same check every outbound request runs; the
     /// connector startup check asks it once per connector `base_url`.

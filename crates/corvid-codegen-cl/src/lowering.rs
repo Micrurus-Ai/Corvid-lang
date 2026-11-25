@@ -53,6 +53,7 @@ use agent::*;
 mod entry;
 use entry::*;
 mod public_json;
+mod connector_call;
 pub use public_json::native_public_json_type;
 use public_json::{lower_json_decode, lower_json_encode};
 
@@ -94,6 +95,11 @@ pub fn lower_file(
     // declare the matching `__corvid_tool_<name>` wrapper import.
     for tool in &ir.tools {
         runtime.ir_tools.insert(tool.id, tool.clone());
+    }
+    for connector in &ir.connectors {
+        for op in &connector.operations {
+            runtime.connector_ops.insert(op.tool_id);
+        }
     }
 
     // Same pattern for prompt declarations. `IrCallKind::Prompt`

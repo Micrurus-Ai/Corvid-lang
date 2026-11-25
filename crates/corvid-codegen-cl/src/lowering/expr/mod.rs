@@ -839,6 +839,14 @@ pub(super) fn lower_expr(
                         expr.span,
                     ));
                 }
+                // A connector operation is a runtime-owned call: the
+                // runtime sends it, records it and replays it.
+                if runtime.connector_ops.contains(def_id) {
+                    return super::connector_call::lower_connector_call(
+                        builder, &tool, args, expr, current_return_ty, env, scope_stack,
+                        func_ids_by_def, module, runtime,
+                    );
+                }
                 let types = |id: DefId| runtime.ir_types.get(&id).cloned();
                 if let Some(held) = tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
                     .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {

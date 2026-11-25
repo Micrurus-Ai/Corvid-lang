@@ -35,6 +35,12 @@ pub enum NotNativeReason {
     ToolCall {
         name: String,
     },
+    /// A connector operation that native code cannot call yet; the
+    /// reason names what (native dispatch N1 covers JSON-shaped calls).
+    ConnectorNotNative {
+        operation: String,
+        reason: &'static str,
+    },
     /// Wider tagged unions and retry bodies outside the supported
     /// native `Result` / `Option` subset still route to the
     /// interpreter. Nullable-pointer `Option<T>` with a
@@ -84,6 +90,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::PythonImport { module } => write!(
                 f,
                 "program imports Python module `{module}` - native Python FFI is not implemented yet"
+            ),
+            Self::ConnectorNotNative { operation, reason } => write!(
+                f,
+                "program calls connector operation `{operation}`, which {reason} - it runs on the interpreter until native dispatch covers it"
             ),
             Self::ToolCall { name } => write!(
                 f,
@@ -170,10 +180,49 @@ pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
 struct ScanContext<'a> {
     types: &'a [corvid_ir::IrType],
     has_tools_lib: bool,
+    connectors: &'a [corvid_ir::IrConnector],
+    tools: &'a [corvid_ir::IrTool],
+}
+
+/// Why native code cannot call connector operation `tool_id` yet, or
+/// `Ok` when it can: through `corvid_runtime_call` (native dispatch N1),
+/// for an operation whose arguments and answer have a native JSON form.
+/// `None` when `tool_id` is not a connector operation.
+fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> Option<Result<(), &'static str>> {
+    let (connector, op) = context
+        .connectors
+        .iter()
+        .find_map(|c| c.operations.iter().find(|op| op.tool_id == tool_id).map(|op| (c, op)))?;
+    let tool = context.tools.iter().find(|t| t.id == tool_id)?;
+    let problem = if connector.circuit_breaker.is_some() {
+        Some("belongs to a connector with a `circuit_breaker`, whose count spans one interpreter run")
+    } else if op.streams.is_some() {
+        Some("streams its response")
+    } else if tool.return_ty.mentions_response() {
+        Some("returns a `Response`")
+    } else if tool.params.iter().any(|p| matches!(p.ty, Type::Bytes | Type::Upload(_)))
+        || op.body.as_ref().is_some_and(|b| b.encoding == corvid_ast::BodyEncoding::Multipart)
+    {
+        Some("sends a file or multipart body")
+    } else if !tool
+        .params
+        .iter()
+        .map(|p| &p.ty)
+        .chain(std::iter::once(&tool.return_ty))
+        .all(|ty| corvid_codegen_cl::native_public_json_type(ty, context.types))
+    {
+        Some("sends or reads a type with no native JSON form")
+    } else {
+        None
+    };
+    Some(match problem {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    })
 }
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
-    let context = ScanContext { types: &ir.types, has_tools_lib };
+    let context = ScanContext { types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if declared_types(ir).any(Type::mentions_secret) {
         return Err(NotNativeReason::SecretNotNative);
     }
@@ -394,6 +443,17 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 IrCallKind::ClosureLocal { signature, .. } if corvid_codegen_cl::native_callback_type(signature) => {}
                 IrCallKind::ClosureLocal { .. } => {
                     return Err(NotNativeReason::CallbackNotNative)
+                }
+                // A connector operation is a runtime-owned call; it needs
+                // no tools library, only a native JSON shape.
+                IrCallKind::Tool { def_id, .. } if connector_native_problem(*def_id, context).is_some() => {
+                    if let Some(Err(reason)) = connector_native_problem(*def_id, context) {
+                        return Err(NotNativeReason::ConnectorNotNative { operation: callee_name.clone(), reason });
+                    }
+                    for a in args {
+                        scan_expr(a, current_return_ty, context)?;
+                    }
+                    return Ok(());
                 }
                 IrCallKind::Tool { .. } if !context.has_tools_lib => {
                     return Err(NotNativeReason::ToolCall {

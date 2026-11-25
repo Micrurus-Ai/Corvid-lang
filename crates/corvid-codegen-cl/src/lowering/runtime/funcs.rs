@@ -263,6 +263,14 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// offsets, constructor arity checks, destructor lookup) without
     /// threading `&IrFile` through every call site.
     pub ir_types: HashMap<DefId, corvid_ir::IrType>,
+    /// The tools that are connector operations, by id. Native code
+    /// calls them through `corvid_runtime_call`, which runs
+    /// `Runtime::call_tool` and so records, replays, redacts and applies
+    /// the HTTP policy exactly as the interpreter does.
+    pub connector_ops: std::collections::HashSet<DefId>,
+    /// `corvid_runtime_call(name, args, arg_count, plan, plan_len,
+    /// typeinfos, payload) -> tag`: a runtime-owned call.
+    pub runtime_call: FuncId,
     /// Tool declarations, keyed by `DefId`. The codegen
     /// needs to know the declared signature (param types, return type)
     /// to emit a correctly-typed direct call to the `#[tool]` wrapper

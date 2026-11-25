@@ -68,6 +68,73 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     }
 }
 
+/// A runtime-owned call from native code (native dispatch N1): run
+/// `Runtime::call_tool(name, args)`, the path the interpreter takes, and
+/// decode its answer into the plan's root type, writing it to `payload`.
+/// The arguments are public JSON texts the compiled code encoded. A
+/// connector answer that does not decode becomes the operation's
+/// `on failure` variant, as in the interpreter; any other failure stops
+/// the program with the runtime's message, as the interpreter does.
+///
+/// # Safety
+/// `name` and the `arg_count` strings at `args` must be live Corvid
+/// strings; `plan`, `plan_len` and `typeinfos` as for
+/// [`corvid_json_decode_typed`]; `payload` a writable, aligned slot.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_runtime_call(
+    name: CorvidString,
+    args: *const CorvidString,
+    arg_count: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+    payload: *mut i64,
+) -> i64 {
+    let name = unsafe { name.as_str() }.to_string();
+    let mut values = Vec::with_capacity(arg_count.max(0) as usize);
+    for index in 0..arg_count.max(0) as usize {
+        let text = unsafe { (*args.add(index)).as_str() };
+        values.push(serde_json::from_str::<J>(text).unwrap_or_else(|err| {
+            panic!("internal compiler error: native code encoded an argument of `{name}` that is not JSON: {err}")
+        }));
+    }
+    let state = crate::ffi_bridge::bridge();
+    let runtime = state.corvid_runtime();
+    let call_name = name.clone();
+    let call_runtime = runtime.clone();
+    let answer = state
+        .tokio_handle()
+        .block_on(async move { call_runtime.call_tool(&call_name, values).await });
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(err) => {
+            crate::ffi_bridge::panic_if_replay_runtime_error(&format!("corvid: `{name}`"), &err);
+            eprintln!("corvid: `{name}`: {err}");
+            std::process::exit(1);
+        }
+    };
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let mut builder = NativeValues { plan: &plan, typeinfos };
+    let decoded = match corvid_public_json::decode(&answer, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder) {
+        Ok(value) => value,
+        Err(error) => match runtime.connector_failure_variant(&name) {
+            Some((variant, takes_reason)) => {
+                let reason = format!("the response does not match the declared type {}", error.message());
+                let failure = crate::connectors::failure_result(&variant, takes_reason, &reason);
+                corvid_public_json::decode(&failure, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder)
+                    .unwrap_or_else(|e| panic!("internal error: `{name}`'s failure value does not decode: {}", e.message()))
+            }
+            None => {
+                eprintln!("corvid: connector `{name}`: the response does not match the declared type {}", error.message());
+                std::process::exit(1);
+            }
+        },
+    };
+    unsafe { payload.write(decoded.bits) };
+    RESULT_TAG_OK
+}
+
 /// Plans live in the program's read-only data, so their address
 /// identifies them; each is parsed once.
 unsafe fn cached_plan(plan: *const u8, plan_len: i64) -> Arc<DecodePlan> {

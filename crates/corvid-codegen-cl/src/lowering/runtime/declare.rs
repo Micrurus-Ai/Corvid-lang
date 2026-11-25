@@ -180,6 +180,15 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let json_decode_typed_id = module
         .declare_function("corvid_json_decode_typed", Linkage::Import, &json_decode_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare json_decode_typed: {e}"), Span::new(0, 0)))?;
+    // corvid_runtime_call(name, args, arg_count, plan, plan_len, typeinfos, payload) -> tag
+    let mut runtime_call_sig = module.make_signature();
+    for _ in 0..7 {
+        runtime_call_sig.params.push(AbiParam::new(I64));
+    }
+    runtime_call_sig.returns.push(AbiParam::new(I64));
+    let runtime_call_id = module
+        .declare_function("corvid_runtime_call", Linkage::Import, &runtime_call_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare runtime_call: {e}"), Span::new(0, 0)))?;
     // corvid_json_encode_typed(value, plan, plan_len, typeinfos) -> String
     let mut json_encode_sig = module.make_signature();
     for _ in 0..4 {
@@ -1310,6 +1319,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         currency_operations,
         bytes_operations,
         json_decode_typed: json_decode_typed_id,
+        runtime_call: runtime_call_id,
         json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
@@ -1433,6 +1443,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         result_typeinfos: HashMap::new(),
         option_typeinfos: HashMap::new(),
         ir_types: HashMap::new(),
+        connector_ops: std::collections::HashSet::new(),
         ir_tools: HashMap::new(),
         tool_wrapper_ids: std::cell::RefCell::new(HashMap::new()),
         ir_prompts: HashMap::new(),

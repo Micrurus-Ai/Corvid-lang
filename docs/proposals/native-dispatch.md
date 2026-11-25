@@ -37,13 +37,20 @@ A native call that skipped the runtime would silently lose all of them. That is 
 - For a connector operation with `on failure`, a body that does not decode becomes the declared variant with the reason. That is the rule the interpreter applies in `connector_json::failure_value`, and both call the runtime's `connectors::failure_result`.
 - Any other failure stops the program with the interpreter's message, as it does there.
 
-**The circuit breaker moves into the runtime for connectors, for both tiers.** The interpreter counts breaker failures in its tool arm, which native code does not run. Rather than copy that count into generated code, the runtime counts a connector's failures inside `call_tool`, where every tier passes. The interpreter stops counting connector calls itself. The behavior is unchanged: the same failures count, a success resets the count, and an open breaker is the `on failure` variant or a stop.
+**A connector with `circuit_breaker` stays on the interpreter for now.** The interpreter counts breaker failures per run, in its tool arm, which native code does not run. Moving the count into the runtime would change its scope without the source saying so: under `corvid serve` one runtime serves every request, so an opened breaker would stay open for all later requests with no rule for closing it. Copying the count into generated code would be a second implementation. A breaker that spans a server needs a declared reset policy (how long it stays open, how it probes), which is a consequential choice the source must make, so it is its own decision, recorded on the roadmap. Until then, `corvid run` keeps a program whose connector declares `circuit_breaker` on the interpreter and names the reason.
+
+**A native binary is configured as the interpreter's runtime is.** A compiled binary builds its runtime from the environment when it starts (`ffi_bridge::tokio_handle`), so three things must reach it:
+- *The connector specs.* The compiler serializes the specs from `connectors::connector_calls_from_ir`, the projection the interpreter's runtime is given, into the binary. The generated entry installs them before the program runs, so there is still one source.
+- *The mode.* The binary reads `CORVID_CONNECTOR_MODE`. `corvid run --mode` sets it, and a binary whose program declares connectors refuses to start without it, as the interpreter does, rather than picking one.
+- *The HTTP policy and the startup check.* `corvid run` loads `[http] allow` and runs the connector startup check before launching the binary, as for the interpreter, and passes the allowlist as `CORVID_HTTP_ALLOW`. A binary run on its own reads the same variable and runs the same runtime checks at startup.
+
+**Approval is unchanged.** Native `approve` already calls the runtime's approval gate (`corvid_approve_sync`), so a `dangerous` operation needs its approval in native code as in the interpreter. The comment in `native_ability.rs` that calls it a no-op is out of date and is corrected in N1.
 
 **Mock mode stays on the interpreter.** A connector's `mock:` is a Corvid expression the interpreter evaluates. `corvid run --mode mock` picks the interpreter for a program with connectors, and says so. Real and replay modes run natively.
 
 ## Slices
 
-1. **N1. Connector calls in native code.** The export, connector operations whose parameters and result have a native public JSON form, the runtime-owned breaker, `corvid run` choosing native code for them in real and replay modes, and parity tests. The parity tests run the same program on both tiers and compare the result and the recorded `ToolCall`, `ToolResult` and `HttpExchange` events.
+1. **N1. Connector calls in native code.** The export, connector operations whose parameters and result have a native public JSON form, `corvid run` choosing native code for them in real and replay modes (not mock mode, not a connector with `circuit_breaker`), and parity tests. The parity tests run the same program on both tiers and compare the result and the recorded `ToolCall`, `ToolResult` and `HttpExchange` events.
 2. **N2. The standard library's runtime tools in native code:** `uuid_v4`, `uuid_v7`, `time_now`, the `random_*` tools, and `secret_read` through the same export.
 3. **N3. Native `Secret`.** An opaque, runtime-owned handle that no string, print or JSON path can read, so `secret`, `random_token`, `hash_password` and an HMAC keyed by a `Secret` compile natively. This is B04's open item.
 4. **N4. `Response<T>` in native code**, as a native record built from `RESPONSE_FIELDS`.

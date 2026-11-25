@@ -196,7 +196,7 @@ pub unsafe extern "C" fn corvid_tool_call_sync_int(name_ptr: *const u8, name_len
 // consumed by compile-time-generated code.
 // ------------------------------------------------------------
 
-fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
+pub(crate) fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
     if matches!(
         err,
         RuntimeError::ReplayTraceLoad { .. }
