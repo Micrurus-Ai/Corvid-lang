@@ -1,5 +1,27 @@
 # Browser views
 
+## Preview your first web project
+
+```sh
+corvid new palette --web
+cd palette
+corvid check
+corvid test src/main.cor
+corvid serve src/main.cor --listen 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/`. The GET route calls `welcome_page()`.
+Change the greeting and its test in `src/main.cor`, stop the preview with
+Ctrl+C and start it again to see the edit. Build a distributable archive
+with `corvid build src/main.cor --target web`.
+
+After installing a component package, use a module alias such as
+`import "corvid://@trial/color-picker/v1.0.0" as picker`. In a Corvid
+editor, type `picker.Col` to complete exported names. Use Go to Definition
+on `picker.ColorPicker` to open the installed source that matches the lock.
+
+From the repository root, run `python -B scripts/verify_component_tooling.py --cli target/debug/corvid.exe --channel msedge` with Python Playwright and Edge installed. It exercises the locked picker with scripting enabled and disabled, then triggers a nested checkout failure, checks the reported Corvid line and retries after rebuilding the fix.
+
 A view can be an ordinary Corvid function. Import `std/ui` in a scaffolded project and return a `View` to reuse a control. Pass a list of views to a container to set their order.
 
 ```corvid-fragment

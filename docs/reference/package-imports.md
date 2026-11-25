@@ -249,3 +249,17 @@ The catalog prototype at `/packages` accepts package names and task descriptions
 A component can import an embedded Corvid standard module by name. For example, `import "std:ui" use View` makes the same `View` definition available in both the author's project and a project that consumes the published module. The installed compiler supplies the standard module. A relative import such as `"./std/ui"` refers to files relative to the importing module.
 
 The [storefront picker](../../examples/storefront/src/color_picker.cor) exports `Color`, `ColorPicker`, and `color_name`. The [publisher exercise](../../scripts/verify_published_picker.py) signs that source in a local test registry, imports it into a separate theme editor, and checks type errors at the point of use. Run `python scripts/verify_published_picker.py target/debug/corvid.exe` with Playwright and Edge. Native form submission works by keyboard, and an interactive page submits a changed selection automatically.
+
+### Inspect an installed component
+
+Module-member completion, hover and Go to Definition use the public exports
+of the exact installed package. The editor's `installed_component_source`
+lookup takes the importing file and package URI, finds its project lock,
+and checks the cached source against the locked SHA-256 before returning
+its path and text. A missing entry or digest mismatch leaves the package
+source unavailable to these editor requests.
+
+When upgrading to a breaking version, install the new version with
+`corvid add package`, update the URI in the import, and run `corvid check`.
+For example, if the picker adds a required label, update the reported
+call to `ColorPicker(value, "/", "Cover color")` and rerun the rendering test.

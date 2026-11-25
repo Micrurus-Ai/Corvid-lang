@@ -2,6 +2,15 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### F16 web starter and installed component tooling
+
+The web starter uses the usual manifest and a server-rendered Corvid page
+so the first preview and test exercise the same function. Component editor
+requests use the package lock and the verified local artifact so authors
+can follow a call into the installed version while offline. The palette
+exercise covers the consuming call site when a package upgrade changes
+the required arguments. [Design](docs/proposals/frontend-web-starter.md)
+
 ---
 
 ## 2026-11-25 - Connectors speak public JSON (B05, slice 3a)

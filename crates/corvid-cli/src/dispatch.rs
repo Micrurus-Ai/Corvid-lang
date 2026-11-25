@@ -75,8 +75,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
     match cli.command {
         Some(Command::New {
             name,
+            web,
             with_python_tools,
-        }) => cmd_new(&name, with_python_tools),
+        }) => cmd_new(&name, with_python_tools, web),
         Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
         Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {

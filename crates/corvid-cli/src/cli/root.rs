@@ -77,6 +77,9 @@ pub enum Command {
     /// Scaffold a new Corvid project.
     New {
         name: String,
+        /// Start with a web page, a GET route and a rendering test.
+        #[arg(long)]
+        web: bool,
         /// Also scaffold the opt-in Python tool template
         /// (`tools.py` + an example .cor) — slice 47a made the
         /// DEFAULT scaffold pure Corvid.

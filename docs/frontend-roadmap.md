@@ -203,6 +203,7 @@ The [reading-list prototype](frontend-component-design.md#reading-list-prototype
 - [ ] Show developers which actions a build exposes, their types, and where they run. When a handler's input changes, point to incompatible bindings in the Corvid source. Teach exposure and debugging through a runnable learning example.
 
 - [ ] Provide a web project template, local dev server, fast rebuilds, state-preserving updates where safe, editor completions, component navigation and browser stack traces mapped to Corvid source.
+  The [web starter](book/19-browser-views.md#preview-your-first-web-project) includes a rendering test and a loopback preview command. The [package exercise](../scripts/verify_picker_package.py) checks a separate app, its dependency lock, and a breaking picker upgrade. Pass `--lsp target/debug/corvid-lsp.exe` for installed-component completion and navigation, and `--channel msedge` for computed style and keyboard submission.
 - [ ] Package assets, fonts and scoped styles with deterministic URLs, production caching and deployable static and server builds. Exercise upgrades with an old browser tab still open.
 - [ ] Support component tests, real-browser interaction tests and server rendering tests through documented commands. Cover invalid programs in compiler diagnostics. Document every public function and grammar change alongside its implementation in the book and reference.
 
