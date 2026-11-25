@@ -32,6 +32,12 @@ jobs:
           python-version: '3.13'
       - name: Install browser test dependencies
         run: python -m pip install playwright
+      - name: Install inventory performance test dependencies
+        if: contains(format(',{0},', inputs.suite), ',windowed_inventory,')
+        run: |
+          python -m pip install psutil
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m playwright install firefox webkit
       - name: Build Corvid
         run: cargo build --locked -p corvid-cli --bin corvid
       - name: Run the selected Edge check
