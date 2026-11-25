@@ -1936,9 +1936,15 @@ fn dispatch_stdlib_random_tool(
 /// whose internal and public JSON forms agree (no `Option`), which is
 /// why native code may decode their answers with the public decoder; a
 /// tool added here must pass the parity test in
-/// `corvid-driver/tests/native_runtime_tools.rs`.
+/// `corvid-driver/tests/native_runtime_tools.rs`. `secret(name)` and
+/// `random_token(bytes)` are on the list too (N3): their result is a
+/// `Secret`, which only the runtime call's decoder can build.
 pub fn is_native_runtime_tool(name: &str) -> bool {
-    is_stdlib_time_tool(name) || is_stdlib_random_tool(name) || super::uuid::is_uuid_tool(name) || name == "secret_read"
+    is_stdlib_time_tool(name)
+        || is_stdlib_random_tool(name)
+        || super::uuid::is_uuid_tool(name)
+        || name == "secret_read"
+        || is_stdlib_secret_value_tool(name)
 }
 
 /// Exact-name gate for the executing secrets surface.

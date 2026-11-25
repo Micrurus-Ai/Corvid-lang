@@ -12,7 +12,7 @@
 
 use super::*;
 use super::expr::lower_container_maybe_borrowed;
-use super::public_json::{json_plan, lower_json_encode, native_public_json_type};
+use super::public_json::{json_plan, lower_json_encode, native_runtime_call_types};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lower_runtime_call(
@@ -28,17 +28,11 @@ pub(super) fn lower_runtime_call(
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
     let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
-    for ty in tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)) {
-        if !native_public_json_type(ty, &types) {
-            return Err(CodegenError::not_supported(
-                format!(
-                    "connector operation `{}` sends or reads `{}`, which has no native JSON form; use the interpreter tier",
-                    tool.name,
-                    ty.display_name()
-                ),
-                expr.span,
-            ));
-        }
+    if !native_runtime_call_types(tool, &types) {
+        return Err(CodegenError::not_supported(
+            format!("`{}` sends or reads a type with no native JSON form; use the interpreter tier", tool.name),
+            expr.span,
+        ));
     }
 
     // Arguments: each encoded as public JSON text. A computed argument

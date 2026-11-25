@@ -2,7 +2,7 @@
 
 `Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes, HMAC and Ed25519 signature verification are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
 
-Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. `Bytes`, hashing, HMAC with a `Bytes` key and Ed25519 verification also compile to native code; a program that mentions `Secret` runs on the interpreter (see [Native code](#native-code)). Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
+Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. `Bytes`, hashing, HMAC with a `Bytes` key and Ed25519 verification also compile to native code, and so do reading, holding and comparing a `Secret` (see [Native code](#native-code)). Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
 
 ```corvid
 agent content_hash(body: String) -> String:
@@ -192,7 +192,7 @@ A compiled program holds a `Bytes` value as its unpadded base64url text, the tex
 
 These run on the interpreter, chosen automatically by `corvid run` and refused by name in a native build:
 
-- **A program that mentions `Secret`**: a field, an agent or prompt signature, the signature of a tool it calls, or an expression. A tool it only imports does not count, so importing `std/secrets` for `secret_read` stays native. A secret comes only from a tool (`secret(name)`, `random_token(bytes)`) and reaches tools as text. Native binaries do not dispatch the standard library's tools that produce and take secrets, and a native tool call has no path that hands the implementation a secret's text while every record holds `<redacted>`, or that scrubs an echoed secret from the record only. So `hash_password`, `verify_password`, `decode_base64_after` and an HMAC keyed by a `Secret`, which covers the webhook programs above, run on the interpreter. To verify natively, key the HMAC with `Bytes`; for a key that must stay out of traces, keep the program on the interpreter.
+- **A secret passed to a tool of the program's own, or to `hash_password`, and a secret that keys an HMAC, `verify_password` or `decode_base64_after`.** Native code holds a secret as the runtime's opaque object: `secret(name)` and `random_token(bytes)` run through the runtime, which records their results as `<redacted>`; a secret can sit in a local, a record, a list, an option or a result; and `==` and `!=` compare secrets in constant time, through the same `corvid_crypto::Secret` the interpreter uses. A native call to a tool of the program's own records its arguments without redaction, so a program that passes a secret to one runs on the interpreter, and so does one that hashes a password or keys an HMAC with a secret, until native secret cryptography lands (native dispatch N3b and N3c). To verify natively today, key the HMAC with `Bytes`.
 - **A tool or prompt whose signature holds `Bytes`**, as for the B06 types: native tool and prompt bridges have no `Bytes` form.
 - **`Bytes` as a map value**, since native maps hold `String`, `Int` and record values, and **`list.contains(bytes)`**, since native code compiles `contains` on no list yet.
 
@@ -283,7 +283,7 @@ The application contract publishes no secret. A public type's field that holds a
 
 ### Not yet
 
-Native code refuses `Secret` (see [Native code](#native-code)). Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
+Native code cannot yet pass a secret to a tool of the program's own or key cryptography with one (see [Native code](#native-code)). Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
 
 ## Random tokens
 

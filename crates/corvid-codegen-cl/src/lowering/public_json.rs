@@ -20,20 +20,55 @@ use std::collections::{BTreeMap, HashSet};
 /// provenance to encode, and `JsonValue` has no native form.
 pub fn native_public_json_type(target: &Type, types: &[corvid_ir::IrType]) -> bool {
     let by_id: HashMap<DefId, &corvid_ir::IrType> = types.iter().map(|ty| (ty.id, ty)).collect();
-    decodable(target, &by_id, &mut HashSet::new())
+    Decodable { types: &by_id, secrets: false }.check(target, &mut HashSet::new())
 }
 
-fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut HashSet<DefId>) -> bool {
+/// Whether native code can decode the answer of a tool the runtime
+/// implements whose result it holds as a secret (`secret(name)`,
+/// `random_token(bytes)`): the public form, plus `Secret` positions,
+/// which only the runtime call's decoder builds (native dispatch N3).
+pub fn native_secret_result_type(target: &Type, types: &[corvid_ir::IrType]) -> bool {
+    let by_id: HashMap<DefId, &corvid_ir::IrType> = types.iter().map(|ty| (ty.id, ty)).collect();
+    Decodable { types: &by_id, secrets: true }.check(target, &mut HashSet::new())
+}
+
+/// Whether native code can make `tool`'s runtime call: every parameter
+/// has a native JSON form and so does the result, where a tool whose
+/// result the runtime holds as a secret may return one. The code
+/// generator and the driver's tier picker both ask this.
+pub fn native_runtime_call_types(tool: &corvid_ir::IrTool, types: &[corvid_ir::IrType]) -> bool {
+    let result_is_native = if corvid_runtime::runtime::is_stdlib_secret_value_tool(&tool.name) {
+        native_secret_result_type(&tool.return_ty, types)
+    } else {
+        native_public_json_type(&tool.return_ty, types)
+    };
+    result_is_native && tool.params.iter().all(|p| native_public_json_type(&p.ty, types))
+}
+
+struct Decodable<'a, 'types> {
+    types: &'a HashMap<DefId, &'types corvid_ir::IrType>,
+    secrets: bool,
+}
+
+impl Decodable<'_, '_> {
+    fn check(&self, ty: &Type, seen: &mut HashSet<DefId>) -> bool {
+        decodable(ty, self, seen)
+    }
+}
+
+fn decodable(ty: &Type, rules: &Decodable<'_, '_>, seen: &mut HashSet<DefId>) -> bool {
+    let types = rules.types;
     match ty {
+        Type::Secret => rules.secrets,
         // B06 — a `Decimal`, time, currency or locale value travels as
         // its canonical text.
         Type::Int | Type::Float | Type::String | Type::Bool => true,
         ty if crate::text_scalar::is_text_scalar(ty) => true,
-        Type::Tainted(inner) | Type::List(inner) => decodable(inner, types, seen),
-        Type::Option(inner) => is_native_option_type(ty) && decodable(inner, types, seen),
-        Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, types, seen),
+        Type::Tainted(inner) | Type::List(inner) => decodable(inner, rules, seen),
+        Type::Option(inner) => is_native_option_type(ty) && decodable(inner, rules, seen),
+        Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, rules, seen),
         Type::Result(ok, err) => {
-            is_native_result_type(ty) && decodable(ok, types, seen) && decodable(err, types, seen)
+            is_native_result_type(ty) && decodable(ok, rules, seen) && decodable(err, rules, seen)
         }
         // The driver checks programs before `JsonError` becomes a record
         // and this backend after, so the record is excluded here too:
@@ -47,7 +82,7 @@ fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut H
             decl.fields
                 .iter()
                 .chain(decl.variants.iter().flat_map(|variant| &variant.fields))
-                .all(|field| decodable(&field.ty, types, seen))
+                .all(|field| decodable(&field.ty, rules, seen))
         }
         _ => false,
     }

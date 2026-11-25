@@ -806,6 +806,22 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Whether `value` holds `field`'s refinement, and if not the value as
+/// shown in a message. The one rule every check of a refinement uses:
+/// decoding, building a record in code, assigning a field, and reading
+/// a table row.
+pub fn refinement_breach(field: &corvid_ir::IrField, value: &Value) -> Option<String> {
+    let refinement = field.refinement.as_ref()?;
+    let admitted = match value {
+        Value::Int(n) => refinement.admits_int(*n),
+        Value::String(s) => refinement.admits_text(s),
+        // Form/type mismatches are rejected at typecheck; anything
+        // else reaching here has no value check.
+        _ => true,
+    };
+    (!admitted).then(|| value_to_json(value).to_string())
+}
+
 /// Slice 50j — enforce a field's declared value refinement after
 /// its structural decode. Violations render actionably (field,
 /// value, refinement) because this exact string is what `with
@@ -815,22 +831,12 @@ pub fn check_field_refinement(
     field: &corvid_ir::IrField,
     value: &Value,
 ) -> Result<(), ConvError> {
-    let Some(refinement) = &field.refinement else {
-        return Ok(());
-    };
-    let violated = match value {
-        Value::Int(n) => !refinement.admits_int(*n),
-        Value::String(s) => !refinement.admits_text(s),
-        // Form/type mismatches are rejected at typecheck; anything
-        // else reaching here decodes without a value check.
-        _ => false,
-    };
-    if violated {
+    if let Some(got) = refinement_breach(field, value) {
         return Err(ConvError::RefinementViolated {
             struct_name: struct_name.to_string(),
             field: field.name.clone(),
-            refinement: refinement.describe(),
-            got: value_to_json(value).to_string(),
+            refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+            got,
         });
     }
     Ok(())

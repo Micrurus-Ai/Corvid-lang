@@ -23,7 +23,9 @@ fn operand_supported(expr: &IrExpr) -> bool {
                 || crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty)
                 || crate::time_methods::time_binary(*op, &left.ty, &right.ty).is_some()
                 || crate::currency_methods::currency_binary(*op, &left.ty, &right.ty).is_some()
-                || crate::bytes_methods::bytes_binary(*op, &left.ty, &right.ty).is_some() => {
+                || crate::bytes_methods::bytes_binary(*op, &left.ty, &right.ty).is_some()
+                || (matches!(op, corvid_ast::BinaryOp::Eq | corvid_ast::BinaryOp::NotEq)
+                    && matches!(crate::text_scalar::scalar_of(&left.ty), Type::Secret)) => {
                 operand_supported(left) && operand_supported(right)
             }
         IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),

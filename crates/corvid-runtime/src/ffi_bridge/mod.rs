@@ -45,6 +45,7 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod equality;
+mod secret_object;
 mod approval_exports;
 mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.

@@ -240,9 +240,19 @@ impl<'ir> Interpreter<'ir> {
             .iter()
             .zip(row)
             .map(|(field, column)| {
-                self.from_column(column, &field.ty)
-                    .map(|value| (field.name.clone(), value))
-                    .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))
+                let value = self
+                    .from_column(column, &field.ty)
+                    .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))?;
+                // A stored row holds its refinements too; one that does
+                // not was written outside this program.
+                if let Some(shown) = crate::conv::refinement_breach(field, &value) {
+                    let refinement = field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default();
+                    return Err(format!(
+                        "a stored `{}` row breaks `{}.{}` must be {refinement}: it holds {shown}",
+                        record.name, record.name, field.name
+                    ));
+                }
+                Ok((field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Value::Struct(StructValue::new(record.id, record.name.clone(), fields)))

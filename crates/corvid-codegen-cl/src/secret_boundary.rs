@@ -1,15 +1,15 @@
-//! Why native code has no `Secret` (B04), in the one wording the code
-//! generator and the driver's tier picker both use.
+//! Where native code still cannot use a `Secret` (B04, native dispatch
+//! N3), in the one wording the code generator and the driver's tier
+//! picker both use.
 //!
-//! A program gets a secret only from a tool: `secret(name)` from
-//! std/secrets or `random_token(bytes)` from std/crypto. Native
-//! binaries do not dispatch the standard library's tools, and a native
-//! tool call has no path that hands an implementation a secret's text
-//! while every record of the call (the trace, replay, approvals) holds
-//! `<redacted>`, and that scrubs a secret the tool echoes from the
-//! recorded result only. Rather than run a secret through code that
-//! cannot keep those guarantees, a program that mentions `Secret`
-//! anywhere runs on the interpreter, which keeps all of them.
+//! Native code holds a secret as the runtime's opaque object: it can get
+//! one from `secret(name)` or `random_token(bytes)` through the runtime
+//! call, hold it, pass it between agents and compare it. Two uses wait:
+//! a tool of the program's own whose signature holds a secret, because a
+//! native tool call records its arguments without redaction, and the
+//! cryptography a secret keys (HMAC, `verify_password`,
+//! `decode_base64_after`, `hash_password`), which arrives in later
+//! slices. A program that needs either runs on the interpreter.
 
 /// The reason, for compile errors and the tier picker.
-pub const SECRET_REQUIREMENT: &str = "`Secret` runs on the interpreter tier: a secret comes only from a tool (`secret(name)`, `random_token(bytes)`) and reaches tools as text, and native binaries neither dispatch the standard library's tools nor redact a secret in a native tool call's record";
+pub const SECRET_REQUIREMENT: &str = "a `Secret` passed to a tool of the program's own, to `hash_password`, or used to key an HMAC, `verify_password` or `decode_base64_after` runs on the interpreter tier: a native tool call records its arguments without redaction, and native secret cryptography is not built yet";

@@ -276,6 +276,8 @@ pub fn typeinfo_data_for_refcounted_payload(
         // B06, B04 — a native `Decimal`, time, currency, locale or `Bytes` value is a
         // String holding its canonical text.
         Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Some(runtime.string_typeinfo),
+        // Native dispatch N3 — a secret is the runtime's own object.
+        Type::Secret => Some(runtime.secret_typeinfo),
         Type::Function { .. } if crate::native_callback_type(ty) => Some(runtime.callback_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),

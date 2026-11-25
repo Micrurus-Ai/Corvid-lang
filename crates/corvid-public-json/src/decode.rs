@@ -40,6 +40,15 @@ pub trait ValueBuilder {
     /// B06 — a `Decimal`, time or currency value, already parsed from
     /// its canonical text (see [`crate::text_scalar`]).
     fn text_scalar(&mut self, value: crate::text_scalar::TextScalar) -> Self::Value;
+    /// A `Secret` holding `text`, or `None` to refuse it. A secret has no
+    /// JSON form, so every builder refuses by default and `T.from_json`
+    /// can never make one. Only the native runtime call accepts one, for
+    /// the answer of a tool the runtime implements whose declared result
+    /// is a secret, such as `secret(name)` (native dispatch N3).
+    fn secret(&mut self, text: &str) -> Option<Self::Value> {
+        let _ = text;
+        None
+    }
     /// Release a value built for a decode that then failed.
     fn discard(&mut self, value: Self::Value) {
         drop(value);
@@ -161,6 +170,16 @@ impl<B: ValueBuilder> Decoder<'_, B> {
             }
             Type::Conflict(row, _) => self.decode_variant(json, &crate::conflict_decl(row), path),
             Type::JsonValue => Ok(self.builder.json(json)),
+            // A builder that accepts secrets gets the text; every other
+            // decode is refused as before. The message never quotes the
+            // JSON, which may be the secret.
+            Type::Secret => match json {
+                J::String(text) => self.builder.secret(text),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                JsonDecodeError::new(path, "a type with a JSON form (`Secret` has none)", json_kind(json))
+            }),
             Type::Grounded(_) => Err(JsonDecodeError::new(
                 path,
                 "a grounded value produced by a retrieval",

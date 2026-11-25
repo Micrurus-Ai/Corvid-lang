@@ -29,6 +29,53 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Secrets in native code (native dispatch N3a)
+
+A native program can now read a secret with `secret(name)`, draw one with
+`random_token(bytes)`, keep it in locals, records, lists, options and
+results, and compare two with `==` and `!=`. Until now any program that
+mentioned `Secret` ran on the interpreter.
+
+**The representation.** A native secret is a reference-counted heap
+object of a new allocator type, `corvid_typeinfo_Secret`, whose 8-byte
+payload points to a boxed `corvid_crypto::Secret`, the interpreter's own
+value. Compiled code retains, releases and passes it and never reads it;
+`ffi_bridge::secret_object` is the only code that opens the box. The box
+is dropped from the type's `weak_fn`, because the cycle collector's sweep
+calls that and not `destroy_fn`, so a secret inside a collected cycle is
+freed too. Equality calls `Secret::constant_time_eq`, through a new
+`Secret` equality layout for secrets inside records, lists and options.
+
+**Simpler options considered.** Holding the text as a string, as `Bytes`
+is held, would have been less code, but string printing and JSON would
+then work on it, leaving only the checker between a missed path and the
+text, and a key decoded by `decode_base64_after` has no text to hold. An
+integer id into a runtime table would need its own lifetime rule.
+
+**Making one.** The public JSON decoder gained an opt-in
+`ValueBuilder::secret`. Every builder refuses by default, so
+`T.from_json` still cannot make a secret; the native runtime call's
+builder accepts one only for the answer of a tool the runtime holds as a
+secret (`is_stdlib_secret_value_tool`). `secret` and `random_token` joined
+`is_native_runtime_tool`, and `native_runtime_call_types` is now the one
+rule codegen and the tier picker use for a runtime call's types.
+
+**What still runs on the interpreter.** A tool of the program's own whose
+signature holds a secret, because native tool calls record their
+arguments without redaction. The check now looks inside record fields:
+the interpreter's `holds_secret` moved to `corvid-ir` so both use it.
+Also `hash_password`, and HMAC, `verify_password` and `decode_base64_after`
+keyed by a secret, which are N3b and N3c. A library's exported agent never
+takes or returns a secret.
+
+**Tests.** `corvid-driver/tests/native_secrets.rs` runs one program on
+both tiers: the same nine comparison answers and the same missing-secret
+message, no secret text in the native trace, every secret and token result
+recorded as `<redacted>`, the same answers on native replay, and balanced
+allocator counts at exit. Unit tests pin what is native and what is not.
+
+---
+
 ## 2026-11-25 - The standard library's runtime tools in native code (native dispatch N2)
 
 A program that reads the clock, makes a UUID, draws a random number or
@@ -600,6 +647,32 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-25 - Refinements hold for every value on the interpreter (B09 Refine-1)
+
+A field refinement was checked only where values entered from outside,
+so `Search("dune", 500)` ran and no reader of a `Search` could rely on
+`limit <= 50`. Now a constant out of range in a constructor, a variant
+constructor or a record literal is `RefinementOutOfRange`, and a
+computed value is checked by the interpreter at constructors, record
+literals, `{ ..base }` updates and field assignments (compound ones
+too), stopping the run with `` `Search.limit` must be between(1, 50),
+but this value is 500 ``. A table row is checked when read, so a row
+written outside the program is refused instead of handed on.
+
+Every check calls `conv::refinement_breach`, the rule decoding already
+used, so a refinement means one thing at every boundary. Native code
+does not check yet. Rather than let the tiers disagree, the native
+ability scan routes a program that gives a refined field a computed
+value to the interpreter and names the field; a literal, proven by the
+checker, stays native. That routing goes when Refine-2 adds the native
+check. Variant payloads take no refinements in the grammar, so the
+variant constructor's check guards nothing yet and costs nothing.
+
+Also removed: the `malformed` helper in `tables/recorded.rs`, left
+unused by Conflict-2's rename to `malformed_outcome`.
 
 ---
 
