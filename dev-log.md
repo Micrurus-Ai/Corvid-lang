@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+## 2026-11-25 - Windowed inventory regression coverage (F17)
+
+The inventory trial uses fixed-height rows to bound DOM work and a native link for each mounted bin. The paired build shares its browser adapter and feed so differences in load size and interaction costs include the actual Corvid loader and model. The CLI model test, Wasm build, TypeScript parity and HTTP fixture checks passed locally. Browser budgets and keyboard/history behavior await hosted verification. [Trial design](docs/proposals/frontend-windowed-collections.md)
+
 ---
 
 ## 2026-11-25 - Connectors declare their timeout and redirect policy (B05, first slice)

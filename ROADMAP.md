@@ -2,6 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+F17 compares windowed lists and tables through one shared browser workflow so that input, navigation and streaming costs are comparable across implementations. The [frontend checklist](docs/frontend-roadmap.md#running-the-frontend-loop) tracks host verification.
+
 Backend and AI implementation follows the [ordered backend and AI queue](docs/backend-ai-roadmap.md#ordered-tasks). Its target is parity with what developers build in Python and TypeScript, through built-in capability and typed interoperability together.
 
 The [platform plan](docs/proposals/corvid-platform-plan.md), adopted for backend and AI on 2026-11-23, organizes the next work around one principle: the application and the AI can always see each other, within what the author declares. It adds backend and AI tasks B21 to B43, moves B09 to B11 ahead of B02 to B08, and proposes frontend tasks F-P1 to F-P6 for frontend development to accept into its own queue.

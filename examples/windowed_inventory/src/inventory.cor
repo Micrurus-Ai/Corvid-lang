@@ -1,0 +1,23 @@
+# Include two rows above the first visible bin.
+agent first_row(scroll: Int, height: Int) -> Int:
+    first = scroll / height
+    if first < 2:
+        return 0
+    return first - 2
+
+# Return the exclusive end, including a partial row and two rows below it.
+agent end_row(scroll: Int, viewport: Int, height: Int, count: Int) -> Int:
+    end = (scroll + viewport + height - 1) / height + 2
+    if end > count:
+        return count
+    return end
+
+agent stock(bin: Int) -> Int:
+    return bin * 17 % 101
+
+test inventory_edges:
+    assert first_row(0, 32) == 0
+    assert first_row(103, 32) == 1
+    assert end_row(103, 320, 32, 10000) == 16
+    assert end_row(0, 320, 32, 0) == 0
+    assert stock(1) == 17
