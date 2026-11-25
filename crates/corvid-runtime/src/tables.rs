@@ -21,6 +21,7 @@ use corvid_ast::DatabaseLocation;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod conflict;
 mod dialect;
 pub mod exact_columns;
 mod indexes;
@@ -31,6 +32,7 @@ mod query;
 mod recorded;
 mod schema;
 mod transaction;
+pub use conflict::WriteConflict;
 pub use dialect::TableEngine;
 pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_prefix, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
@@ -160,8 +162,8 @@ impl Runtime {
     }
 
     /// `Shelf.insert(row)`: `Ok` with the stored row (revision 1), or
-    /// `Err` with the row already stored under that key.
-    async fn table_insert_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Row>, RuntimeError> {
+    /// `Taken` with the row that holds its key or a `unique` value.
+    async fn table_insert_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let (columns, mut values) = split_revision(table, row)?;
         let names = columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
         let marks = values
@@ -182,18 +184,19 @@ impl Runtime {
             return Ok(Ok(values));
         }
         if let Some(existing) = self.select_row(table, key.clone()).await? {
-            return Ok(Err(existing));
+            return Ok(Err(WriteConflict::Taken(existing)));
         }
         // Not the key: another row holds a `unique` value.
         match self.unique_holder(table, &values).await? {
-            Some(holder) => Ok(Err(holder)),
+            Some(holder) => Ok(Err(WriteConflict::Taken(holder))),
             None => Err(RuntimeError::Other(format!("table `{}`: an insert conflicted with a row that is gone", table.name))),
         }
     }
 
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
-    /// or `Err` with the row stored now (`None` if it was deleted).
-    async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// or why not: `Changed` with the row stored now, `Deleted`, or
+    /// `Taken` with the row that holds one of its `unique` values.
+    async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let revision = revision_of(table, &row)?;
         let (columns, mut values) = split_revision(table, row)?;
         let key = key_values(table, &values)?;
@@ -238,11 +241,11 @@ impl Runtime {
         if let Some(stored) = &current {
             if revision_of(table, stored)? == revision {
                 if let Some(holder) = self.unique_holder(table, &values).await? {
-                    return Ok(Err(Some(holder)));
+                    return Ok(Err(WriteConflict::Taken(holder)));
                 }
             }
         }
-        Ok(Err(current))
+        Ok(Err(WriteConflict::stale(current)))
     }
 
     /// Another row (not the one with `key`) holding all of some `unique`
@@ -263,9 +266,9 @@ impl Runtime {
         Ok(None)
     }
 
-    /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Err` with
-    /// the row stored now (`None` if it is already gone).
-    async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Changed` with
+    /// the row stored now, or `Deleted` if it is already gone.
+    async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let revision = revision_of(table, &row)?;
         let key = key_values(table, &row)?;
         let sql = format!(
@@ -281,7 +284,7 @@ impl Runtime {
         if deleted == 1 {
             return Ok(Ok(row));
         }
-        Ok(Err(self.select_row(table, key).await?))
+        Ok(Err(WriteConflict::stale(self.select_row(table, key).await?)))
     }
 
     async fn select_row(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {

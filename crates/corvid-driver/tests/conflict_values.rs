@@ -117,3 +117,76 @@ agent wrong(member: Member) -> Conflict<Member>:
     );
     assert!(errors.iter().any(|e| e.message.contains("`Deleted`, which carries no row")), "{errors:#?}");
 }
+
+/// Each table write returns only the conflicts it can produce.
+mod table_writes {
+    use corvid_driver::compile_to_ir;
+
+    const TABLES: &str = "
+database library:
+    engine: sqlite
+    location: \"library.sqlite\"
+
+table Shelf:
+    key shelf: Int
+    title: String
+
+table Member:
+    key id: Int
+    email: String
+    unique email
+";
+
+    fn errors(body: &str) -> Vec<String> {
+        match compile_to_ir(&format!("{TABLES}\n{body}")) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors.into_iter().map(|e| e.message).collect(),
+        }
+    }
+
+    #[test]
+    fn an_insert_match_is_complete_with_taken_alone() {
+        let found = errors(
+            "agent add(row: Shelf) -> String:\n    return match Shelf.insert(row):\n        Ok(stored) -> \"stored\"\n        Err(Taken(holder)) -> holder.title\n",
+        );
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn an_arm_an_insert_can_never_reach_is_refused() {
+        let found = errors(
+            "agent add(row: Shelf) -> String:\n    return match Shelf.insert(row):\n        Ok(stored) -> \"stored\"\n        Err(Changed(current)) -> \"changed\"\n        Err(Taken(holder)) -> holder.title\n",
+        );
+        assert!(
+            found.iter().any(|m| m.contains("this conflict is never `Changed`: it can only be `Taken`")),
+            "{found:#?}"
+        );
+    }
+
+    /// A save keeps its key, so only a table with `unique` values can
+    /// have a save another row's value blocks.
+    #[test]
+    fn a_save_is_taken_only_on_a_table_with_unique_values() {
+        let without_unique = errors(
+            "agent store(row: Shelf) -> String:\n    return match Shelf.save(row):\n        Ok(saved) -> \"saved\"\n        Err(Changed(current)) -> \"changed\"\n        Err(Deleted) -> \"gone\"\n",
+        );
+        assert!(without_unique.is_empty(), "{without_unique:#?}");
+        let taken_arm = errors(
+            "agent store(row: Shelf) -> String:\n    return match Shelf.save(row):\n        Ok(saved) -> \"saved\"\n        Err(Changed(current)) -> \"changed\"\n        Err(Deleted) -> \"gone\"\n        Err(Taken(holder)) -> \"taken\"\n",
+        );
+        assert!(taken_arm.iter().any(|m| m.contains("this conflict is never `Taken`")), "{taken_arm:#?}");
+        let missing_taken = errors(
+            "agent rename(row: Member) -> String:\n    return match Member.save(row):\n        Ok(saved) -> \"saved\"\n        Err(Changed(current)) -> \"changed\"\n        Err(Deleted) -> \"gone\"\n",
+        );
+        assert!(missing_taken.iter().any(|m| m.contains("non-exhaustive match")), "{missing_taken:#?}");
+    }
+
+    /// A conflict passes to a function taking any conflict.
+    #[test]
+    fn a_narrower_conflict_passes_where_any_is_expected() {
+        let found = errors(
+            "agent explain(conflict: Conflict<Shelf>) -> String:\n    return match conflict:\n        Changed(current) -> \"changed\"\n        Deleted -> \"gone\"\n        Taken(holder) -> \"taken\"\n\nagent add(row: Shelf) -> String:\n    return match Shelf.insert(row):\n        Ok(stored) -> \"stored\"\n        Err(conflict) -> explain(conflict)\n",
+        );
+        assert!(found.is_empty(), "{found:#?}");
+    }
+}

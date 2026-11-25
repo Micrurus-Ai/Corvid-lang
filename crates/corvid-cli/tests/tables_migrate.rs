@@ -93,7 +93,7 @@ fn lifecycle(engine: &Engine) {
 
     // Create the table and store a row.
     let first = "    title: String\n    note: Option<String>\n    legacy: String\n    count: Option<Int>";
-    let insert = "    added = match Shelf.insert(Shelf(1, \"Reading\", None, \"old\", Some(3))):\n        Ok(row) -> row.revision\n        Err(row) -> 0 - row.revision\n    return \"stored r\" + added.to_string()";
+    let insert = "    added = match Shelf.insert(Shelf(1, \"Reading\", None, \"old\", Some(3))):\n        Ok(row) -> row.revision\n        Err(Taken(row)) -> 0 - row.revision\n    return \"stored r\" + added.to_string()";
     write(first, insert);
     let planned = ok(&plan());
     assert!(planned.contains("for Shelf"), "on {on}: {planned}");

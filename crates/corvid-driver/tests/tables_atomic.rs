@@ -38,14 +38,14 @@ agent titles() -> String:
         out = out + shelf.title + " r" + shelf.revision.to_string() + ","
     return out
 
-agent rename_pair(left: String, right: String, left_seen: Int, right_seen: Int) -> Result<String, Option<Shelf>>:
+agent rename_pair(left: String, right: String, left_seen: Int, right_seen: Int) -> Result<String, Conflict<Shelf>>:
     atomic:
         first = Shelf.save(Shelf(1, left, left_seen))?
         second = Shelf.save(Shelf(2, right, right_seen))?
         logged = Ledger.insert(Ledger(left_seen, left + "+" + right))
     return Ok(first.title + "+" + second.title)
 
-agent describe(outcome: Result<String, Option<Shelf>>) -> String:
+agent describe(outcome: Result<String, Conflict<Shelf>>) -> String:
     return match outcome:
         Ok(text) -> text
         Err(_) -> "conflict, nothing kept"

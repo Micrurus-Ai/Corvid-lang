@@ -16,15 +16,18 @@ pub enum TableOp {
     /// `Shelf.get(key) -> Option<Shelf>`; a key of several fields takes
     /// their values in declaration order, `Edit.get(proposal, shelf)`.
     Get,
-    /// `Shelf.insert(row) -> Result<Shelf, Shelf>`: `Err` holds the row
-    /// already stored under that key.
+    /// `Shelf.insert(row) -> Result<Shelf, Conflict<Shelf>>`, whose
+    /// conflict is only `Taken(holder)`: the row with that key or one of
+    /// its `unique` values.
     Insert,
-    /// `Shelf.save(row) -> Result<Shelf, Option<Shelf>>`: succeeds only
-    /// if the stored row still has `row.revision`; `Err` holds the row
-    /// stored now, or `None` if it was deleted.
+    /// `Shelf.save(row) -> Result<Shelf, Conflict<Shelf>>`: succeeds only
+    /// if the stored row still has `row.revision`. Its conflict is
+    /// `Changed(current)` or `Deleted`, and `Taken(holder)` when the
+    /// table declares `unique` values.
     Save,
-    /// `Shelf.delete(row) -> Result<Shelf, Option<Shelf>>`, checked like
-    /// `save`; `Ok` holds the deleted row.
+    /// `Shelf.delete(row) -> Result<Shelf, Conflict<Shelf>>`, checked
+    /// like `save`; `Ok` holds the deleted row. Its conflict is
+    /// `Changed(current)` or `Deleted`.
     Delete,
 }
 
@@ -58,6 +61,20 @@ impl TableOp {
 
     pub fn writes(self) -> bool {
         !matches!(self, Self::Get)
+    }
+
+    /// The conflict cases a write to a table can return, and no others,
+    /// so a `match` on its result is complete when it covers these. A
+    /// save keeps its key, so another row can hold one of its values
+    /// only when the table declares `unique` values.
+    pub fn conflicts(self, has_unique: bool) -> crate::ConflictCases {
+        use crate::ConflictCase::{Changed, Deleted, Taken};
+        crate::ConflictCases::of(match (self, has_unique) {
+            (Self::Get, _) => &[],
+            (Self::Insert, _) => &[Taken],
+            (Self::Save, true) => &[Changed, Deleted, Taken],
+            (Self::Save, false) | (Self::Delete, _) => &[Changed, Deleted],
+        })
     }
 }
 

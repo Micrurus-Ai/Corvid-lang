@@ -503,6 +503,29 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Table writes return their conflicts by name (B09 Conflict-2)
+
+`insert`, `save` and `delete` now return `Result<Row, Conflict<Row>>`,
+each with only the cases it can produce: `TableOp::conflicts` is the one
+list the checker reads. A save keeps its key, so it can be `Taken` only
+when its table declares `unique` values; a table without them gets a
+save whose conflict is `Changed` or `Deleted`, and no arm that could
+never run. The invention catalog's tables example caught this: its
+two-arm match was correct and the first rule would have refused it. The runtime's writes return a `WriteConflict`
+built where the database outcome is known, so the save that a unique
+value blocks is `Taken(holder)` and the save of a changed row is
+`Changed(current)`, and no caller compares keys to tell them apart. The
+unique-values test shows the gain: its `refused` and `blocked` helpers,
+which made that comparison, are gone, replaced by three arms.
+
+The trace records the case by name, `{"conflict": "Taken", "row": ...}`.
+A write recorded in the earlier shape is refused with a message to
+record again: an old save's `{"err": row}` could be either case, and
+replay must return what happened, not a guess. No recorded table trace
+existed in the repository, so nothing needed converting.
+
+---
+
 ## 2026-11-25 - Clients name the conflict type (B09 Conflict-1b)
 
 A route or agent that returns a `Conflict<Row>` is advertised as

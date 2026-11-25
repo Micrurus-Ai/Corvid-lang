@@ -3,7 +3,7 @@
 //! replay trace without opening the database. The trace holds rows
 //! and outcomes as JSON; the helpers here encode and decode them.
 
-use super::{Row, TableRef};
+use super::{Row, TableRef, WriteConflict};
 use crate::db::DbValue;
 use crate::errors::RuntimeError;
 use crate::Runtime;
@@ -27,46 +27,39 @@ impl Runtime {
     }
 
     /// `Shelf.insert(row)`: `Ok` with the stored row (revision 1), or
-    /// `Err` with the row already stored under that key.
-    pub async fn table_insert(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Row>, RuntimeError> {
+    /// `Taken` with the row that holds its key or a `unique` value.
+    pub async fn table_insert(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "insert"), args, || async {
-                Ok(match self.table_insert_live(table, row).await? {
-                    Ok(stored) => serde_json::json!({ "ok": row_json(&stored) }),
-                    Err(existing) => serde_json::json!({ "err": row_json(&existing) }),
-                })
+                Ok(checked_write_json(self.table_insert_live(table, row).await?))
             })
             .await?;
-        match (outcome.get("ok"), outcome.get("err")) {
-            (Some(stored), _) => Ok(Ok(json_row(stored)?)),
-            (_, Some(existing)) => Ok(Err(json_row(existing)?)),
-            _ => Err(malformed(table, "insert")),
-        }
+        checked_write_outcome(table.name, "insert", &outcome)
     }
 
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
-    /// or `Err` with the row stored now (`None` if it was deleted).
-    pub async fn table_save(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// or the conflict that stopped it.
+    pub async fn table_save(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "save"), args, || async {
                 Ok(checked_write_json(self.table_save_live(table, row).await?))
             })
             .await?;
-        checked_write_outcome(table, "save", &outcome)
+        checked_write_outcome(table.name, "save", &outcome)
     }
 
-    /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Err` with the
-    /// row stored now (`None` if it is already gone).
-    pub async fn table_delete(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// `Shelf.delete(row)`: `Ok` with the deleted row, or the conflict
+    /// that stopped it.
+    pub async fn table_delete(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "delete"), args, || async {
                 Ok(checked_write_json(self.table_delete_live(table, row).await?))
             })
             .await?;
-        checked_write_outcome(table, "delete", &outcome)
+        checked_write_outcome(table.name, "delete", &outcome)
     }
 }
 
@@ -75,22 +68,78 @@ pub(super) fn call_name(table: &TableRef<'_>, op: &str) -> String {
 }
 
 pub(super) fn malformed(table: &TableRef<'_>, op: &str) -> RuntimeError {
-    RuntimeError::Other(format!("the recorded outcome of `{}.{op}` is malformed", table.name))
+    malformed_outcome(table.name, op)
 }
 
-fn checked_write_json(outcome: Result<Row, Option<Row>>) -> J {
+fn malformed_outcome(table: &str, op: &str) -> RuntimeError {
+    RuntimeError::Other(format!("the recorded outcome of `{table}.{op}` is malformed"))
+}
+
+/// A write's outcome in the trace: `{"ok": row}`, or `{"conflict":
+/// "Changed" | "Deleted" | "Taken", "row": row}` naming the case, with
+/// `row` absent for `Deleted`.
+fn checked_write_json(outcome: Result<Row, WriteConflict>) -> J {
     match outcome {
         Ok(row) => serde_json::json!({ "ok": row_json(&row) }),
-        Err(current) => serde_json::json!({ "err": current.as_ref().map(|row| row_json(row)) }),
+        Err(conflict) => {
+            let mut recorded = serde_json::json!({ "conflict": conflict.case().name() });
+            if let Some(row) = conflict.row() {
+                recorded["row"] = row_json(row);
+            }
+            recorded
+        }
     }
 }
 
-fn checked_write_outcome(table: &TableRef<'_>, op: &str, outcome: &J) -> Result<Result<Row, Option<Row>>, RuntimeError> {
-    match (outcome.get("ok"), outcome.get("err")) {
-        (Some(row), _) => Ok(Ok(json_row(row)?)),
-        (_, Some(J::Null)) => Ok(Err(None)),
-        (_, Some(current)) => Ok(Err(Some(json_row(current)?))),
-        _ => Err(malformed(table, op)),
+fn checked_write_outcome(table: &str, op: &str, outcome: &J) -> Result<Result<Row, WriteConflict>, RuntimeError> {
+    if let Some(row) = outcome.get("ok") {
+        return Ok(Ok(json_row(row)?));
+    }
+    if outcome.get("err").is_some() {
+        // Recorded before writes named their conflict; which case it was
+        // cannot be told from it, so it is not guessed.
+        return Err(RuntimeError::Other(format!(
+            "the recorded outcome of `{table}.{op}` predates named conflicts; record the trace again"
+        )));
+    }
+    let case = outcome
+        .get("conflict")
+        .and_then(J::as_str)
+        .and_then(corvid_types::ConflictCase::from_name)
+        .ok_or_else(|| malformed_outcome(table, op))?;
+    let row = outcome.get("row").map(json_row).transpose()?;
+    WriteConflict::new(case, row).map(Err).ok_or_else(|| malformed_outcome(table, op))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each case is recorded by name and read back as itself.
+    #[test]
+    fn every_write_outcome_round_trips_through_the_trace() {
+        let row = vec![DbValue::Integer(1), DbValue::Text("Novels".into()), DbValue::Integer(2)];
+        for outcome in [
+            Ok(row.clone()),
+            Err(WriteConflict::Changed(row.clone())),
+            Err(WriteConflict::Deleted),
+            Err(WriteConflict::Taken(row.clone())),
+        ] {
+            let recorded = checked_write_json(outcome.clone());
+            let read = checked_write_outcome("Shelf", "save", &recorded).expect("reads back");
+            assert_eq!(read, outcome, "{recorded}");
+        }
+        assert_eq!(checked_write_json(Err(WriteConflict::Deleted)), serde_json::json!({ "conflict": "Deleted" }));
+    }
+
+    /// An outcome recorded before conflicts were named could be either
+    /// case, so a replay refuses it instead of guessing.
+    #[test]
+    fn an_outcome_recorded_before_named_conflicts_is_refused() {
+        let error = checked_write_outcome("Shelf", "save", &serde_json::json!({ "err": [1, "Novels", 2] })).unwrap_err();
+        assert!(error.to_string().contains("predates named conflicts; record the trace again"), "{error}");
+        let wrong = checked_write_outcome("Shelf", "save", &serde_json::json!({ "conflict": "Deleted", "row": [1] }));
+        assert!(wrong.is_err(), "a Deleted conflict carries no row");
     }
 }
 
