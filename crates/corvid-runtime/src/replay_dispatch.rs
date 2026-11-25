@@ -1,4 +1,5 @@
 use crate::errors::RuntimeError;
+use crate::replay::is_dispatch_metadata;
 use corvid_trace_schema::{read_events_from_path, validate_supported_schema, TraceEvent};
 use std::path::Path;
 
@@ -159,25 +160,6 @@ fn next_non_dispatch_metadata(events: &[TraceEvent], mut index: usize) -> Option
         }
     }
     None
-}
-
-fn is_dispatch_metadata(event: &TraceEvent) -> bool {
-    matches!(
-        event,
-        TraceEvent::ModelSelected { .. }
-            | TraceEvent::HostEvent { .. }
-            | TraceEvent::ProgressiveEscalation { .. }
-            | TraceEvent::ProgressiveExhausted { .. }
-            | TraceEvent::StreamUpgrade { .. }
-            | TraceEvent::PromptCache { .. }
-            | TraceEvent::ApprovalTokenIssued { .. }
-            | TraceEvent::ApprovalScopeViolation { .. }
-            | TraceEvent::AbVariantChosen { .. }
-            | TraceEvent::EnsembleVote { .. }
-            | TraceEvent::AdversarialPipelineCompleted { .. }
-            | TraceEvent::AdversarialContradiction { .. }
-            | TraceEvent::ProvenanceEdge { .. }
-    )
 }
 
 fn malformed_pair<T>(
