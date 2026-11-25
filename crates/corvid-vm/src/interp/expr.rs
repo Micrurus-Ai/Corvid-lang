@@ -439,17 +439,7 @@ mod tests {
 /// Python-style float rendering: always shows a decimal point
 /// or exponent so string output round-trips visibly typed.
 fn render_float(f: f64) -> String {
-    let rendered = format!("{f}");
-    if rendered.contains('.')
-        || rendered.contains('e')
-        || rendered.contains('E')
-        || rendered.contains("inf")
-        || rendered.contains("NaN")
-    {
-        rendered
-    } else {
-        format!("{rendered}.0")
-    }
+    corvid_runtime::number_text::float_to_string(f)
 }
 
 /// Checked Float->Int conversion shared by `floor`/`ceil`/`round`

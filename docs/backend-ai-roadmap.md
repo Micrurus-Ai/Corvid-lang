@@ -284,6 +284,9 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
   - [ ] Move a tool of the program's own onto the runtime call, so it can take or return a secret natively with its arguments redacted, and its trace comes from the one path the interpreter uses. The proposal's non-scope until decided: user tools work through their direct-call path today.
   - [ ] N4. `Response<T>` in native code.
 
+- [x] Native code wrote a `Float` with C's `%.17g` when printing a result, interpolating it into a prompt and recording it, so `0.1` became `0.10000000000000001` and a prompt read differently on each tier; `to_string()` on `Int`, `Float` and `Bool` had no native form. All of it now goes through `corvid_runtime::number_text`, which both tiers read, with parity tests for printing, `to_string()` and a prompt's recorded text.
+- [ ] A printed `Float` result drops its decimal point (`2`) on both tiers while `to_string()` keeps it (`2.0`), against the rule that a `Float` always reads as one. Stronger: print the `to_string()` form (`number_text::float_to_string`) everywhere a `Float` is shown, with the change named in learnings, since it changes program output.
+
 **Test infrastructure**
 
 - [x] `serve_smoke.rs` gave each served app a fixed port, and six ports were each used by two tests, so `approval_transition_endpoints_approve_re_executes_and_deny_drops_pending` failed in parallel runs whenever another test answered on its port. Every served test now takes an OS-assigned port from `free_port()`, the form the newer serve tests already used.

@@ -45,6 +45,7 @@ pub mod catalog;
 pub mod catalog_c_api;
 pub mod citation;
 pub mod connectors;
+pub mod number_text;
 pub mod db;
 pub mod protocol;
 pub mod protocol_simulate;

@@ -157,6 +157,20 @@ pub(super) fn lower_expr(
             }
             Ok(map)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_scalar_to_string(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let (func, input) = match kind {
+                corvid_types::BuiltinMethodKind::FloatToString => (runtime.float_to_string, input),
+                corvid_types::BuiltinMethodKind::BoolToString => {
+                    let widened = if builder.func.dfg.value_type(input) == I8 { builder.ins().uextend(I64, input) } else { input };
+                    (runtime.bool_to_string, widened)
+                }
+                _ => (runtime.int_to_string, input),
+            };
+            let call = module.declare_func_in_func(func, builder.func);
+            let call = builder.ins().call(call, &[input]);
+            Ok(builder.inst_results(call)[0])
+        }
         IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
             let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             overflow::convert_number(builder, module, *kind, input, expr.span)

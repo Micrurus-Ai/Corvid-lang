@@ -468,6 +468,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) || corvid_codegen_cl::native_numeric_conversion(*kind)
+                || corvid_codegen_cl::native_scalar_to_string(*kind)
                 || corvid_codegen_cl::native_string_method(*kind)
                 || corvid_codegen_cl::native_text_method(*kind)
                 || corvid_codegen_cl::is_native_decimal_method(*kind)

@@ -45,6 +45,7 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod equality;
+mod number_text;
 mod secret_object;
 mod approval_exports;
 mod bytes;

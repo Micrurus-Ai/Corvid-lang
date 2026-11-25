@@ -25,6 +25,47 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-25 - Numbers read the same on both tiers
+
+Found while building native `Response` (N4): `Int.to_string()`,
+`Float.to_string()` and `Bool.to_string()` had no native form, so a
+program that wrote `r.status().to_string()` stayed on the interpreter.
+Looking at how native code writes numbers turned up a worse problem:
+it formatted a `Float` with C's `%.17g` in three places, where the
+interpreter writes the shortest text.
+
+- **A printed result.** `agent main() -> Float: return 0.1` printed
+  `0.1` on the interpreter and `0.10000000000000001` natively.
+- **A prompt.** A `Float` interpolated into a prompt was sent to the
+  model as `0.10000000000000001`, and `2.0` as `2`, where the
+  interpreter sends `0.1` and `2.0`. The recorded prompt text differed
+  between tiers.
+- **A native trace.** Arguments and results recorded natively wrote
+  floats in that form too. They read back as the same numbers, but the
+  text differed from the interpreter's.
+
+The three forms now live in `corvid_runtime::number_text`, the one
+source both tiers read: `float_to_string` (always a decimal point, the
+language's rule, moved from the interpreter), `float_display` (a printed
+result) and `float_json` (JSON number text, for prompts and traces). The
+C printer, prompt formatter and trace writer call into it for the text,
+so output stays on C's buffered stdout, and the interpreter's
+`to_string()` and printing call it too. `to_string()` on `Int`, `Float`
+and `Bool` is now one runtime call each in native code.
+
+**Tests.** Parity tests: printed `Float` results (`0.1`, `2.0`,
+`0.1 + 0.2`, `1 / 3`), and `to_string()` on all three scalars including
+infinity. A driver test checks that the recorded prompt is
+`Price 0.1, ratio 2.0` on both tiers.
+
+**Still different, on the roadmap.** On both tiers a printed `Float`
+result drops the decimal point (`2`), while `to_string()` keeps it
+(`2.0`). That goes against the language's rule that a `Float` always
+reads as one. Changing the printed form changes every program's output,
+so it is a roadmap item rather than part of this fix.
+
+---
+
 ## 2026-11-25 - Serve tests no longer share ports
 
 `approval_transition_endpoints_approve_re_executes_and_deny_drops_pending`

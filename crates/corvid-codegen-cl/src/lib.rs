@@ -370,6 +370,14 @@ pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
         | StringContains | StringStartsWith | StringEndsWith | StringSplit | StringReplace)
 }
 
+/// `int.to_string()`, `float.to_string()` and `bool.to_string()`: one
+/// runtime call each, writing the interpreter's text
+/// (`corvid_runtime::number_text`).
+pub fn native_scalar_to_string(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, IntToString | FloatToString | BoolToString)
+}
+
 pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
     use corvid_types::BuiltinMethodKind::*;
     matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)

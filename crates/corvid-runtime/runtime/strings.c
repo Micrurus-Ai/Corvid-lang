@@ -278,16 +278,14 @@ void* corvid_string_from_bool(char b) {
     }
 }
 
+/* The JSON number text the interpreter interpolates into a prompt, from
+ * the runtime's `number_text`, so a native prompt reads the same. */
+extern size_t corvid_float_json_text(double value, char* buffer, size_t capacity);
+
 void* corvid_string_from_float(double v) {
     uint64_t start_ns = corvid_profile_runtime_enabled() ? corvid_now_ns() : 0;
-    /* `%.17g` is the round-trippable IEEE 754 format — same one
-     * `corvid_print_f64` uses for stdout. NaN / Inf round-trip
-     * as their printf representations ("nan" / "inf" / "-inf"). 64
-     * bytes is conservatively above the longest possible %.17g
-     * output (~25 chars). */
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "%.17g", v);
-    if (len < 0) len = 0;
+    size_t len = corvid_float_json_text(v, buf, sizeof(buf));
     void* payload = alloc_string(buf, (long long)len);
     if (start_ns != 0) {
         corvid_bench_prompt_render_ns_total += corvid_now_ns() - start_ns;

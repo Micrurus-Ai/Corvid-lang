@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.
+
 Hashing and checking passwords now runs as native code: `hash_password(password, owasp_2023())` records the password as `<redacted>` and reveals it only to the hashing, exactly as on the interpreter, so a sign-up and log-in service builds into a native binary. The only secret use that still needs the interpreter is passing a secret to a tool you declared yourself. [Native code](docs/reference/cryptography.md#native-code)
 
 Verifying a webhook with a key read as a `Secret` now runs as native code: `hmac_sha256` and `hmac_sha512` keyed by a secret, `verify_password` and `decode_base64_after("whsec_")` give the same answers in a native binary as on the interpreter. Passing a secret to a tool of your own or to `hash_password` still runs on the interpreter. [Native code](docs/reference/cryptography.md#native-code)
