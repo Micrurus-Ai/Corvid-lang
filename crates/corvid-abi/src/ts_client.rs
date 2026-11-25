@@ -359,6 +359,7 @@ fn ts_type(name: &str) -> String {
                 ts_type(inner)
             ),
             "Page" => format!("Page<{}>", ts_type(inner)),
+            "Conflict" => conflict_union(&ts_type(inner)),
             "Upload" => "File".to_string(),
             "Result" => {
                 let (ok, err) = inner.split_once(',').unwrap_or((inner, "string"));
@@ -378,6 +379,22 @@ fn ts_type(name: &str) -> String {
     }
     // A bare named type is its generated interface/union.
     name.to_string()
+}
+
+/// A table write's conflict (B09) as the union its public JSON takes,
+/// one arm per case, written the way a declared sum type is.
+fn conflict_union(row: &str) -> String {
+    corvid_types::ConflictCase::ALL
+        .into_iter()
+        .map(|case| match case.field() {
+            Some(field) => format!(
+                "{{ tag?: \"variant\"; type?: \"Conflict\"; variant: \"{}\"; fields: [{field}: {row}] }}",
+                case.name()
+            ),
+            None => format!("{{ tag?: \"variant\"; type?: \"Conflict\"; variant: \"{}\" }}", case.name()),
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 fn generic_inner(name: &str) -> Option<String> {
@@ -516,6 +533,16 @@ public agent hello(n: String) -> String:
             .find(|f| f.filename == "api.ts")
             .unwrap()
             .contents
+    }
+
+    /// A table write's conflict is the union its JSON takes, written as a
+    /// declared sum type is.
+    #[test]
+    fn a_conflict_is_a_union_of_its_cases() {
+        assert_eq!(
+            ts_type("Result<Member, Conflict<Member>>"),
+            "{ tag?: \"ok\"; ok: Member } | { tag?: \"err\"; err: { tag?: \"variant\"; type?: \"Conflict\"; variant: \"Changed\"; fields: [current: Member] } | { tag?: \"variant\"; type?: \"Conflict\"; variant: \"Deleted\" } | { tag?: \"variant\"; type?: \"Conflict\"; variant: \"Taken\"; fields: [holder: Member] } }"
+        );
     }
 }
 

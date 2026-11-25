@@ -220,7 +220,10 @@ arm naming a case the value can never be is a compile error. Code can
 build each case, `Changed(row)`, `Deleted` and `Taken(row)`, so a test
 or a fake store returns the same value a table does. A conflict crosses
 JSON as a sum type: `{"tag": "variant", "type": "Conflict", "variant":
-"Taken", "fields": [holder]}`.
+"Taken", "fields": [holder]}`. The generated clients name it too: a
+union of the three cases in TypeScript, `Conflict[Row]` with
+`Conflict.Taken(holder)` in Python, and `CorvidConflict<Row>` in Swift
+and Kotlin.
 
 The operations above still return `Option<Row>` and `Row` errors; they
 move to `Conflict<Row>`, each returning only the cases it can produce,

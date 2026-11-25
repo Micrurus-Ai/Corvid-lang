@@ -503,6 +503,25 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Clients name the conflict type (B09 Conflict-1b)
+
+A route or agent that returns a `Conflict<Row>` is advertised as
+`Conflict<Row>`, and every generated client now reads and writes it.
+TypeScript inlines the union of the three cases, the shape a declared
+sum type gets, and OpenAPI gives the matching `oneOf`. Python has a
+generic `Conflict` base with `Conflict.Changed`, `Conflict.Deleted` and
+`Conflict.Taken`, and the codec decodes the cases by name. Swift and
+Kotlin follow their `CorvidResult` and `CorvidPage`: a generic
+`CorvidConflict<Row>` with hand-written Codable, and a sealed interface
+with its serializer. Each generator builds its type from
+`ConflictCase::ALL`, so a case added there reaches every client. The
+round-trip tests send a `Taken` and a `Deleted` through the generated
+Python, Kotlin and Swift and compare the JSON; the Kotlin and Swift
+ones run with the compilers in `/opt/sdk-toolchains` named by
+`CORVID_KOTLINC`, `CORVID_KOTLIN_CLASSPATH` and `CORVID_SWIFTC`.
+
+---
+
 ## 2026-11-25 - The conflict type (B09 Conflict-1a)
 
 `Conflict<Row>` is a compiler-known type with three cases. Its cases are

@@ -367,6 +367,9 @@ fn schema_for_type_name(name: &str) -> Value {
                 },
                 "required": ["items", "has_more"]
             }),
+            // A table write's conflict (B09): a sum type whose cases
+            // carry the row.
+            "Conflict" => conflict_schema(inner),
             // OpenAPI 3.1 is JSON Schema 2020-12, which has no
             // `nullable`; `None` is `null` in the type itself.
             "Option" => nullable(schema_for_type_name(inner)),
@@ -397,6 +400,34 @@ fn schema_for_type_name(name: &str) -> Value {
     }
     // A bare named type references its component schema.
     json!({ "$ref": format!("#/components/schemas/{name}") })
+}
+
+/// The schema of `Conflict<row>`, one alternative per case, in the shape
+/// [`schema_for_type`] gives a declared sum type.
+fn conflict_schema(row: &str) -> Value {
+    let alternatives: Vec<Value> = corvid_types::ConflictCase::ALL
+        .into_iter()
+        .map(|case| {
+            let count = usize::from(case.field().is_some());
+            let mut fields = json!({"type": "array", "minItems": count, "maxItems": count});
+            let mut required = vec!["variant"];
+            if count > 0 {
+                fields["prefixItems"] = json!([schema_for_type_name(row)]);
+                required.push("fields");
+            }
+            json!({
+                "type": "object",
+                "required": required,
+                "properties": {
+                    "tag": {"const": "variant"},
+                    "type": {"const": "Conflict"},
+                    "variant": {"const": case.name()},
+                    "fields": fields
+                }
+            })
+        })
+        .collect();
+    json!({"oneOf": alternatives})
 }
 
 /// Allow `null` alongside `schema`: add it to a simple `type`, or wrap
@@ -823,5 +854,19 @@ mod tests {
         // Round-trips as JSON.
         let s = serde_json::to_string(&openapi).unwrap();
         let _: Value = serde_json::from_str(&s).unwrap();
+    }
+
+    /// A table write's conflict is described as the sum type it is on
+    /// the wire, each case with the row as its one field, `Deleted` with
+    /// none.
+    #[test]
+    fn a_conflict_projects_as_a_sum_type_over_its_row() {
+        let schema = schema_for_type_name("Conflict<Member>");
+        let cases = schema["oneOf"].as_array().expect("one alternative per case");
+        let names: Vec<&str> = cases.iter().map(|c| c["properties"]["variant"]["const"].as_str().unwrap()).collect();
+        assert_eq!(names, ["Changed", "Deleted", "Taken"]);
+        assert_eq!(cases[0]["properties"]["type"]["const"], "Conflict");
+        assert_eq!(cases[0]["properties"]["fields"]["prefixItems"][0]["$ref"], "#/components/schemas/Member");
+        assert_eq!(cases[1]["properties"]["fields"]["maxItems"], 0);
     }
 }
