@@ -367,6 +367,9 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
                 intern_expr_literals(iter, pool);
                 intern_string_literals(body, pool);
             }
+            IrStmt::Atomic { body, .. } => {
+                intern_string_literals(body, pool);
+            }
             IrStmt::While { cond, body, .. } => {
                 intern_expr_literals(cond, pool);
                 intern_string_literals(body, pool);
@@ -484,6 +487,11 @@ fn collect_block_imports(
             IrStmt::Parallel { .. } => {
                 return Err(WasmCodegenError::unsupported(
                     "parallel blocks are interpreter-only in 46e".to_string(),
+                ));
+            }
+            IrStmt::Atomic { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "atomic blocks run on the interpreter (B09)".to_string(),
                 ));
             }
             IrStmt::Approve { label, args, .. } => {
@@ -1016,6 +1024,7 @@ fn emit_block(
             | IrStmt::While { .. }
             | IrStmt::Destructure { .. }
             | IrStmt::Parallel { .. }
+            | IrStmt::Atomic { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(
@@ -1120,17 +1129,17 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "currency formatting is interpreter-only until B06's native Decimal slice",
+                "`Currency` and `Locale` have no WebAssembly form yet; they run on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "`TimeZone` is interpreter-only until B06's native time slice",
+                "`TimeZone` has no WebAssembly form yet; it runs on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::Decimal(_)) => {
             return Err(WasmCodegenError::unsupported(
-                "`Decimal` is interpreter-only until B06's native Decimal slice",
+                "`Decimal` has no WebAssembly form yet; it runs on the interpreter and native tiers",
             ));
         }
         IrExprKind::Literal(IrLiteral::String(value)) => {

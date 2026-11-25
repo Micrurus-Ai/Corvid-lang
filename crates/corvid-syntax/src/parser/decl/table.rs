@@ -27,7 +27,7 @@ impl<'a> Parser<'a> {
         self.expect_newline()?;
         self.expect_block_start()?;
 
-        let mut key = None;
+        let mut keys = Vec::new();
         let mut fields = Vec::new();
         let mut renamed = Vec::new();
         let mut retired = Vec::new();
@@ -49,27 +49,18 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            // `key name: Type` marks the primary key; `key` stays an
+            // `key name: Type` marks a field of the primary key; several
+            // marked fields identify a row together. `key` stays an
             // ordinary field name when `:` follows it directly.
             let marks_key = matches!(self.peek(), TokKind::Ident(w) if w == "key")
                 && matches!(self.peek_ahead(1), TokKind::Ident(_));
             if marks_key {
-                let marker = self.peek_span();
                 self.bump();
-                if key.is_some() {
-                    self.errors.push(ParseError {
-                        kind: ParseErrorKind::UnexpectedToken {
-                            got: "a second `key` field".into(),
-                            expected: "one `key` field per table".into(),
-                        },
-                        span: marker,
-                    });
-                }
             }
             match self.parse_table_field(&mut renamed) {
                 Ok(field) => {
-                    if marks_key && key.is_none() {
-                        key = Some(field.name.clone());
+                    if marks_key {
+                        keys.push(field.name.clone());
                     }
                     fields.push(field);
                 }
@@ -102,7 +93,7 @@ impl<'a> Parser<'a> {
             visibility,
             span: start.merge(end),
         };
-        Ok(TableDecl { record, key, renamed, retired })
+        Ok(TableDecl { record, keys, renamed, retired })
     }
 
     /// A table field, optionally followed by `renamed from <old name>`.

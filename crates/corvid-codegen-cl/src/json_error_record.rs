@@ -79,6 +79,8 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::ZonedTime
         | Type::Currency
         | Type::Locale
+        | Type::Bytes
+        | Type::Secret
         | Type::Unknown => false,
     }
 }

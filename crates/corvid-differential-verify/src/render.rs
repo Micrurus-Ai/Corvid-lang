@@ -569,6 +569,11 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             out.push_str(":\n");
             render_block(body, indent + 1, out);
         }
+        Stmt::Atomic { body, .. } => {
+            push_indent(indent, out);
+            out.push_str("atomic:\n");
+            render_block(body, indent + 1, out);
+        }
         Stmt::While { cond, body, .. } => {
             push_indent(indent, out);
             out.push_str("while ");
@@ -787,6 +792,14 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             )),
         }
     }
+    if let Some(secs) = connector.timeout_secs {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("timeout: {secs}s\n"));
+    }
+    if let Some(redirects) = connector.redirects {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("redirects: {}\n", redirects.as_str()));
+    }
     if let Some(retry) = connector.retry {
         push_indent(indent + 1, out);
         out.push_str(&format!("retry: {retry}\n"));
@@ -838,6 +851,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             }
         }
         out.push('\n');
+        if let Some(secs) = op.timeout_secs {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("timeout: {secs}s\n"));
+        }
         for mapping in &op.error_map {
             push_indent(indent + 2, out);
             out.push_str(&format!(

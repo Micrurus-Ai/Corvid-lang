@@ -131,6 +131,8 @@ fn collect_prompt_pins_in_stmt(
         IrStmt::If { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
         IrStmt::For { iter, .. } => collect_prompt_pins_in_expr(iter, borrowed_reads, out),
         IrStmt::While { cond, .. } => collect_prompt_pins_in_expr(cond, borrowed_reads, out),
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        IrStmt::Atomic { .. } => {}
         IrStmt::Destructure { value, .. } => {
             collect_prompt_pins_in_expr(value, borrowed_reads, out)
         }
@@ -187,7 +189,11 @@ fn collect_prompt_pins_in_expr(
             collect_prompt_pins_in_expr(items, borrowed_reads, out);
             collect_prompt_pins_in_expr(next_cursor, borrowed_reads, out);
         }
-        IrExprKind::TableOp { arg, .. } => collect_prompt_pins_in_expr(arg, borrowed_reads, out),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                collect_prompt_pins_in_expr(arg, borrowed_reads, out);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 collect_prompt_pins_in_expr(e, borrowed_reads, out);

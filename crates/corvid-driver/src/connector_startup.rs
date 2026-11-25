@@ -51,6 +51,14 @@ pub enum ConnectorStartupError {
     /// configured (`[http] allow` / `CORVID_HTTP_ALLOW`). A connector
     /// never reaches the network by default.
     RealMissingEgress { connector: String },
+    /// `real` mode with an allow list configured, but the connector's own
+    /// `base_url` is refused by it (an unlisted host, or one the SSRF
+    /// block covers). Refused at startup rather than at the first call.
+    RealHostNotAllowed {
+        connector: String,
+        base_url: String,
+        reason: String,
+    },
     /// `replay` mode, but no recorded interaction source is present —
     /// replay must serve from a cassette and never fall through to real.
     ReplayWithoutSource { connector: String },
@@ -110,6 +118,15 @@ impl ConnectorStartupError {
                  `[http] allow` (or `CORVID_HTTP_ALLOW`) — a connector never reaches the network \
                  by default.",
             ),
+            Self::RealHostNotAllowed {
+                connector,
+                base_url,
+                reason,
+            } => format!(
+                "E5205 Connector host not allowed: connector `{connector}` runs in `real` mode \
+                 against `{base_url}`, which the project's HTTP policy refuses: {reason} The \
+                 backend refuses to start rather than fail at the first request.",
+            ),
             Self::ReplayWithoutSource { connector } => format!(
                 "E5205 Connector replay source missing: connector `{connector}` runs in `replay` \
                  mode but no recorded interaction source is present. Replay serves from a \
@@ -144,6 +161,10 @@ impl ConnectorStartupError {
 pub struct ConnectorRuntimeContext<'a> {
     pub selected_mode: Option<ConnectorMode>,
     pub egress_configured: bool,
+    /// Why the project's HTTP policy refuses a URL, or `None` when it is
+    /// allowed: the same check every request runs, asked once per
+    /// connector at startup.
+    pub egress_refusal: &'a dyn Fn(&str) -> Option<String>,
     pub replay_source_present: bool,
     pub secret_present: &'a dyn Fn(&str) -> bool,
     /// The connector execution modes this runtime tier actually
@@ -244,6 +265,12 @@ pub fn check_connector_startup(
                     errors.push(ConnectorStartupError::RealMissingEgress {
                         connector: connector.name.clone(),
                     });
+                } else if let Some(reason) = (ctx.egress_refusal)(&connector.base_url) {
+                    errors.push(ConnectorStartupError::RealHostNotAllowed {
+                        connector: connector.name.clone(),
+                        base_url: connector.base_url.clone(),
+                        reason,
+                    });
                 }
                 for secret in connector_secret_names(connector) {
                     if !(ctx.secret_present)(&secret) {
@@ -286,6 +313,7 @@ mod tests {
         ConnectorRuntimeContext {
             selected_mode: mode,
             egress_configured: egress,
+            egress_refusal: &|_| None,
             replay_source_present: replay,
             secret_present: secret,
             executable_modes: &ALL_MODES,
@@ -300,6 +328,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, replay, real]
@@ -379,6 +409,28 @@ connector github:
         assert!(errs.is_empty(), "real mode should be executable: {errs:?}");
     }
 
+    /// An allow list that does not name the connector's own host is a
+    /// startup refusal naming the connector, its URL and the policy's
+    /// reason, not a failure at the first request.
+    #[test]
+    fn real_mode_refuses_to_start_when_the_connector_host_is_not_allowed() {
+        let ir = ir(GITHUB);
+        let present = |_: &str| true;
+        let refuse = |url: &str| Some(format!("host of `{url}` is not in `[http] allow`."));
+        let context = ConnectorRuntimeContext {
+            egress_refusal: &refuse,
+            ..ctx(Some(ConnectorMode::Real), true, false, &present)
+        };
+        let errs = check_connector_startup(&ir, &context);
+        let refusal = errs
+            .iter()
+            .find(|e| matches!(e, ConnectorStartupError::RealHostNotAllowed { .. }))
+            .expect("the unlisted host must refuse startup");
+        let message = refusal.message();
+        assert!(message.contains("connector `github`"), "{message}");
+        assert!(message.contains("not in `[http] allow`"), "{message}");
+    }
+
     #[test]
     fn a_declared_mode_the_runtime_cannot_execute_yet_refuses_at_startup() {
         // `real` is a declared+allowed mode with credentials and egress,
@@ -390,6 +442,7 @@ connector github:
         let restricted = ConnectorRuntimeContext {
             selected_mode: Some(ConnectorMode::Real),
             egress_configured: true,
+            egress_refusal: &|_| None,
             replay_source_present: true,
             secret_present: &present,
             executable_modes: &mock_only,
@@ -420,6 +473,8 @@ connector github:
     fn a_verified_protocol_is_startup_clean_now_that_the_lifecycle_runtime_exists() {
         let source = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:

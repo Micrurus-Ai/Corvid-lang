@@ -277,6 +277,11 @@ impl Codegen {
                 self.emit_expr(expr);
                 self.out.newline();
             }
+            IrStmt::Atomic { .. } => {
+                self.out.writeln(
+                    "raise NotImplementedError(\"atomic blocks run on the interpreter (B09)\")",
+                );
+            }
             IrStmt::While { cond, body, .. } => {
                 self.out.write("while ");
                 self.emit_expr(cond);
@@ -572,13 +577,13 @@ impl Codegen {
             // the Python backend refuses decimals rather than change
             // their meaning.
             IrLiteral::Currency(_) | IrLiteral::Locale(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"currency formatting is interpreter-only until B06's native Decimal slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"Currency and Locale run on the interpreter and native tiers; the Python backend has no form for them\"))",
             ),
             IrLiteral::TimeZone(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"TimeZone is interpreter-only until B06's native time slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"TimeZone runs on the interpreter and native tiers; the Python backend has no form for it\"))",
             ),
             IrLiteral::Decimal(_) => self.out.write(
-                "(_ for _ in ()).throw(NotImplementedError(\"Decimal is interpreter-only until B06's native Decimal slice\"))",
+                "(_ for _ in ()).throw(NotImplementedError(\"Decimal runs on the interpreter and native tiers; Python's decimal rounds to its context precision, so the Python backend refuses it\"))",
             ),
         }
     }
@@ -681,11 +686,17 @@ fn python_type_hint_of(ty: &corvid_types::Type, types: &[IrType]) -> String {
         // B03 — the regex methods are builtin methods, which the
         // Python backend refuses before a hint is needed.
         T::RegexMatch => "object".into(),
-        // B06 — the Python backend refuses `Decimal` (interpreter-tier
-        // until its native slice) before a hint is needed.
+        // B06 — the Python backend refuses `Decimal` (its literals
+        // raise) before a hint is needed.
         T::Decimal => "object".into(),
         // B06 — the Python backend refuses time types like `Decimal`.
         T::Duration | T::Instant | T::TimeZone | T::ZonedTime | T::Currency | T::Locale => "object".into(),
+        // `Bytes` values come only from builtin methods, which the
+        // Python backend refuses before a hint is needed.
+        T::Bytes => "object".into(),
+        // A `Secret` comes only from `secret(name)`, a stdlib executing
+        // tool the Python backend refuses before a hint is needed.
+        T::Secret => "object".into(),
         // Phase 33R5b-a — JsonValue / JsonBuilder also
         // interpreter-tier only. The Python codegen-py backend
         // can lower them as `object` since the cdylib C-ABI

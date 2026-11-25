@@ -36,6 +36,10 @@ mod decimal;
 mod time;
 #[path = "interp/currency.rs"]
 mod currency;
+#[path = "interp/crypto.rs"]
+mod crypto;
+#[path = "interp/secret_tools.rs"]
+mod secret_tools;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 
@@ -157,6 +161,10 @@ struct Interpreter<'ir> {
     /// from live timing. `None` for completed/errored arms and outside
     /// replay.
     replay_cancel_after: Option<usize>,
+    /// The open `atomic:` block's transaction (B09 P7a), shared with
+    /// the agents it calls so their table operations join it. `None`
+    /// outside an `atomic:` block.
+    table_transaction: Option<Arc<corvid_runtime::tables::TableTransaction>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -197,6 +205,7 @@ impl<'ir> Interpreter<'ir> {
             parallel_cancel: None,
             dispatch_count: None,
             replay_cancel_after: None,
+            table_transaction: None,
         }
     }
 
@@ -1203,12 +1212,15 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Struct(page)))
             },
 
-            IrExprKind::TableOp { op, table, arg } => {
-                let arg_v = match self.eval_expr(arg).await?.into_value() {
-                    Ok(v) => v,
-                    Err(v) => return Ok(ExprFlow::Propagate(v)),
-                };
-                self.eval_table_op(*op, table, arg_v, expr.span).await.map(ExprFlow::Value)
+            IrExprKind::TableOp { op, table, args } => {
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args {
+                    match self.eval_expr(arg).await?.into_value() {
+                        Ok(v) => values.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    }
+                }
+                self.eval_table_op(*op, table, values, expr.span).await.map(ExprFlow::Value)
             },
 
             IrExprKind::TableQuery { table, filter, order, descending, take } => {
@@ -1785,6 +1797,9 @@ impl<'ir> Interpreter<'ir> {
                 }
 
                 let start = std::time::Instant::now();
+                // Kept to scrub a secret the tool echoes out of the step
+                // event below; the program's value is never scrubbed.
+                let mut echo_scrub: Option<corvid_runtime::RevealedToolArguments> = None;
                 let result_value = if let Some((connector, op)) =
                     self.connector_ops_by_id.get(def_id).copied()
                 {
@@ -1846,9 +1861,20 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                     .await?
+                } else if corvid_runtime::runtime::is_stdlib_secret_value_tool(callee_name) {
+                    secret_tools::dispatch_secret_value_tool(self.runtime, callee_name, json_args, &tool.return_ty, span).await?
                 } else {
+                    // A `Secret` argument reaches the implementation as its
+                    // text; every record of the call holds `json_args`.
+                    let revealed =
+                        secret_tools::revealed_arguments(tool, &json_args, &arg_values, &self.types_by_id, span)?;
+                    echo_scrub = revealed.clone();
                     let outcome = if let Some((module, member)) = &tool.python {
-                        self.runtime.call_imported_python(module, member, &tool.effect_names, json_args).await
+                        self.runtime
+                            .call_imported_python(module, member, &tool.effect_names, json_args, revealed)
+                            .await
+                    } else if let Some(revealed) = revealed {
+                        self.runtime.call_tool_revealing_secrets(callee_name, json_args, revealed).await
                     } else {
                         self.runtime.call_tool(callee_name, json_args).await
                     }
@@ -1881,6 +1907,10 @@ impl<'ir> Interpreter<'ir> {
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
                 let result = value_to_json(&result_value);
+                let result = match &echo_scrub {
+                    Some(revealed) => revealed.scrub_json(result),
+                    None => result,
+                };
 
                 if self.should_yield_boundary() {
                     let action = self
@@ -1956,6 +1986,8 @@ impl<'ir> Interpreter<'ir> {
                 sub.parallel_cancel = self.parallel_cancel.clone();
                 sub.dispatch_count = self.dispatch_count.clone();
                 sub.replay_cancel_after = self.replay_cancel_after;
+                // An agent called inside an `atomic:` block writes inside it.
+                sub.table_transaction = self.table_transaction.clone();
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {

@@ -55,6 +55,12 @@ pub struct Checked {
     /// field types from here instead of resolving type references a
     /// second time, so the two layers cannot disagree about a type.
     pub type_refs: HashMap<Span, Type>,
+    /// The spans of the type references in [`Self::type_refs`] whose
+    /// type holds a `Secret`, directly, as a type argument or in a field
+    /// of a record it names. The application contract leaves these
+    /// positions out, so no client, SDK or frontend is offered a field
+    /// a secret would fill.
+    pub secret_type_refs: HashSet<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,6 +363,7 @@ fn typecheck_with_everything(
 
     c.record_signature_types(file);
     c.check_json_boundaries(file);
+    c.check_secret_boundaries(file);
 
     Checked {
         types: c.types,
@@ -366,6 +373,7 @@ fn typecheck_with_everything(
         imported_calls: c.imported_calls,
         grounded_coercion_sites: c.grounded_coercion_sites,
         type_refs: c.type_refs,
+        secret_type_refs: c.secret_type_refs,
     }
 }
 
@@ -389,12 +397,14 @@ struct Checker<'a> {
     /// receiver of a `round_<mode>` call, the one place such a division
     /// is accepted. See `checker/decimal.rs`.
     rounded_division: Option<Span>,
-    /// B06 — set while checking a tool or prompt signature, where
-    /// durations and instants cross as their standard text.
-    time_text_boundary: bool,
+    /// B06 — set while checking a table's columns, where the B06 types
+    /// have no storage mapping until B09 adds one.
+    refuse_b06_columns: bool,
     /// Every root-file type reference resolved so far, by span. See
     /// [`Checked::type_refs`].
     type_refs: HashMap<Span, Type>,
+    /// [`Checked::secret_type_refs`], filled by `check_secret_boundaries`.
+    secret_type_refs: HashSet<Span>,
 
     /// Indexed declarations for O(1) lookup by DefId. Methods from
     /// `extend` blocks get inserted here too — a method `extend Order: agent
@@ -736,8 +746,9 @@ impl<'a> Checker<'a> {
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
             rounded_division: None,
-            time_text_boundary: false,
+            refuse_b06_columns: false,
             type_refs: HashMap::new(),
+            secret_type_refs: HashSet::new(),
             tools_by_id: tools,
             file,
             operations_by_id: operations,
@@ -909,6 +920,9 @@ mod decl;
 mod decl_eval;
 mod decl_extern_c;
 mod decimal;
+mod bytes;
+mod crypto_arguments;
+mod secrets;
 mod currency;
 mod time;
 mod form;

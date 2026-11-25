@@ -38,9 +38,11 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 pub use builder::RuntimeBuilder;
+pub use llm_dispatch::is_stdlib_secret_value_tool;
 
 mod builder;
 mod connector_dispatch;
+mod crypto_tools;
 mod io;
 mod path;
 mod protocol_dispatch;
@@ -278,6 +280,16 @@ impl Runtime {
     /// by default.
     pub fn egress_configured(&self) -> bool {
         self.http_policy.is_configured()
+    }
+
+    /// Why the project's HTTP policy refuses `url`, or `None` when it is
+    /// allowed. The same check every outbound request runs; the
+    /// connector startup check asks it once per connector `base_url`.
+    pub fn egress_refusal(&self, url: &str) -> Option<String> {
+        self.http_policy.check(url).err().map(|err| match err {
+            RuntimeError::ToolFailed { message, .. } => message,
+            other => other.to_string(),
+        })
     }
 
     /// Whether a named secret resolves right now (slice 52g-3c). Used by

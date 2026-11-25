@@ -231,6 +231,9 @@ pub async fn run_ir_with_runtime(
         .iter()
         .find(|a| a.name == chosen_name)
         .expect("agent presence checked above");
+    if agent.is_none() && chosen.return_ty.mentions_secret() {
+        return Err(RunError::EntryReturnsSecret { agent: chosen.name.clone() });
+    }
     if args.is_empty() && !chosen.params.is_empty() {
         return Err(RunError::NeedsArgs {
             agent: chosen.name.clone(),

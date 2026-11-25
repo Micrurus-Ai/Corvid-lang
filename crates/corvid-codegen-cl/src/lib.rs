@@ -17,8 +17,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bytes_methods;
+pub use bytes_methods::is_native_bytes_method;
 pub mod cdylib;
 pub mod dataflow;
+pub mod currency_methods;
+pub use currency_methods::is_native_currency_method;
+pub mod decimal_methods;
+pub use decimal_methods::is_native_decimal_method;
 pub mod dup_drop;
 pub mod errors;
 pub mod latency_rc;
@@ -28,10 +34,16 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
+pub mod secret_boundary;
+pub mod text_scalar;
+pub mod text_scalar_boundary;
+pub mod time_methods;
+pub use time_methods::is_native_time_method;
 
 mod assignment;
 pub use assignment::{native_indexed_assignment, native_list_append, native_local_compound, native_record_assignment};
 pub use lowering::native_public_json_type;
+pub use lowering::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod json_error_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
@@ -361,4 +373,12 @@ pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
 pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {
     use corvid_types::BuiltinMethodKind::*;
     matches!(kind, IntToFloat | FloatToIntTruncated | FloatFloor | FloatCeil | FloatRound)
+}
+
+/// Whether the unified ownership pass runs: on unless `CORVID_DUP_DROP_PASS`
+/// is `0` or `false`, which selects the legacy ownership path. Lowering and
+/// `corvid run`'s native cache key both read the setting here, so a binary
+/// built under one setting is never reused under the other.
+pub fn dup_drop_pass_enabled() -> bool {
+    std::env::var("CORVID_DUP_DROP_PASS").map(|v| v != "0" && v != "false").unwrap_or(true)
 }

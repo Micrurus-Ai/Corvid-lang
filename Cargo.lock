@@ -626,9 +626,11 @@ version = "0.0.1"
 dependencies = [
  "base64",
  "corvid-ast",
+ "corvid-crypto",
  "corvid-guarantees",
  "corvid-ir",
  "corvid-prompt-format",
+ "corvid-public-json",
  "corvid-resolve",
  "corvid-syntax",
  "corvid-test-paths",
@@ -726,6 +728,7 @@ dependencies = [
  "corvid-ast",
  "corvid-bind",
  "corvid-connector-runtime",
+ "corvid-crypto",
  "corvid-differential-verify",
  "corvid-driver",
  "corvid-guarantees",
@@ -773,6 +776,7 @@ dependencies = [
  "corvid-abi",
  "corvid-ast",
  "corvid-c-header",
+ "corvid-decimal",
  "corvid-ir",
  "corvid-prompt-format",
  "corvid-public-json",
@@ -780,6 +784,7 @@ dependencies = [
  "corvid-runtime",
  "corvid-syntax",
  "corvid-test-paths",
+ "corvid-time",
  "corvid-trace-schema",
  "corvid-types",
  "corvid-vm",
@@ -843,6 +848,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvid-crypto"
+version = "0.0.1"
+dependencies = [
+ "argon2",
+ "corvid-text",
+ "ed25519-dalek",
+ "hmac 0.12.1",
+ "rand_core 0.6.4",
+ "sha2 0.10.9",
+ "subtle",
+]
+
+[[package]]
 name = "corvid-currency"
 version = "0.0.1"
 dependencies = [
@@ -897,6 +915,7 @@ dependencies = [
  "corvid-codegen-cl",
  "corvid-codegen-py",
  "corvid-codegen-wasm",
+ "corvid-crypto",
  "corvid-guarantees",
  "corvid-ir",
  "corvid-resolve",
@@ -986,6 +1005,7 @@ version = "0.0.1"
 dependencies = [
  "corvid-ast",
  "corvid-ir",
+ "corvid-public-json",
  "corvid-resolve",
  "corvid-types",
  "serde_json",
@@ -996,8 +1016,12 @@ name = "corvid-public-json"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-crypto",
+ "corvid-currency",
+ "corvid-decimal",
  "corvid-ir",
  "corvid-resolve",
+ "corvid-time",
  "corvid-types",
  "serde_json",
 ]
@@ -1042,6 +1066,9 @@ dependencies = [
  "corvid-abi",
  "corvid-ast",
  "corvid-codegen-cl",
+ "corvid-crypto",
+ "corvid-currency",
+ "corvid-decimal",
  "corvid-guarantees",
  "corvid-ir",
  "corvid-public-json",
@@ -1205,6 +1232,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "corvid-ast",
+ "corvid-crypto",
  "corvid-currency",
  "corvid-decimal",
  "corvid-ir",

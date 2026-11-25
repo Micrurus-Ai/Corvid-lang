@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use corvid_resolve::ModuleSemanticSummary;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 
 use serde::{Deserialize, Serialize};
 
@@ -295,12 +295,13 @@ fn verify_package_signature(
             package.name, package.version
         )
     })?;
-    verifying_key.verify(&subject, &sig).map_err(|err| {
-        format!(
-            "package `{}`@{} signature verification failed: {err}",
+    if !corvid_crypto::verify_ed25519_signature(&verifying_key, &subject, &sig) {
+        return Err(format!(
+            "package `{}`@{} signature verification failed",
             package.name, package.version
-        )
-    })
+        ));
+    }
+    Ok(())
 }
 
 fn package_signature_subject(package: &RegistryPackage) -> Result<Vec<u8>> {
@@ -639,6 +640,44 @@ mod tests {
             AddPackageOutcome::Rejected { ref reason }
                 if reason.contains("signature verification failed")
         ));
+    }
+
+    /// The identity-key forgery: under the small-order public key
+    /// `01 00..00`, the signature `01 00..00 00..00` passes permissive
+    /// Ed25519 verification for every message. An index that names that
+    /// key, with the forged signature on a package, must be refused.
+    #[test]
+    fn add_package_refuses_the_identity_key_forgery() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("corvid.toml"), "[package-policy]\nrequire-package-signatures = true\n").unwrap();
+        let package_src = "public type SafetyReceipt:\n    id: String\n";
+        let source = tmp.path().join("policy.cor");
+        fs::write(&source, package_src).unwrap();
+        let url = serve_once("/scope-name-1.0.0.cor", package_src);
+        let url_base = url.trim_end_matches("/scope-name-1.0.0.cor");
+        let published = publish_package(PublishPackageOptions {
+            source: &source,
+            name: "@scope/name",
+            version: "1.0.0",
+            out_dir: tmp.path(),
+            url_base,
+            signing_seed_hex: "0000000000000000000000000000000000000000000000000000000000000000",
+            key_id: "test-key",
+        })
+        .unwrap();
+        let identity = format!("01{}", "00".repeat(31));
+        let mut index: serde_json::Value = serde_json::from_str(&fs::read_to_string(&published.index).unwrap()).unwrap();
+        *index.pointer_mut("/signing_key").expect("the index names its signing key") =
+            serde_json::Value::String(format!("ed25519:test-key:{identity}"));
+        *index.pointer_mut("/packages/@scope~1name/versions/1.0.0/signature").expect("a signature") =
+            serde_json::Value::String(format!("{identity}{}", "00".repeat(32)));
+        fs::write(&published.index, serde_json::to_string_pretty(&index).unwrap()).unwrap();
+
+        let outcome = add_package("@scope/name@1", tmp.path(), Some(published.index.to_str().unwrap())).unwrap();
+        assert!(
+            matches!(outcome, AddPackageOutcome::Rejected { ref reason } if reason.contains("signature verification failed")),
+            "the forged signature must be refused: {outcome:?}"
+        );
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub mod errors;
 pub mod law_check;
 pub mod repl;
 pub mod table_ops;
+pub mod table_columns;
 pub mod type_receiver;
 pub mod types;
 
@@ -45,7 +46,7 @@ pub use law_check::{
 };
 pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_NAME};
 pub use builtin_methods::{
-    builtin_method, builtin_type_method, builtin_type_receiver, decimal_rounding_mode, duration_reading_unit, json_error_fields, number_literal_text, refine_builtin_method_kind, regex_match_fields, type_method,
+    builtin_method, builtin_type_method, builtin_type_receiver, decimal_rounding_mode, duration_reading_unit, is_hmac_key_type, json_error_fields, number_literal_text, refine_builtin_method_kind, regex_match_fields, type_method,
     BuiltinMethodKind, BuiltinMethodSig, JSON_ERROR_TYPE_ID, REGEX_MATCH_TYPE_ID,
 };
 pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};

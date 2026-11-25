@@ -321,6 +321,11 @@ table Shelf:
     key shelf: Int
     title: String renamed from name
     retired legacy, old_note
+
+agent rename(shelf: Shelf) -> String:
+    atomic:
+        saved = Shelf.save(shelf)
+    return "ok"
 "#,
     ),
     (
@@ -414,11 +419,14 @@ extend Customer:
     (
         "connector_settings",
         r#"connector reports:
+    timeout: 10s
+    redirects: never
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
     operation generate(input: String) -> String dangerous:
         POST "/reports" body input
+        timeout: 30s
         async:
             statuses: [queued, completed, failed]
             initial: queued
@@ -696,6 +704,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("table_decl", "tables_and_databases"),
     ("table_field", "tables_and_databases"),
     ("table_retired", "tables_and_databases"),
+    ("atomic_stmt", "tables_and_databases"),
     ("database_decl", "tables_and_databases"),
     ("database_setting", "tables_and_databases"),
     ("type_ref", "record_types_and_stores"),
@@ -744,6 +753,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("connector_decl", "connector_settings"),
     ("connector_item", "connector_settings"),
     ("connector_mode", "connector_settings"),
+    ("redirect_policy", "connector_settings"),
     ("connector_auth", "connector_settings"),
     ("secret_ref", "connector_settings"),
     ("operation_decl", "connector_settings"),

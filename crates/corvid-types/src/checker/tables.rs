@@ -10,7 +10,8 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
 use crate::table_ops::{table_method_target, QueryCondition, TableOp};
 use crate::types::Type;
-use corvid_ast::{DatabaseDecl, DatabaseLocation, Decl, Expr, Ident, Span, TableDecl, TypeRef, Visibility};
+use corvid_ast::{Block, DatabaseDecl, DatabaseLocation, Decl, Expr, Ident, Span, Stmt, TableDecl, TypeRef, Visibility};
+use corvid_resolve::{Binding, BuiltIn, DeclKind};
 
 /// The engines the runtime runs today.
 const ENGINES: &[&str] = &["sqlite", "postgres"];
@@ -34,21 +35,23 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-        match &table.key {
-            None => self.errors.push(TypeError::new(TypeErrorKind::TableKeyRequired { table: name.clone() }, span)),
-            Some(key) => {
-                let declared = table.declared_fields().iter().find(|f| f.name.name == key.name);
-                let type_name = declared.and_then(|f| match &f.ty {
-                    TypeRef::Named { name, .. } => Some(name.name.as_str()),
-                    _ => None,
-                });
-                if !matches!(type_name, Some("Int" | "String")) {
-                    let found = declared.map(|f| type_ref_text(&f.ty)).unwrap_or_default();
-                    self.errors.push(TypeError::new(
-                        TypeErrorKind::TableKeyType { table: name.clone(), key: key.name.clone(), found },
-                        key.span,
-                    ));
-                }
+        if table.keys.is_empty() {
+            self.errors.push(TypeError::new(TypeErrorKind::TableKeyRequired { table: name.clone() }, span));
+        }
+        // Each field of the key is a plain `Int` or `String`, whether the
+        // key is one field or several.
+        for key in &table.keys {
+            let declared = table.declared_fields().iter().find(|f| f.name.name == key.name);
+            let type_name = declared.and_then(|f| match &f.ty {
+                TypeRef::Named { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            });
+            if !matches!(type_name, Some("Int" | "String")) {
+                let found = declared.map(|f| type_ref_text(&f.ty)).unwrap_or_default();
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TableKeyType { table: name.clone(), key: key.name.clone(), found },
+                    key.span,
+                ));
             }
         }
         self.check_field_refinements(&table.record);
@@ -162,6 +165,127 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `atomic:` (B09 P7a). The body is checked as any block, then
+    /// refused anything the database cannot undo, any way out of the
+    /// block that would not say whether to keep its writes, and tables
+    /// in more than one database.
+    pub(super) fn check_atomic(&mut self, body: &Block, span: Span) {
+        self.check_block(body);
+        let mut refusals = Vec::new();
+        atomic_exits(body, 0, &mut refusals);
+        let mut visited = Vec::new();
+        self.atomic_contents(body, None, &mut visited, &mut refusals);
+
+        let tables = crate::table_ops::atomic_tables(body, self.file, self.symbols, self.bindings);
+        let mut databases: Vec<&str> = Vec::new();
+        for table in &tables {
+            if let Some(db) = crate::table_ops::table_database(self.file, &table.name().name) {
+                if !databases.contains(&db.name.name.as_str()) {
+                    databases.push(&db.name.name);
+                }
+            }
+        }
+        if databases.len() > 1 {
+            refusals.push((
+                span,
+                format!(
+                    "an `atomic:` block writes to one database, but this one reaches {}; a transaction cannot span databases",
+                    quoted(&databases)
+                ),
+            ));
+        }
+        for (span, message) in refusals {
+            self.errors.push(TypeError::new(TypeErrorKind::AtomicBlockRefused { message }, span));
+        }
+    }
+
+    /// Refuse what the database cannot undo in `body`, following the
+    /// agents it calls. `through` names the agent being followed.
+    fn atomic_contents(
+        &self,
+        body: &Block,
+        through: Option<&str>,
+        visited: &mut Vec<String>,
+        refusals: &mut Vec<(Span, String)>,
+    ) {
+        let mut stmts = Vec::new();
+        let mut calls = Vec::new();
+        corvid_ast::visit::walk_block(body, &mut |stmt| stmts.push(stmt), &mut |expr| {
+            if let Expr::Call { callee, args, span } = expr {
+                calls.push((callee.as_ref(), args.as_slice(), *span));
+            }
+        });
+        let at = |span: Span, what: &str| {
+            let via = through.map(|agent| format!(" (in agent `{agent}`, called inside the block)")).unwrap_or_default();
+            (span, format!("an `atomic:` block cannot hold {what}{via}, because the database cannot undo it"))
+        };
+        for stmt in stmts {
+            match stmt {
+                Stmt::Atomic { span, .. } if through.is_some() => refusals.push(at(*span, "another `atomic:` block")),
+                Stmt::Approve { span, .. } => refusals.push(at(*span, "an `approve`")),
+                Stmt::Yield { span, .. } => refusals.push(at(*span, "a `yield`")),
+                Stmt::Parallel { span, .. } => refusals.push(at(*span, "a `parallel:` block")),
+                _ => {}
+            }
+        }
+        for (callee, args, span) in calls {
+            let table_operation = crate::table_ops::table_call_target(callee, self.file, self.symbols, self.bindings).is_some()
+                || crate::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings).is_some();
+            if table_operation {
+                continue;
+            }
+            if let Some(agent) = crate::table_ops::called_agent(callee, self.file, self.symbols, self.bindings) {
+                if !visited.contains(&agent.name.name) {
+                    visited.push(agent.name.name.clone());
+                    self.atomic_contents(&agent.body, Some(&agent.name.name), visited, refusals);
+                }
+                continue;
+            }
+            if let Some(what) = self.call_the_database_cannot_undo(callee) {
+                refusals.push(at(span, &what));
+            }
+        }
+    }
+
+    /// A call that acts outside the database, described for an error.
+    fn call_the_database_cannot_undo(&self, callee: &Expr) -> Option<String> {
+        if let Some((import, function)) = crate::effects::python_call_target(callee, self.file, self.symbols, self.bindings) {
+            return Some(format!("a call to Python function `{}.{}`", import.module, function.name.name));
+        }
+        match callee {
+            Expr::Ident { name, .. } => match self.bindings.get(&name.span) {
+                Some(Binding::Decl(id)) => match self.symbols.get(*id).kind {
+                    DeclKind::Tool => Some(format!("a call to tool `{}`", name.name)),
+                    DeclKind::Prompt => Some(format!("a call to prompt `{}`", name.name)),
+                    DeclKind::Fixture => Some(format!("a call to fixture `{}`", name.name)),
+                    DeclKind::ImportedUse
+                        if !self
+                            .module_resolution
+                            .and_then(|modules| modules.lookup_imported_use(&name.name))
+                            .is_some_and(|target| matches!(target.export.kind, DeclKind::Fn | DeclKind::Type)) =>
+                    {
+                        Some(format!("a call to imported `{}`", name.name))
+                    }
+                    _ => None,
+                },
+                Some(Binding::BuiltIn(BuiltIn::Ask | BuiltIn::Choose)) => Some(format!("`{}(...)`", name.name)),
+                _ => None,
+            },
+            Expr::FieldAccess { target, field, .. } => {
+                let Expr::Ident { name, .. } = target.as_ref() else { return None };
+                let module_alias = matches!(self.bindings.get(&name.span),
+                    Some(Binding::Decl(id)) if self.symbols.get(*id).kind == DeclKind::Import);
+                let member = self.module_resolution.map(|modules| modules.lookup_member(&name.name, &field.name));
+                let acts = module_alias
+                    && matches!(member,
+                        Some(corvid_resolve::ModuleLookup::Found { export, .. })
+                            if matches!(export.kind, DeclKind::Agent | DeclKind::Tool | DeclKind::Prompt | DeclKind::Fixture));
+                acts.then(|| format!("a call to imported `{}.{}`", name.name, field.name))
+            }
+            _ => None,
+        }
+    }
+
     /// A networked engine's connection string comes from the
     /// environment and its encryption is stated; a file has neither.
     fn check_database_connection(&mut self, database: &DatabaseDecl) {
@@ -231,26 +355,34 @@ impl<'a> Checker<'a> {
         let (table, op) = table_method_target(receiver, &method.name, self.file, self.symbols, self.bindings)?;
         let row_id = self.symbols.lookup_def(&table.name().name)?;
         let row = Type::Struct(row_id);
-        let (param, ret) = match op {
+        // `get` takes the key's values in declaration order; the other
+        // operations take one row.
+        let (params, ret) = match op {
             TableOp::Get => {
-                let key_ty = table
-                    .key
-                    .as_ref()
-                    .and_then(|key| table.declared_fields().iter().find(|f| f.name.name == key.name))
-                    .map(|field| self.type_ref_to_type(&field.ty))
-                    .unwrap_or(Type::Unknown);
-                (key_ty, Type::Option(Box::new(row.clone())))
+                let key_types = table
+                    .keys
+                    .iter()
+                    .map(|key| {
+                        table
+                            .declared_fields()
+                            .iter()
+                            .find(|f| f.name.name == key.name)
+                            .map(|field| self.type_ref_to_type(&field.ty))
+                            .unwrap_or(Type::Unknown)
+                    })
+                    .collect::<Vec<_>>();
+                (key_types, Type::Option(Box::new(row.clone())))
             }
-            TableOp::Insert => (row.clone(), Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
+            TableOp::Insert => (vec![row.clone()], Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
             TableOp::Save | TableOp::Delete => (
-                row.clone(),
+                vec![row.clone()],
                 Type::Result(Box::new(row.clone()), Box::new(Type::Option(Box::new(row.clone())))),
             ),
         };
         let label = format!("{}.{}", table.name().name, op.name());
-        if args.len() != 1 {
+        if args.len() != params.len() {
             self.errors.push(TypeError::new(
-                TypeErrorKind::ArityMismatch { callee: label, expected: 1, got: args.len() },
+                TypeErrorKind::ArityMismatch { callee: label, expected: params.len(), got: args.len() },
                 span,
             ));
             for arg in args {
@@ -258,16 +390,18 @@ impl<'a> Checker<'a> {
             }
             return Some(ret);
         }
-        let got = self.check_expr_as(&args[0], Some(&param));
-        if !got.is_assignable_to(&param) {
-            self.errors.push(TypeError::new(
-                TypeErrorKind::TypeMismatch {
-                    expected: param.display_name(),
-                    got: got.display_name(),
-                    context: format!("argument to `{label}`"),
-                },
-                args[0].span(),
-            ));
+        for (arg, param) in args.iter().zip(&params) {
+            let got = self.check_expr_as(arg, Some(param));
+            if !got.is_assignable_to(param) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::TypeMismatch {
+                        expected: param.display_name(),
+                        got: got.display_name(),
+                        context: format!("argument to `{label}`"),
+                    },
+                    arg.span(),
+                ));
+            }
         }
         Some(ret)
     }
@@ -390,6 +524,34 @@ impl<'a> Checker<'a> {
             TypeErrorKind::TableQueryNotTranslatable { message: message.to_string() },
             span,
         ));
+    }
+}
+
+/// A `return`, or a `break` or `continue` that is not inside a loop of
+/// its own within the block, would leave an `atomic:` block without
+/// saying whether to keep its writes.
+fn atomic_exits(block: &Block, loops: usize, refusals: &mut Vec<(Span, String)>) {
+    const FINISH: &str = "finish the block, then leave";
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Return { span, .. } => refusals.push((
+                *span,
+                format!("a `return` inside an `atomic:` block would leave without saying whether to keep its writes; {FINISH}"),
+            )),
+            Stmt::Break { span } | Stmt::Continue { span } if loops == 0 => refusals.push((
+                *span,
+                format!("a `break` or `continue` here would leave the `atomic:` block without saying whether to keep its writes; {FINISH}"),
+            )),
+            Stmt::For { body, .. } | Stmt::While { body, .. } => atomic_exits(body, loops + 1, refusals),
+            Stmt::If { then_block, else_block, .. } => {
+                atomic_exits(then_block, loops, refusals);
+                if let Some(else_block) = else_block {
+                    atomic_exits(else_block, loops, refusals);
+                }
+            }
+            Stmt::Atomic { span, .. } => refusals.push((*span, "an `atomic:` block cannot hold another one; its writes already commit together".into())),
+            _ => {}
+        }
     }
 }
 
@@ -516,6 +678,46 @@ agent seen(shelf: Shelf) -> Int:
         assert!(reserved.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::TableFieldReserved { .. })));
         let pure = messages(&format!("{LIBRARY}\nfn peek(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n"));
         assert!(pure.iter().any(|m| m.contains("reads the database")), "{pure:#?}");
+    }
+
+    #[test]
+    fn a_key_of_several_fields_is_read_with_one_value_each() {
+        let table = "database d:\n    engine: sqlite\n    location: \"x\"\n    tables: Edit\n\ntable Edit:\n    key proposal: String\n    key shelf: Int\n    title: String\n";
+        let ok = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p, 1)\n"));
+        assert!(ok.is_empty(), "{ok:#?}");
+        let one = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(p)\n"));
+        assert!(one.iter().any(|m| m.contains("Edit.get")), "{one:#?}");
+        let swapped = messages(&format!("{table}\nagent q(p: String) -> Option<Edit>:\n    return Edit.get(1, p)\n"));
+        assert!(swapped.iter().any(|m| m.contains("argument to `Edit.get`")), "{swapped:#?}");
+        let bad = messages("database d:\n    engine: sqlite\n    location: \"x\"\n    tables: T\n\ntable T:\n    key id: Int\n    key score: Float\n");
+        assert!(bad.iter().any(|m| m.contains("the key `score`")), "{bad:#?}");
+    }
+
+    #[test]
+    fn an_atomic_block_holds_only_what_the_database_can_undo() {
+        let program = |body: &str| {
+            messages(&format!(
+                "{LIBRARY}\ntool notify(id: Int) -> String\n\nprompt summarize(text: String) -> String:\n    \"Summarize {{text}}\"\n\nagent reads(id: Int) -> Option<Shelf>:\n    return Shelf.get(id)\n\nagent asks(text: String) -> String:\n    return summarize(text)\n\nagent q(shelf: Shelf) -> String:\n{body}\n    return \"done\"\n"
+            ))
+        };
+        let accepted = program("    atomic:\n        saved = Shelf.save(shelf)\n        found = reads(1)\n        for n in [1, 2]:\n            if n == 2:\n                break\n");
+        assert!(accepted.is_empty(), "{accepted:#?}");
+        let tool = program("    atomic:\n        saved = Shelf.save(shelf)\n        sent = notify(1)");
+        assert!(tool.iter().any(|m| m.contains("cannot hold a call to tool `notify`")), "{tool:#?}");
+        let through_agent = program("    atomic:\n        text = asks(\"x\")");
+        assert!(through_agent.iter().any(|m| m.contains("a call to prompt `summarize` (in agent `asks`")), "{through_agent:#?}");
+        let returned = program("    atomic:\n        saved = Shelf.save(shelf)\n        return \"early\"");
+        assert!(returned.iter().any(|m| m.contains("a `return` inside an `atomic:` block")), "{returned:#?}");
+        let nested = program("    atomic:\n        atomic:\n            saved = Shelf.save(shelf)");
+        assert!(nested.iter().any(|m| m.contains("cannot hold another one")), "{nested:#?}");
+    }
+
+    #[test]
+    fn an_atomic_block_writes_to_one_database() {
+        let errors = messages(
+            "database a:\n    engine: sqlite\n    location: \"a\"\n    tables: T\n\ndatabase b:\n    engine: sqlite\n    location: \"b\"\n    tables: U\n\ntable T:\n    key id: Int\n\ntable U:\n    key id: Int\n\nagent q() -> String:\n    atomic:\n        t = T.get(1)\n        u = U.get(1)\n    return \"x\"\n",
+        );
+        assert!(errors.iter().any(|m| m.contains("a transaction cannot span databases")), "{errors:#?}");
     }
 
     #[test]

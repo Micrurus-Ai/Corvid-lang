@@ -6,12 +6,15 @@ license.workspace = true
 description = "Phase 22 Corvid ABI descriptor emission."
 
 [dependencies]
+# Ed25519 verification goes through corvid-crypto's strict check.
+corvid-crypto = { workspace = true }
 corvid-ast = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-guarantees = { workspace = true }
 corvid-prompt-format = { workspace = true }
+corvid-public-json = { workspace = true }
 serde ={ workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = "0.10"

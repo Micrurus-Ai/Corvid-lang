@@ -43,19 +43,51 @@ impl Runtime {
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
-        self.dispatch_tool(name, args, None).await
+        self.dispatch_tool(name, args, None, None).await
     }
 
+    /// Call a tool whose declared parameters hold a `Secret`. `args` is
+    /// the recorded form, with `<redacted>` at every secret position:
+    /// the `ToolCall` event, replay and every other record use it.
+    /// `revealed` carries the text and reaches only the implementation.
+    /// See [`crate::secret_arguments`].
+    pub async fn call_tool_revealing_secrets(
+        &self,
+        name: &str,
+        args: Vec<serde_json::Value>,
+        revealed: crate::RevealedToolArguments,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        self.dispatch_tool(name, args, None, Some(revealed)).await
+    }
+
+    /// Call an imported Python tool. `revealed` is set when its declared
+    /// parameters hold a `Secret`, as for [`Self::call_tool_revealing_secrets`].
     pub async fn call_imported_python(
-        &self, module: &str, member: &str, effects: &[String], args: Vec<serde_json::Value>,
+        &self,
+        module: &str,
+        member: &str,
+        effects: &[String],
+        args: Vec<serde_json::Value>,
+        revealed: Option<crate::RevealedToolArguments>,
     ) -> Result<serde_json::Value, RuntimeError> {
         let name = format!("python:{module}.{member}");
-        self.dispatch_tool(&name, args, Some((module, member, effects))).await
+        self.dispatch_tool(&name, args, Some((module, member, effects)), revealed).await
     }
 
     async fn dispatch_tool(
-        &self, name: &str, args: Vec<serde_json::Value>, python: Option<(&str, &str, &[String])>,
+        &self,
+        name: &str,
+        args: Vec<serde_json::Value>,
+        python: Option<(&str, &str, &[String])>,
+        revealed: Option<crate::RevealedToolArguments>,
     ) -> Result<serde_json::Value, RuntimeError> {
+        // `args` is what every record of the call holds; the
+        // implementation receives the revealed form when a parameter is
+        // a `Secret`.
+        let implementation_args: &[serde_json::Value] = match &revealed {
+            Some(revealed) => revealed.args(),
+            None => &args,
+        };
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::ToolCall {
                 ts_ms: now_ms(),
@@ -71,8 +103,20 @@ impl Runtime {
             // ToolResult below is redacted), so there is nothing to
             // substitute — the same read-passthrough rule db_query
             // follows. A changed environment at replay time diverges
-            // honestly.
-            self.dispatch_stdlib_secret_tool(&args)
+            // honestly. The recorded call and result are stepped past so
+            // the calls after this one stay aligned with the trace.
+            if let Some(replay) = self.replay_source()? {
+                replay.step_past_reexecuted_tool_call(name, &args);
+            }
+            self.dispatch_stdlib_secret_tool(name, &args)
+        } else if super::crypto_tools::is_random_token_tool(name) {
+            // A token is never recorded (its ToolResult below is
+            // `<redacted>`), so replay cannot substitute it: it steps
+            // past the recorded call, draws a fresh token and warns.
+            if let Some(replay) = self.replay_source()? {
+                replay.step_past_redrawn_token(name, &args);
+            }
+            super::crypto_tools::random_token(implementation_args)
         } else if let Some(replay) = self.replay_source()? {
             replay.replay_tool_call(name, &args)
         } else if let Some((module, member, effects)) = python {
@@ -81,7 +125,7 @@ impl Runtime {
                 let policy = crate::PythonSandboxProfile::new(effects.iter().cloned());
                 let module = module.to_owned();
                 let member = member.to_owned();
-                let args = args.clone();
+                let args = implementation_args.to_vec();
                 tokio::task::spawn_blocking(move || {
                     crate::PythonRuntime::new().call_with_decoder(
                         &module, &member, &args, &policy, crate::python_ffi::typed_python_result,
@@ -94,23 +138,25 @@ impl Runtime {
                 Err(RuntimeError::ToolFailed { tool: name.into(), message: "this runtime was built without Python support".into() })
             }
         } else if is_stdlib_cache_tool(name) {
-            self.dispatch_stdlib_cache_tool(name, &args)
+            self.dispatch_stdlib_cache_tool(name, implementation_args)
         } else if is_stdlib_io_tool(name) {
-            self.dispatch_stdlib_io_tool(name, args.clone()).await
-        } else if let Some(result) = super::path::dispatch(&self.io, name, &args) {
+            self.dispatch_stdlib_io_tool(name, implementation_args.to_vec()).await
+        } else if let Some(result) = super::path::dispatch(&self.io, name, implementation_args) {
             result
         } else if is_stdlib_http_tool(name) {
-            self.dispatch_stdlib_http_tool(name, args.clone()).await
+            self.dispatch_stdlib_http_tool(name, implementation_args.to_vec()).await
         } else if is_stdlib_time_tool(name) {
-            dispatch_stdlib_time_tool(name, &args)
+            dispatch_stdlib_time_tool(name, implementation_args)
         } else if is_stdlib_random_tool(name) {
-            dispatch_stdlib_random_tool(name, &args)
-        } else if let Some(result) = super::uuid::dispatch(name, &args) {
+            dispatch_stdlib_random_tool(name, implementation_args)
+        } else if let Some(result) = super::uuid::dispatch(name, implementation_args) {
             result
+        } else if super::crypto_tools::is_password_hash_tool(name) {
+            super::crypto_tools::hash_password(implementation_args).await
         } else if is_stdlib_rag_tool(name) {
-            self.dispatch_stdlib_rag_tool(name, &args).await
+            self.dispatch_stdlib_rag_tool(name, implementation_args).await
         } else if name == "mcp_call" {
-            self.dispatch_stdlib_mcp_tool(&args).await
+            self.dispatch_stdlib_mcp_tool(implementation_args).await
         } else if let Some(spec) = self.connector_calls.get(name) {
             // Slice 52g-3c-4: a connector operation in `real` mode. This
             // branch is reached ONLY when no replay source short-circuited
@@ -119,9 +165,9 @@ impl Runtime {
             // request (strict no-real-fallback). The credential is
             // resolved and attached to a header here and never enters the
             // recorded ToolCall args or ToolResult body.
-            self.dispatch_connector_http(spec, &args).await
+            self.dispatch_connector_http(spec, implementation_args).await
         } else {
-            self.tools.call(name, args.clone()).await
+            self.tools.call(name, implementation_args.to_vec()).await
         };
         // Record a FAILING tool's error as a substitutable ToolResult
         // (slice 52d-3) so replay reproduces it — e.g. a failing
@@ -132,13 +178,19 @@ impl Runtime {
             Ok(v) => v,
             Err(e) => {
                 if self.tracer.is_enabled() {
+                    // A tool that echoed a secret it was given in its
+                    // error has the text replaced in the record only.
+                    let recorded = match &revealed {
+                        Some(revealed) => revealed.recorded_error(&e.to_string()),
+                        None => serde_json::json!({
+                            crate::replay::CORVID_TOOL_ERROR_KEY: e.to_string(),
+                        }),
+                    };
                     self.tracer.emit(TraceEvent::ToolResult {
                         ts_ms: now_ms(),
                         run_id: self.tracer.run_id().to_string(),
                         tool: name.to_string(),
-                        result: serde_json::json!({
-                            crate::replay::CORVID_TOOL_ERROR_KEY: e.to_string(),
-                        }),
+                        result: recorded,
                     });
                 }
                 return Err(e);
@@ -146,11 +198,18 @@ impl Runtime {
         };
         if self.tracer.is_enabled() {
             // Traces must NEVER persist secret values: the recorded
-            // copy of a secret_read result carries the redacted
-            // marker in place of the value. The caller still receives
-            // the real result.
+            // copy of a secret_read or secret result carries the
+            // redacted marker in place of the value. The caller still
+            // receives the real result.
+            // A tool that echoed a secret it was given in its result has
+            // the text replaced in the record only, marked as scrubbed;
+            // the program receives the result unchanged.
             let recorded = if is_stdlib_secret_tool(name) {
-                redact_secret_result_for_trace(&result)
+                redact_secret_result_for_trace(name, &result)
+            } else if super::crypto_tools::is_random_token_tool(name) {
+                serde_json::json!(crate::REDACTED_SECRET)
+            } else if let Some(revealed) = &revealed {
+                revealed.recorded_result(&result)
             } else {
                 result.clone()
             };
@@ -165,17 +224,28 @@ impl Runtime {
     }
 
     /// Slice 48a — executing secrets surface. Recoverable failures
-    /// are Err VALUES; a missing secret is Ok with `present: false`.
+    /// are Err VALUES. `secret_read` returns its envelope, and a missing
+    /// secret is Ok with `present: false`. `secret` returns the text the
+    /// interpreter holds as a `Secret`, and a missing secret is an Err,
+    /// because there is no `Secret` to return.
     fn dispatch_stdlib_secret_tool(
         &self,
+        tool: &str,
         args: &[serde_json::Value],
     ) -> Result<serde_json::Value, RuntimeError> {
         let name_arg = args.first().and_then(|v| v.as_str()).ok_or_else(|| {
             RuntimeError::ToolFailed {
-                tool: "secret_read".to_string(),
+                tool: tool.to_string(),
                 message: "expected one String argument (secret name)".to_string(),
             }
         })?;
+        if is_secret_value_read(tool) {
+            return Ok(match self.secrets.read_env(name_arg) {
+                Ok(crate::SecretRead { value: Some(value), .. }) => stdlib_result_ok(serde_json::json!(value)),
+                Ok(read) => stdlib_result_err(format!("the secret `{}` is not set in the environment", read.name)),
+                Err(err) => stdlib_result_err(err),
+            });
+        }
         match self.secrets.read_env(name_arg) {
             Ok(read) => Ok(stdlib_result_ok(serde_json::json!({
                 "name": read.name,
@@ -615,19 +685,27 @@ impl Runtime {
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
-        use crate::http::HttpRequest;
+        use crate::http::{HttpRequest, RedirectPolicy};
         let url = args.first().and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
             tool: name.into(),
             message: "expected a String URL".into(),
         })?;
+        // These two tools predate declared HTTP policy and have always
+        // used a 30-second timeout and followed redirects to allowed
+        // hosts. They are replaced by a dynamic-host connector, which
+        // declares both, in the HTTP client's fourth slice; until then
+        // their limits are written here, at the one place they apply.
+        let request = |method: &str| {
+            HttpRequest::new(method, url, std::time::Duration::from_secs(30), RedirectPolicy::AllowedHosts)
+        };
         let request = match name {
-            "http_get" => HttpRequest::get(url.to_string()),
+            "http_get" => request("GET"),
             "http_post_json" => {
                 let body = args.get(1).and_then(|v| v.as_str()).ok_or_else(|| RuntimeError::ToolFailed {
                     tool: name.into(),
                     message: "expected a String JSON body".into(),
                 })?;
-                HttpRequest::post_json(url.to_string(), body.to_string())
+                request("POST").json_body(body)
             }
             other => return Err(RuntimeError::UnknownTool(other.to_string())),
         };
@@ -1841,21 +1919,16 @@ fn dispatch_stdlib_time_tool(
 }
 
 /// Slice 45m — the executing stdlib randomness tools. OS-entropy
-/// draws (rand_core/getrandom); traced + replay-substituted like
+/// draws (`corvid_crypto::fill_random`); traced + replay-substituted like
 /// every tool, so replays reproduce the recorded draws.
 fn dispatch_stdlib_random_tool(
     name: &str,
     args: &[serde_json::Value],
 ) -> Result<serde_json::Value, RuntimeError> {
     fn entropy_u64(tool: &str) -> Result<u64, RuntimeError> {
-        use rand_core::{OsRng, RngCore};
-        let mut rng = OsRng;
         let mut buf = [0u8; 8];
-        rng.try_fill_bytes(&mut buf)
-            .map_err(|e| RuntimeError::ToolFailed {
-                tool: tool.to_string(),
-                message: format!("OS entropy source failed: {e}"),
-            })?;
+        corvid_crypto::fill_random(&mut buf)
+            .map_err(|message| RuntimeError::ToolFailed { tool: tool.to_string(), message })?;
         Ok(u64::from_le_bytes(buf))
     }
     match name {
@@ -1905,7 +1978,21 @@ fn dispatch_stdlib_random_tool(
 
 /// Exact-name gate for the executing secrets surface.
 fn is_stdlib_secret_tool(name: &str) -> bool {
-    name == "secret_read"
+    name == "secret_read" || is_secret_value_read(name)
+}
+
+/// Exact-name gate for `secret(name) -> Result<Secret, String>`, the
+/// environment read whose Ok text the interpreter holds as a `Secret`.
+fn is_secret_value_read(name: &str) -> bool {
+    name == "secret"
+}
+
+/// Exact-name gate for the tools whose result the interpreter holds as a
+/// `Secret`: `secret(name) -> Result<Secret, String>` and
+/// `random_token(bytes) -> Secret`. The interpreter reads this gate
+/// too, so the two cannot name different tools.
+pub fn is_stdlib_secret_value_tool(name: &str) -> bool {
+    is_secret_value_read(name) || super::crypto_tools::is_random_token_tool(name)
 }
 
 /// Exact-name gate for the executing cache surface.
@@ -1919,9 +2006,17 @@ fn is_stdlib_cache_tool(name: &str) -> bool {
 /// Produce the trace-safe copy of a secret_read result: the `value`
 /// field of an Ok envelope is replaced by the same `<redacted:..>`
 /// marker the audit metadata uses, and `value_redacted` flips to
-/// true. Err results carry no value and pass through unchanged.
-fn redact_secret_result_for_trace(result: &serde_json::Value) -> serde_json::Value {
+/// true. A `secret` result's Ok text is replaced by `<redacted>`
+/// whole, with no characters kept. Err results carry no value and pass
+/// through unchanged.
+fn redact_secret_result_for_trace(tool: &str, result: &serde_json::Value) -> serde_json::Value {
     let mut recorded = result.clone();
+    if is_secret_value_read(tool) {
+        if let Some(ok) = recorded.get_mut("ok") {
+            *ok = serde_json::json!(crate::REDACTED_SECRET);
+        }
+        return recorded;
+    }
     if let Some(ok) = recorded.get_mut("ok") {
         if let Some(fields) = ok.as_object_mut() {
             let redacted_marker = fields

@@ -37,6 +37,14 @@ pub enum Type {
     Currency,
     /// B06 — a BCP 47 locale with CLDR data (`corvid_currency::Locale`).
     Locale,
+    /// An immutable byte string (`corvid_crypto::Bytes`): digests, MAC
+    /// tags, keys and binary payloads. `==` is constant-time; there is no
+    /// ordering.
+    Bytes,
+    /// Sensitive text (`corvid_crypto::Secret`): a key, a password or a
+    /// token the program can use but never reveal. It has no `String`
+    /// form, no JSON form and no display; `==` is constant-time.
+    Secret,
     String,
     Bool,
     Nothing,
@@ -233,6 +241,8 @@ impl Type {
             "ZonedTime" => Type::ZonedTime,
             "Currency" => Type::Currency,
             "Locale" => Type::Locale,
+            "Bytes" => Type::Bytes,
+            "Secret" => Type::Secret,
             "String" => Type::String,
             "Bool" => Type::Bool,
             "Nothing" => Type::Nothing,
@@ -260,6 +270,8 @@ impl Type {
             Type::ZonedTime => "ZonedTime".into(),
             Type::Currency => "Currency".into(),
             Type::Locale => "Locale".into(),
+            Type::Bytes => "Bytes".into(),
+            Type::Secret => "Secret".into(),
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),
@@ -332,6 +344,31 @@ impl Type {
         match self {
             Type::Tainted(inner) => inner.untainted(),
             other => other,
+        }
+    }
+
+    /// Whether this type is or names `Secret` among its type arguments:
+    /// `Secret`, `List<Secret>`, `Result<Secret, String>`, a function
+    /// taking one. A declared record holding a `Secret` field is not
+    /// seen here, because its fields live in its declaration; callers
+    /// that can see declarations walk the fields too.
+    pub fn mentions_secret(&self) -> bool {
+        match self {
+            Type::Secret => true,
+            Type::List(inner)
+            | Type::Option(inner)
+            | Type::Tainted(inner)
+            | Type::Grounded(inner)
+            | Type::Stream(inner)
+            | Type::Partial(inner)
+            | Type::ResumeToken(inner)
+            | Type::Upload(inner)
+            | Type::Page(inner)
+            | Type::Weak(inner, _) => inner.mentions_secret(),
+            Type::Map(a, b) | Type::Result(a, b) => a.mentions_secret() || b.mentions_secret(),
+            Type::Function { params, ret, .. } => ret.mentions_secret() || params.iter().any(Type::mentions_secret),
+            Type::RouteParams(params) => params.iter().any(|(_, param)| param.mentions_secret()),
+            _ => false,
         }
     }
 

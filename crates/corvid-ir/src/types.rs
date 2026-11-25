@@ -60,6 +60,13 @@ pub struct IrConnector {
     pub rate_limit: Option<IrRateLimit>,
     /// Circuit-breaker consecutive-failure threshold (slice 52g-4).
     pub circuit_breaker: Option<u64>,
+    /// The connector's declared `timeout:` in seconds. Always present in
+    /// a checked program (the checker requires it); `None` only in IR
+    /// built from unchecked source, which the runtime refuses to send.
+    pub timeout_secs: Option<u64>,
+    /// The connector's declared `redirects:` policy. Present in every
+    /// checked program, as `timeout_secs` is.
+    pub redirects: Option<corvid_ast::RedirectPolicy>,
     /// The execution modes this connector is allowed to run in (slice
     /// 52g-3b). Never empty (the checker rejects an undeclared set).
     /// The deployment selects exactly one at start.
@@ -102,6 +109,9 @@ pub struct IrOperation {
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
+    /// This operation's timeout in seconds: its own `timeout:` when it
+    /// declares one, otherwise the connector's.
+    pub timeout_secs: Option<u64>,
     /// The `mock:` payload expression, lowered (slice 52g-3b). In
     /// `mock` mode the runtime evaluates this to produce the operation
     /// response. `None` when the connector's allowed modes exclude
@@ -755,6 +765,16 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// `atomic:` (B09 P7a): the body's table writes commit together,
+    /// or are all undone when the body is left through an error.
+    /// `database` is the one database the body's tables live in, or
+    /// `None` when the body touches no table.
+    Atomic {
+        database: Option<IrDatabase>,
+        body: IrBlock,
+        span: Span,
+    },
+
     /// `approve Label(args)` — authorizes matching dangerous tool calls.
     Approve {
         label: String,
@@ -1090,12 +1110,13 @@ pub enum IrExprKind {
     },
 
     /// `Shelf.get(key)`, `Shelf.insert(row)`, `Shelf.save(row)` or
-    /// `Shelf.delete(row)` (B09). `arg` is the key for `get` and the
-    /// row otherwise; the call's type is the operation's result.
+    /// `Shelf.delete(row)` (B09). `args` are the key's values for `get`,
+    /// one per key field in declaration order, and the one row otherwise;
+    /// the call's type is the operation's result.
     TableOp {
         op: corvid_types::TableOp,
         table: IrTable,
-        arg: Box<IrExpr>,
+        args: Vec<IrExpr>,
     },
 
     /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
@@ -1175,7 +1196,9 @@ impl IrTableFilter {
 pub struct IrTable {
     pub def_id: DefId,
     pub name: String,
-    pub key: String,
+    /// The key's columns, in declaration order: one, or several that
+    /// identify a row together.
+    pub keys: Vec<String>,
     /// Column names in declaration order, with `revision` last.
     pub columns: Vec<String>,
     pub database: IrDatabase,

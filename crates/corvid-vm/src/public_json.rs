@@ -13,6 +13,7 @@
 //! they differ only on `Option`, `Result` and `Grounded`.
 
 use crate::value::{BoxedValue, EnumValue, ListValue, MapValue, StructValue, Value};
+use corvid_public_json::text_scalar::TextScalar;
 use corvid_ir::IrType;
 use corvid_resolve::DefId;
 use corvid_types::Type;
@@ -120,6 +121,39 @@ impl corvid_public_json::ValueBuilder for InterpreterValues {
     fn json(&mut self, json: &J) -> Value {
         Value::JsonValue(Arc::new(json.clone()))
     }
+    fn text_scalar(&mut self, value: TextScalar) -> Value {
+        value_of_text_scalar(value)
+    }
+}
+
+/// B06 — the interpreter value of a parsed text scalar. Tool and prompt
+/// JSON (`conv.rs`) and the public mapping both go through this pair.
+pub(crate) fn value_of_text_scalar(value: TextScalar) -> Value {
+    match value {
+        TextScalar::Decimal(d) => Value::Decimal(d),
+        TextScalar::Duration(d) => Value::Duration(d),
+        TextScalar::Instant(i) => Value::Instant(i),
+        TextScalar::TimeZone(z) => Value::TimeZone(z),
+        TextScalar::ZonedTime(z) => Value::ZonedTime(z),
+        TextScalar::Currency(c) => Value::Currency(c),
+        TextScalar::Locale(l) => Value::Locale(Arc::new(l)),
+        TextScalar::Bytes(b) => Value::Bytes(b),
+    }
+}
+
+/// B06 — the text scalar an interpreter value holds, if it is one.
+pub(crate) fn text_scalar_of_value(value: &Value) -> Option<TextScalar> {
+    Some(match value {
+        Value::Decimal(d) => TextScalar::Decimal(*d),
+        Value::Duration(d) => TextScalar::Duration(*d),
+        Value::Instant(i) => TextScalar::Instant(*i),
+        Value::TimeZone(z) => TextScalar::TimeZone(*z),
+        Value::ZonedTime(z) => TextScalar::ZonedTime(*z),
+        Value::Currency(c) => TextScalar::Currency(*c),
+        Value::Locale(l) => TextScalar::Locale((**l).clone()),
+        Value::Bytes(b) => TextScalar::Bytes(b.clone()),
+        _ => return None,
+    })
 }
 
 /// Encode `value`, of type `ty`, as compact public JSON text with sorted
@@ -237,6 +271,9 @@ impl corvid_public_json::ValueReader for InterpreterValues {
             Value::JsonValue(json) => Ok((**json).clone()),
             other => Err(mismatch("JsonValue", other)),
         }
+    }
+    fn text_scalar(&mut self, ty: &Type, value: &Value) -> Result<TextScalar, String> {
+        text_scalar_of_value(value).ok_or_else(|| mismatch(&ty.display_name(), value))
     }
 }
 

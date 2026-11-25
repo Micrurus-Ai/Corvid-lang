@@ -2,7 +2,7 @@
 
 Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing, `contains_regex`, `replace_regex` and `split_regex` also compile to native code, with the same results and messages. A program that calls `find_regex` or `find_all_regex` runs on the interpreter until native code can build `RegexMatch` records, and native UUID generation waits for native stdlib tools. [Proposal](../proposals/b03-text-and-encoding.md)
+Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing, `contains_regex`, `replace_regex` and `split_regex` also compile to native code, with the same results and messages. A program that calls `find_regex` or `find_all_regex` runs on the interpreter until native code can build `RegexMatch` records, and native UUID generation waits for native stdlib tools. [Proposal](../proposals/text-and-encoding.md)
 
 ## Encoding
 
@@ -44,7 +44,7 @@ The decoders follow these rules:
 
 `encode_url_component` keeps only the RFC 3986 unreserved characters, so its output is safe in a path segment, a query value or a form body. It is Python's `urllib.parse.quote(text, safe="")`. JavaScript's `encodeURIComponent` also leaves `!'()*` unescaped.
 
-Bytes that are not text, such as cryptographic digests, cannot be encoded yet. Byte encoders arrive with B04, which decides how Corvid represents bytes.
+Bytes that are not text, such as cryptographic digests, are a `Bytes` value, with the same encoders and decoders as `bytes.to_hex()` and `Bytes.from_hex(text)`. See [Cryptography](cryptography.md).
 
 ## UUIDs
 

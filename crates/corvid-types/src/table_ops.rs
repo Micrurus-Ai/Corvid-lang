@@ -6,14 +6,15 @@
 //! call is a table operation with [`table_call_target`], so they
 //! cannot disagree.
 
-use corvid_ast::{BinaryOp, Decl, Expr, File, Literal, Span, TableDecl, UnaryOp};
+use corvid_ast::{BinaryOp, Block, DatabaseDecl, Decl, Expr, File, Literal, Span, TableDecl, UnaryOp};
 use corvid_resolve::{Binding, DeclKind, SymbolTable};
 use std::collections::HashMap;
 
 /// A table operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TableOp {
-    /// `Shelf.get(key) -> Option<Shelf>`
+    /// `Shelf.get(key) -> Option<Shelf>`; a key of several fields takes
+    /// their values in declaration order, `Edit.get(proposal, shelf)`.
     Get,
     /// `Shelf.insert(row) -> Result<Shelf, Shelf>`: `Err` holds the row
     /// already stored under that key.
@@ -312,6 +313,82 @@ pub fn query_condition<'e>(
             ),
         },
     }
+}
+
+/// Every table an `atomic:` block reads or writes, through an operation
+/// or a query in its body or in an agent it calls (an agent called
+/// inside the block runs inside its transaction), in source order with
+/// repeats removed. The checker's one-database rule and IR lowering
+/// both read the block's tables here.
+pub fn atomic_tables<'a>(
+    body: &'a Block,
+    file: &'a File,
+    symbols: &SymbolTable,
+    bindings: &HashMap<Span, Binding>,
+) -> Vec<&'a TableDecl> {
+    let mut tables: Vec<&'a TableDecl> = Vec::new();
+    let mut visited = Vec::new();
+    collect_atomic_tables(body, file, symbols, bindings, &mut tables, &mut visited);
+    tables
+}
+
+fn collect_atomic_tables<'a>(
+    body: &'a Block,
+    file: &'a File,
+    symbols: &SymbolTable,
+    bindings: &HashMap<Span, Binding>,
+    tables: &mut Vec<&'a TableDecl>,
+    visited: &mut Vec<String>,
+) {
+    let mut called = Vec::new();
+    corvid_ast::visit::walk_block(body, &mut |_| {}, &mut |expr| {
+        let Expr::Call { callee, args, .. } = expr else { return };
+        let table = table_call_target(callee, file, symbols, bindings)
+            .map(|(table, _)| table)
+            .or_else(|| table_query_call(callee, args, file, symbols, bindings).map(|query| query.table));
+        match table {
+            Some(table) => {
+                if !tables.iter().any(|t| t.name().name == table.name().name) {
+                    tables.push(table);
+                }
+            }
+            None => called.extend(called_agent(callee, file, symbols, bindings)),
+        }
+    });
+    for agent in called {
+        if visited.contains(&agent.name.name) {
+            continue;
+        }
+        visited.push(agent.name.name.clone());
+        collect_atomic_tables(&agent.body, file, symbols, bindings, tables, visited);
+    }
+}
+
+/// The agent a call's callee names in this file, if it names one.
+pub fn called_agent<'a>(
+    callee: &Expr,
+    file: &'a File,
+    symbols: &SymbolTable,
+    bindings: &HashMap<Span, Binding>,
+) -> Option<&'a corvid_ast::AgentDecl> {
+    let Expr::Ident { name, .. } = callee else { return None };
+    let Binding::Decl(id) = bindings.get(&name.span)? else { return None };
+    let entry = symbols.get(*id);
+    if entry.kind != DeclKind::Agent {
+        return None;
+    }
+    file.decls.iter().find_map(|decl| match decl {
+        Decl::Agent(agent) if agent.name.name == entry.name => Some(agent),
+        _ => None,
+    })
+}
+
+/// The `database` block that lists `table`.
+pub fn table_database<'a>(file: &'a File, table: &str) -> Option<&'a DatabaseDecl> {
+    file.decls.iter().find_map(|decl| match decl {
+        Decl::Database(db) if db.tables.iter().any(|t| t.name == table) => Some(db),
+        _ => None,
+    })
 }
 
 /// The table declared at `span`, if the type there is a table.

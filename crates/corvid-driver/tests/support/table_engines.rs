@@ -79,7 +79,7 @@ impl TestDatabase {
 
     /// Create the tables `source` declares.
     pub async fn create_tables(&self, source: &str) {
-        let schemas = corvid_driver::table_schemas(source).unwrap_or_else(|e| panic!("must compile: {e:#?}"));
+        let schemas = corvid_driver::table_schemas(source, std::path::Path::new("program.cor")).unwrap_or_else(|e| panic!("must compile: {e:#?}"));
         let sql = schemas.iter().map(|table| create_table_sql_on(table, self.engine())).collect::<Vec<_>>().join("\n");
         match self {
             TestDatabase::Sqlite { path, .. } => {

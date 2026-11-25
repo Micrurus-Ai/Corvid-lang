@@ -14,8 +14,8 @@ use crate::token::TokKind;
 use corvid_ast::{
     BodyEncoding, ConnectorAuth, ConnectorDecl, ConnectorMode, Effect, Ident, OperationBody,
     OperationDecl, ProtocolIdempotency, ProtocolPoll, ProtocolPollInterval, ProtocolStateDecl,
-    ProtocolTransition, ProviderProtocolDecl, RateLimitConfig, SecretRef, StatusErrorMapping,
-    Visibility,
+    ProtocolTransition, ProviderProtocolDecl, RateLimitConfig, RedirectPolicy, SecretRef,
+    StatusErrorMapping, Visibility,
 };
 
 impl<'a> Parser<'a> {
@@ -40,6 +40,8 @@ impl<'a> Parser<'a> {
         let mut rate_limit: Option<RateLimitConfig> = None;
         let mut circuit_breaker: Option<u64> = None;
         let mut modes: Vec<ConnectorMode> = Vec::new();
+        let mut timeout_secs: Option<u64> = None;
+        let mut redirects: Option<RedirectPolicy> = None;
         let mut operations = Vec::new();
 
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -70,11 +72,23 @@ impl<'a> Parser<'a> {
                     circuit_breaker = Some(self.parse_u64_literal("circuit_breaker threshold")?)
                 }
                 "modes" => modes = self.parse_connector_modes()?,
+                "timeout" => {
+                    if timeout_secs.is_some() {
+                        return Err(duplicate_connector_key("timeout", key_span));
+                    }
+                    timeout_secs = Some(self.parse_timeout_secs()?);
+                }
+                "redirects" => {
+                    if redirects.is_some() {
+                        return Err(duplicate_connector_key("redirects", key_span));
+                    }
+                    redirects = Some(self.parse_redirect_policy()?);
+                }
                 _ => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("connector key `{key}`"),
-                            expected: "`base_url`, `auth`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
+                            expected: "`base_url`, `auth`, `timeout`, `redirects`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
                         },
                         span: key_span,
                     });
@@ -102,6 +116,8 @@ impl<'a> Parser<'a> {
             retry,
             rate_limit,
             circuit_breaker,
+            timeout_secs,
+            redirects,
             modes,
             operations,
             visibility: Visibility::Private,
@@ -152,6 +168,36 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RBracket, "`]` to close the modes list")?;
         Ok(modes)
+    }
+
+    /// `timeout: <n>s` — a whole number of seconds. The unit is required,
+    /// so a reader never wonders whether `timeout: 10` means milliseconds.
+    fn parse_timeout_secs(&mut self) -> Result<u64, ParseError> {
+        let secs = self.parse_u64_literal("a timeout in seconds, such as `timeout: 10s`")?;
+        if !self.peek_ident_is("s") {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: describe_token(self.peek()),
+                    expected: format!("the unit `s` after the timeout: `timeout: {secs}s`"),
+                },
+                span: self.peek_span(),
+            });
+        }
+        self.bump(); // s
+        Ok(secs)
+    }
+
+    /// `redirects: never | same_host | allowed_hosts`.
+    fn parse_redirect_policy(&mut self) -> Result<RedirectPolicy, ParseError> {
+        let span = self.peek_span();
+        let (name, name_span) = self.expect_ident()?;
+        RedirectPolicy::from_name(&name).ok_or_else(|| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: format!("redirect policy `{name}`"),
+                expected: "`never`, `same_host`, or `allowed_hosts`".into(),
+            },
+            span: span.merge(name_span),
+        })
     }
 
     /// `auth: bearer(secret("X"))` | `header("Name", secret("X"))` |
@@ -295,6 +341,7 @@ impl<'a> Parser<'a> {
         let mut error_map = Vec::new();
         let mut mock: Option<corvid_ast::Expr> = None;
         let mut protocol = None;
+        let mut timeout_secs: Option<u64> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -316,6 +363,17 @@ impl<'a> Parser<'a> {
                     });
                 }
                 mock = Some(self.parse_expr()?);
+                self.expect_newline()?;
+                continue;
+            }
+            if self.peek_ident_is("timeout") {
+                let key_span = self.peek_span();
+                self.bump(); // timeout
+                self.expect(TokKind::Colon, "`:` after `timeout`")?;
+                if timeout_secs.is_some() {
+                    return Err(duplicate_connector_key("timeout", key_span));
+                }
+                timeout_secs = Some(self.parse_timeout_secs()?);
                 self.expect_newline()?;
                 continue;
             }
@@ -350,6 +408,7 @@ impl<'a> Parser<'a> {
             path,
             body,
             error_map,
+            timeout_secs,
             mock,
             protocol,
             span: start.merge(end),
@@ -684,5 +743,15 @@ impl<'a> Parser<'a> {
             variant: Ident::new(variant, variant_span),
             span: start.merge(variant_span),
         })
+    }
+}
+
+fn duplicate_connector_key(key: &str, span: corvid_ast::Span) -> ParseError {
+    ParseError {
+        kind: ParseErrorKind::UnexpectedToken {
+            got: format!("a second `{key}:`"),
+            expected: format!("at most one `{key}:` here"),
+        },
+        span,
     }
 }

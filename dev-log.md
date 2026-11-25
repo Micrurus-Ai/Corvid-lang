@@ -4,6 +4,640 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 ---
 
+## 2026-11-25 - Connectors declare their timeout and redirect policy (B05, first slice)
+
+Every request a connector sent used a 30-second timeout and followed up
+to 10 redirects, and neither appeared in the source. Both are now
+declared, and omitting either is a compile error naming the values:
+`timeout: <n>s` on the connector (an operation may override it) and
+`redirects: never | same_host | allowed_hosts`.
+
+**Corvid follows redirects itself.** reqwest's redirect policy is set
+per client, not per request, so it could not apply a different policy to
+each connector. It also strips `Authorization` on a cross-host hop, but
+not a connector's own `header("X-Api-Key", ...)` credential. The
+transport now builds every client with automatic redirects off and
+follows them in one loop. That loop applies the request's policy, checks
+`allowed_hosts` hops against the same egress policy as the first request,
+drops every credential header when the origin changes, refuses a 301, 302
+or 303 that would turn a `POST` into a body-less `GET`, and stops after 10
+hops. The timeout covers the whole attempt, redirects and body included.
+`HttpRequest::new` takes the timeout and policy as arguments, so no Rust
+caller can build a request without them either.
+
+**Startup refuses a host that is not allowed.** In `real` mode a
+connector whose `base_url` fails the project's HTTP policy now stops
+`corvid run` and `corvid serve` before binding, naming the connector, the
+URL and the reason. The check is the same `HttpEgressPolicy::check` every
+request runs.
+
+**One rule for the effective timeout.** IR lowering and the Application
+Contract both read the AST, so the rule "the operation's timeout wins
+over the connector's" is one method, `ConnectorDecl::operation_timeout_secs`,
+called by both. The contract now lists `redirects` per connector and
+`timeout_secs` per operation.
+
+**Order change.** `HEAD` and the replacement of `http_get` and
+`http_post_json` were planned for this slice. Both need `Response<T>`,
+since a `HEAD` response has no body and the tools return a status, so
+they move after slice 3. The two tools keep their 30-second timeout and
+redirects to allowed hosts, now written at their one call site instead
+of as a client-wide default.
+
+About 60 connector sources in tests, the tour and `examples/orders_api`
+gained the two lines. The test transport helpers now pass a
+`reqwest::ClientBuilder`, so a test client can never follow redirects
+behind the runtime's back.
+
+Tests: the parser and checker for the new items; the transport for each
+policy, a cross-origin hop dropping both credential headers, a refused
+`POST` to `GET`, a 307 keeping its body, the hop limit, a slow body
+timing out, and a fingerprint that never depends on a key; the request
+builder; the startup refusal, as a unit test and through `corvid serve`;
+the contract; and three end-to-end programs against a mock provider
+(an operation timeout, `never`, `same_host`).
+
+---
+
+## 2026-11-25 - The complete HTTP client is decided (B05)
+
+B05 completes the `connector` declaration instead of adding a second
+HTTP client ([proposal](docs/proposals/http-client.md)). A connector
+already fixes its host in source, attaches credentials by secret name
+without recording them, and maps statuses to typed errors. What it
+lacked is what B05 adds: a declared `timeout:` and `redirects:` policy
+with no default (today every request silently gets 30 seconds and up to
+10 redirects), every method, headers, query records, bodies through
+B01's public JSON mapping rather than the trace envelope, `Response<T>`,
+streaming both ways, multipart, a record of every attempt, and
+cancellation that closes the upstream connection.
+
+Decided by the laws in `AGENTS.md`, as the user directed:
+
+- No frontend agreement: only backend code writes connectors.
+- `http_get` and `http_post_json` are replaced by a dynamic-host
+  connector, because "one obvious way" rules out a second request path
+  and the tools' hidden timeout and redirect limit break "no hidden
+  defaults". They are a documented invention (catalog entry, tour, book
+  chapter 18, three guarantee IDs), so slice 1 migrates every one of
+  those surfaces.
+- Native code waits for the shared native-dispatch decision that native
+  `Secret` also waits on.
+
+The main-line session reviewed the proposal and asked for one wire
+description of connector bodies: slice 3 adds body types to the
+Application Contract from the same schema code routes use, with a test
+that the runtime's encoding matches it.
+
+---
+
+## 2026-11-24 - `corvid migrate` compiles a program the way `corvid check` does
+
+Porting the reading list onto tables found that `corvid migrate plan`
+refused programs `corvid check` accepts. `migrate plan src/main.cor`
+reported that `ui.text` "requires cross-file resolution", and
+`migrate plan src/reviews.cor` refused a `View(...)` call in a `fn`. The
+driver's `table_schemas` and `declared_databases` compiled the source
+text without its path, so neither `std:` nor relative imports resolved
+and `corvid.toml` was never read. Only programs with no imports could be
+planned, which every test program happened to be.
+
+Both now take the file's path and share one `compile_program`, which
+calls the driver's `compile_to_ir_with_config_at_path` with the
+`corvid.toml` found for that file, the same compile `corvid check` runs.
+`migrate plan` and `migrate up | status | down --program` both use it.
+A new test plans a table module that imports `std:ui` and a sibling
+module; with the old compile it fails with the reading list's error.
+The planner still plans the tables the named module declares, not those
+of modules it imports, as before.
+
+---
+
+## 2026-11-25 - Native loops release rebound and early-returned values once
+
+The two native bugs the byte-string slice found are fixed, and they
+turned out to be wider than loops. The ownership pass and native
+lowering disagreed about who releases a rebound local's old value.
+Lowering releases it whenever a `Let` rebinds a local it has already
+bound; the pass's analysis treated the rebinding as a plain definition,
+so it also released the old value at its last read, or, when the
+rebinding sat inside a branch, dropped the local at the branch's tail,
+which by then held the new value. Any rebound string, record, list or
+byte string could be released twice: `s = "a" + "x"`, `n = s.length()`,
+`s = "b" + "y"` aborted on its own, with no loop in sight. The parity
+tests had passed because the two errors cancelled in the shapes they
+used, for instance a `Dup` the analysis scheduled for the wrong reason
+balancing `text = text + "t"`, and `s = s.trim()` read freed memory and
+returned garbage instead of crashing.
+
+The analysis now models what lowering does. The CFG builder tracks the
+locals lowering has bound, in lowering's own statement order, and a
+rebinding `Let` reads the old value as its last, consuming use; reads in
+a `Let` are judged against what is live after its binding, since they
+see the old value. A binding nothing reads afterwards is dropped where
+it is made, decided per binding rather than per local, because another
+binding of the same local may still be read. Lowering now releases the old value after
+computing the new one on both ownership paths, so `s = s.trim()` reads
+a live string, and the unified path's release-first order, which only
+worked because of the compensating `Dup`, is gone.
+
+The leak on `return` from inside a loop came from three drop placements
+that a path leaving a block early skips. A local whose last read is an
+`if` condition was dropped after the whole `if`, never reached when the
+branch returns; the drop now lands at the start of both branches. A
+local dying on a branch edge was dropped at the branch's tail; it is now
+dropped at its start, the one place that is right on every path, and
+the tail placement was also the double free inside the branch. And a
+local the iterable only borrows, like `header` in
+`for part in header.split(",")`, was dropped after the loop; it now
+stays live until the loop exits, so a `return` in the body releases it.
+A local needed only if the loop finishes, in a body that returns
+without reading it, dies on the edge into the body, which no drop
+covered; the pass now drops it there. Edge drops skip locals lowering
+has not bound yet, because it has no variable for them.
+
+Ten parity tests in `parity/loop_ownership.rs` run these shapes on both
+tiers with balanced allocations, for strings, records, lists, byte
+strings, a rebound parameter and nested loops; nine fail without the
+fix. Four tests in `edge_drop_placement.rs` pin where the pass puts the
+drops. The recorded-webhook parity test now reads the header the way
+the driver's programs do, rebinding the timestamp in a loop and
+returning from the loop that finds a signature. One related leak stays
+open: a local first bound inside a loop body and read after the loop is
+overwritten on the next iteration without being released, because
+lowering only releases on a rebinding it can see in the source. The fix
+needs lowering to have a variable for the local before the loop without
+keeping every body local alive across iterations; it is on the roadmap.
+
+---
+
+## 2026-11-25 - Byte strings, hashing, HMAC and signatures in native code (B04, sixth slice)
+
+`Bytes` compiles to native code, with every method on it: `utf8()`,
+`to_utf8()`, `length()`, the hex and base64 conversions both ways,
+SHA-256, SHA-384 and SHA-512, HMAC-SHA256 and HMAC-SHA512 with a
+`Bytes` key, and `verify_ed25519`. A native byte string is held the way
+B06 holds a `Decimal`: a reference-counted Corvid String containing its
+JSON form, here the unpadded base64url text. That reuses string
+reference counting, record and list slots, options, results, JSON and
+the trace unchanged, and `to_base64_url()` is the value itself. Every
+other method is one call into a new runtime file,
+`ffi_bridge/bytes.rs`, which decodes with `corvid-crypto` and computes
+with it, so the two tiers cannot disagree on a digest, a tag, a verdict
+or a message. One table in the code generator, `bytes_methods.rs`,
+names each entry point; the imports, the lowering, the tier picker and
+the match support read it.
+
+The one thing that could not be reused is string equality. `==` on
+`Bytes` must stay constant-time, and native string comparison is not.
+It is a runtime call that compares the two canonical texts with
+`corvid_crypto::constant_time_eq`. The text is one to one with the
+bytes, because the base64url decoder refuses stray bits in the last
+character and the encoder never pads, so this is exactly the byte
+comparison's answer; a new `Bytes::canonical_texts_equal` holds the
+rule and a unit test checks it against `constant_time_eq` on the bytes.
+Comparing the texts also avoids decoding a computed digest before the
+comparison, which would branch on its characters. Structural equality
+gets an `EqualityLayout::Bytes` that calls the same function, so a
+record, list, option or result holding bytes compares in constant time
+too. A native JSON decode re-encodes padded input, so every native byte
+string is canonical. An entry agent may return `Bytes`; the runtime
+prints `Bytes(<hex>)` from the same `Debug` form the interpreter prints.
+
+`Secret` stays on the interpreter, and I want to be exact about why. A
+secret only ever comes from a tool, `secret(name)` or
+`random_token(bytes)`, and is only useful when it reaches a tool or a
+secret method. Native binaries do not dispatch the standard library's
+tools at all: a native tool call is a direct call into a linked
+`#[tool]` library, with its own trace and replay path that has no
+redacted position, no revealed-argument form and no scrubbing of an
+echoed secret. A native `Secret` type would therefore compile code that
+no native program can reach with a secret in hand, which could not be
+tested against the interpreter. The correct choice is the loud one: a
+program that mentions `Secret` anywhere keeps running on the
+interpreter, which keeps every guarantee, and a native build refuses it
+with one shared reason (`corvid_codegen_cl::secret_boundary`). That
+includes `hash_password`, `verify_password`, `decode_base64_after` and
+an HMAC keyed by a secret. Native secrets need the standard library's
+tools dispatched natively through the runtime's recording first, which
+is on the roadmap. A tool or prompt whose signature holds `Bytes` also
+stays on the interpreter, for the B06 reason.
+
+The parity tests run every program on both tiers with balanced
+allocations: the FIPS digests, encodings and decoder messages, equality
+inside every container, the RFC 4231 HMAC vectors, the two recorded
+webhooks with the key held as `Bytes`, the RFC 8032 vectors with six
+forgeries, JSON, a printed result, and the refusal of a secret.
+Writing the webhook test found two native bugs that have nothing to do
+with bytes: returning from inside a `for` loop leaks an allocation, and
+reassigning a string inside an `if` within a `for` loop double-frees.
+Both reproduce with programs that use only strings. The test avoids the
+two shapes and they are roadmap items, not fixed here.
+
+---
+
+## 2026-11-25 - Ed25519 signature verification (B04, fifth slice)
+
+`message.verify_ed25519(signature, public_key)` is a pure method on
+`Bytes`: the signed bytes, a 64-byte signature and a 32-byte public
+key, all `Bytes`, answering `Bool`. It is allowed in `@deterministic`
+agents and never traced. The rule lives once, in `corvid-crypto`'s new
+`signature.rs`, over the `ed25519-dalek` 2 version the runtime, the ABI
+tooling and the CLI already locked; the interpreter only moves values
+in and out.
+
+Verification is strict. RFC 8032 lets verifiers differ on edge cases,
+and the permissive check `ed25519-dalek` offers as `verify` accepts a
+signature nobody made: under the identity point as the public key, the
+64 bytes `01 00 ... 00` verify for every message. A unit test shows the
+permissive check accepting that forgery and `verify_ed25519` refusing
+it. `verify_strict` refuses a public key or a signature point R of
+small order, and an S not reduced below the group order, so a valid
+signature cannot be altered into a second valid one (also tested, by
+adding the group order to S). Every Ed25519 vector in RFC 8032 section
+7.1 verifies: TEST 1, 2, 3, the 1023-byte TEST 1024 and TEST SHA(abc),
+copied from the RFC's text.
+
+A wrong length is `false`, not an error. A signature that is not 64
+bytes, a key that is not 32, or 32 bytes that are not a curve point
+verify nothing, which is what a forgery gets, and the length of a
+received signature is the sender's choice, so a `Result` would give
+every check two failure branches handled the same way. Decoding stays
+a `Result` (`Bytes.from_hex`, `from_base64`), so a garbled header is
+still reported. Fixed-length `Signature` and `PublicKey` types and a
+free `verify_ed25519(message, signature, key)` were considered and are
+recorded in the proposal.
+
+Reuse: the repository verifies Ed25519 in five places (`corvid-abi`'s
+DSSE `verify_envelope`, two CLI signing modules, the driver's
+dimension artifacts and package registry), each a single permissive
+library call inside its own envelope parsing and messages, with an
+already-parsed key. None was a function to move, and switching them to
+strict verification changes what they accept in files other sessions
+own, so moving them onto `corvid_crypto::verify_ed25519` is a roadmap
+item. The driver test instead uses the tooling directly: it signs a
+release manifest with `corvid_abi::sign_envelope`, the function
+`corvid release` signs with, and a Corvid program rebuilds the DSSE
+Pre-Authentication Encoding with string methods and verifies it. The
+genuine release verifies; a changed manifest byte, another manifest's
+signature, a changed signature character, another payload type and
+another signer's key are rejected, and for each case
+`corvid_abi::verify_envelope` gives the same answer. The encoding is
+built as text because the manifest is JSON; joining byte strings for a
+binary payload is a roadmap item.
+
+Native code still refuses every `Bytes` method, this one included,
+until the native cryptography slice. Signing stays deferred: a private
+key is a long-lived credential whose storage needs its own design.
+
+---
+
+## 2026-11-25 - Random tokens and declared-cost password hashing (B04, fourth slice)
+
+`std/crypto` is a new executing module. `random_token(bytes)` draws
+16 to 1024 random bytes from the operating system and returns their
+unpadded base64url text as a `Secret`, so `random_token(32)` is 43
+characters and never reaches a trace: its recorded result is
+`<redacted>`. `hash_password(password, cost)` hashes a `Secret` with
+Argon2id under a fresh 16-byte salt and returns the PHC string, and
+`password.verify_password(hash)` on a `Secret` checks one, reading
+the cost and salt from the hash. Hashing, verification, the token and
+the entropy all live in `corvid-crypto` (new `password.rs`, `token.rs`,
+`entropy.rs`) over the `argon2` 0.5 and `rand_core` 0.6 versions the
+workspace already locked. The Argon2id output is pinned to the
+reference implementation's test vector (t=2, m=256 KiB) and to a hash
+at the OWASP cost computed outside Corvid with OpenSSL 3.6's Argon2id
+KDF.
+
+The cost is declared, never chosen: `hash_password(password,
+owasp_2023())`, where `owasp_2023()` is a pure `fn` in `std/crypto`
+returning `PasswordCost(19456, 2, 1)`, or any `PasswordCost` of the
+program's own. A cost weaker than every setting OWASP lists as equal
+to its 2023 minimum stops the call with an error that names them, and
+so does more than 4 GiB of memory; verification refuses a stored hash
+that claims more, and refuses anything that is not Argon2id version
+19. The Corvid numbers and `corvid_crypto::PasswordCost::OWASP_2023`
+are two copies, because one is source and one is Rust, so a driver
+test asserts they are equal.
+
+Replay was the decision. The trace never holds a token, so replay
+cannot substitute one. Refusing to replay would make every program
+that issues a session or an API key unreplayable, and silently
+re-drawing could change a run without anyone noticing, so replay draws
+a fresh token and warns, keeping the warning for
+`Runtime::replay_redrawn_token_warnings()` as the scrubbed-result and
+tz-database warnings are kept. The token only ever reaches positions
+every record holds as `<redacted>`, so the `hash_password` call after
+it still matches its recording and is substituted: a replayed issuance
+returns the recorded hash. When the run's result does depend on the
+token, as in `key.verify_password(hash)` against the recorded hash,
+replay reports a `run_completed` divergence. Both cases are tested.
+
+`verify_password` returns `Bool`, `false` for a hash it cannot read: a
+`Result` would make every login a `match` for what is a corrupted
+database, not a user error. `corvid_crypto::verify_password` keeps the
+error, which the API-key store still reports as an invalid stored
+hash. The proposal's `token.reveal_once()` does not ship. A key must
+reach its owner, and today it does so through a tool that takes a
+`Secret` (an email, a notification), which receives the text while
+every record holds `<redacted>`. Showing it once in a route response
+needs the serve runtime to write a response it does not record, a
+contract marker and the frontend's binding; a `reveal_once()` the
+checker accepted before the runtime could keep that promise would be a
+silent degradation, so it is a roadmap item, with a `Secret` request
+body field for login forms.
+
+The runtime's API-key store (`auth/api_keys.rs`, the main line's auth
+area) now hashes and verifies through `corvid_crypto` with
+`API_KEY_HASH_COST = PasswordCost::OWASP_2023`, the setting
+`Argon2::default()` chose silently. The change is the two functions'
+bodies; a test proves a hash made by the old path still verifies.
+`argon2` is now only a dev-dependency of the runtime, for that test.
+`std/uuid` and `std/random` draw through `corvid_crypto::fill_random`,
+so the runtime has one entropy path for its tools. The interpreter's
+secret-result decoding is chosen by the tool's declared return type,
+so `random_token`'s bare `Secret` and `secret`'s `Result` share one
+path. The skill audit maps both new tools to a `crypto` group, ahead
+of the `random_` prefix.
+
+Syntax: `random_token(32)` names bytes, as `Bytes.length()` counts
+them, rather than a fixed-size `random_token()` (a hidden size) or a
+`Bytes` result (printable). `hash_password(password, owasp_2023())`
+won over a default cost (a hidden policy) and over a method (methods
+are pure; hashing draws a salt). `password.verify_password(hash)` reads
+as the question it asks and keeps cryptography methods off `String`.
+
+## 2026-11-24 - HMAC and a verified payment webhook (B04, third slice)
+
+`bytes.hmac_sha256(key)` and `bytes.hmac_sha512(key)` return the HMAC
+tag as `Bytes`. They live in `corvid-crypto`'s new `mac.rs` over the
+`hmac` 0.12 and `sha2` 0.10 crates the runtime already uses, and are
+pinned to RFC 4231's test cases 1, 2 and 6. Like every `Bytes` method
+they are pure: allowed in `@deterministic` agents and never traced.
+
+The key is `Bytes` or a `Secret`. The builtin-method table gives a
+parameter one type, so the two HMAC entries name `Bytes` and a new
+`checker/crypto_arguments.rs` accepts either through
+`is_hmac_key_type`, next to the table. Two table entries resolved by
+argument type would have needed the IR lowerer to pick between them
+from checked types, and the call means the same thing with either key.
+The interpreter passes `corvid_crypto::HmacKey::Bytes` or
+`HmacKey::Secret`; a secret's bytes are read only inside
+`corvid-crypto`, so the key never becomes a value. A `String` key is
+refused with a hint to read it with `secret(name)`.
+
+Providers disagree on what the key is. Stripe keys the HMAC with the
+`whsec_...` text as written; Standard Webhooks (Svix and others) with
+the bytes written in base64 after `whsec_`. A program turns the second
+kind into its key with `secret.decode_base64_after("whsec_")`, the one
+method on `Secret`, which returns another `Secret`. Its errors never
+quote the secret, an empty key is an error, and the prefix must be a
+string literal, so the method cannot be used to test a secret's text
+one guess at a time. `corvid_crypto::Secret` now holds bytes and
+remembers whether they are text. A decoded key is not, so
+`expose_text` returns `None`, `tool_argument_json` refuses it, and a
+tool call that would receive one stops the run with an error that
+says so. We considered a separate key type, which would make that a
+compile error, but it would add a second secret type to every
+boundary rule for a case no program has needed; it is a roadmap item.
+`key.without_prefix(...).decode_base64()` (two `Result`s for one
+step), a `Bytes` result (printable) and an HMAC option that decodes
+the key (hidden in every call) were the other alternatives.
+
+The acceptance test, `crates/corvid-driver/tests/webhook_verification.rs`,
+is Corvid source compiled through the driver with `std/secrets`. A
+recorded Stripe request (`Stripe-Signature: t=...,v1=<hex>`, payload
+`timestamp.body`) and a recorded Standard Webhooks request
+(`v1,<base64>`, payload `id.timestamp.body`) verify with `==` on
+`Bytes`; a changed body byte, timestamp, message id, signature or key
+is rejected, and any matching `v1` verifies while a key rolls. The
+expected signatures were computed outside Corvid with Python's `hmac`
+and checked with `openssl dgst`. The trace of the verification holds
+`<redacted>` for the secret read and no record of the HMAC, and the run
+replays. Headers are parsed with `split` in the test program; a
+reusable verifier with a declared timestamp tolerance and raw request
+bodies are B16's.
+
+The driver tests' project staging moved to `tests/support/std_project.rs`,
+shared by the secrets test and this one.
+
+## 2026-11-24 - Secret values that never reach a trace, a prompt or a log (B04, second slice)
+
+Corvid has a `Secret` type: text such as a webhook signing key, a
+password or an API token that a program can use but never reveal.
+`secret(name)` in `std/secrets` reads one from the environment and is
+an `Err` when the variable is missing. Two secrets compare with `==` in
+constant time, through the comparison `Bytes` uses, now a
+`corvid_crypto::constant_time_eq` function both types call. A secret
+can be passed to a tool, alone or inside a record. `Debug` and
+`Display` write `<secret>`, so a printed result, the REPL or a panic
+never shows the text.
+
+Everything else is a compile error with a hint, in a new
+`checker/secrets.rs`: no method (so no `to_string` or `to_json`), no
+ordering, no `+`, no mixing with `String`, no JSON form (the
+`to_json` walk in `json_methods.rs` catches a record holding one), and
+no secret in a route's inputs or response, a store field, a table
+column, a prompt parameter or result, a connector operation, `ask`,
+`choose`, or `main`'s signature. The table-column hint names the two
+ways forward the main line asked for: store a hash with
+`hash_password(...)` (slice 4) for values that are only checked, or
+wait for an encrypted column (B09) for values used again. `column_kind`
+in the main line's `tables/schema.rs` gains one explicit `Secret` arm.
+
+The redaction sits where trace payloads are built. The interpreter's
+`value_to_json`, which every trace event, approval, step event, replay
+comparison and rendered prompt is built from, writes `<redacted>` for a
+secret. A second function, `tool_argument_json`, writes the text, and
+the interpreter calls it in one place: when a tool's declared parameter
+types hold a `Secret`, for the arguments the implementation receives.
+The runtime's new `secret_arguments` module keeps the two forms apart,
+so the `ToolCall` event, replay and approvals see only the recorded
+form. A tool that echoes a secret it was given is scrubbed in the record
+only. The program receives the tool's real result or error unchanged,
+because silently rewriting program data is a hidden behavior and, for a
+short secret, would corrupt unrelated text. The recorded `ToolResult`
+and the step debugger's view have every occurrence of the text replaced
+by `<redacted>`. The recorded result is marked inside its payload with
+`__corvid_secret_scrubbed__`, as tool errors already are, so the trace
+schema needs no new version. Replay substitutes the recorded, scrubbed
+form and prints a warning naming the tool, kept for
+`Runtime::replay_secret_scrub_warnings()` the way the tz-database
+warning is kept. When the scrubbed value changes the outcome, replay
+also reports the divergence at the first event that stops matching, so
+it never differs from the recording silently. Once a tool hands the text back,
+the program holds an ordinary `String`, recorded wherever the program
+sends it. Replay compares the recorded forms,
+which hold `<redacted>` at the same positions on both sides, so a
+recorded call matches whatever secret the replay re-reads, and a
+rotated key still replays. Replay now steps past a secret read's
+recorded call and result, which also fixes `secret_read` inside a
+longer recorded run: before, the next tool call met the secret's
+recorded event and diverged.
+
+JSON cannot mint a `Secret`, so a user tool, a model or a request body
+cannot produce one; `secret(name)` is decoded on its own path. The
+checker records every type reference that holds a secret, and the
+application contract leaves those fields and agents out. Native code
+refuses any program that mentions `Secret`, naming the native
+cryptography slice. `corvid run` refuses a file whose only agent
+returns a secret. A user `type Secret` now names the builtin, so the
+contract-closure tour and a `serve` test use `Classified`.
+
+`Secret` is an invention, so it ships with `corvid tour --topic
+secrets`, a README row, a catalog entry and a proof-matrix row.
+Syntax: `secret(name)` beat `read_secret(name)` and
+`Secret.from_env(name)`, because the module already says secrets and
+the name should not tie the call to the environment; `==` beat
+`a.matches(b)`, because there is one equality and it is the safe one.
+Shared enums gain `Type::Secret`, `BuiltIn::Secret` and
+`Value::Secret`, with every exhaustive arm, and `Checked` gains
+`secret_type_refs`.
+
+## 2026-11-24 - Byte strings and SHA-2 hashing (B04, first slice)
+
+Corvid has a `Bytes` type: an immutable byte string for digests, MAC
+tags, signatures, keys and binary payloads. A new `corvid-crypto` crate
+holds its rules and depends only on `corvid-text` and the `sha2` and
+`subtle` crates the runtime already uses. `text.utf8()` turns text into
+bytes and `bytes.to_utf8()` turns them back as a `Result`;
+`to_hex()`, `to_base64()` and `to_base64_url()` write them as text, and
+`Bytes.from_hex(text)`, `Bytes.from_base64(text)` and
+`Bytes.from_base64_url(text)` read them back through the builtin
+type-method table `Instant.from_epoch_milliseconds` uses. `sha256()`,
+`sha384()` and `sha512()` hash them. Every method is pure, so none is
+traced and all run in `@deterministic` code.
+
+The codecs were not written twice. `corvid-text` gained byte variants
+of its hex and base64 codecs, and the text codecs are now those plus a
+UTF-8 check, so `Bytes.from_hex` and `text.decode_hex()` share one
+decoder and one set of messages. This closes B03's deferred byte-codec
+item.
+
+`==` on `Bytes` is constant-time. The interpreter's value equality
+calls `Bytes::constant_time_eq` (`subtle`'s comparison, which depends
+only on the lengths), so records and lists holding bytes and
+`list.contains` compare the same way. The checker refuses ordering, with
+a hint that an ordered comparison stops at the first differing byte,
+and refuses `+` and any mix with `String`, naming `utf8()` and the
+encodings. Those rules sit in a new `checker/bytes.rs`.
+
+In JSON a `Bytes` value is unpadded base64url text, added as one more
+`corvid_public_json::text_scalar` type, so decoding, encoding, tool and
+prompt values, prompt schemas, OpenAPI, the TypeScript client and the
+SDKs pick it up from that one module. Schemas publish
+`contentEncoding: base64url`. Table columns of type `Bytes` are refused
+with the B06 types, and `column_kind` names `Bytes` explicitly, a
+one-arm edit to the main line's `tables/schema.rs`.
+
+Native code refuses any program that mentions `Bytes`, with a reason
+naming the native cryptography slice, and native code's list of
+text-held scalars leaves `Bytes` out: holding it as text would make
+`==` native string equality, which is not constant-time.
+
+Syntax: `Bytes.from_hex(text)` beat `text.decode_hex_bytes()`, which
+differs from the text decoder by an easy-to-miss suffix; `text.utf8()`
+beat `text.to_bytes()`, which hides the encoding. Shared enums gain
+`Type::Bytes`, `BuiltIn::Bytes`, `Value::Bytes` and the byte-string
+`BuiltinMethodKind` entries, with every exhaustive arm.
+
+## 2026-11-24 - Native time and currency types (B06, seventh slice)
+
+Programs that use `Duration`, `Instant`, `TimeZone`, `ZonedTime`,
+`Currency` and `Locale`, and `format_currency`, now compile to native
+code. Each is held the way slice 6 holds a `Decimal`: a reference-counted
+String containing the value's canonical text, the same text as its JSON
+form. Every operator and method is one call into a new `corvid-runtime`
+entry point (`ffi_bridge/time.rs` and `ffi_bridge/currency.rs`) that
+parses with `corvid-time` or `corvid-currency`, computes and writes the
+result back, so the tiers share every rule and message. Two tables,
+`time_methods.rs` and `currency_methods.rs`, name the symbols, and one
+lowering file turns operators and methods into those calls, evaluating
+operands in source order even when the call takes them swapped
+(`n * duration`). The parse errors the interpreter wrote inline moved
+into `parse_user_text` functions in the shared crates, which both tiers
+call.
+
+Order and equality go through the runtime by value. RFC 3339 text with
+a fraction sorts before the same second without one, so comparing text
+would put `08:30:00.500Z` before `08:30:00Z`; a parity test checks it.
+The structural comparison gains one layout per type, so records, lists
+and options holding them compare by value.
+
+Holding the text as the value found a real bug: RFC 9557 text did not
+read back for times before standard time, whose local mean time offsets
+have seconds and are written rounded to the minute, nor for local times
+in year 10000 east of UTC. `ZonedTime::parse` now accepts both, checked
+over every zone from year 1 to 9999, which also fixes `from_json` on the
+interpreter.
+
+For replay, native code reports each zone-dependent operation to the
+runtime at the same points the interpreter's `zone_rules_use` does, so
+a native replay of a trace recorded with another tz database warns once
+per operation and zone, as the interpreter does; a new
+`replay_native` test shows it. A binary whose program needs no runtime
+never starts one, so it records and replays nothing and has nothing to
+warn about. Tools and prompts holding any of these types stay on the
+interpreter, as for `Decimal`, which keeps `time_now()` there. Two
+papercuts found on the way are on the roadmap: a zone literal compared
+with `==` is not typed by its operand, and `Int.to_string()` is not
+native.
+
+## 2026-11-24 - Native Decimal (B06, sixth slice)
+
+Programs that use `Decimal` now compile to native code. Native code
+keeps every value in one 8-byte slot, so a native decimal is a pointer
+to a reference-counted String holding its exact canonical text, the
+same text as its JSON form. That choice reuses string reference
+counting, list and record slots, option and result payloads and
+printing unchanged. Every operator and method is one call into a new
+`corvid-runtime` entry point that parses with `corvid-decimal`,
+computes and writes canonical text back, so the tiers share every rule
+and every message. One table in the code generator,
+`decimal_methods.rs`, names each operation's symbol and shape, and the
+imports, the lowering, the tier picker and native match arms read it.
+
+Equality had to stay numeric inside containers: records, lists and
+options holding decimals compare through a new `Decimal` layout in the
+structural comparison, so `Price("tea", 1.0)` equals
+`Price("tea", 1.00)`. Native maps take only `String` keys, so no
+native hash is needed. `to_json` and `from_json` carry the text, and a
+JSON number is refused with the interpreter's reason. A trap prints the
+`corvid-decimal` message the interpreter's arithmetic error carries.
+
+Still on the interpreter: `format_currency` (it needs native `Currency`
+and `Locale`, slice 7), tools and prompts whose signature holds a
+`Decimal` (a native bridge would see text with nothing checking it),
+compound assignment on a decimal, as on any reference-counted value,
+and decimals in native maps. The tier picker routes each of these to
+the interpreter and the code generator refuses them by name. Parsing on
+every operation is a cost; the roadmap records measuring it before
+choosing a compact heap value. Across the tiers, the browser, the
+backend and an assistant all see the same `"19.90"`, because the native
+form is the JSON form.
+
+## 2026-11-24 - JSON and contract forms for the B06 types (B06, fifth slice)
+
+All seven B06 types now cross every JSON boundary as their exact
+canonical text: `"19.90"`, `"PT1H30M"`, RFC 3339 and RFC 9557 times,
+IANA zones, ISO 4217 codes and BCP 47 tags. A new
+`corvid_public_json::text_scalar` module holds the list, the parsers,
+the text forms and the JSON Schemas, and every consumer reads it: the
+public decoder and encoder, tool and prompt values on the interpreter
+(whose per-type code from slices 2 to 4 is gone), prompt schemas,
+OpenAPI, the TypeScript client and the three SDKs. A JSON number for a
+`Decimal` is refused with the reason, in Corvid and in the generated
+Python. Routes, stores and `to_json` accept the types; native code
+still refuses them at compile time.
+
+The proposal had the SDKs use platform types. Checking each one
+showed Python's `datetime` and `timedelta` and Swift's `Date` drop
+nanoseconds, and Swift's `Decimal` drops trailing zeros, so every
+client keeps the exact text as a string, as TypeScript must anyway.
+Table columns stay refused: the main line owns their storage mapping
+because it decides query comparison, and it reuses the canonical
+encodings this slice names.
+
 ## 2026-11-24 - Currency formatting (B06, fourth slice)
 
 `amount.format_currency("EUR", "de-DE")` writes money from Unicode
@@ -145,6 +779,92 @@ Found on the way: an `Int` value in a `Float` slot is never converted
 at run time, so `x: Float = 3` then `x.to_string()` traps on the
 interpreter. It is on the roadmap; `Decimal` slots accept literals
 only, so they do not inherit it.
+
+## 2026-11-24 - Strict Ed25519 verification everywhere
+
+Five places verified Ed25519 signatures with `ed25519-dalek`'s permissive
+`verify`: release envelopes (`verify_envelope`, used by `ops show`),
+signed traces, bundle attestations, dimension artifacts and the package
+registry. Permissive verification accepts the identity-key forgery: under
+the small-order key `01 00..00`, the signature `01 00..00 00..00` is
+valid for every message. Where an attacker supplies the key, as a
+package index does, a forged package installs; a new registry test
+showed it did, and now shows it is refused. Every check now goes through
+one function, `corvid_crypto::verify_ed25519_signature`, which refuses a
+weak key and verifies strictly; the language's own `verify_ed25519`
+calls it too. Found by the B04 work, which demonstrated the forgery.
+
+## 2026-11-24 - Tables keyed by several columns (B09 P7b)
+
+A table may mark several fields `key`; together they identify a row,
+in declaration order. `Edit.get(proposal, shelf)` takes one value per
+key field and the checker types each against its field; every key field
+is `Int` or `String`. Writes match the whole key in their compare-and-set,
+queries order by the key's columns (after any `order_by` column), and the
+table is created with `PRIMARY KEY (a, b)`; a single key keeps its
+column-level `PRIMARY KEY`, so existing migrations still match. The
+planner already compared key membership per column, so changing which
+columns form the key is refused as before. The reading list's
+`proposal_items` and `extraction_items` tables, keyed by two columns,
+can now be declared as tables. The work touched every IR walker of
+`TableOp`, whose single `arg` became `args`.
+
+## 2026-11-24 - One definition of which types run natively
+
+`native_ability.rs` kept its own copies of four code-generator type
+checks, and they had drifted: the driver's refcounted check had lost
+callbacks and the `Grounded` and `Tainted` wrappers. The code
+generator's checks are now the only ones, and take a
+`NativeTypeQuestion`: `Lowering` (can lowering represent this type?) or
+`Program` (can the native tier run a program that mentions it, as the
+checker typed it?). The two answers differ only where the type changes
+between those stages, `JsonError`, which becomes a record, and where a
+tier policy applies, `TraceId`, refused until native replay. A unit test
+pins that these are the only differences, also inside containers, so a
+new one has to be added on purpose.
+
+## 2026-11-24 - Native loops keep every update on the legacy ownership path
+
+With `CORVID_DUP_DROP_PASS=0`, a native loop that rebinds a refcounted
+local from its own value (`subtotal = subtotal + line.price *
+line.quantity`) lost updates. The legacy path released the old value
+before lowering the new one, so the new value read freed memory. It
+stayed hidden in simple loops and showed once the memory was reused: the
+Decimal invoice parity test printed `3.30` instead of `16.05`. The legacy
+path now lowers the new value first and releases the old one after; the
+default unified pass, whose ownership analysis expects the earlier
+order, is unchanged. A regression test in `dup_drop_pipeline.rs` runs
+the invoice program under both settings, failing without the fix, and
+the harness now returns what the program printed, not only its
+allocation counts. `corvid run`'s native cache key now includes the
+setting, read through the one `dup_drop_pass_enabled` that lowering also
+uses, so a binary built under one setting is never reused under the
+other.
+
+## 2026-11-24 - Atomic table writes (B09 P7a)
+
+`atomic:` blocks make several table writes succeed or fail together. The
+writes commit when the block ends; leaving it through an error, a
+propagated `?` or a runtime failure, undoes them. Conflicts stay
+ordinary values, so the reading list's review can record "Conflict" for
+one shelf and still save the rest in one transaction. The checker keeps
+a block to what the database can undo: tools, prompts, approvals,
+`ask`, `parallel:` and calls that reach them through an agent are
+refused, as are a `return` or an escaping `break` (either would leave
+without saying whether to keep the writes), nesting, and tables in two
+databases. `atomic` stays contextual, like `parallel`.
+
+Each block runs on its own connection, so no other agent's statement
+lands inside it. On SQLite the block also holds the file's writer turn
+from `BEGIN IMMEDIATE` to its end, so another writer waits in the
+registry's queue instead of on SQLite's lock, where the two could
+deadlock; a test runs two runtimes writing to one file through atomic
+blocks and checks that every write lands. The trace records
+`table:<database>.begin`, `.commit` and `.rollback`, and a replay serves
+them without the database. A new `corvid_ast::visit` module walks every
+statement and expression of a block, so the checker's rules and IR
+lowering read a block's tables through one function, `atomic_tables`,
+which follows called agents.
 
 ## 2026-11-24 - Migrations on Postgres (B09 P4b)
 
@@ -334,7 +1054,7 @@ knows it. `RegexMatch` is registered; `JsonError` is left for B01.
 
 ## 2026-11-24 - B03 text and encoding: encoders, decoders and UUID parsing
 
-[The proposal](docs/proposals/b03-text-and-encoding.md) settles the
+[The proposal](docs/proposals/text-and-encoding.md) settles the
 surface for all of B03, and this slice ships the first part on the
 interpreter: eight encoding methods and `parse_uuid`, all builtin
 `String` methods.
@@ -413,7 +1133,7 @@ native target.
 
 ## 2026-11-24 - B09 typed persistence: the design
 
-[The proposal](docs/proposals/b09-typed-persistence.md) settles the
+[The proposal](docs/proposals/typed-persistence.md) settles the
 shape before any code. A `table` is a record type with a declared key
 and a database-maintained `revision`; a `database` block must name its
 engine, location and tables, because where data lives is a decision the

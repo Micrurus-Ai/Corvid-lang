@@ -225,6 +225,8 @@ impl<'a> CostAnalyzer<'a> {
             // construction: the body + condition feed the tree once
             // and the estimate is UNBOUNDED so `@budget` stays sound.
             // (`for` over a static range stays the bounded-loop tool.)
+            // An atomic block runs its body once; its cost is the body's.
+            corvid_ast::Stmt::Atomic { body, .. } => self.analyze_block(body, agent_name),
             corvid_ast::Stmt::While { cond, body, span } => {
                 let cond_est = self.analyze_expr(cond, agent_name);
                 let body_est = self.analyze_block(body, agent_name);

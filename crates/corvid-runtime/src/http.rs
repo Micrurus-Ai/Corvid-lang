@@ -1,7 +1,20 @@
 use crate::errors::RuntimeError;
+pub use corvid_ast::RedirectPolicy;
 use sha2::{Digest, Sha256};
 use serde::Serialize;
 use std::time::{Duration, Instant};
+
+/// The most redirects one request follows, under any policy. A fixed
+/// structural bound like the SSRF block, not a per-program setting: the
+/// declared policy decides *where* a redirect may go, and no legitimate
+/// API chains more hops than this.
+pub const MAX_REDIRECT_HOPS: u32 = 10;
+
+/// Headers that carry a credential under every scheme. A request never
+/// sends them to an origin other than the one it started at, and a
+/// request's own credential headers (`HttpRequest::credential_headers`)
+/// are dropped with them.
+const ALWAYS_CREDENTIAL_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HttpHeader {
@@ -24,47 +37,60 @@ impl Default for HttpRetryPolicy {
     }
 }
 
+/// One outbound HTTP request. Its timeout and redirect policy are
+/// constructor arguments, so no request can be built without both: the
+/// runtime holds no default for either.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<HttpHeader>,
     pub body: Option<String>,
+    /// The longest one attempt may take, from connecting to the last
+    /// byte of the response, redirects included.
     pub timeout_ms: u64,
+    pub redirects: RedirectPolicy,
+    /// Lower-cased names of the headers in `headers` that carry this
+    /// request's credential (a connector's `header("X-Api-Key", ...)`
+    /// auth). They are never sent to another origin, and never enter a
+    /// fingerprint or a record.
+    pub credential_headers: Vec<String>,
     pub retry: HttpRetryPolicy,
     pub effect_tag: Option<String>,
 }
 
 impl HttpRequest {
-    pub fn get(url: impl Into<String>) -> Self {
+    pub fn new(
+        method: impl Into<String>,
+        url: impl Into<String>,
+        timeout: Duration,
+        redirects: RedirectPolicy,
+    ) -> Self {
         Self {
-            method: "GET".to_string(),
+            method: method.into(),
             url: url.into(),
             headers: Vec::new(),
             body: None,
-            timeout_ms: 30_000,
+            timeout_ms: timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+            redirects,
+            credential_headers: Vec::new(),
             retry: HttpRetryPolicy::default(),
             effect_tag: None,
         }
     }
 
-    pub fn post_json(url: impl Into<String>, body: impl Into<String>) -> Self {
-        Self {
-            method: "POST".to_string(),
-            url: url.into(),
-            headers: vec![HttpHeader {
-                name: "content-type".to_string(),
-                value: "application/json".to_string(),
-            }],
-            body: Some(body.into()),
-            timeout_ms: 30_000,
-            retry: HttpRetryPolicy::default(),
-            effect_tag: None,
-        }
+    /// Send `body` as JSON.
+    pub fn json_body(self, body: impl Into<String>) -> Self {
+        self.body("application/json", body)
     }
 
-    pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.timeout_ms = timeout_ms;
+    /// Send `body` with the given content type.
+    pub fn body(mut self, content_type: &str, body: impl Into<String>) -> Self {
+        self.headers.push(HttpHeader {
+            name: "content-type".to_string(),
+            value: content_type.to_string(),
+        });
+        self.body = Some(body.into());
         self
     }
 
@@ -81,9 +107,23 @@ impl HttpRequest {
         self
     }
 
+    /// Attach a header that carries the request's credential. It is sent
+    /// only to the origin the request starts at.
+    pub fn credential_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        let name = name.into();
+        self.credential_headers.push(name.to_ascii_lowercase());
+        self.header(name, value)
+    }
+
     pub fn effect_tag(mut self, effect_tag: impl Into<String>) -> Self {
         self.effect_tag = Some(effect_tag.into());
         self
+    }
+
+    fn is_credential_header(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        ALWAYS_CREDENTIAL_HEADERS.contains(&name.as_str())
+            || self.credential_headers.iter().any(|credential| credential == &name)
     }
 }
 
@@ -107,29 +147,54 @@ pub struct RecordedHttpExchange {
     pub response_body: String,
 }
 
+/// The HTTP transport every outbound request goes through.
+///
+/// Redirects are followed here, not by reqwest: the underlying client
+/// never follows one itself, so the request's declared
+/// [`RedirectPolicy`], the egress policy and the rule that a credential
+/// never crosses to another origin apply to every hop.
 #[derive(Clone)]
 pub struct HttpClient {
     client: reqwest::Client,
+    /// The project's `[http] allow` list and SSRF block, applied to
+    /// every redirect under `redirects: allowed_hosts`. The first hop is
+    /// checked by the caller, which reports the refusal as its own.
+    egress: HttpEgressPolicy,
     /// Slice `35V2-P38-C-5`: set to `true` by
     /// `RuntimeBuilder::build` when entering Substitute-mode replay.
     /// `send` short-circuits with `RuntimeError::QuarantineViolation`
     /// so a replayed run cannot reach the network even if some caller
-    /// bypasses the runtime's trace-substitution path. Recorded HTTP
-    /// exchanges are not yet substituted at the runtime layer (filed
-    /// for post-v1.0 — connector calls today go through the
-    /// connector-runtime), so any HTTP send during replay is a
-    /// quarantine violation by construction.
+    /// bypasses the runtime's trace-substitution path.
     quarantined: bool,
 }
 
 impl Default for HttpClient {
     fn default() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::limited(10))
-                .build()
-                .expect("reqwest client builds with default config"),
-            quarantined: false,
+        Self::with_reqwest_builder(reqwest::Client::builder())
+    }
+}
+
+/// Why one attempt failed, and whether trying again could help. A
+/// refusal (a redirect the policy forbids) is final; a transport error
+/// or a timeout may be retried.
+struct AttemptFailure {
+    message: String,
+    retryable: bool,
+}
+
+impl AttemptFailure {
+    fn transient(message: String) -> Self {
+        Self { message, retryable: true }
+    }
+
+    fn refused(message: String) -> Self {
+        Self { message, retryable: false }
+    }
+
+    fn into_error(self) -> RuntimeError {
+        RuntimeError::ToolFailed {
+            tool: "std.http".to_string(),
+            message: self.message,
         }
     }
 }
@@ -139,41 +204,28 @@ impl HttpClient {
         Self::default()
     }
 
-    /// Apply the project policy to redirect destinations as well as the initial request.
-    pub(crate) fn with_egress_policy(policy: HttpEgressPolicy) -> Self {
-        let redirects = reqwest::redirect::Policy::custom(move |attempt| {
-            if policy.check(attempt.url().as_str()).is_err() {
-                return attempt.error("redirect destination rejected by project HTTP policy");
-            }
-            reqwest::redirect::Policy::limited(10).redirect(attempt)
-        });
-        Self::with_reqwest_client(reqwest::Client::builder().redirect(redirects)
-            .build().expect("reqwest client builds with project HTTP policy"))
-    }
-
-    /// Construct an `HttpClient` backed by a caller-supplied
-    /// `reqwest::Client`. Production code uses [`HttpClient::new`],
-    /// which builds a default reqwest client with the standard
-    /// redirect policy; tests use this constructor to install a
-    /// reqwest client configured with `.resolve(host, addr)` DNS
-    /// overrides so a publicly-named URL (e.g.
-    /// `http://api.example.com/`) routes at the TCP layer to a
-    /// loopback wiremock server.
-    ///
-    /// This is the no-shortcut answer to "how do we end-to-end test
-    /// the executing HTTP surface without poking holes in the SSRF
-    /// block". The `HttpEgressPolicy::check` runs on the literal
-    /// hostname in the URL string — `api.example.com` is a public-
-    /// looking name to the policy, so SSRF passes and the allowlist
-    /// gate runs normally. Only the reqwest layer's DNS resolution
-    /// is rewritten to point at the loopback test server. Production
-    /// behavior is identical to a real network call; only the
-    /// transport endpoint differs in tests.
-    pub fn with_reqwest_client(client: reqwest::Client) -> Self {
+    /// Build the transport from a caller-configured reqwest builder.
+    /// Production code uses [`HttpClient::new`]; tests pass a builder
+    /// with `.resolve(host, addr)` DNS overrides so a publicly named URL
+    /// (`http://api.example.com/`) reaches a loopback wiremock server
+    /// while the egress policy still sees the public name. Automatic
+    /// redirects are always turned off here, whatever the builder says,
+    /// because this client follows redirects itself.
+    pub fn with_reqwest_builder(builder: reqwest::ClientBuilder) -> Self {
         Self {
-            client,
+            client: builder
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("reqwest client builds"),
+            egress: HttpEgressPolicy::unset(),
             quarantined: false,
         }
+    }
+
+    /// Install the project's egress policy, used for redirects under
+    /// `redirects: allowed_hosts`. Called by `RuntimeBuilder::build`.
+    pub fn set_egress_policy(&mut self, policy: HttpEgressPolicy) {
+        self.egress = policy;
     }
 
     /// Flip into replay-quarantine mode. Subsequent `send` calls fail
@@ -207,14 +259,8 @@ impl HttpClient {
         let mut last_error = None;
         while attempt < attempts_allowed {
             attempt += 1;
-            match self.send_once(request).await {
-                Ok(response) => {
-                    let status = response.status().as_u16();
-                    let headers = response_headers(response.headers());
-                    let body = response.text().await.map_err(|err| RuntimeError::ToolFailed {
-                        tool: "std.http".to_string(),
-                        message: format!("failed to read HTTP response body: {err}"),
-                    })?;
+            match self.attempt(request).await {
+                Ok((status, headers, body)) => {
                     let should_retry =
                         request.retry.retry_on_5xx && status >= 500 && attempt < attempts_allowed;
                     if should_retry {
@@ -229,10 +275,10 @@ impl HttpClient {
                         elapsed_ms: elapsed_ms(started),
                     });
                 }
-                Err(err) if attempt < attempts_allowed => {
-                    last_error = Some(err.to_string());
+                Err(failure) if failure.retryable && attempt < attempts_allowed => {
+                    last_error = Some(failure.message);
                 }
-                Err(err) => return Err(err),
+                Err(failure) => return Err(failure.into_error()),
             }
         }
         Err(RuntimeError::ToolFailed {
@@ -250,30 +296,146 @@ impl HttpClient {
         Ok((response, record))
     }
 
-    async fn send_once(
+    /// One attempt, bounded as a whole by the request's timeout:
+    /// connecting, every redirect hop, and reading the full body.
+    async fn attempt(
         &self,
         request: &HttpRequest,
-    ) -> Result<reqwest::Response, RuntimeError> {
+    ) -> Result<(u16, Vec<HttpHeader>, String), AttemptFailure> {
+        let timeout = Duration::from_millis(request.timeout_ms);
+        match tokio::time::timeout(timeout, self.follow_redirects(request)).await {
+            Ok(result) => result,
+            Err(_) => Err(AttemptFailure::transient(format!(
+                "{} `{}` did not finish within its declared timeout of {}",
+                request.method,
+                request.url,
+                describe_timeout(request.timeout_ms)
+            ))),
+        }
+    }
+
+    async fn follow_redirects(
+        &self,
+        request: &HttpRequest,
+    ) -> Result<(u16, Vec<HttpHeader>, String), AttemptFailure> {
         let method = request.method.parse::<reqwest::Method>().map_err(|err| {
-            RuntimeError::ToolFailed {
-                tool: "std.http".to_string(),
-                message: format!("invalid HTTP method `{}`: {err}", request.method),
-            }
+            AttemptFailure::refused(format!("invalid HTTP method `{}`: {err}", request.method))
         })?;
-        let mut builder = self
-            .client
-            .request(method, &request.url)
-            .timeout(Duration::from_millis(request.timeout_ms.max(1)));
-        for header in &request.headers {
-            builder = builder.header(&header.name, &header.value);
+        let mut url = reqwest::Url::parse(&request.url).map_err(|err| {
+            AttemptFailure::refused(format!("invalid request URL `{}`: {err}", request.url))
+        })?;
+        let mut headers = request.headers.clone();
+        let mut body = request.body.clone();
+        let mut hops = 0;
+        loop {
+            let mut builder = self.client.request(method.clone(), url.clone());
+            for header in &headers {
+                builder = builder.header(&header.name, &header.value);
+            }
+            if let Some(body) = &body {
+                builder = builder.body(body.clone());
+            }
+            let response = builder
+                .send()
+                .await
+                .map_err(|err| AttemptFailure::transient(err.to_string()))?;
+            let status = response.status().as_u16();
+            let location = redirect_location(&response);
+            let Some(location) = location.filter(|_| request.redirects != RedirectPolicy::Never)
+            else {
+                let response_headers = response_headers(response.headers());
+                let text = response.text().await.map_err(|err| {
+                    AttemptFailure::transient(format!("failed to read HTTP response body: {err}"))
+                })?;
+                return Ok((status, response_headers, text));
+            };
+            let next = url.join(&location).map_err(|err| {
+                AttemptFailure::refused(format!(
+                    "`{url}` answered {status} with a Location `{location}` that is not a URL: {err}"
+                ))
+            })?;
+            if hops == MAX_REDIRECT_HOPS {
+                return Err(AttemptFailure::refused(format!(
+                    "{} `{}` was redirected more than {MAX_REDIRECT_HOPS} times; the last hop pointed at `{next}`",
+                    request.method, request.url
+                )));
+            }
+            hops += 1;
+            let changes_method = matches!(status, 301 | 302 | 303)
+                && method != reqwest::Method::GET
+                && method != reqwest::Method::HEAD;
+            if changes_method {
+                return Err(AttemptFailure::refused(format!(
+                    "{method} `{url}` was answered {status}, which would re-send it to `{next}` as a GET \
+                     without its body; Corvid refuses rather than change the request's method. \
+                     A provider that moves a {method} endpoint answers 307 or 308"
+                )));
+            }
+            let leaves_origin = origin(&next) != origin(&url);
+            match request.redirects {
+                RedirectPolicy::Never => unreachable!("a `never` policy returns the 3xx above"),
+                RedirectPolicy::SameHost if leaves_origin => {
+                    return Err(AttemptFailure::refused(format!(
+                        "`{url}` redirected to `{next}`, another host, and the connector declares \
+                         `redirects: same_host`"
+                    )));
+                }
+                RedirectPolicy::SameHost => {}
+                RedirectPolicy::AllowedHosts => {
+                    if let Err(err) = self.egress.check(next.as_str()) {
+                        return Err(AttemptFailure::refused(format!(
+                            "`{url}` redirected to `{next}`, which the project's HTTP policy refuses: {}",
+                            policy_message(err)
+                        )));
+                    }
+                }
+            }
+            if leaves_origin {
+                headers.retain(|header| !request.is_credential_header(&header.name));
+            }
+            if status == 303 {
+                // A 303 after a GET or HEAD: fetch the other resource
+                // with the same method and no body.
+                body = None;
+            }
+            url = next;
         }
-        if let Some(body) = &request.body {
-            builder = builder.body(body.clone());
-        }
-        builder.send().await.map_err(|err| RuntimeError::ToolFailed {
-            tool: "std.http".to_string(),
-            message: err.to_string(),
-        })
+    }
+}
+
+/// The `Location` of a response that asks to be followed, if any. Only
+/// 301, 302, 303, 307 and 308 redirect; a 300 or 304 is an answer.
+fn redirect_location(response: &reqwest::Response) -> Option<String> {
+    if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+        return None;
+    }
+    response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+fn origin(url: &reqwest::Url) -> (String, Option<String>, Option<u16>) {
+    (
+        url.scheme().to_string(),
+        url.host_str().map(str::to_ascii_lowercase),
+        url.port_or_known_default(),
+    )
+}
+
+fn policy_message(error: RuntimeError) -> String {
+    match error {
+        RuntimeError::ToolFailed { message, .. } => message,
+        other => other.to_string(),
+    }
+}
+
+fn describe_timeout(timeout_ms: u64) -> String {
+    if timeout_ms % 1000 == 0 {
+        format!("{}s", timeout_ms / 1000)
+    } else {
+        format!("{timeout_ms}ms")
     }
 }
 
@@ -305,8 +467,22 @@ pub fn record_exchange(request: &HttpRequest, response: &HttpResponse) -> Record
     }
 }
 
+/// A SHA-256 of everything that defines the request. A credential header
+/// contributes its name only, so the fingerprint is the same for every
+/// key and reveals nothing about one.
 pub fn request_fingerprint(request: &HttpRequest) -> String {
-    let mut headers = request.headers.clone();
+    let mut headers: Vec<HttpHeader> = request
+        .headers
+        .iter()
+        .map(|header| HttpHeader {
+            name: header.name.clone(),
+            value: if request.is_credential_header(&header.name) {
+                crate::REDACTED_SECRET.to_string()
+            } else {
+                header.value.clone()
+            },
+        })
+        .collect();
     headers.sort_by(|left, right| left.name.cmp(&right.name).then(left.value.cmp(&right.value)));
     let canonical = serde_json::json!({
         "method": request.method,
@@ -314,6 +490,7 @@ pub fn request_fingerprint(request: &HttpRequest) -> String {
         "headers": headers,
         "body": request.body,
         "timeout_ms": request.timeout_ms,
+        "redirects": request.redirects.as_str(),
         "retry": {
             "max_retries": request.retry.max_retries,
             "retry_on_5xx": request.retry.retry_on_5xx,
@@ -606,6 +783,10 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn get(url: impl Into<String>) -> HttpRequest {
+        HttpRequest::new("GET", url, Duration::from_secs(5), RedirectPolicy::Never)
+    }
+
     /// Slice 35V2-P38-C-5: a quarantined `HttpClient` short-circuits
     /// `send` with `RuntimeError::QuarantineViolation { surface:
     /// "http", .. }` before reaching the network. No mock server is
@@ -615,7 +796,7 @@ mod tests {
         let mut client = HttpClient::new();
         client.quarantine();
         assert!(client.is_quarantined());
-        let req = HttpRequest::get("https://example.invalid/should-not-reach");
+        let req = get("https://example.invalid/should-not-reach");
         let err = client.send(&req).await.expect_err("quarantine must error");
         match err {
             RuntimeError::QuarantineViolation { surface, detail } => {
@@ -652,7 +833,7 @@ mod tests {
             .await;
 
         let response = HttpClient::new()
-            .send(&HttpRequest::get(format!("{}/hello", server.uri())))
+            .send(&get(format!("{}/hello", server.uri())))
             .await
             .unwrap();
 
@@ -678,7 +859,7 @@ mod tests {
 
         let response = HttpClient::new()
             .send(
-                &HttpRequest::get(format!("{}/flaky", server.uri())).retry(HttpRetryPolicy {
+                &get(format!("{}/flaky", server.uri())).retry(HttpRetryPolicy {
                     max_retries: 1,
                     retry_on_5xx: true,
                 }),
@@ -700,7 +881,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let request = HttpRequest::get(format!("{}/recorded", server.uri())).effect_tag("network:http");
+        let request = get(format!("{}/recorded", server.uri())).effect_tag("network:http");
         let (response, record) = HttpClient::new().send_recorded(&request).await.unwrap();
 
         assert_eq!(response.status, 200);
@@ -708,6 +889,236 @@ mod tests {
         assert_eq!(record.effect_tag.as_deref(), Some("network:http"));
         assert_eq!(record.response_body, "captured");
         assert_eq!(record.request_fingerprint.len(), 64);
+    }
+
+    // ------------ Declared redirect policy and timeouts ------------
+
+    /// A client that reaches each named host's wiremock server, so the
+    /// egress policy sees public names while the bytes stay on loopback.
+    fn resolving_client(hosts: &[(&str, &MockServer)], allow: &[&str]) -> HttpClient {
+        let mut builder = reqwest::Client::builder();
+        for (host, server) in hosts {
+            builder = builder.resolve(host, *server.address());
+        }
+        let mut client = HttpClient::with_reqwest_builder(builder);
+        let allow: Vec<String> = allow.iter().map(|h| h.to_string()).collect();
+        client.set_egress_policy(HttpEgressPolicy::new(Some(&allow)));
+        client
+    }
+
+    fn url_on(host: &str, server: &MockServer, path: &str) -> String {
+        format!("http://{host}:{}{path}", server.address().port())
+    }
+
+    fn request(method: &str, url: String, redirects: RedirectPolicy) -> HttpRequest {
+        HttpRequest::new(method, url, Duration::from_secs(5), redirects)
+    }
+
+    async fn redirect_to(server: &MockServer, from: &str, status: u16, location: String) {
+        Mock::given(path(from))
+            .respond_with(ResponseTemplate::new(status).insert_header("location", location.as_str()))
+            .mount(server)
+            .await;
+    }
+
+    async fn answer(server: &MockServer, at: &str, body: &str) {
+        Mock::given(path(at))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn never_returns_the_redirect_as_the_answer() {
+        let server = MockServer::start().await;
+        let target = url_on("api.example.com", &server, "/moved");
+        redirect_to(&server, "/old", 302, target).await;
+        answer(&server, "/moved", "followed").await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+
+        let response = client
+            .send(&request("GET", url_on("api.example.com", &server, "/old"), RedirectPolicy::Never))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, 302);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "`never` must not follow the redirect");
+    }
+
+    #[tokio::test]
+    async fn same_host_follows_a_redirect_within_the_origin() {
+        let server = MockServer::start().await;
+        redirect_to(&server, "/old", 301, "/new".to_string()).await;
+        answer(&server, "/new", "here").await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+
+        let response = client
+            .send(&request("GET", url_on("api.example.com", &server, "/old"), RedirectPolicy::SameHost))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "here");
+    }
+
+    #[tokio::test]
+    async fn same_host_refuses_a_redirect_to_another_host() {
+        let origin = MockServer::start().await;
+        let other = MockServer::start().await;
+        redirect_to(&origin, "/old", 302, url_on("cdn.example.com", &other, "/file")).await;
+        answer(&other, "/file", "elsewhere").await;
+        let client = resolving_client(
+            &[("api.example.com", &origin), ("cdn.example.com", &other)],
+            &["api.example.com", "cdn.example.com"],
+        );
+
+        let err = client
+            .send(&request("GET", url_on("api.example.com", &origin, "/old"), RedirectPolicy::SameHost))
+            .await
+            .expect_err("a cross-host redirect must be refused under same_host");
+
+        let message = err.to_string();
+        assert!(message.contains("redirects: same_host"), "{message}");
+        assert!(message.contains("cdn.example.com"), "{message}");
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+
+    /// The credential stays with the origin it was meant for: a redirect
+    /// to another allowed host drops `Authorization` and the connector's
+    /// own credential header, and keeps the rest.
+    #[tokio::test]
+    async fn allowed_hosts_follows_to_an_allowed_host_without_the_credential() {
+        let origin = MockServer::start().await;
+        let other = MockServer::start().await;
+        redirect_to(&origin, "/old", 307, url_on("cdn.example.com", &other, "/file")).await;
+        answer(&other, "/file", "from the cdn").await;
+        let client = resolving_client(
+            &[("api.example.com", &origin), ("cdn.example.com", &other)],
+            &["api.example.com", "cdn.example.com"],
+        );
+        let req = request("GET", url_on("api.example.com", &origin, "/old"), RedirectPolicy::AllowedHosts)
+            .credential_header("authorization", "Bearer sk_live_secret")
+            .credential_header("X-Api-Key", "key_secret")
+            .header("x-request-id", "req-1");
+
+        let response = client.send(&req).await.unwrap();
+
+        assert_eq!(response.body, "from the cdn");
+        let first = &origin.received_requests().await.unwrap()[0];
+        assert!(first.headers.get("x-api-key").is_some(), "the origin receives the key");
+        let forwarded = &other.received_requests().await.unwrap()[0];
+        assert!(forwarded.headers.get("authorization").is_none());
+        assert!(forwarded.headers.get("x-api-key").is_none());
+        assert_eq!(forwarded.headers.get("x-request-id").unwrap(), "req-1");
+    }
+
+    #[tokio::test]
+    async fn allowed_hosts_refuses_a_host_outside_the_allow_list() {
+        let origin = MockServer::start().await;
+        let other = MockServer::start().await;
+        redirect_to(&origin, "/old", 302, url_on("evil.example.org", &other, "/steal")).await;
+        let client = resolving_client(
+            &[("api.example.com", &origin), ("evil.example.org", &other)],
+            &["api.example.com"],
+        );
+
+        let err = client
+            .send(&request("GET", url_on("api.example.com", &origin, "/old"), RedirectPolicy::AllowedHosts))
+            .await
+            .expect_err("an unlisted redirect host must be refused");
+
+        assert!(err.to_string().contains("evil.example.org"), "{err}");
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+
+    /// A 302 to a POST would make most clients re-send it as a body-less
+    /// GET. Corvid refuses instead; a 307 keeps the method and the body.
+    #[tokio::test]
+    async fn a_post_is_never_silently_turned_into_a_get() {
+        let server = MockServer::start().await;
+        redirect_to(&server, "/found", 302, "/elsewhere".to_string()).await;
+        redirect_to(&server, "/temporary", 307, "/kept".to_string()).await;
+        Mock::given(method("POST"))
+            .and(path("/kept"))
+            .respond_with(ResponseTemplate::new(201).set_body_string("created"))
+            .mount(&server)
+            .await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+
+        let err = client
+            .send(&request("POST", url_on("api.example.com", &server, "/found"), RedirectPolicy::SameHost).json_body("{}"))
+            .await
+            .expect_err("a 302 to a POST must be refused");
+        assert!(err.to_string().contains("as a GET"), "{err}");
+
+        let response = client
+            .send(&request("POST", url_on("api.example.com", &server, "/temporary"), RedirectPolicy::SameHost).json_body("{\"a\":1}"))
+            .await
+            .unwrap();
+        assert_eq!(response.status, 201);
+        let kept = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.url.path() == "/kept")
+            .unwrap();
+        assert_eq!(kept.method.as_str(), "POST");
+        assert_eq!(kept.body, b"{\"a\":1}");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_loop_stops_at_the_hop_limit() {
+        let server = MockServer::start().await;
+        redirect_to(&server, "/loop", 302, "/loop".to_string()).await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+
+        let err = client
+            .send(&request("GET", url_on("api.example.com", &server, "/loop"), RedirectPolicy::SameHost))
+            .await
+            .expect_err("a redirect loop must stop");
+
+        assert!(err.to_string().contains(&format!("more than {MAX_REDIRECT_HOPS} times")), "{err}");
+        assert_eq!(server.received_requests().await.unwrap().len(), MAX_REDIRECT_HOPS as usize + 1);
+    }
+
+    /// The timeout bounds the whole exchange, body included, and names
+    /// the declared value.
+    #[tokio::test]
+    async fn the_declared_timeout_bounds_a_slow_response() {
+        let server = MockServer::start().await;
+        Mock::given(path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+            .mount(&server)
+            .await;
+        let client = resolving_client(&[("api.example.com", &server)], &["api.example.com"]);
+        let req = HttpRequest::new(
+            "GET",
+            url_on("api.example.com", &server, "/slow"),
+            Duration::from_millis(300),
+            RedirectPolicy::Never,
+        );
+
+        let started = Instant::now();
+        let err = client.send(&req).await.expect_err("the slow response must time out");
+
+        assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
+        assert!(err.to_string().contains("declared timeout of 300ms"), "{err}");
+    }
+
+    #[test]
+    fn the_fingerprint_never_depends_on_a_credential() {
+        let with_key = |key: &str| {
+            request("GET", "https://api.example.com/x".to_string(), RedirectPolicy::Never)
+                .credential_header("X-Api-Key", key)
+        };
+        assert_eq!(request_fingerprint(&with_key("first")), request_fingerprint(&with_key("second")));
+        let plain = |id: &str| {
+            request("GET", "https://api.example.com/x".to_string(), RedirectPolicy::Never)
+                .header("x-request-id", id)
+        };
+        assert_ne!(request_fingerprint(&plain("a")), request_fingerprint(&plain("b")));
     }
 
     // ------------ Slice 33S2a: HttpEgressPolicy plumbing tests ------------

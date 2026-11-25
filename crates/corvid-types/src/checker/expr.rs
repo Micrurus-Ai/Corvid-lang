@@ -285,6 +285,8 @@ impl<'a> Checker<'a> {
                 | BuiltIn::ZonedTime
                 | BuiltIn::Currency
                 | BuiltIn::Locale
+                | BuiltIn::Bytes
+                | BuiltIn::Secret
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing

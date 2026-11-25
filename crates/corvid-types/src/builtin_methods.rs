@@ -466,6 +466,60 @@ pub enum BuiltinMethodKind {
     StringParseCurrency,
     /// `String.parse_locale() -> Result<Locale, String>`.
     StringParseLocale,
+
+    // ----- byte strings and hashing --------------------------------
+    //
+    // Every rule is `corvid_crypto`'s. Encodings are always explicit:
+    // text becomes bytes only through `utf8()`, and bytes become text
+    // only through a named encoding.
+    /// `String.utf8() -> Bytes` — the string's UTF-8 encoding.
+    StringUtf8,
+    /// `Bytes.to_utf8() -> Result<String, String>` — the Err names the
+    /// first byte that starts an invalid sequence.
+    BytesToUtf8,
+    /// `Bytes.length() -> Int` — the number of bytes.
+    BytesLength,
+    /// `Bytes.to_hex() -> String` — two lowercase digits per byte.
+    BytesToHex,
+    /// `Bytes.to_base64() -> String` — the standard alphabet, padded.
+    BytesToBase64,
+    /// `Bytes.to_base64_url() -> String` — the URL-safe alphabet,
+    /// unpadded; also the JSON form.
+    BytesToBase64Url,
+    /// `Bytes.from_hex(text: String) -> Result<Bytes, String>`, a method
+    /// of the type itself; either case.
+    BytesFromHex,
+    /// `Bytes.from_base64(text: String) -> Result<Bytes, String>`;
+    /// padding optional.
+    BytesFromBase64,
+    /// `Bytes.from_base64_url(text: String) -> Result<Bytes, String>`;
+    /// padding optional.
+    BytesFromBase64Url,
+    /// `Bytes.sha256() -> Bytes` — the 32-byte digest.
+    BytesSha256,
+    /// `Bytes.sha384() -> Bytes` — the 48-byte digest.
+    BytesSha384,
+    /// `Bytes.sha512() -> Bytes` — the 64-byte digest.
+    BytesSha512,
+    /// `Bytes.hmac_sha256(key) -> Bytes` — the 32-byte HMAC-SHA256 tag.
+    /// The key is `Bytes` or a `Secret` (see [`is_hmac_key_type`]).
+    BytesHmacSha256,
+    /// `Bytes.hmac_sha512(key) -> Bytes` — the 64-byte HMAC-SHA512 tag;
+    /// the same keys.
+    BytesHmacSha512,
+    /// `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) ->
+    /// Bool` — whether `signature` is the receiver's Ed25519 signature
+    /// under `public_key`, verified strictly; `false` for a signature
+    /// that is not 64 bytes or a key that is not 32.
+    BytesVerifyEd25519,
+    /// `Secret.decode_base64_after(prefix: String) -> Result<Secret,
+    /// String>` — the key written in base64 after a literal prefix, as
+    /// a new secret.
+    SecretDecodeBase64After,
+    /// `Secret.verify_password(hash: String) -> Bool` — whether the
+    /// secret is the password the Argon2id PHC string was made from;
+    /// `false` for a malformed hash. Pure, and constant-time.
+    SecretVerifyPassword,
 }
 
 impl BuiltinMethodKind {
@@ -553,6 +607,37 @@ impl BuiltinMethodKind {
         )
     }
 
+    /// The byte-string, hashing, HMAC, signature, secret-key and password
+    /// methods.
+    pub fn is_crypto(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringUtf8
+                | BytesToUtf8
+                | BytesLength
+                | BytesToHex
+                | BytesToBase64
+                | BytesToBase64Url
+                | BytesFromHex
+                | BytesFromBase64
+                | BytesFromBase64Url
+                | BytesSha256
+                | BytesSha384
+                | BytesSha512
+                | BytesHmacSha256
+                | BytesHmacSha512
+                | BytesVerifyEd25519
+                | SecretDecodeBase64After
+                | SecretVerifyPassword
+        )
+    }
+
+    /// The HMAC methods, whose key is `Bytes` or a `Secret`.
+    pub fn is_hmac(self) -> bool {
+        matches!(self, BuiltinMethodKind::BytesHmacSha256 | BuiltinMethodKind::BytesHmacSha512)
+    }
+
     /// The B03 regular-expression methods, whose first argument is a
     /// pattern literal.
     pub fn is_regex(self) -> bool {
@@ -569,6 +654,15 @@ impl BuiltinMethodKind {
     }
 }
 
+/// Whether a value of type `ty` can key an HMAC: `Bytes`, or a
+/// `Secret`, which keys it with its bytes without revealing them. The
+/// method table can give a parameter only one type, so the HMAC
+/// entries name `Bytes` and the checker accepts either through this
+/// function.
+pub fn is_hmac_key_type(ty: &Type) -> bool {
+    ty.is_assignable_to(&Type::Bytes) || ty.is_assignable_to(&Type::Secret)
+}
+
 /// The rounding mode a `Decimal` rounding method names:
 /// `round_half_even` names `HalfEven`. The checker, the method table
 /// and IR lowering all read method names through this one function.
@@ -582,21 +676,26 @@ pub fn duration_reading_unit(method: &str) -> Option<corvid_time::TimeUnit> {
 }
 
 /// A method called on a compiler-known type name rather than a value:
-/// `Instant.from_epoch_milliseconds(n)`. The checker and IR lowering
-/// both look the call up here.
+/// `Instant.from_epoch_milliseconds(n)`, `Bytes.from_hex(text)`. The
+/// checker and IR lowering both look the call up here.
 pub fn builtin_type_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    use BuiltinMethodKind::*;
+    let sig = |kind, params, ret| Some(BuiltinMethodSig { kind, params, ret });
+    let bytes_result = || Type::Result(Box::new(Type::Bytes), Box::new(Type::String));
     match (receiver, name) {
-        (Type::Instant, "from_epoch_milliseconds") => Some(BuiltinMethodSig {
-            kind: BuiltinMethodKind::InstantFromEpochMilliseconds,
-            params: vec![Type::Int],
-            ret: Type::Instant,
-        }),
+        (Type::Instant, "from_epoch_milliseconds") => {
+            sig(InstantFromEpochMilliseconds, vec![Type::Int], Type::Instant)
+        }
+        (Type::Bytes, "from_hex") => sig(BytesFromHex, vec![Type::String], bytes_result()),
+        (Type::Bytes, "from_base64") => sig(BytesFromBase64, vec![Type::String], bytes_result()),
+        (Type::Bytes, "from_base64_url") => sig(BytesFromBase64Url, vec![Type::String], bytes_result()),
         _ => None,
     }
 }
 
 /// The compiler-known type a bare type name denotes when it is a
-/// method receiver (`Instant` in `Instant.from_epoch_milliseconds`).
+/// method receiver (`Instant` in `Instant.from_epoch_milliseconds`,
+/// `Bytes` in `Bytes.from_hex`).
 pub fn builtin_type_receiver(
     target: &corvid_ast::Expr,
     bindings: &std::collections::HashMap<corvid_ast::Span, corvid_resolve::Binding>,
@@ -604,6 +703,7 @@ pub fn builtin_type_receiver(
     let corvid_ast::Expr::Ident { name, .. } = target else { return None };
     match bindings.get(&name.span)? {
         corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Instant) => Some(Type::Instant),
+        corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Bytes) => Some(Type::Bytes),
         _ => None,
     }
 }
@@ -816,6 +916,24 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             vec![],
             Type::Result(Box::new(Type::Locale), Box::new(Type::String)),
         ),
+        (Type::String, "utf8") => sig(StringUtf8, vec![], Type::Bytes),
+        (Type::Bytes, "to_utf8") => sig(BytesToUtf8, vec![], text_result()),
+        (Type::Bytes, "length") => sig(BytesLength, vec![], Type::Int),
+        (Type::Bytes, "to_hex") => sig(BytesToHex, vec![], Type::String),
+        (Type::Bytes, "to_base64") => sig(BytesToBase64, vec![], Type::String),
+        (Type::Bytes, "to_base64_url") => sig(BytesToBase64Url, vec![], Type::String),
+        (Type::Bytes, "sha256") => sig(BytesSha256, vec![], Type::Bytes),
+        (Type::Bytes, "sha384") => sig(BytesSha384, vec![], Type::Bytes),
+        (Type::Bytes, "sha512") => sig(BytesSha512, vec![], Type::Bytes),
+        (Type::Bytes, "hmac_sha256") => sig(BytesHmacSha256, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "hmac_sha512") => sig(BytesHmacSha512, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "verify_ed25519") => sig(BytesVerifyEd25519, vec![Type::Bytes, Type::Bytes], Type::Bool),
+        (Type::Secret, "decode_base64_after") => sig(
+            SecretDecodeBase64After,
+            vec![Type::String],
+            Type::Result(Box::new(Type::Secret), Box::new(Type::String)),
+        ),
+        (Type::Secret, "verify_password") => sig(SecretVerifyPassword, vec![Type::String], Type::Bool),
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

@@ -77,6 +77,14 @@ pub fn native_list_append(receiver: &corvid_types::Type, item: &corvid_types::Ty
                 | Type::Float
                 | Type::Bool
                 | Type::String
+                | Type::Decimal
+                | Type::Duration
+                | Type::Instant
+                | Type::TimeZone
+                | Type::ZonedTime
+                | Type::Currency
+                | Type::Locale
+                | Type::Bytes
                 | Type::Struct(_)
                 | Type::List(_)
                 | Type::Result(_, _)

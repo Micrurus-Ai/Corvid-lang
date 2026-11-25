@@ -79,6 +79,13 @@ impl Decimal {
         }
         Decimal::from_big(coefficient, fraction_digits.len())
     }
+
+    /// Corvid's `text.parse_decimal()`: trims whitespace, as
+    /// `parse_int` does, and on failure names the refused text and the
+    /// problem. Both tiers call this, so they return the same `Err`.
+    pub fn parse_user_text(text: &str) -> Result<Decimal, String> {
+        Decimal::parse(text.trim()).map_err(|error| format!("`{text}` is not a decimal number: {error}"))
+    }
 }
 
 impl fmt::Display for Decimal {
@@ -115,6 +122,15 @@ mod tests {
         assert_eq!(round_trip("+7"), "7");
         assert_eq!(round_trip("0007.10"), "7.10");
         assert_eq!(round_trip("0.0000000000000000000000000001"), "0.0000000000000000000000000001");
+    }
+
+    #[test]
+    fn user_text_is_trimmed_and_its_error_names_the_text() {
+        assert_eq!(Decimal::parse_user_text(" 19.990 ").unwrap().to_string(), "19.990");
+        assert_eq!(
+            Decimal::parse_user_text("1e3").unwrap_err(),
+            "`1e3` is not a decimal number: exponents are not accepted; write the digits out at position 1"
+        );
     }
 
     #[test]

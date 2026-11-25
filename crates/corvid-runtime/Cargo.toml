@@ -37,7 +37,6 @@ tokio-postgres = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 webpki-roots = "1"
-argon2 = "0.5"
 base64 = "0.22"
 jsonwebtoken = "9.3"
 opentelemetry = { version = "0.27", default-features = false, features = ["trace"] }
@@ -60,7 +59,12 @@ corvid-resolve = { workspace = true }
 corvid-syntax = { workspace = true }
 corvid-types = { workspace = true }
 corvid-public-json = { workspace = true }
+corvid-decimal = { workspace = true }
+corvid-currency = { workspace = true }
 corvid-text = { workspace = true }
+# Argon2id API-key hashing, random tokens and password hashing for the
+# std/crypto tools: one implementation with the language.
+corvid-crypto = { workspace = true }
 corvid-time = { workspace = true }
 # `inventory` collects `ToolMetadata` entries from every `#[tool]`
 # macro invocation across linked user tool crates. Read once by
@@ -88,6 +92,9 @@ workspace = true
 optional = true
 
 [dev-dependencies]
+# Only to prove that API keys hashed by the earlier `Argon2::default()`
+# path still verify through corvid-crypto.
+argon2 = "0.5"
 corvid-test-paths = { workspace = true }
 tempfile = "3"
 wiremock = "0.6"

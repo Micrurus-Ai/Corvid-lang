@@ -97,6 +97,36 @@ pub enum TypeErrorKind {
     /// B06 — an operator that does not apply to the time types involved.
     TimeOperatorMismatch { left: String, right: String, hint: String },
 
+    /// An operator other than `==` and `!=` with a `Bytes` operand, or
+    /// `Bytes` compared with another type.
+    BytesOperatorMismatch { left: String, right: String, hint: String },
+
+    /// An operator other than `==` and `!=` between two secrets, or a
+    /// `Secret` combined with another type.
+    SecretOperatorMismatch { left: String, right: String, hint: String },
+
+    /// A method called on a `Secret` other than `decode_base64_after`
+    /// and `verify_password`.
+    SecretMethod { method: String },
+
+    /// `secret.decode_base64_after(prefix)` with a prefix that is not a
+    /// string literal.
+    SecretKeyPrefixNotLiteral,
+
+    /// An HMAC key that is neither `Bytes` nor a `Secret`.
+    HmacKeyType { method: String, got: String },
+
+    /// A `Secret` at a place its text would leave the program: a route,
+    /// a store, a prompt, a connector operation or `main`. `at` is empty
+    /// or names the record field that holds it.
+    SecretAtBoundary { boundary: String, at: String, hint: String },
+
+    /// A table column that holds a `Secret`.
+    SecretTableColumn { column: String, at: String },
+
+    /// `ask` answering with, or `choose` offering, a `Secret`.
+    SecretShownToPerson { builtin: String, at: String },
+
     /// B06 — a `Decimal`, `Duration` or `Instant` in a type that leaves
     /// the program as JSON before B06's JSON slice gives it a form.
     PendingJsonFormAtBoundary { type_name: String, boundary: String },
@@ -414,6 +444,8 @@ pub enum TypeErrorKind {
     /// B09 P3 — `renamed from` or `retired` contradicts the table's
     /// declared columns or another clause.
     TableColumnHistoryConflict { table: String, message: String },
+    /// B09 P7a — something an `atomic:` block cannot hold.
+    AtomicBlockRefused { message: String },
     /// B09 — a table declares no `key` field.
     TableKeyRequired { table: String },
     /// B09 — a table's key is neither `Int` nor `String`.
@@ -639,8 +671,33 @@ impl TypeErrorKind {
             Self::TimeOperatorMismatch { left, right, .. } => {
                 format!("this operator does not combine `{left}` and `{right}`")
             }
+            Self::BytesOperatorMismatch { left, right, .. } => {
+                format!("this operator does not combine `{left}` and `{right}`")
+            }
+            Self::SecretOperatorMismatch { left, right, .. } => {
+                format!("this operator does not combine `{left}` and `{right}`")
+            }
+            Self::SecretMethod { method } => {
+                format!("a `Secret` has no method `{method}`: its text can never be read back or turned into other text")
+            }
+            Self::SecretKeyPrefixNotLiteral => {
+                "the prefix passed to `decode_base64_after` must be a string literal".into()
+            }
+            Self::HmacKeyType { method, got } => {
+                format!("the key of `{method}` must be `Bytes` or a `Secret`, not `{got}`")
+            }
+            Self::SecretAtBoundary { boundary, at, .. } => {
+                format!("{boundary} cannot hold a `Secret`{at}: a secret's text never leaves the program")
+            }
+            Self::SecretTableColumn { column, at } => {
+                format!("table column `{column}` cannot hold a `Secret`{at}: a stored secret could be read back and shown")
+            }
+            Self::SecretShownToPerson { builtin, at } => match builtin.as_str() {
+                "ask" => format!("`ask` cannot answer with a `Secret`{at}: a person's answer is recorded in the trace"),
+                _ => format!("`{builtin}` cannot offer a `Secret`{at}: its options are shown to a person"),
+            },
             Self::PendingJsonFormAtBoundary { type_name, boundary } => format!(
-                "a `{type_name}` cannot appear in {boundary} yet: its JSON form arrives with B06's JSON slice"
+                "a `{type_name}` cannot be {boundary} yet: its storage mapping, which decides how queries compare it, arrives with B09"
             ),
             Self::BareFunctionReference { name } => {
                 format!("`{name}` is a function; call it with `()` to use its result")
@@ -888,6 +945,7 @@ impl TypeErrorKind {
             }
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
+            Self::AtomicBlockRefused { message } => message.clone(),
             Self::TableKeyRequired { table } => format!("table `{table}` declares no key field"),
             Self::TableKeyType { table, key, found } => {
                 format!("the key `{key}` of table `{table}` is `{found}`; a key is `Int` or `String`")
@@ -1095,18 +1153,33 @@ impl TypeErrorKind {
                 "use an IANA zone name such as `Europe/Berlin` or `America/New_York`; for a name chosen at run time, use `parse_time_zone()`".into(),
             ),
             Self::TimeOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::BytesOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::SecretOperatorMismatch { hint, .. } => Some(hint.clone()),
+            Self::SecretMethod { .. } => Some(
+                "compare two secrets with `==`, key an HMAC with one (`body.utf8().hmac_sha256(key)`), check one against a stored hash (`password.verify_password(hash)`), or pass the secret to the tool that needs it; the tool receives the text and its trace records `<redacted>`".into(),
+            ),
+            Self::SecretKeyPrefixNotLiteral => Some(
+                "write the provider's prefix inline, such as `key.decode_base64_after(\"whsec_\")`; a prefix computed at run time could test the secret's text one guess at a time".into(),
+            ),
+            Self::HmacKeyType { .. } => Some(
+                "read a signing key with `secret(name)` from std/secrets, so it never reaches a trace; a key the program holds as bytes, such as `Bytes.from_hex(text)?`, works too".into(),
+            ),
+            Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
+            Self::SecretTableColumn { .. } => Some(
+                "never store a secret's text. To check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
+            ),
+            Self::SecretShownToPerson { .. } => Some(
+                "read secrets from the environment with `secret(name)` from std/secrets; never ask a person to type one or show them one".into(),
+            ),
             Self::UnknownCurrencyOrLocale { .. } => Some(
                 "currencies are ISO 4217 codes such as `USD` and `EUR`, and locales are BCP 47 tags such as `en-US` and `de-DE`; for values chosen at run time, use `parse_currency()` or `parse_locale()`".into(),
             ),
-            Self::PendingJsonFormAtBoundary { type_name, .. } => Some(match type_name.as_str() {
-                "Decimal" => "carry the amount as a String with `amount.to_string()` and read it back with `parse_decimal()`".into(),
-                "Duration" => "carry it as a String with `span.to_string()` and read it back with `parse_duration()`".into(),
-                "TimeZone" => "carry it as a String with `zone.to_string()` and read it back with `parse_time_zone()`".into(),
-                "Currency" => "carry it as a String with `currency.to_string()` and read it back with `parse_currency()`".into(),
-                "Locale" => "carry it as a String with `locale.to_string()` and read it back with `parse_locale()`".into(),
-                "ZonedTime" => "carry it as a String with `at.to_string()` and read it back with `parse_zoned_time()`".into(),
-                _ => "carry it as a String with `at.to_string()` and read it back with `parse_instant()`".into(),
-            }),
+            Self::PendingJsonFormAtBoundary { type_name, .. } if type_name == "Bytes" => Some(
+                "store `to_base64_url()` in a `String` column and read it back with `Bytes.from_base64_url(text)`".into(),
+            ),
+            Self::PendingJsonFormAtBoundary { .. } => Some(
+                "store its exact text with `to_string()` in a `String` column and read it back with the matching `parse_` method".into(),
+            ),
             Self::UnknownField { struct_name, field } => Some(format!(
                 "check the declaration of `{struct_name}` for the correct field name (you wrote `{field}`)"
             )),
@@ -1317,6 +1390,9 @@ impl TypeErrorKind {
             Self::TableQueryNotTranslatable { .. } => Some(
                 "a query runs in the database, so its parts are limited to what SQL can do: filter with comparisons of a column and an agent value, order by one column, take a count; combine further in the agent after the query".into(),
             ),
+            Self::AtomicBlockRefused { .. } => Some(
+                "an `atomic:` block holds only what the database can undo: table operations, queries and pure code. Do anything else (a tool, a model call, an approval) before or after the block, and finish the block before returning".into(),
+            ),
             Self::TableColumnHistoryConflict { .. } => Some(
                 "`renamed from` names the column a field was stored as before, and `retired` names stored columns the table no longer has; each stored name appears once, and never as a declared field".into(),
             ),
@@ -1449,7 +1525,7 @@ impl TypeErrorKind {
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),
             Self::ConnectorConfigInvalid { .. } => Some(
-                "`base_url` must be an absolute `http(s)://` URL; each operation path must start with `/` and its `{placeholders}` must name declared parameters; reliability values (`retry`, `rate_limit`, `circuit_breaker`) must be non-zero.".into(),
+                "`base_url` must be an absolute `http(s)://` URL; `timeout: <n>s` (1 to 3600) and `redirects: never | same_host | allowed_hosts` are required; each operation path must start with `/` and its `{placeholders}` must name declared parameters; reliability values (`retry`, `rate_limit`, `circuit_breaker`) must be non-zero.".into(),
             ),
         }
     }

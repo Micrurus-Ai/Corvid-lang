@@ -41,6 +41,10 @@ pub enum RunError {
     UnknownAgent { name: String, available: Vec<String> },
     /// The caller asked for default args but the agent expects parameters.
     NeedsArgs { agent: String, expected: usize },
+    /// The agent picked as the program's entry point returns a
+    /// `Secret`, which the runner would print. The checker refuses this
+    /// for `main`; this covers a file whose only agent is the entry.
+    EntryReturnsSecret { agent: String },
     /// The interpreter aborted.
     Interp(InterpError),
 }
@@ -64,6 +68,10 @@ impl fmt::Display for RunError {
             Self::NeedsArgs { agent, expected } => write!(
                 f,
                 "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
+            ),
+            Self::EntryReturnsSecret { agent } => write!(
+                f,
+                "agent `{agent}` is the program's entry point and returns a `Secret`, which would be printed; return what the secret proves, such as a `Bool`, or call the agent from another agent"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }
@@ -384,9 +392,11 @@ fn run_via_interpreter_tier(
     // widen `executable_modes`.
     {
         let secret_present = |name: &str| rt.secret_present(name);
+        let egress_refusal = |url: &str| rt.egress_refusal(url);
         let ctx = crate::connector_startup::ConnectorRuntimeContext {
             selected_mode: rt.connector_mode(),
             egress_configured: rt.egress_configured(),
+            egress_refusal: &egress_refusal,
             replay_source_present: rt.has_replay_source(),
             secret_present: &secret_present,
             executable_modes: &[
@@ -615,6 +625,8 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, real]
@@ -834,8 +846,15 @@ pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {
 /// can share this loading logic instead of re-implementing the
 /// precedence.
 pub fn load_http_egress_policy(source_path: &Path) -> HttpEgressPolicy {
+    http_egress_policy_from(std::env::var("CORVID_HTTP_ALLOW").ok().as_deref(), source_path)
+}
+
+/// [`load_http_egress_policy`] with the `CORVID_HTTP_ALLOW` value given,
+/// so the precedence can be tested without changing the process
+/// environment, which other tests in the same process read.
+fn http_egress_policy_from(env_allow: Option<&str>, source_path: &Path) -> HttpEgressPolicy {
     // 1. Env override.
-    if let Ok(env_allow) = std::env::var("CORVID_HTTP_ALLOW") {
+    if let Some(env_allow) = env_allow {
         let env_allow_trimmed = env_allow.trim();
         if !env_allow_trimmed.is_empty() {
             let hosts: Vec<String> = env_allow_trimmed
@@ -984,16 +1003,10 @@ mod http_policy_loader_tests {
     //! `CORVID_HTTP_ALLOW` env override > `[http] allow` from
     //! corvid.toml > unconfigured (fail-closed default).
     //!
-    //! These tests serialise on env state — they always snapshot
-    //! the current `CORVID_HTTP_ALLOW` value, mutate inside the
-    //! test, then restore it. Two tests touching the same env
-    //! var must NOT run in parallel; the `tokio::test` flavor
-    //! `multi_thread` is fine here because cargo test runs each
-    //! function on its own thread by default, but cross-test
-    //! parallelism is the actual concern. For the loader tests
-    //! here that's `cargo test`'s job to schedule; we don't add
-    //! a serial lock because the existing 33S1b `CORVID_IO_ROOT`
-    //! tests pass the same way.
+    //! The tests give the `CORVID_HTTP_ALLOW` value to
+    //! `http_egress_policy_from` directly rather than setting the
+    //! process-wide variable, which other tests running in parallel
+    //! read.
 
     use super::*;
 
@@ -1013,14 +1026,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             policy.is_configured(),
@@ -1057,14 +1063,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             !policy.is_configured(),
@@ -1088,14 +1087,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             !policy.is_configured(),
@@ -1120,20 +1112,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe {
-            std::env::set_var(
-                "CORVID_HTTP_ALLOW",
-                "env-host-one.example, env-host-two.example",
-            )
-        };
-
-        let policy = load_http_egress_policy(&source);
-
-        match prior_env {
-            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
-            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
-        }
+        let policy = http_egress_policy_from(Some("env-host-one.example, env-host-two.example"), &source);
 
         assert!(policy.is_configured());
         let allow = policy.allow_list();
@@ -1168,15 +1147,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::set_var("CORVID_HTTP_ALLOW", "   ,, ,  ") };
-
-        let policy = load_http_egress_policy(&source);
-
-        match prior_env {
-            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
-            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
-        }
+        let policy = http_egress_policy_from(Some("   ,, ,  "), &source);
 
         assert!(
             policy.is_configured(),

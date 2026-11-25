@@ -66,6 +66,20 @@ impl TraceCursor {
         }
     }
 
+    /// Steps past the next event when `predicate` holds for it, and
+    /// reports whether it did.
+    pub(crate) fn advance_if<F>(&mut self, events: &[TraceEvent], predicate: F) -> bool
+    where
+        F: FnOnce(&TraceEvent) -> bool,
+    {
+        self.skip_dispatch_metadata(events);
+        let matched = events.get(self.next).is_some_and(predicate);
+        if matched {
+            self.next += 1;
+        }
+        matched
+    }
+
     pub(crate) fn finish(&mut self, events: &[TraceEvent]) -> Result<(), ReplayDivergence> {
         self.skip_dispatch_metadata(events);
         if self.next == events.len() {

@@ -5,7 +5,9 @@ mod event_classify;
 mod mutation;
 mod mutation_session;
 mod mutation_validate;
+mod redrawn_tokens;
 mod result_factory;
+mod scrubbed_results;
 mod substitute;
 mod zone_rules;
 
@@ -40,6 +42,8 @@ pub use corvid_runtime_core::replay_divergence::ReplayDivergence;
 pub use mutation::{MutationDivergence, ReplayMutationReport};
 use mutation_session::{ReplayMutation, ReplayMutationState};
 use substitute::is_initial_metadata;
+use redrawn_tokens::ReplayRedrawnTokens;
+use scrubbed_results::ReplayScrubbedResults;
 use zone_rules::ReplayZoneRules;
 
 /// Reserved key under which a FAILING tool records its error message in
@@ -77,6 +81,12 @@ pub struct ReplaySource {
     /// B06 — the recording's tz database, for warnings at zone-dependent
     /// operations whose rules may have changed since.
     zone_rules: ReplayZoneRules,
+    /// Warnings for substituted tool results whose record had a
+    /// secret's text scrubbed.
+    scrubbed_results: ReplayScrubbedResults,
+    /// Warnings for `random_token` calls replay re-drew, because the
+    /// trace never holds a token.
+    redrawn_tokens: ReplayRedrawnTokens,
 }
 
 /// One recorded `parallel` arm's terminal state (slice 52d-3).
@@ -302,6 +312,8 @@ impl ReplaySource {
             parallel_outcomes: Arc::new(parallel_outcomes),
             parallel_cursor: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             zone_rules: ReplayZoneRules::new(recorded_tzdb),
+            scrubbed_results: ReplayScrubbedResults::default(),
+            redrawn_tokens: ReplayRedrawnTokens::default(),
         })
     }
 
@@ -314,6 +326,17 @@ impl ReplaySource {
 
     pub(crate) fn zone_rules_warnings(&self) -> Vec<String> {
         self.zone_rules.warnings()
+    }
+
+    /// The warnings for substituted tool results whose record had a
+    /// secret's text scrubbed.
+    pub(crate) fn secret_scrub_warnings(&self) -> Vec<String> {
+        self.scrubbed_results.warnings()
+    }
+
+    /// The warnings for tokens replay drew afresh.
+    pub(crate) fn redrawn_token_warnings(&self) -> Vec<String> {
+        self.redrawn_tokens.warnings()
     }
 
     /// Hand out the next recorded `parallel` block's arm outcomes, in
@@ -506,6 +529,35 @@ impl ReplaySource {
             .map_err(RuntimeError::ReplayDivergence)
     }
 
+    /// A tool that replay re-executes instead of substituting (the
+    /// secret reads, whose recorded result is redacted) steps past its
+    /// recorded call and result, so the calls after it stay aligned with
+    /// the trace. A trace that does not hold them at this point is
+    /// accepted unchanged: the call itself is re-executed either way.
+    pub fn step_past_reexecuted_tool_call(&self, tool: &str, args: &[serde_json::Value]) {
+        let mut cursor = self.cursor.lock().unwrap();
+        let stepped = cursor.advance_if(&self.events, |event| {
+            matches!(
+                event,
+                TraceEvent::ToolCall { tool: recorded_tool, args: recorded_args, .. }
+                    if recorded_tool == tool && recorded_args == args
+            )
+        });
+        if stepped {
+            cursor.advance_if(&self.events, |event| {
+                matches!(event, TraceEvent::ToolResult { tool: recorded_tool, .. } if recorded_tool == tool)
+            });
+        }
+    }
+
+    /// A `random_token` call, which replay draws afresh because its
+    /// recorded result is `<redacted>`: steps past the recorded call
+    /// and result, as for a re-read secret, and warns.
+    pub fn step_past_redrawn_token(&self, tool: &str, args: &[serde_json::Value]) {
+        self.step_past_reexecuted_tool_call(tool, args);
+        self.redrawn_tokens.note(tool);
+    }
+
     pub fn replay_tool_call(
         &self,
         tool: &str,
@@ -622,10 +674,11 @@ impl ReplaySource {
                 if step == mutation.step_1based {
                     return mutated_json_result(mutation, &recorded_call, recorded_result);
                 }
-                return replayed_json_result(tool, recorded_result);
+                return replayed_json_result(tool, self.scrubbed_results.unwrap(tool, recorded_result));
             }
         }
-        replayed_json_result(tool, cursor.next_event(&self.events))
+        let recorded_result = cursor.next_event(&self.events);
+        replayed_json_result(tool, self.scrubbed_results.unwrap(tool, recorded_result))
     }
 
     fn llm_call_matches(

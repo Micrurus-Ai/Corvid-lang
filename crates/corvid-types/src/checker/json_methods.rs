@@ -38,10 +38,13 @@ impl NoForm {
         Self { reason: reason.into(), hint: hint.into(), pending: None }
     }
 
-    fn pending(type_name: &'static str, hint: &str) -> Self {
+    fn pending(type_name: &'static str) -> Self {
         Self {
             pending: Some(type_name),
-            ..NoForm::new(format!("`{type_name}` has no JSON form until B06's JSON slice"), hint)
+            ..NoForm::new(
+                format!("`{type_name}` has no table-column mapping yet"),
+                "store its text with `to_string()` in a String column until B09 maps it",
+            )
         }
     }
 }
@@ -174,18 +177,17 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    /// B06 — the first type `ty` reaches whose JSON form is still
-    /// missing, walking records the way `to_json` does. At a tool or
-    /// prompt (`text_boundary`), durations and instants cross as text.
-    pub(super) fn pending_json_form(&mut self, ty: &Type, text_boundary: bool) -> Option<&'static str> {
-        let outer = std::mem::replace(&mut self.time_text_boundary, text_boundary);
+    /// B06 — the first B06 type `ty` reaches, walking records the way
+    /// `to_json` does, for the table-column check.
+    pub(super) fn b06_type_reached(&mut self, ty: &Type) -> Option<&'static str> {
+        let outer = std::mem::replace(&mut self.refuse_b06_columns, true);
         let pending = [Direction::Encode, Direction::Decode].into_iter().find_map(|direction| {
             match self.json_form(ty, direction, &mut Vec::new()) {
                 Err(NoForm { pending, .. }) => pending,
                 Ok(_) => None,
             }
         });
-        self.time_text_boundary = outer;
+        self.refuse_b06_columns = outer;
         pending
     }
 
@@ -222,41 +224,41 @@ impl<'a> Checker<'a> {
                     "decode the error's fields into a record you declare",
                 )),
             },
-            Type::Decimal => Err(NoForm::pending(
-                "Decimal",
-                "send `amount.to_string()` and read it back with `parse_decimal()`",
-            )),
-            // Tools and prompts carry time as its standard text on the
-            // interpreter (RFC 3339, ISO 8601); the published mapping —
-            // routes, `from_json`, SDKs — arrives with the JSON slice.
-            Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale
-                if self.time_text_boundary =>
-            {
-                Ok(false)
+            // B06 — each crosses JSON as its exact canonical text (see
+            // `corvid_public_json::text_scalar`). Table columns are the
+            // exception: their storage mapping decides query semantics and
+            // belongs to B09, so a table check refuses them for now.
+            // `Bytes` crosses JSON as base64url text, the same way, and
+            // waits for B09's storage mapping like the B06 types.
+            Type::Decimal
+            | Type::Duration
+            | Type::Instant
+            | Type::TimeZone
+            | Type::ZonedTime
+            | Type::Currency
+            | Type::Locale
+            | Type::Bytes => {
+                if self.refuse_b06_columns {
+                    Err(NoForm::pending(match ty {
+                        Type::Decimal => "Decimal",
+                        Type::Duration => "Duration",
+                        Type::Instant => "Instant",
+                        Type::TimeZone => "TimeZone",
+                        Type::ZonedTime => "ZonedTime",
+                        Type::Currency => "Currency",
+                        Type::Bytes => "Bytes",
+                        _ => "Locale",
+                    }))
+                } else {
+                    Ok(false)
+                }
             }
-            Type::Currency => Err(NoForm::pending(
-                "Currency",
-                "send `currency.to_string()` and read it back with `parse_currency()`",
-            )),
-            Type::Locale => Err(NoForm::pending(
-                "Locale",
-                "send `locale.to_string()` and read it back with `parse_locale()`",
-            )),
-            Type::TimeZone => Err(NoForm::pending(
-                "TimeZone",
-                "send `zone.to_string()` and read it back with `parse_time_zone()`",
-            )),
-            Type::ZonedTime => Err(NoForm::pending(
-                "ZonedTime",
-                "send `at.to_string()` and read it back with `parse_zoned_time()`",
-            )),
-            Type::Duration => Err(NoForm::pending(
-                "Duration",
-                "send `span.to_string()` and read it back with `parse_duration()`",
-            )),
-            Type::Instant => Err(NoForm::pending(
-                "Instant",
-                "send `at.to_string()` and read it back with `parse_instant()`",
+            // A secret's text never leaves the program, so it has no
+            // JSON form in either direction, and a record holding one has
+            // none either.
+            Type::Secret => Err(NoForm::new(
+                "a `Secret` has no JSON form, because its text must never leave the program",
+                "keep the secret out of the encoded value and pass it straight to the tool that needs it",
             )),
             Type::RegexMatch => Err(NoForm::new(
                 "a `RegexMatch` describes a position in one text and has no JSON form",
@@ -371,7 +373,7 @@ impl<'a> Checker<'a> {
 }
 
 /// The declaration of type `def_id` in an imported `module`.
-fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
+pub(super) fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
     module.file.decls.iter().find_map(|decl| match decl {
         corvid_ast::Decl::Type(t) if module.resolved.symbols.lookup_def(&t.name.name) == Some(def_id) => Some(t),
         _ => None,

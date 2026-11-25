@@ -66,38 +66,3 @@ fn methods_and_parsing_typecheck() {
     let errors = kinds("agent main() -> Instant:\n    return Instant.from_epoch_milliseconds(\"soon\")\n");
     assert!(errors.iter().any(|kind| matches!(kind, TypeErrorKind::TypeMismatch { .. })), "got {errors:?}");
 }
-
-#[test]
-fn time_crosses_tools_and_prompts_as_text_but_not_routes_yet() {
-    assert_clean(
-        "tool book_slot(at: Instant, every: Duration) -> Instant
-
-prompt suggest_time(goal: String) -> Instant:
-    \"When should {goal} happen?\"
-",
-    );
-    let errors = kinds(
-        "type Booking:
-    at: Instant
-
-memory Calendar:
-    next: Instant
-",
-    );
-    assert!(
-        errors.iter().any(|kind| matches!(kind, TypeErrorKind::PendingJsonFormAtBoundary { type_name, boundary }
-            if type_name == "Instant" && boundary == "a store field")),
-        "got {errors:?}"
-    );
-    let errors = check("type Booking:\n    at: Instant\n\nagent main(b: Booking) -> String:\n    return b.to_json()\n").errors;
-    assert!(errors.iter().any(|e| e.kind.hint().is_some_and(|hint| hint.contains("parse_instant()"))), "got {errors:?}");
-}
-
-#[test]
-fn a_decimal_inside_a_record_with_time_is_still_refused_at_a_tool() {
-    let errors = kinds("type Charge:\n    at: Instant\n    amount: Decimal\n\ntool record(charge: Charge) -> String\n");
-    assert!(
-        errors.iter().any(|kind| matches!(kind, TypeErrorKind::PendingJsonFormAtBoundary { type_name, .. } if type_name == "Decimal")),
-        "got {errors:?}"
-    );
-}

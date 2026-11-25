@@ -67,6 +67,9 @@ impl<'a> Checker<'a> {
                 self.walk_grounded_pure_expr(agent, iter);
                 self.walk_grounded_pure_block(agent, body);
             }
+            Stmt::Atomic { body, .. } => {
+                self.walk_grounded_pure_block(agent, body);
+            }
             Stmt::While { cond, body, .. } => {
                 self.walk_grounded_pure_expr(agent, cond);
                 self.walk_grounded_pure_block(agent, body);

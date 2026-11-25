@@ -125,7 +125,7 @@ Amended on 2026-11-24 under the syntax simplicity rule, before slice 3 landed.
 
 ### JSON, contracts and SDKs
 
-The five types get a JSON form through `corvid-public-json`, so HTTP routes, `T.from_json`, prompts and OpenAPI agree:
+The seven types get a JSON form through `corvid-public-json` (`text_scalar`), so HTTP routes, `T.from_json`, tools, prompts and OpenAPI agree; each is a string in the type's canonical text, the one its own crate prints and parses:
 
 | Type | JSON | OpenAPI |
 | --- | --- | --- |
@@ -134,12 +134,16 @@ The five types get a JSON form through `corvid-public-json`, so HTTP routes, `T.
 | `Instant` | An RFC 3339 string in UTC | `type: string`, `format: date-time` |
 | `TimeZone` | An IANA name | `type: string` |
 | `ZonedTime` | An RFC 9557 string | `type: string` |
+| `Currency` | An ISO 4217 code | `type: string`, `pattern: ^[A-Z]{3}$` |
+| `Locale` | A BCP 47 tag | `type: string` |
 
-Decoding a JSON number into a `Decimal` field is a `JsonError` that names the field and asks for a string. Accepting numbers exactly would need the raw number text, and a decoder that went through `f64` would reintroduce the error that `Decimal` exists to remove. The TypeScript client, and the Swift, Kotlin and Python SDKs, map each type to the platform type that preserves its value: a string for `Decimal` in TypeScript, `Decimal` in Python and Swift, `BigDecimal` in Kotlin, and the platform's instant and duration types.
+Decoding a JSON number into a `Decimal` field is a `JsonError` that names the field and asks for a string. Accepting numbers exactly would need the raw number text, and a decoder that went through `f64` would reintroduce the error that `Decimal` exists to remove. **The TypeScript client and the Swift, Kotlin and Python SDKs hold each type as a string with its exact text** (amended when slice 5 landed). The draft mapped them to platform types, but those lose data in two of the four languages: Python's `datetime` and `timedelta` and Swift's `Date` drop nanoseconds, and Swift's `Decimal` drops trailing zeros, so `19.90` would come back as `19.9`. JavaScript has neither an exact decimal nor a nanosecond time. The exact text is the one mapping every client holds without loss, it matches what OpenAPI publishes, and a client converts with its platform parser where it wants arithmetic. A JSON number sent for a `Decimal` is refused in the generated Python too.
+
+**Table columns are not part of the JSON form.** How a column is stored decides how `where` and `order_by` compare it: a decimal stored as text sorts wrong, and Postgres timestamps and intervals hold microseconds, not nanoseconds. That mapping is a B09 item owned by the main line, which reuses the canonical encodings named here (`Decimal::to_string`/`parse` or `coefficient`/`scale`, `Instant::nanoseconds_since_epoch`, `Duration::nanoseconds`, `TimeZone::name`, `ZonedTime::instant` with its zone). Until it lands, a table column of a B06 type is a compile error.
 
 ### Across the tiers
 
-Answered under the project's three-tier rule. Slice 1 ships the language and the interpreter only, so for now every answer below is still to come: a `Decimal` cannot yet leave the program. Each answer says which slice delivers it.
+Answered under the project's three-tier rule. Slice 5 delivered the JSON forms every tier reads; the browser-side bindings below still need the frontend's form work.
 
 - **What the backend knows that the frontend and AI can use.** A `Decimal` carries its exact digits and its scale, so `19.90` is two places and not a binary approximation. A `TimeZone` carries the zone's daylight-saving transitions, and a `ZonedTime` carries the instant, the zone and the offset in force. Each of these is one declaration in source, such as `price: Decimal`.
 - **What the UI gets for free.** From slice 5, the same declaration types the frontend. A `Decimal` field becomes a price input that accepts exactly the digits a `Decimal` holds and reports errors in `parse_decimal`'s words. The browser runs the `corvid-decimal` rules compiled to WebAssembly, not a JavaScript copy, so a total shown in the cart is the total the server charges. A `ZonedTime` or `Instant` field displays in the viewer's zone and handles daylight-saving changes in the browser. Currency display (slice 4) uses the one formatter with an explicit locale. A separate stack needs a decimal library on each side and a convention for sending amounts as strings, and the two drift. Here the compiler checks both sides against one type, and changing a field from `Float` to `Decimal` points at every form, route and prompt that uses it.
@@ -151,7 +155,11 @@ Every method above is pure and deterministic, so replay never records them, and 
 
 ### Native code
 
-Both tiers call `corvid-decimal` and `corvid-time`. The native representation (`Decimal` as a 128-bit value, `Duration` and `Instant` as 64-bit integers, `TimeZone` as an index into the bundled database, and `ZonedTime` as a pair) is decided in each type's native slice, with parity tests that compare results on both tiers. Until then, programs that use these types run on the interpreter, and native builds refuse them with a message naming the slice, as they refused regular expressions before B03's native slices.
+Both tiers call `corvid-decimal` and `corvid-time`. The native representation (`Duration` and `Instant` as 64-bit integers, `TimeZone` as an index into the bundled database, and `ZonedTime` as a pair) is decided in each type's native slice, with parity tests that compare results on both tiers. Until then, programs that use these types run on the interpreter, and native builds refuse them with a message naming the slice, as they refused regular expressions before B03's native slices.
+
+Slice 6 decided `Decimal`. Native code keeps every value in one 8-byte slot, so a 128-bit value would need a heap object anyway. A native `Decimal` is therefore a Corvid String holding its exact canonical text, the text of its JSON form, which reuses string reference counting, list and record storage and printing. Every operator and method is one call into a runtime entry point that parses with `corvid-decimal`, computes, and returns canonical text, so both tiers share each rule and message. Structural equality compares decimals by value. Parsing on every operation costs time; the roadmap records measuring it and moving to a compact heap value if it dominates.
+
+Slice 7 decided the other six types the same way, and for the same reason: a native `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency` or `Locale` is a String holding its canonical text, and every operator and method is one runtime call into `corvid-time` or `corvid-currency`. The proposal's first idea, integers and a zone index, would have needed a second width for the 128-bit nanosecond counts and a pair for zoned times, while the text form reuses everything `Decimal` already uses and is the JSON form. Instants and durations order through the runtime by value, because RFC 3339 text with a fraction does not sort bytewise, and the structural comparison gains one layout per type. Zone-dependent operations report themselves to the runtime exactly where the interpreter does, so a native replay of a trace recorded with another tz database warns the same way; a binary that never starts the runtime records and replays no trace, so it has nothing to report. Making the text the representation found that RFC 9557 text did not read back for local mean time offsets with seconds or for local times in year 10000; `ZonedTime::parse` now reads both, which also fixes `from_json` on the interpreter. Tools and prompts holding any of these types stay on the interpreter, which keeps `time_now()` there, where replay substitutes the clock.
 
 ### Not an invention
 
@@ -178,7 +186,7 @@ Recorded under the project's syntax simplicity rule.
 3. **Time zones on the interpreter.** `TimeZone`, `ZonedTime`, zone literals checked by their slot, conversion, `parse_local_time` with its errors for gaps and folds, `parse_zoned_time`, calendar arithmetic, the Berlin daylight-saving acceptance test, and the scheduler moved onto `corvid-time`.
 3b. **The tz database version in the trace header**, with replay reporting a mismatch.
 4. **Currency formatting.** `Currency`, `Locale`, `format_currency` and `minor_digits` with CLDR data.
-5. **JSON, contracts and SDKs** for all five types.
+5. **JSON, contracts and SDKs** for all seven types, as exact text; table columns are a B09 item.
 6. **Native Decimal**, with parity tests.
 7. **Native time types**, with parity tests.
 

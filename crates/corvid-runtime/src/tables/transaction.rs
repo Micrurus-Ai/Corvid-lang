@@ -1,0 +1,113 @@
+//! `atomic:` blocks (B09 P7a): table writes that commit together or not
+//! at all.
+//!
+//! A transaction runs on its own connection, so no other agent's
+//! statements land inside it. On SQLite it also holds the file's writer
+//! turn from `BEGIN IMMEDIATE` to its end: other writers wait in the
+//! registry's queue instead of on SQLite's lock, where they could
+//! deadlock against the open transaction. On Postgres the connection is
+//! opened for the block and closed after it.
+//!
+//! The begin, commit and rollback are recorded in the trace as table
+//! calls named `table:<database>.begin`, `.commit` and `.rollback`, so a
+//! replay shows where a transaction started and how it ended; a replay
+//! serves them from the trace and never opens the database.
+
+use super::{named_database, resolve_location, PostgresTables, TableConnection, TableEngine};
+use crate::errors::RuntimeError;
+use crate::Runtime;
+use corvid_ast::DatabaseLocation;
+use serde_json::Value as J;
+use std::sync::Arc;
+
+/// An open `atomic:` block's transaction.
+pub struct TableTransaction {
+    /// The database's connection identity, as table operations name it.
+    pub(super) id: String,
+    database: String,
+    /// `None` during a replay, which never opens the database.
+    pub(super) connection: Option<TableConnection>,
+    _writer_turn: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl std::fmt::Debug for TableTransaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableTransaction").field("database", &self.database).finish_non_exhaustive()
+    }
+}
+
+impl Runtime {
+    /// Begin the transaction for an `atomic:` block on `database`.
+    pub async fn table_begin(
+        &self,
+        database: &str,
+        location: &DatabaseLocation,
+        engine: TableEngine,
+    ) -> Result<TableTransaction, RuntimeError> {
+        let resolved = resolve_location(location)?;
+        let id = format!("{}:{resolved}", engine.name());
+        let mut opened = None;
+        self.recorded_table_call(&format!("table:{database}.begin"), Vec::new(), || async {
+            opened = Some(self.open_transaction(&resolved, engine).await?);
+            Ok(J::Null)
+        })
+        .await?;
+        let (connection, writer_turn) = match opened {
+            Some((connection, turn)) => (Some(connection), turn),
+            None => (None, None),
+        };
+        Ok(TableTransaction { id, database: database.to_string(), connection, _writer_turn: writer_turn })
+    }
+
+    /// Commit an `atomic:` block's writes.
+    pub async fn table_commit(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
+        self.end_transaction(transaction, "commit", "COMMIT").await
+    }
+
+    /// Undo an `atomic:` block's writes.
+    pub async fn table_rollback(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
+        self.end_transaction(transaction, "rollback", "ROLLBACK").await
+    }
+
+    async fn open_transaction(
+        &self,
+        location: &str,
+        engine: TableEngine,
+    ) -> Result<(TableConnection, Option<tokio::sync::OwnedMutexGuard<()>>), RuntimeError> {
+        match engine {
+            TableEngine::Sqlite => {
+                // A connection of its own, opened before taking the turn.
+                let handle = self.db_registry().open(location)?;
+                let turn = handle.hold_writer_turn().await;
+                self.db_registry().execute(handle.handle_id, "BEGIN IMMEDIATE", &[])?;
+                Ok((TableConnection::Sqlite(handle), turn))
+            }
+            TableEngine::Postgres { tls } => {
+                let connection = PostgresTables::connect(location, tls).await?;
+                connection.execute("BEGIN", &[]).await?;
+                Ok((TableConnection::Postgres(Arc::new(connection)), None))
+            }
+        }
+    }
+
+    async fn end_transaction(&self, transaction: TableTransaction, op: &str, sql: &str) -> Result<(), RuntimeError> {
+        let TableTransaction { database, connection, _writer_turn, .. } = transaction;
+        self.recorded_table_call(&format!("table:{database}.{op}"), Vec::new(), || async {
+            match &connection {
+                Some(TableConnection::Sqlite(handle)) => {
+                    self.db_registry().execute(handle.handle_id, sql, &[]).map_err(|e| named_database(&database, e))?;
+                }
+                Some(TableConnection::Postgres(connection)) => {
+                    connection.execute(sql, &[]).await.map_err(|e| named_database(&database, e))?;
+                }
+                None => {}
+            }
+            Ok(J::Null)
+        })
+        .await?;
+        // The writer turn is released only now, after the commit or
+        // rollback has finished.
+        drop(_writer_turn);
+        Ok(())
+    }
+}

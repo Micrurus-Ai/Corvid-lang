@@ -50,15 +50,17 @@ pub fn query_sql(table: &TableRef<'_>, query: &TableQuery) -> Result<(String, Ve
         sql.push_str(" WHERE ");
         sql.push_str(&filter_sql(table, filter, &mut params));
     }
-    let key = quote(table.key);
-    match &query.order {
-        Some(column) if column != table.key => {
-            let direction = if query.descending { "DESC" } else { "ASC" };
-            sql.push_str(&format!(" ORDER BY {} {direction}, {key} ASC", quote(column)));
-        }
-        Some(_) if query.descending => sql.push_str(&format!(" ORDER BY {key} DESC")),
-        _ => sql.push_str(&format!(" ORDER BY {key} ASC")),
+    // The `order_by` column first, then the key's columns, so equal sort
+    // values keep key order; without `order_by`, key order alone.
+    let mut order = Vec::new();
+    if let Some(column) = &query.order {
+        let direction = if query.descending { "DESC" } else { "ASC" };
+        order.push(format!("{} {direction}", quote(column)));
     }
+    for key in table.keys.iter().filter(|key| query.order.as_ref() != Some(*key)) {
+        order.push(format!("{} ASC", quote(key)));
+    }
+    sql.push_str(&format!(" ORDER BY {}", order.join(", ")));
     if let Some(count) = query.take {
         if count < 0 {
             return Err(RuntimeError::Other(format!(
@@ -149,10 +151,12 @@ mod tests {
         (vec!["id".into(), "title".into(), "count".into(), "revision".into()], DatabaseLocation::Path(":memory:".into()))
     }
 
+    static ID: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| vec!["id".to_string()]);
+
     const KINDS: &[ColumnKind] = &[ColumnKind::Integer, ColumnKind::Text, ColumnKind::Integer, ColumnKind::Integer];
 
     fn table<'a>(columns: &'a [String], location: &'a DatabaseLocation, engine: super::super::TableEngine) -> TableRef<'a> {
-        TableRef { name: "Shelf", key: "id", columns, kinds: KINDS, location, engine }
+        TableRef { name: "Shelf", keys: ID.as_slice(), columns, kinds: KINDS, location, engine, transaction: None }
     }
 
     #[test]

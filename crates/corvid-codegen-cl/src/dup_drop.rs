@@ -50,7 +50,7 @@ use corvid_ir::{IrAgent, IrBlock, IrExpr, IrExprKind, IrStmt};
 use corvid_resolve::LocalId;
 use std::collections::BTreeMap;
 
-use crate::dataflow::{analyze_agent, BranchDrops, IrNavStep, IrPath, OwnershipPlan};
+use crate::dataflow::{analyze_agent, IrNavStep, IrPath, OwnershipPlan};
 
 mod propagation;
 
@@ -182,6 +182,33 @@ fn apply_plan_owned(mut out: IrAgent, plan: &OwnershipPlan, mut next_local: u32)
         }
     }
 
+    // Edge drops: a local that dies on entry to an If branch or a loop
+    // body is released at the start of that block, before its first
+    // statement, so the drop runs on every path through the block.
+    for (if_path, drops) in &plan.branch_drops {
+        let mut then_path = if_path.clone();
+        then_path.push(IrNavStep::IfThen);
+        push_entry_drops(&mut group, then_path, &drops.then_drops);
+        if drops.fallthrough_drops.is_empty() {
+            continue;
+        }
+        if if_has_else(&out.body, if_path) {
+            let mut else_path = if_path.clone();
+            else_path.push(IrNavStep::IfElse);
+            push_entry_drops(&mut group, else_path, &drops.fallthrough_drops);
+        } else {
+            // No statements to shift: the synthesized else holds only the drops.
+            synthesize_else_drops(&mut out.body, if_path, &drops.fallthrough_drops);
+        }
+    }
+    for (loop_path, locals) in &plan.loop_entry_drops {
+        if let Some(step) = loop_body_step(&out.body, loop_path) {
+            let mut body_path = loop_path.clone();
+            body_path.push(step);
+            push_entry_drops(&mut group, body_path, locals);
+        }
+    }
+
     // Sort each group's insertions: by (idx desc, side desc-so-After-first-then-Before).
     // Inserting from the back means earlier positions don't shift. At
     // the SAME idx, we want After insertions to land at idx+1 BEFORE
@@ -202,25 +229,11 @@ fn apply_plan_owned(mut out: IrAgent, plan: &OwnershipPlan, mut next_local: u32)
         });
     }
 
-    // Return hoists and branch-tail edits use original statement coordinates.
-    // Apply them before inserting siblings that would shift those coordinates.
+    // Return hoists use original statement coordinates. Apply them
+    // before inserting siblings that would shift those coordinates.
     hoists.sort_by(|a, b| b.return_idx.cmp(&a.return_idx));
     for hoist in hoists {
         apply_hoist(&mut out.body, &hoist);
-    }
-
-    // Branch-specialized drops. For each If statement
-    // that analysis identified as needing per-branch drops,
-    // inject `IrStmt::Drop` ops at the tail of the appropriate
-    // branch. Deepest-nested Ifs processed first so earlier
-    // injections don't shift outer If indices.
-    //
-    // Keyed by IrPath ordered by length descending so a branch drop
-    // inside a nested If lands before its enclosing If is mutated.
-    let mut branch_drops: Vec<_> = plan.branch_drops.iter().collect();
-    branch_drops.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-    for (if_path, drops) in branch_drops {
-        apply_branch_drops(&mut out.body, if_path, drops);
     }
 
     // A parent path is a prefix of each child path. Visit children first
@@ -366,6 +379,9 @@ fn scan_stmt(stmt: &IrStmt, max_id: &mut u32) {
             scan_expr(iter, max_id);
             scan_block(body, max_id);
         }
+        IrStmt::Atomic { body, .. } => {
+            scan_block(body, max_id);
+        }
         IrStmt::While { cond, body, .. } => {
             scan_expr(cond, max_id);
             scan_block(body, max_id);
@@ -424,7 +440,11 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
             scan_expr(items, max_id);
             scan_expr(next_cursor, max_id);
         }
-        IrExprKind::TableOp { arg, .. } => scan_expr(arg, max_id),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                scan_expr(arg, max_id);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 scan_expr(e, max_id);
@@ -534,7 +554,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_reads_local(items, target) || expr_reads_local(next_cursor, target)
         }
-        IrExprKind::TableOp { arg, .. } => expr_reads_local(arg, target),
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_reads_local(arg, target)),
         IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_reads_local(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
@@ -738,95 +758,70 @@ fn zero_span() -> Span {
     Span::new(0, 0)
 }
 
-/// Apply per-branch drops to an If statement.
-///
-/// `if_path` points to the If statement inside `root`. `drops` lists
-/// locals that die on each branch edge per the dataflow analysis.
-///
-/// For the then-edge: append `Drop` ops to the tail of
-/// `then_block`. Sorting BranchDrops via BTreeSet keeps the order
-/// deterministic.
-///
-/// For the fallthrough-edge: append to the tail of `else_block` if
-/// it exists; otherwise synthesize an else_block containing only
-/// the Drop ops.
-fn apply_branch_drops(root: &mut IrBlock, if_path: &IrPath, drops: &BranchDrops) {
-    // Navigate to the parent block containing the If statement, then
-    // fetch the specific If via its final Stmt index.
-    let (parent, idx) = split_path(if_path);
-    let parent_block = navigate_mut(root, &parent);
-    if idx >= parent_block.stmts.len() {
-        return;
-    }
-    let if_stmt = &mut parent_block.stmts[idx];
-    let (then_block, else_block, if_span) = match if_stmt {
-        IrStmt::If {
-            then_block,
-            else_block,
-            span,
-            ..
-        } => (then_block, else_block, *span),
-        _ => return, // stale path
-    };
-
-    // Then-branch: append Drops to end of then_block, or before
-    // any trailing Return so they actually execute.
-    insert_drops_at_block_tail(then_block, &drops.then_drops);
-
-    // Fallthrough/else-branch: append to existing else_block or
-    // synthesize a new one. Note: synthesizing an else_block is a
-    // semantic change — it means control now passes through a new
-    // explicit block on the fall-through path. Since the new block
-    // contains only Drops, all-primitive pure computation outside
-    // the If continues to work; the only observable difference is
-    // the Drops fire where they previously didn't.
-    if !drops.fallthrough_drops.is_empty() {
-        match else_block {
-            Some(eb) => insert_drops_at_block_tail(eb, &drops.fallthrough_drops),
-            None => {
-                let drop_stmts: Vec<IrStmt> = drops
-                    .fallthrough_drops
-                    .iter()
-                    .map(|&l| IrStmt::Drop {
-                        local_id: l,
-                        span: zero_span(),
-                    })
-                    .collect();
-                *else_block = Some(IrBlock {
-                    stmts: drop_stmts,
-                    span: if_span,
-                });
-            }
-        }
-    }
-}
-
-/// Append Drop ops at the tail of `block`, but BEFORE any trailing
-/// Return — Drops after a Return are unreachable at runtime. Locals
-/// iterated in BTreeSet order for deterministic output.
-fn insert_drops_at_block_tail(
-    block: &mut IrBlock,
-    locals: &std::collections::BTreeSet<corvid_resolve::LocalId>,
+/// Queue `Drop`s for `locals` at the start of the block `block_path`
+/// leads into (an If branch or a loop body).
+fn push_entry_drops(
+    group: &mut BTreeMap<IrPath, Vec<(usize, IrStmt, InsertionSide)>>,
+    block_path: IrPath,
+    locals: &std::collections::BTreeSet<LocalId>,
 ) {
     if locals.is_empty() {
         return;
     }
-    let ret_pos = block
-        .stmts
-        .iter()
-        .rposition(|s| matches!(s, IrStmt::Return { .. } | IrStmt::Continue { .. } | IrStmt::Break { .. }));
-    let insert_at = ret_pos.unwrap_or(block.stmts.len());
-    let mut at = insert_at;
+    let inserts = group.entry(block_path).or_default();
     for &l in locals {
-        block.stmts.insert(
-            at,
+        inserts.push((
+            0,
             IrStmt::Drop {
                 local_id: l,
                 span: zero_span(),
             },
-        );
-        at += 1;
+            InsertionSide::Before,
+        ));
     }
+}
+
+/// The statement `path` points at, if the path still matches the IR.
+fn stmt_at<'a>(root: &'a IrBlock, path: &IrPath) -> Option<&'a IrStmt> {
+    let (parent, idx) = split_path(path);
+    find_block(root, &parent)?.stmts.get(idx)
+}
+
+fn if_has_else(root: &IrBlock, if_path: &IrPath) -> bool {
+    matches!(stmt_at(root, if_path), Some(IrStmt::If { else_block: Some(_), .. }))
+}
+
+/// The navigation step into the body of the loop `loop_path` points at.
+fn loop_body_step(root: &IrBlock, loop_path: &IrPath) -> Option<IrNavStep> {
+    match stmt_at(root, loop_path)? {
+        IrStmt::For { .. } => Some(IrNavStep::ForBody),
+        IrStmt::While { .. } => Some(IrNavStep::WhileBody),
+        _ => None,
+    }
+}
+
+/// Give an If without an else branch one that holds only `Drop`s for
+/// `locals`, the locals that die when the condition is false.
+fn synthesize_else_drops(
+    root: &mut IrBlock,
+    if_path: &IrPath,
+    locals: &std::collections::BTreeSet<LocalId>,
+) {
+    let (parent, idx) = split_path(if_path);
+    let parent_block = navigate_mut(root, &parent);
+    let Some(IrStmt::If { else_block, span, .. }) = parent_block.stmts.get_mut(idx) else {
+        return; // stale path
+    };
+    *else_block = Some(IrBlock {
+        stmts: locals
+            .iter()
+            .map(|&l| IrStmt::Drop {
+                local_id: l,
+                span: zero_span(),
+            })
+            .collect(),
+        span: *span,
+    });
 }
 
 // ---------------------------------------------------------------------------

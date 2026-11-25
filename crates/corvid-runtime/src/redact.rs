@@ -62,7 +62,7 @@ impl RedactionSet {
         match value {
             Value::String(s) => {
                 if self.secrets.contains(&s) {
-                    Value::String("<redacted>".into())
+                    Value::String(crate::secret_arguments::REDACTED_SECRET.into())
                 } else {
                     Value::String(s)
                 }

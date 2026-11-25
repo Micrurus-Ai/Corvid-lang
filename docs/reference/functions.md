@@ -40,6 +40,8 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.replace_regex(pattern: String, replacement: String) -> String`
 - `String.split_regex(pattern: String) -> List<String>`
 
+- `String.utf8() -> Bytes`
+
 The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must be a string literal, which the compiler checks. A `RegexMatch` has the fields `text: String`, `start: Int`, `end: Int` and `groups: List<Option<String>>`. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
@@ -129,6 +131,33 @@ A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19
 A string literal where a `TimeZone` is meant is a zone the compiler checks: `at.in_zone("Europe/Berlin")`. See [Time zones](stdlib/time.md#time-zones).
 
 Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` reads the clock. See [Durations and instants](stdlib/time.md#durations-and-instants).
+
+## Bytes
+
+- `String.utf8() -> Bytes`
+- `Bytes.from_hex(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64_url(text: String) -> Result<Bytes, String>`
+- `Bytes.to_utf8() -> Result<String, String>`
+- `Bytes.length() -> Int`
+- `Bytes.to_hex() -> String`
+- `Bytes.to_base64() -> String`
+- `Bytes.to_base64_url() -> String`
+- `Bytes.sha256() -> Bytes`
+- `Bytes.sha384() -> Bytes`
+- `Bytes.sha512() -> Bytes`
+- `Bytes.hmac_sha256(key: Bytes or Secret) -> Bytes`
+- `Bytes.hmac_sha512(key: Bytes or Secret) -> Bytes`
+- `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) -> Bool`
+
+`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. An HMAC key is `Bytes` or a `Secret`. `verify_ed25519` checks a 64-byte Ed25519 signature against a 32-byte public key strictly, and is `false` for any other length. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
+
+## Secret
+
+- `Secret.decode_base64_after(prefix: String) -> Result<Secret, String>`
+- `Secret.verify_password(hash: String) -> Bool`
+
+No method returns a secret's text. `decode_base64_after` returns another secret, the key written in base64 after a literal `prefix` such as `"whsec_"`. `verify_password` says whether the secret is the password an Argon2id hash in PHC format was made from, using the cost and salt the hash records; it is `false` for a malformed hash, and it is pure. `==` and `!=` between two secrets are constant-time, and a secret can key `hmac_sha256` and `hmac_sha512`; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one and `random_token(bytes)` in `std/crypto` draws one. See [Cryptography: secrets](cryptography.md#secrets).
 
 ## Bool
 
@@ -316,6 +345,15 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `agent cache_entry(key: CacheKeyEnvelope, replay_safe: Bool, invalidation_key: String) -> CacheEntryEnvelope`
 - `agent cache_hit(entry: CacheEntryEnvelope) -> Bool`
 
+### [std/crypto](../../std/crypto.cor)
+
+- `type PasswordCost` with `memory_kib: Int`, `iterations: Int`, `lanes: Int`
+- `fn owasp_2023() -> PasswordCost`
+- `tool random_token(bytes: Int) -> Secret uses crypto_random`
+- `tool hash_password(password: Secret, cost: PasswordCost) -> String uses crypto_random`
+
+`random_token` draws 16 to 1024 random bytes from the operating system and returns their unpadded base64url text as a `Secret`; replay draws a fresh one and warns. `hash_password` returns the Argon2id hash as a PHC string and refuses a cost below the OWASP 2023 minimum. Check a password with `Secret.verify_password(hash)`. See [Cryptography: random tokens](cryptography.md#random-tokens) and [Passwords](cryptography.md#passwords).
+
 ### [std/db](../../std/db.cor)
 
 - `agent sqlite_open(dsn: String, replay_key: String) -> DbConnection`
@@ -462,6 +500,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 
 ### [std/secrets](../../std/secrets.cor)
 
+- `tool secret(name: String) -> Result<Secret, String> uses secrets_read`
 - `tool secret_read(name: String) -> Result<SecretReadEnvelope, String> uses secrets_read`
 - `agent secret_present(name: String, value: String) -> SecretReadEnvelope`
 - `agent secret_missing(name: String) -> SecretReadEnvelope`
@@ -600,7 +639,7 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
 - `ui.list_editor(rows: View, new_row: View, add_label: String, remove_label: String) -> View` adds local insertion and removal to one keyed browser list. Render exactly one row with the same row function for the template. Its key is the prefix for newly generated string keys. The other fields supply the defaults. Edits and membership last until reload.
-- `ui.assistant_reorder(component: View, name: String, description: String) -> View` exposes the move action for one enclosed browser list. Its inputs are a row key and a direction of `up` or `down`. For a list editor, `{}` reads the current keys in display order.
+- `ui.assistant_reorder(component: View, name: String, description: String) -> View` exposes the move action for one enclosed browser list. Its inputs are a string row key and a direction of `up` or `down`. For a list editor, `{}` reads the current keys in display order. A move requires the row's enabled button for that direction. A cached call fails if the row was removed, the list left its wrapper, or the wrapper withdrew the tool name.
 - The keyed child loop uses `ui.browser_row(key: String, key_field: String, fields: Map<String, List<String>>, content: List<View>) -> View` to mount a record editor and `ui.browser_rows(label: String, rows: List<View>) -> View` to group the rows.
 - `ui.boolean_children(field: String, content: List<View>) -> View` shows its children while a browser boolean is true. Prefer `if settings.tools.web_search:` inside a child block for compile-time checking.
 - `ui.choice_children(field: String, variant: String, content: List<View>) -> View` groups views whose visibility follows a browser choice. Prefer an indented `if settings.mode == Scheduled` child block so the compiler checks the field and variant.

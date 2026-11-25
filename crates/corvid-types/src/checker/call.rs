@@ -751,7 +751,9 @@ impl<'a> Checker<'a> {
         }
 
         self.bump_effect(WeakEffect::Human);
-        self.type_expr_to_type(&args[1])
+        let answer = self.type_expr_to_type(&args[1]);
+        self.refuse_secret_for_person("ask", &answer, args[1].span());
+        answer
     }
 
     fn check_choose_call(&mut self, name: &Ident, args: &[Expr]) -> Type {
@@ -772,7 +774,10 @@ impl<'a> Checker<'a> {
 
         self.bump_effect(WeakEffect::Human);
         match self.check_expr(&args[0]) {
-            Type::List(inner) => *inner,
+            Type::List(inner) => {
+                self.refuse_secret_for_person("choose", &inner, args[0].span());
+                *inner
+            }
             Type::Unknown => Type::Unknown,
             other => {
                 self.errors.push(TypeError::new(
@@ -811,6 +816,8 @@ impl<'a> Checker<'a> {
             Some(Binding::BuiltIn(BuiltIn::ZonedTime)) => Type::ZonedTime,
             Some(Binding::BuiltIn(BuiltIn::Currency)) => Type::Currency,
             Some(Binding::BuiltIn(BuiltIn::Locale)) => Type::Locale,
+            Some(Binding::BuiltIn(BuiltIn::Bytes)) => Type::Bytes,
+            Some(Binding::BuiltIn(BuiltIn::Secret)) => Type::Secret,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,
@@ -987,6 +994,11 @@ impl<'a> Checker<'a> {
                 return (**inner).clone();
             }
         }
+        // A `Secret` has no method that returns its text; the table's
+        // methods on it return another secret or a `Bool`.
+        if let Some(ty) = self.refuse_secret_method(&recv_ty, method_name, args) {
+            return ty;
+        }
         // Builtin-method table (slice 45c): methods on built-in
         // receiver types resolve here — one shared table drives the
         // checker, the lowerer, and the interpreter.
@@ -1003,6 +1015,12 @@ impl<'a> Checker<'a> {
                 for a in args {
                     let _ = self.check_expr(a);
                 }
+                return sig.ret;
+            }
+            // Cryptography (B04): an HMAC key is `Bytes` or a `Secret`,
+            // which one table parameter cannot say.
+            if sig.kind.is_hmac() {
+                self.check_hmac_key(&method_name.name, &args[0]);
                 return sig.ret;
             }
             // Sequential signature refinement (45j): `fold`'s
@@ -1073,6 +1091,9 @@ impl<'a> Checker<'a> {
             }
             // Exact decimals (B06): a literal `places` is 0 to 28.
             self.check_decimal_method_arguments(sig.kind, args);
+            if sig.kind == BuiltinMethodKind::SecretDecodeBase64After {
+                self.check_secret_key_prefix(args);
+            }
             return sig.ret;
         }
 

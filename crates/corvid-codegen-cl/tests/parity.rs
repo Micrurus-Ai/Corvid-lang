@@ -54,6 +54,18 @@ mod typed_json;
 mod sumtypes;
 #[path = "parity/text.rs"]
 mod text;
+#[path = "parity/scalar_harness.rs"]
+mod scalar_harness;
+#[path = "parity/decimal.rs"]
+mod decimal;
+#[path = "parity/time.rs"]
+mod time;
+#[path = "parity/currency.rs"]
+mod currency;
+#[path = "parity/crypto.rs"]
+mod crypto;
+#[path = "parity/loop_ownership.rs"]
+mod loop_ownership;
 
 /// Path to the `corvid-test-tools` staticlib. The parity harness links
 /// this into every compiled Corvid binary so `#[tool]`-declared mocks

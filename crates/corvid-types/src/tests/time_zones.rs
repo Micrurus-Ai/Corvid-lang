@@ -72,10 +72,3 @@ fn zoned_times_compare_by_instant_not_by_order() {
     let errors = kinds("agent main(a: ZonedTime) -> ZonedTime:\n    return a + 1\n");
     assert!(errors.iter().any(|kind| matches!(kind, TypeErrorKind::TimeOperatorMismatch { .. })), "got {errors:?}");
 }
-
-#[test]
-fn zones_cross_tools_and_prompts_as_text_but_not_routes_yet() {
-    assert_clean("tool book(at: ZonedTime, home: TimeZone) -> ZonedTime\n");
-    let errors = kinds("type Meeting:\n    at: ZonedTime\n\nagent main(m: Meeting) -> String:\n    return m.to_json()\n");
-    assert!(!errors.is_empty(), "to_json must wait for the JSON slice");
-}

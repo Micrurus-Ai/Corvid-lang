@@ -29,6 +29,9 @@ function bindKeyedList(region, mountRecord) {
   }
   let rowRange;
   function move(row, direction) {
+    if (!row || row.parentElement !== list || list.parentElement !== region) return false;
+    const button = row.querySelector(':scope > button[data-corvid-move="' + direction + '"]');
+    if (!button || button.matches(":disabled")) return false;
     const up = direction === "up";
     const neighbor = up ? row.previousElementSibling : row.nextElementSibling;
     if (neighbor) {
@@ -42,9 +45,7 @@ function bindKeyedList(region, mountRecord) {
     // Locate the row without allocating an array of every sibling. Range offsets
     // include text and comments, so use element indices for hand-authored lists.
     let position;
-    if (row.parentElement !== list) {
-      position = 0;
-    } else if (!row.previousElementSibling) {
+    if (!row.previousElementSibling) {
       position = 1;
     } else if (!row.nextElementSibling) {
       position = list.children.length;
@@ -56,9 +57,11 @@ function bindKeyedList(region, mountRecord) {
       position = Array.prototype.indexOf.call(list.children, row) + 1;
     }
     status.textContent = row.dataset.corvidKey + ", position " + position + " of " + rows.size;
+    return true;
   }
   const owner = region.closest("[data-reorder-owner]");
   if (owner && (rows.size || editor) && document.modelContext?.registerTool && owner.querySelectorAll("[data-browser-rows]").length === 1) {
+    const toolName = owner.dataset.corvidTool;
     const schema = {type: "object", additionalProperties: false,
       properties: {key: editor ? {type: "string"} : {type: "string", enum: Array.from(rows.keys())},
         direction: {type: "string", enum: ["up", "down"]}}};
@@ -67,10 +70,14 @@ function bindKeyedList(region, mountRecord) {
       schema.description = "Send {} to read current row keys in order, or supply a key and direction to move.";
     } else schema.required = ["key", "direction"];
     Promise.resolve().then(() => document.modelContext.registerTool({
-      name: owner.dataset.corvidTool, description: owner.dataset.corvidDescription,
+      name: toolName, description: owner.dataset.corvidDescription,
       inputSchema: schema,
       execute(input) {
-        if (!region.isConnected || !input || typeof input !== "object" || Array.isArray(input)) {
+        if (!region.isConnected || region.closest("[data-reorder-owner]") !== owner ||
+            owner.dataset.corvidTool !== toolName || list.parentElement !== region) {
+          throw Error("List action is unavailable.");
+        }
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
           throw Error("Invalid row move.");
         }
         const count = Object.keys(input).length;
@@ -78,7 +85,7 @@ function bindKeyedList(region, mountRecord) {
         if (count !== 2 || !rows.has(input.key) || !["up", "down"].includes(input.direction)) {
           throw Error("Invalid row move.");
         }
-        move(rows.get(input.key), input.direction);
+        if (!move(rows.get(input.key), input.direction)) throw Error("Row move is unavailable.");
         return status.textContent;
       },
     })).catch(error => { status.textContent = error.message; });

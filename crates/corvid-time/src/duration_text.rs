@@ -43,6 +43,13 @@ pub(crate) fn format(duration: &Duration) -> String {
 }
 
 impl Duration {
+    /// Corvid's `text.parse_duration()`: trims whitespace, as
+    /// `parse_int` does, and on failure names the refused text and the
+    /// problem. Both tiers call this, so they return the same `Err`.
+    pub fn parse_user_text(text: &str) -> Result<Duration, String> {
+        Duration::parse(text.trim()).map_err(|error| format!("`{text}` is not a duration: {error}"))
+    }
+
     /// Reads ISO 8601 duration text. Components are written in order
     /// (hours, minutes, seconds), each at most once; only seconds take
     /// a fraction, of at most nine digits.
@@ -148,6 +155,13 @@ impl Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_text_is_trimmed_and_its_error_names_the_text() {
+        assert_eq!(Duration::parse_user_text(" PT1H30M ").unwrap().to_string(), "PT1H30M");
+        let error = Duration::parse_user_text("P1D").unwrap_err();
+        assert!(error.starts_with("`P1D` is not a duration: a day is not a fixed length of time"), "{error}");
+    }
 
     fn round_trip(text: &str) -> String {
         Duration::parse(text).unwrap().to_string()

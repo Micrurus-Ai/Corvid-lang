@@ -130,6 +130,47 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
         text_methods.push((kind, id));
     }
+    // B06 `Decimal`: one import per operation, shaped by its table entry.
+    let mut decimal_operations = HashMap::new();
+    for operation in crate::decimal_methods::DecimalOperation::all() {
+        use crate::decimal_methods::DecimalSlot;
+        let width = |slot: DecimalSlot| match slot {
+            DecimalSlot::Word => I64,
+            DecimalSlot::Float => F64,
+        };
+        let (params, returns) = operation.signature();
+        let mut sig = module.make_signature();
+        sig.params.extend(params.iter().map(|slot| AbiParam::new(width(*slot))));
+        sig.returns.push(AbiParam::new(width(returns)));
+        let symbol = operation.symbol();
+        let id = module
+            .declare_function(&symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
+        decimal_operations.insert(operation, id);
+    }
+    // B06 time and currency types: one import per operation, every
+    // parameter and the return one word.
+    let mut declare_word_import = |symbol: &str, arity: usize| {
+        let mut sig = module.make_signature();
+        sig.params.extend((0..arity).map(|_| AbiParam::new(I64)));
+        sig.returns.push(AbiParam::new(I64));
+        module
+            .declare_function(symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))
+    };
+    let mut time_operations = HashMap::new();
+    for operation in crate::time_methods::TimeOperation::all() {
+        time_operations.insert(operation, declare_word_import(&operation.symbol(), operation.arity())?);
+    }
+    let mut currency_operations = HashMap::new();
+    for operation in crate::currency_methods::CurrencyOperation::all() {
+        currency_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
+    }
+    // B04 `Bytes`: the same one-word shape.
+    let mut bytes_operations = HashMap::new();
+    for operation in crate::bytes_methods::BytesOperation::all() {
+        bytes_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
+    }
     // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
     let mut json_decode_sig = module.make_signature();
     for _ in 0..6 {
@@ -1264,6 +1305,10 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_split,
         string_parse_int: string_parse_int_id,
         text_methods,
+        decimal_operations,
+        time_operations,
+        currency_operations,
+        bytes_operations,
         json_decode_typed: json_decode_typed_id,
         json_encode_typed: json_encode_typed_id,
         string_char_len: string_char_len_id,
@@ -1371,9 +1416,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // stabilized in production.
         in_match_operand: Default::default(),
         next_variable: Default::default(),
-        dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true),
+        dup_drop_enabled: crate::dup_drop_pass_enabled(),
         // Default to the native (link-time wrapper) dispatch; `lower_file`
         // sets this true for library targets (cdylib/staticlib).
         tools_via_registry: false,

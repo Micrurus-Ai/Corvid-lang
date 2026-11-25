@@ -209,6 +209,37 @@ Roadmap: [Phase 20e](../../ROADMAP.md)
 Proof: [minimum confidence tests](../../crates/corvid-types/src/tests.rs)
 Non-scope: Confidence only means something when model adapters report calibrated signals.
 
+#### Secrets That Never Reach a Trace, a Prompt or a Log
+
+A `Secret` is sensitive text, such as a webhook signing key, a password or an API token, that the program can use but never reveal. `secret(name)` from `std/secrets` reads one from the environment. Two secrets compare with `==` in constant time, a secret keys an HMAC (`body.utf8().hmac_sha256(key)`) without its text becoming a value, and a secret can be passed to the tool that needs it, alone or inside a record.
+
+Every other way the text could leave the program is a compile error that says why: no method returns it (`to_string`, `to_json`), it never mixes with text, it has no JSON form, and no route, store field, table column, prompt, connector operation, `ask`, `choose` or `main` signature may hold it, directly or in a record field. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the trace, approvals, the step debugger, replay and the exports built from the trace. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays although the trace never held the text. The application contract leaves every secret field out, so no client or SDK has one to read.
+
+A key the program issues is a `Secret` from the moment it exists: `random_token(32)` from `std/crypto` records `<redacted>`, the owner receives it through a tool that takes a `Secret`, and the program keeps only `hash_password(key, owasp_2023())`, an Argon2id hash at a declared cost. `presented.verify_password(hash)` checks one in constant time and is pure. Replay has no token to substitute, so it draws a fresh one and warns.
+
+```corvid
+import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+tool sign_webhook(key: Secret, body: String) -> String
+tool deliver_key(owner: String, key: Secret) -> Bool
+
+agent signature(body: String) -> Result<String, String>:
+    key = secret("WEBHOOK_KEY")?
+    return Ok(sign_webhook(key, body))
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    delivered = deliver_key(owner, key)
+    return hash_password(key, owasp_2023())
+```
+
+Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
+Tour: `corvid tour --topic secrets`
+Roadmap: [B04 cryptography, slices 2 to 4](../../docs/backend-ai-roadmap.md)
+Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs), [tokens and passwords end to end](../../crates/corvid-driver/tests/tokens_and_passwords.rs)
+Non-scope: interpreter tier only, because native binaries do not dispatch the standard library's tools that produce and take secrets, so a native build refuses `Secret` by name (a roadmap item); secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
+
 ### AI-Native Ergonomics
 
 #### AI-Native Keywords
@@ -345,7 +376,7 @@ agent api_key() -> Result<String, String>:
 Spec: [`std.secrets` reference](../../docs/reference/stdlib/secrets.md)
 Tour: `corvid tour --topic replay-safe-secrets`
 Proof: [secrets + cache e2e tests](../../crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs)
-Non-scope: forwarding a secret into another tool's arguments records it in that tool's events — the structural `SecretHandle` taint is the tracked post-v1.0 deepening.
+Non-scope: `secret_read` returns the text as a `String`, so forwarding it into another tool's arguments records it in that tool's events; [`Secret`](#secrets-that-never-reach-a-trace-a-prompt-or-a-log), read with `secret(name)`, closes that channel.
 
 #### Provenance-Keyed Cache
 
@@ -878,12 +909,14 @@ Non-scope: The login/session and route-authorization runtime is complete; durabl
 
 #### Protocol-Typed Connectors
 
-Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
+Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. How long a request may take and where a redirect may send it are declared the same way: `timeout:` and `redirects:` are required, and a redirect never carries the credential to another origin. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
 
 ```corvid
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    timeout: 10s                          # omit → compile error; no default
+    redirects: never                      # never | same_host | allowed_hosts
     rate_limit: 60 per 60s
     modes: [mock, replay, real]           # omit → compile error; no default
     operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:

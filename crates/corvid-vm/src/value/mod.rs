@@ -51,6 +51,11 @@ pub enum Value {
     Currency(corvid_currency::Currency),
     /// B06 — a BCP 47 locale with CLDR data.
     Locale(Arc<corvid_currency::Locale>),
+    /// An immutable byte string. Equality is constant-time.
+    Bytes(corvid_crypto::Bytes),
+    /// Sensitive text. It displays as `<secret>`, serializes as
+    /// `<redacted>` and compares in constant time.
+    Secret(corvid_crypto::Secret),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -243,6 +248,8 @@ impl Clone for Value {
             Value::ZonedTime(z) => Value::ZonedTime(*z),
             Value::Currency(c) => Value::Currency(*c),
             Value::Locale(l) => Value::Locale(l.clone()),
+            Value::Bytes(b) => Value::Bytes(b.clone()),
+            Value::Secret(s) => Value::Secret(s.clone()),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -290,6 +297,8 @@ impl Value {
             Value::ZonedTime(_) => "ZonedTime".into(),
             Value::Currency(_) => "Currency".into(),
             Value::Locale(_) => "Locale".into(),
+            Value::Bytes(_) => "Bytes".into(),
+            Value::Secret(_) => "Secret".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -364,6 +373,11 @@ impl PartialEq for Value {
             (Value::ZonedTime(a), Value::ZonedTime(b)) => a == b,
             (Value::Currency(a), Value::Currency(b)) => a == b,
             (Value::Locale(a), Value::Locale(b)) => a == b,
+            // Constant-time, wherever the comparison happens: `==`, a
+            // record or list field, `contains`, a map key.
+            (Value::Bytes(a), Value::Bytes(b)) => a.constant_time_eq(b),
+            // Constant-time too, in every position, like `Bytes`.
+            (Value::Secret(a), Value::Secret(b)) => a.constant_time_eq(b),
             (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
             (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,

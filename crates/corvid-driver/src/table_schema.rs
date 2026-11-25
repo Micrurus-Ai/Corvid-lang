@@ -2,7 +2,9 @@
 //! migrations: each table's name, key, checked column types and its
 //! `renamed from` and `retired` clauses, and the engine its database runs on.
 
-use crate::{compile_to_ir, Diagnostic};
+use std::path::Path;
+
+use crate::{compile_to_ir_with_config_at_path, load_corvid_config_for, Diagnostic};
 use corvid_ast::Decl;
 use corvid_runtime::tables::{TableEngine, TableSchema};
 
@@ -15,12 +17,21 @@ pub struct DeclaredDatabase {
     pub tables: Vec<String>,
 }
 
-/// The databases `source` declares. The source must compile, so each
-/// names a running engine and a location.
-pub fn declared_databases(source: &str) -> Result<Vec<DeclaredDatabase>, Vec<Diagnostic>> {
-    compile_to_ir(source)?;
+/// Compile the program at `source_path` exactly as `corvid check` does:
+/// imports resolve from the file's directory and its `corvid.toml`
+/// applies. Returns the IR and the root module's parsed declarations.
+fn compile_program(source: &str, source_path: &Path) -> Result<(corvid_ir::IrFile, corvid_ast::File), Vec<Diagnostic>> {
+    let config = load_corvid_config_for(source_path);
+    let ir = compile_to_ir_with_config_at_path(source, source_path, config.as_ref())?;
     let tokens = corvid_syntax::lex(source).map_err(|_| Vec::new())?;
     let (file, _) = corvid_syntax::parse_file(&tokens);
+    Ok((ir, file))
+}
+
+/// The databases the module at `source_path` declares. The program must
+/// compile, so each names a running engine and a location.
+pub fn declared_databases(source: &str, source_path: &Path) -> Result<Vec<DeclaredDatabase>, Vec<Diagnostic>> {
+    let (_, file) = compile_program(source, source_path)?;
     Ok(file
         .decls
         .iter()
@@ -39,12 +50,10 @@ pub fn declared_databases(source: &str) -> Result<Vec<DeclaredDatabase>, Vec<Dia
         .collect())
 }
 
-/// The tables `source` declares, with their columns' checked types and
-/// `revision` last. The source must compile.
-pub fn table_schemas(source: &str) -> Result<Vec<TableSchema>, Vec<Diagnostic>> {
-    let ir = compile_to_ir(source)?;
-    let tokens = corvid_syntax::lex(source).map_err(|_| Vec::new())?;
-    let (file, _) = corvid_syntax::parse_file(&tokens);
+/// The tables the module at `source_path` declares, with their columns'
+/// checked types and `revision` last. The program must compile.
+pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema>, Vec<Diagnostic>> {
+    let (ir, file) = compile_program(source, source_path)?;
     Ok(file
         .decls
         .iter()
@@ -66,7 +75,7 @@ pub fn table_schemas(source: &str) -> Result<Vec<TableSchema>, Vec<Diagnostic>> 
             )?;
             Some(TableSchema {
                 name: record.name.clone(),
-                key: table.key.as_ref()?.name.clone(),
+                keys: table.keys.iter().map(|key| key.name.clone()).collect(),
                 columns: record.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
                 renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
                 retired: table.retired.iter().map(|name| name.name.clone()).collect(),

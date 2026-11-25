@@ -193,6 +193,8 @@ fn stmt_mentions_local(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::If { cond, .. } => expr_mentions_local(cond, local_id),
         IrStmt::For { iter, .. } => expr_mentions_local(iter, local_id),
         IrStmt::While { cond, .. } => expr_mentions_local(cond, local_id),
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        IrStmt::Atomic { .. } => true,
         IrStmt::Destructure { value, .. } => expr_mentions_local(value, local_id),
         IrStmt::Parallel { arms, .. } => arms
             .iter()
@@ -225,7 +227,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_mentions_local(items, local_id) || expr_mentions_local(next_cursor, local_id)
         }
-        IrExprKind::TableOp { arg, .. } => expr_mentions_local(arg, local_id),
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, local_id)),
         IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_mentions_local(e, local_id)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_mentions_local(scrutinee, local_id)
@@ -309,6 +311,7 @@ fn stmt_is_effect_barrier(stmt: &IrStmt) -> bool {
         | IrStmt::If { .. }
         | IrStmt::For { .. }
         | IrStmt::While { .. }
+        | IrStmt::Atomic { .. }
         | IrStmt::Approve { .. }
         | IrStmt::Break { .. }
         | IrStmt::Continue { .. }

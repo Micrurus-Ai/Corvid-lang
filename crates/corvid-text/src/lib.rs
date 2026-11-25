@@ -17,7 +17,8 @@ pub mod regex;
 pub mod uuid;
 
 pub use encoding::{
-    decode_base64, decode_base64_url, decode_hex, decode_url_component, encode_base64,
-    encode_base64_url, encode_hex, encode_url_component,
+    decode_base64, decode_base64_bytes, decode_base64_url, decode_base64_url_bytes, decode_hex,
+    decode_hex_bytes, decode_url_component, encode_base64, encode_base64_bytes, encode_base64_url,
+    encode_base64_url_bytes, encode_hex, encode_hex_bytes, encode_url_component,
 };
 pub use uuid::{parse_uuid, uuid_v4_from_random, uuid_v7_from_parts};

@@ -25,7 +25,7 @@ pub(crate) fn run(request: MigrateRequest<'_>, database: &Path, program: Option<
         return run_sqlite(&request, database);
     };
     let source = std::fs::read_to_string(program).with_context(|| format!("cannot read `{}`", program.display()))?;
-    let databases = match corvid_driver::declared_databases(&source) {
+    let databases = match corvid_driver::declared_databases(&source, program) {
         Ok(databases) => databases,
         Err(diagnostics) => {
             eprint!("{}", corvid_driver::render_all_pretty(&diagnostics, program, &source));

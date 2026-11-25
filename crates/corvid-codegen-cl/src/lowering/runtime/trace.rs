@@ -335,7 +335,10 @@ fn emit_json_append(
             let f = module.declare_func_in_func(runtime.json_buffer_append_float, builder.func);
             builder.ins().call(f, &[buf, value]);
         }
-        Type::String => {
+        // B06, B04 — a `Decimal`, time, currency, locale or `Bytes` value is a JSON
+        // string of its canonical text, as the interpreter's
+        // `value_to_json` writes it.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
             let f = module.declare_func_in_func(runtime.json_buffer_append_string, builder.func);
             builder.ins().call(f, &[buf, value]);
         }
@@ -634,7 +637,7 @@ pub fn emit_trace_payload(
                         owned_values.push(json);
                     }
                 },
-                Type::Int | Type::String => {
+                Type::Int | Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
                     builder.ins().stack_store(*value, stack_slot, offset);
                 }
                 Type::Bool => {
@@ -668,7 +671,9 @@ fn trace_tag_for_type(ty: &Type) -> Result<char, CodegenError> {
         Type::Int => Ok('i'),
         Type::Bool => Ok('b'),
         Type::Float => Ok('f'),
-        Type::String => Ok('s'),
+        // B06, B04 — a `Decimal`, time, currency, locale or `Bytes` value is traced
+        // as its canonical text.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Ok('s'),
         _ => Ok('j'),
     }
 }

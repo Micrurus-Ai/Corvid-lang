@@ -15,7 +15,7 @@ mod records;
 mod roles;
 pub mod scope;
 mod sessions;
-pub use api_keys::{hash_api_key_secret, verify_api_key_secret};
+pub use api_keys::{hash_api_key_secret, verify_api_key_secret, API_KEY_HASH_COST};
 pub use approvals::{authorize_trace_permission, validate_jwt_verification_contract};
 pub use csrf::{mint_csrf_token, verify_csrf_double_submit, CsrfError, CsrfRequestMethod};
 pub use oauth::hash_oauth_state;

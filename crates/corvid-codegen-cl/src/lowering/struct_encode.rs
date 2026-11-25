@@ -69,7 +69,10 @@ fn emit_struct_to_json(
     // `String` only.
     for field in &ir_type.fields {
         match &field.ty {
-            Type::Int | Type::Bool | Type::Float | Type::String => {}
+            // B06, B04 — a `Decimal`, time, currency, locale or `Bytes` field is a JSON
+            // string of its canonical text, as the interpreter's
+            // `value_to_json` writes it.
+            Type::Int | Type::Bool | Type::Float | Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {}
             other => {
                 return Err(CodegenError::not_supported(
                     format!(
@@ -167,7 +170,7 @@ fn emit_struct_to_json(
                         .declare_func_in_func(runtime.json_object_set_float, builder.func);
                     builder.ins().call(setter, &[builder_handle, name_val, v]);
                 }
-                Type::String => {
+                Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
                     let v = builder.ins().load(
                         I64,
                         cranelift_codegen::ir::MemFlags::trusted(),

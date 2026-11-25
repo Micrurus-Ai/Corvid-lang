@@ -31,6 +31,13 @@ impl Locale {
         Ok(Locale { locale })
     }
 
+    /// Corvid's `text.parse_locale()`: trims whitespace and on failure
+    /// says why the tag is refused. Both tiers call this, so they
+    /// return the same `Err`.
+    pub fn parse_user_text(text: &str) -> Result<Locale, String> {
+        Locale::parse(text.trim()).map_err(|error| error.to_string())
+    }
+
     pub(crate) fn cldr(&self) -> &icu_locale_core::Locale {
         &self.locale
     }

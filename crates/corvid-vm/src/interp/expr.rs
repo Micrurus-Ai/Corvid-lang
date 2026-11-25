@@ -800,6 +800,7 @@ pub(super) fn eval_builtin_method(
         _ if kind.is_decimal() => super::decimal::eval_decimal_method(kind, &recv, &args, span),
         _ if kind.is_time() => super::time::eval_time_method(kind, &recv, &args, span),
         _ if kind.is_currency() => super::currency::eval_currency_method(kind, &recv, &args, span),
+        _ if kind.is_crypto() => super::crypto::eval_crypto_method(kind, &recv, &args, span),
         _ if kind.is_text_encoder() || kind.is_text_decoder() => {
             let s = want_string(&recv, span)?;
             super::text_methods::eval_text_method(kind, &s, span)

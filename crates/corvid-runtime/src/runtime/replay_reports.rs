@@ -46,6 +46,26 @@ impl Runtime {
         }
     }
 
+    /// The warnings this replay has printed for substituted tool
+    /// results whose record had a secret's text replaced by
+    /// `<redacted>` (a tool that echoed a secret it was given).
+    pub fn replay_secret_scrub_warnings(&self) -> Vec<String> {
+        match &self.mode {
+            RuntimeMode::Replay(source) => source.secret_scrub_warnings(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The warnings this replay has printed for `random_token` calls it
+    /// drew afresh: the trace never holds a token, so a replayed run
+    /// continues with a different one.
+    pub fn replay_redrawn_token_warnings(&self) -> Vec<String> {
+        match &self.mode {
+            RuntimeMode::Replay(source) => source.redrawn_token_warnings(),
+            _ => Vec::new(),
+        }
+    }
+
     /// B06 — the zone-rules warnings this replay has produced so far.
     pub fn replay_zone_rules_warnings(&self) -> Vec<String> {
         match &self.mode {

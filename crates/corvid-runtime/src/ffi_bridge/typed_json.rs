@@ -222,6 +222,11 @@ impl ValueBuilder for NativeValues<'_> {
     fn json(&mut self, _json: &J) -> Slot {
         panic!("internal compiler error: a native decode plan targets `JsonValue`, which has no native form")
     }
+    /// B06 — every text-scalar type is a native String holding its
+    /// canonical text.
+    fn text_scalar(&mut self, value: corvid_public_json::text_scalar::TextScalar) -> Slot {
+        self.native_string(&value.to_text())
+    }
     fn discard(&mut self, value: Slot) {
         if value.owned && value.bits != 0 {
             unsafe { corvid_release(value.bits as *const u8) };
@@ -338,5 +343,16 @@ impl corvid_public_json::ValueReader for NativeValues<'_> {
     }
     fn json(&mut self, _value: &Slot) -> Result<J, String> {
         Err("`JsonValue` has no native form".into())
+    }
+    /// B06 — a native text-scalar slot holds its canonical text, read
+    /// back with the parser the JSON form uses.
+    fn text_scalar(&mut self, ty: &corvid_types::Type, value: &Slot) -> Result<corvid_public_json::text_scalar::TextScalar, String> {
+        // SAFETY: a native text-scalar slot holds a live descriptor
+        // pointer; `CorvidString` has no destructor.
+        let text: CorvidString = unsafe { std::mem::transmute(value.bits as *const u8) };
+        let text = unsafe { super::strings::borrow_corvid_string(&text) };
+        corvid_public_json::text_scalar::parse(ty, text).map_err(|error| {
+            format!("internal compiler error: a native `{}` holds `{text}`: {error}", ty.display_name())
+        })
     }
 }

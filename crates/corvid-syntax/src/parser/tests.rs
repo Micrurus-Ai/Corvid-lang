@@ -3770,9 +3770,60 @@ fn parses_provisioning_invited_from_invitation() {
     assert!(matches!(prov.tenant, corvid_ast::TenantAssignment::FromInvitation));
 }
 
+/// A connector declares its timeout and redirect policy; an operation
+/// may declare its own timeout.
+#[test]
+fn parses_connector_timeout_and_redirect_policy() {
+    let src = "connector files:
+    base_url: \"https://files.example.com\"
+    timeout: 10s
+    redirects: same_host
+    modes: [real]
+    operation upload(id: String) -> String:
+        POST \"/files/{id}\"
+        timeout: 120s
+    operation ping() -> String:
+        GET \"/ping\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.timeout_secs, Some(10));
+    assert_eq!(c.redirects, Some(corvid_ast::RedirectPolicy::SameHost));
+    assert_eq!(c.operations[0].timeout_secs, Some(120));
+    assert_eq!(c.operations[1].timeout_secs, None);
+    assert_eq!(c.operation_timeout_secs(&c.operations[0]), Some(120));
+    assert_eq!(c.operation_timeout_secs(&c.operations[1]), Some(10));
+}
+
+/// The seconds unit is required, an unknown redirect policy names the
+/// three it accepts, and each item appears once.
+#[test]
+fn connector_policy_items_reject_unclear_forms() {
+    let connector = |items: &str| {
+        format!(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n{items}    modes: [real]\n    operation ping() -> String:\n        GET \"/ping\"\n"
+        )
+    };
+    let first_error = |src: String| {
+        let (_, errors) = parse_file_errs(&src);
+        errors.first().map(|e| format!("{:?}", e.kind)).unwrap_or_default()
+    };
+
+    let missing_unit = first_error(connector("    timeout: 10\n    redirects: never\n"));
+    assert!(missing_unit.contains("timeout: 10s"), "{missing_unit}");
+
+    let unknown = first_error(connector("    timeout: 10s\n    redirects: follow\n"));
+    assert!(unknown.contains("`never`, `same_host`, or `allowed_hosts`"), "{unknown}");
+
+    let twice = first_error(connector("    timeout: 10s\n    timeout: 20s\n    redirects: never\n"));
+    assert!(twice.contains("second `timeout:`"), "{twice}");
+}
+
 #[test]
 fn parses_connector_with_config_and_operations() {
     let src = "connector github:
+    timeout: 10s
+    redirects: never
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     retry: 3
@@ -3842,6 +3893,8 @@ fn parses_optional_protocol_cancel_endpoint() {
     // compensation possible (absent → a submitted intent can only
     // detach). Unlike `poll` it may mutate, since cancelling is an action.
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3882,6 +3935,8 @@ fn parses_optional_protocol_cancel_endpoint() {
 #[test]
 fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3920,6 +3975,8 @@ fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
 #[test]
 fn parses_verified_async_provider_protocol() {
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3970,6 +4027,8 @@ fn parses_verified_async_provider_protocol() {
 fn a_protocol_without_a_resume_posture_is_a_compile_error() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4020,6 +4079,8 @@ fn a_cosmetically_edited_protocol_keeps_its_fingerprint() {
     let original = protocol_of(
         r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4046,6 +4107,8 @@ connector video:
     let reformatted = protocol_of(
         r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4086,6 +4149,8 @@ connector video:
 fn a_protocol_without_an_idempotency_transport_is_a_compile_error() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4123,6 +4188,8 @@ connector video:
 fn an_unknown_resume_posture_is_rejected() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4154,6 +4221,8 @@ connector video:
 #[test]
 fn parses_connector_header_and_basic_auth() {
     let src = "connector svc:
+    timeout: 10s
+    redirects: never
     base_url: \"https://svc.example.com\"
     auth: header(\"X-Api-Key\", secret(\"API_KEY\"))
     operation ping() -> Pong:
@@ -4182,6 +4251,8 @@ fn connector_secret_must_not_be_a_literal() {
     // A bare string where a `secret(...)` is required is a parse error —
     // credentials are never literals.
     let src = "connector svc:
+    timeout: 10s
+    redirects: never
     base_url: \"https://svc.example.com\"
     auth: bearer(\"raw-token\")
     operation ping() -> Pong:

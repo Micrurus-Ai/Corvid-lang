@@ -22,25 +22,35 @@ impl<'ir> Interpreter<'ir> {
         &mut self,
         op: TableOp,
         table: &IrTable,
-        arg: Value,
+        args: Vec<Value>,
         span: Span,
     ) -> Result<Value, InterpError> {
         let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        // `get` takes the key's values; the other operations take one row.
+        let arg = args.first().cloned().unwrap_or(Value::Nothing);
         let record = *self
             .types_by_id
             .get(&table.def_id)
             .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
         let kinds = column_kinds(record);
-        let target = table_target(table, &kinds).map_err(fail)?;
+        let target = table_target(table, &kinds, self.table_transaction.as_deref()).map_err(fail)?;
         let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
         Ok(match op {
             TableOp::Get => {
-                let key_field = record
-                    .fields
+                let key = table
+                    .keys
                     .iter()
-                    .find(|f| f.name == table.key)
-                    .ok_or_else(|| fail(format!("table `{}` has no key field `{}`", table.name, table.key)))?;
-                let key = self.to_column(&arg, &key_field.ty).map_err(fail)?;
+                    .zip(&args)
+                    .map(|(key, value)| {
+                        let field = record
+                            .fields
+                            .iter()
+                            .find(|f| f.name == *key)
+                            .ok_or_else(|| format!("table `{}` has no key field `{key}`", table.name))?;
+                        self.to_column(value, &field.ty)
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+                    .map_err(fail)?;
                 match self.runtime.table_get(&target, key).await.map_err(runtime_error)? {
                     Some(row) => Value::OptionSome(BoxedValue::new(self.row_value(record, row).map_err(fail)?)),
                     None => Value::OptionNone,
@@ -100,7 +110,7 @@ impl<'ir> Interpreter<'ir> {
         };
         let query = TableQuery { filter, order: order.map(str::to_string), descending, take };
         let kinds = column_kinds(record);
-        let target = table_target(table, &kinds).map_err(fail)?;
+        let target = table_target(table, &kinds, self.table_transaction.as_deref()).map_err(fail)?;
         let rows = self
             .runtime
             .table_query(&target, &query)
@@ -156,6 +166,56 @@ impl<'ir> Interpreter<'ir> {
         match (kind, value) {
             (ColumnKind::Integer, Value::Float(f)) => Ok(DbValue::Float(*f)),
             _ => self.to_column(value, column_ty),
+        }
+    }
+
+    /// `atomic:` (B09 P7a). The body's table writes commit when it
+    /// reaches its end. Leaving it through an error undoes them all:
+    /// `?` propagating out of it (the checker refuses a plain `return`,
+    /// `break` or `continue` there) or an interpreter error.
+    pub(super) async fn eval_atomic(
+        &mut self,
+        database: Option<&corvid_ir::IrDatabase>,
+        body: &'ir corvid_ir::IrBlock,
+        span: Span,
+    ) -> Result<super::Flow, InterpError> {
+        let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
+        // A body that touches no table has nothing to commit.
+        let Some(database) = database else { return self.eval_block(body).await };
+        if self.table_transaction.is_some() {
+            return Err(fail("an `atomic:` block runs inside another one".into()));
+        }
+        let engine = TableEngine::from_declaration(&database.engine, database.tls.as_deref())
+            .ok_or_else(|| fail(format!("database `{}` names engine `{}`, which the runtime does not run", database.name, database.engine)))?;
+        let transaction = self
+            .runtime
+            .table_begin(&database.name, &database.location, engine)
+            .await
+            .map_err(runtime_error)?;
+        self.table_transaction = Some(Arc::new(transaction));
+        let outcome = self.eval_block(body).await;
+        let transaction = self
+            .table_transaction
+            .take()
+            .and_then(|shared| Arc::try_unwrap(shared).ok())
+            .ok_or_else(|| fail("an `atomic:` block's transaction is still in use when it ends".into()))?;
+        match outcome {
+            Ok(super::Flow::Normal) => {
+                self.runtime.table_commit(transaction).await.map_err(runtime_error)?;
+                Ok(super::Flow::Normal)
+            }
+            Ok(left_early) => {
+                self.runtime.table_rollback(transaction).await.map_err(runtime_error)?;
+                Ok(left_early)
+            }
+            Err(error) => {
+                // The block's own error is the one to report; a failed
+                // rollback still leaves the database unchanged, because the
+                // transaction never committed.
+                let _ = self.runtime.table_rollback(transaction).await;
+                Err(error)
+            }
         }
     }
 
@@ -253,15 +313,20 @@ fn column_kinds(record: &IrType) -> Vec<ColumnKind> {
 }
 
 /// The table as the runtime sees it, on the engine its database names.
-fn table_target<'t>(table: &'t IrTable, kinds: &'t [ColumnKind]) -> Result<TableRef<'t>, String> {
+fn table_target<'t>(
+    table: &'t IrTable,
+    kinds: &'t [ColumnKind],
+    transaction: Option<&'t corvid_runtime::tables::TableTransaction>,
+) -> Result<TableRef<'t>, String> {
     let engine = TableEngine::from_declaration(&table.database.engine, table.database.tls.as_deref())
         .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
     Ok(TableRef {
         name: &table.name,
-        key: &table.key,
+        keys: &table.keys,
         columns: &table.columns,
         kinds,
         location: &table.database.location,
         engine,
+        transaction,
     })
 }

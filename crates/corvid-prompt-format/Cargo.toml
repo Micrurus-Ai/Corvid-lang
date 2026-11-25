@@ -9,6 +9,7 @@ description = "JSON Schema generation for Corvid prompt return types. Shared by 
 corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
+corvid-public-json = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

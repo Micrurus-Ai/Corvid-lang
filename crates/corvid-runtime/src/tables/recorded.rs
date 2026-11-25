@@ -14,9 +14,9 @@ use serde_json::Value as J;
 /// outcome and never opens the database.
 impl Runtime {
     /// `Shelf.get(key)`.
-    pub async fn table_get(&self, table: &TableRef<'_>, key: DbValue) -> Result<Option<Row>, RuntimeError> {
+    pub async fn table_get(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {
         let outcome = self
-            .recorded_table_call(&call_name(table, "get"), vec![value_json(&key)], || async {
+            .recorded_table_call(&call_name(table, "get"), key.iter().map(value_json).collect(), || async {
                 Ok(match self.table_get_live(table, key).await? {
                     Some(row) => row_json(&row),
                     None => J::Null,

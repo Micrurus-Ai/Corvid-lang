@@ -1051,6 +1051,8 @@ fn agent_list(workspace: Workspace) -> ui.View:
 
 Give each agent a unique, nonempty string ID. Use editable fields such as the name for the controls and keep the ID stable. Start editing the second name and press Alt+Up. The row moves with the caret. An assistant can call the opted-in action with `{"key":"writer","direction":"up"}` to make the same move while the user is typing. On an editable list, calling the reorder action with `{}` returns the current IDs in display order.
 
+The context contains only string IDs. Names and enabled settings stay in the editor. Disabling a row's **Move earlier** button also disables that move through Alt+Up and the assistant. Removing the row invalidates requests for its ID. Moving the list outside its exposing wrapper invalidates the cached tool.
+
 **Add agent** creates a row from the supplied template, including its initial name and enabled setting. The template key supplies the prefix for new IDs such as `agent-1` and `agent-2`. **Remove agent** removes just that row. If you remove the last row, the Add button remains available. Use `ui.value(bind agent.id)` when displaying the generated ID.
 
 ### Show a field in a custom live preview

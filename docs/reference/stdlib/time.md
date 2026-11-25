@@ -96,12 +96,22 @@ traps if a result leaves the range.
 | `duration.whole_hours()`, `whole_minutes()`, `whole_seconds()`, `whole_milliseconds()`, `whole_microseconds()`, `whole_nanoseconds()` | `Int`, truncated toward zero |
 | `duration.abs()` | the length without its sign |
 
-A tool or prompt can take and return `Instant` and `Duration`. They
-cross as RFC 3339 and ISO 8601 text, and a prompt's schema tells the
-model which format to use. Routes, stores, tables, connectors and
-`to_json` refuse them until B06's JSON slice publishes the same text
-forms in the application contract. Native builds refuse them until
-their native slice.
+Every JSON boundary carries `Instant` and `Duration`, and the zone
+types below, as their exact text: tools, prompts, routes, stores,
+`to_json` and `from_json`. OpenAPI publishes `format: date-time` and
+`format: duration`, a prompt's schema tells the model which format to
+use, and the TypeScript client and the SDKs hold the text as a string.
+Table columns of these types wait for B09 to map their storage.
+
+Durations, instants, zones and zoned times run the same in native
+builds. Native code holds each as its canonical text, the same text
+as its JSON form, and every operator and method calls `corvid-time`,
+the code the interpreter runs, so both tiers give the same results and
+stop with the same messages. Instants and durations are ordered and
+compared by value, never by their text. Tools and prompts whose
+signature holds one of these types run on the interpreter, which
+checks the text at the boundary; so do programs that call `time_now()`,
+a tool.
 
 A duration literal, `30 seconds`, is proposed and waits for agreement
 with frontend development. Until it lands, durations come from
@@ -182,7 +192,15 @@ A trace records that database's version. Replaying a trace recorded
 with a different one still works, and each zone-dependent operation
 (a local field, a calendar move, `to_string`, `parse_local_time`)
 warns once with the operation and the zone, because a zone whose
-rules changed in between can give a different answer.
+rules changed in between can give a different answer. A native binary
+reports the same operations to its runtime, so a native replay warns
+the same way.
+
+Before standard time, zones ran on local mean time, whose offsets have
+seconds (Kolkata was `+05:53:28`). RFC 9557 text writes offsets in
+whole minutes, so such a time prints its offset rounded to the minute,
+`1850-06-01T17:53:28+05:53[Asia/Kolkata]`, and reading that text back
+gives the exact instant.
 
 ## Non-scope
 

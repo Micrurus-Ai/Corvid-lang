@@ -64,12 +64,10 @@ fn stage_book_pipeline_project(dir: &Path, main_source: &str) -> std::path::Path
 /// Build a reqwest client that resolves `api.example.com` to the
 /// loopback wiremock socket. Same pattern as
 /// `executing_http_through_driver.rs::loopback_resolving_client`.
-fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::Client {
+fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::ClientBuilder {
     let addr: std::net::SocketAddr = *server.address();
     reqwest::Client::builder()
         .resolve(host, addr)
-        .build()
-        .expect("reqwest client with .resolve override should build")
 }
 
 /// 33S4 — the quickstart's executing-I/O example also compiles
@@ -187,7 +185,7 @@ agent main() -> Result<Int, String>:
     let io_policy = IoToolPolicy::new(Some("."), Some(project.path()));
     let http_policy = HttpEgressPolicy::new(Some(&["api.example.com".to_string()]));
     let http_client =
-        HttpClient::with_reqwest_client(loopback_resolving_client("api.example.com", &server));
+        HttpClient::with_reqwest_builder(loopback_resolving_client("api.example.com", &server));
     let runtime = Runtime::builder()
         .io_policy(io_policy)
         .http_policy(http_policy)

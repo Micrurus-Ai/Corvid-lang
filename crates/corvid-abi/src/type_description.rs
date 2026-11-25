@@ -139,10 +139,10 @@ pub fn emit_type_description(
         Type::RegexMatch => TypeDescription::Struct {
             name: "RegexMatch".to_string(),
         },
-        // B06 — `Decimal` is interpreter-tier until its native slice and
-        // has no JSON form until its JSON slice, which decides its
-        // contract form. Named opaque, like `RegexMatch`, so signed
-        // manifests stay total.
+        // B06 — `Decimal` has no C ABI form: native code holds it as
+        // its exact text internally, and extern-c boundaries refuse it.
+        // Named opaque, like `RegexMatch`, so signed manifests stay
+        // total.
         Type::Decimal => TypeDescription::Struct {
             name: "Decimal".to_string(),
         },
@@ -164,6 +164,18 @@ pub fn emit_type_description(
         },
         Type::Locale => TypeDescription::Struct {
             name: "Locale".to_string(),
+        },
+        // `Bytes` is named the same way: the contract's projections read
+        // its base64url JSON form from `corvid_public_json::text_scalar`.
+        Type::Bytes => TypeDescription::Struct {
+            name: "Bytes".to_string(),
+        },
+        // The ABI descriptor names a `Secret` parameter's type so a
+        // host sees the declaration; no value of it ever crosses the
+        // boundary (native code refuses `Secret`, see
+        // `corvid_codegen_cl::secret_boundary`, and it has no JSON form).
+        Type::Secret => TypeDescription::Struct {
+            name: "Secret".to_string(),
         },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract

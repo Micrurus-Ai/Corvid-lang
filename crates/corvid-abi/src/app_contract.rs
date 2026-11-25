@@ -68,6 +68,11 @@ pub struct ContractConnector {
     /// (`mock`/`replay`/`real`). The deployment selects exactly one at
     /// start; there is no default.
     pub modes: Vec<String>,
+    /// The declared `redirects:` policy (`never`, `same_host` or
+    /// `allowed_hosts`), so a client or an assistant can see where a
+    /// request may be sent next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirects: Option<String>,
     pub operations: Vec<ContractOperation>,
 }
 
@@ -77,6 +82,10 @@ pub struct ContractOperation {
     pub name: String,
     pub method: String,
     pub path: String,
+    /// The longest one request to this operation may take, in seconds:
+    /// its own `timeout:` or the connector's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<String>,
     /// Whether the operation is `dangerous` (requires an `approve`).
@@ -439,7 +448,7 @@ pub fn emit_application_contract(
         .iter()
         .filter_map(|decl| match decl {
             Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
-                Some(contract_type(t))
+                Some(contract_type(t, checked))
             }
             _ => None,
         })
@@ -465,7 +474,13 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Agent(a) if a.visibility.is_callable_from_outside_file() => Some(
+            // A public agent whose signature holds a `Secret` is
+            // server-only: no client could supply or receive one.
+            Decl::Agent(a)
+                if a.visibility.is_callable_from_outside_file()
+                    && !signature_holds_secret(&a.params, &a.return_ty, checked) =>
+            {
+                Some(
                 contract_callable(
                     &a.name.name,
                     &a.params,
@@ -473,7 +488,8 @@ pub fn emit_application_contract(
                     &a.effect_row,
                     registry,
                 ),
-            ),
+                )
+            }
             _ => None,
         })
         .collect();
@@ -535,6 +551,7 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
         name: c.name.name.clone(),
         base_url: c.base_url.clone(),
         modes: c.modes.iter().map(|m| m.as_str().to_string()).collect(),
+        redirects: c.redirects.map(|policy| policy.as_str().to_string()),
         operations: c
             .operations
             .iter()
@@ -542,6 +559,7 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
                 name: op.name.name.clone(),
                 method: op.method.as_str().to_string(),
                 path: op.path.clone(),
+                timeout_secs: c.operation_timeout_secs(op),
                 effects: op
                     .effect_row
                     .effects
@@ -723,18 +741,34 @@ fn mandatory_auth_safeguards() -> Vec<String> {
     .collect()
 }
 
-fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
+/// A public type's contract entry. A field that holds a `Secret` never
+/// leaves the server, so the contract, and every client and SDK
+/// generated from it, has no such field.
+fn contract_type(t: &corvid_ast::TypeDecl, checked: &Checked) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
-        fields: t.fields.iter().map(contract_field).collect(),
-        variants: t.variants.iter().map(contract_variant).collect(),
+        fields: public_fields(&t.fields, checked),
+        variants: t.variants.iter().map(|v| contract_variant(v, checked)).collect(),
     }
 }
 
-fn contract_variant(v: &corvid_ast::SumVariant) -> ContractVariant {
+fn public_fields(fields: &[corvid_ast::Field], checked: &Checked) -> Vec<ContractField> {
+    fields
+        .iter()
+        .filter(|field| !checked.secret_type_refs.contains(&field.ty.span()))
+        .map(contract_field)
+        .collect()
+}
+
+/// Whether a signature holds a `Secret`, as the checker found it.
+fn signature_holds_secret(params: &[corvid_ast::Param], return_ty: &TypeRef, checked: &Checked) -> bool {
+    params.iter().map(|param| &param.ty).chain(std::iter::once(return_ty)).any(|ty| checked.secret_type_refs.contains(&ty.span()))
+}
+
+fn contract_variant(v: &corvid_ast::SumVariant, checked: &Checked) -> ContractVariant {
     ContractVariant {
         name: v.name.name.clone(),
-        fields: v.fields.iter().map(contract_field).collect(),
+        fields: public_fields(&v.fields, checked),
         status: v.status,
         ui: ui_hints_map(&v.ui),
     }
@@ -1065,6 +1099,8 @@ type GithubError:
     | NotFound
 
 connector github:
+    timeout: 10s
+    redirects: same_host
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     modes: [mock, replay, real]
@@ -1072,6 +1108,10 @@ connector github:
         GET \"/repos/{owner}/{repo}\"
         on status 404 -> NotFound
         mock: Ok(Repo(\"corvid\"))
+    operation export(owner: String) -> Repo uses http_read:
+        GET \"/export/{owner}\"
+        timeout: 300s
+        mock: Repo(\"export\")
 ",
         );
         let c = contract
@@ -1081,7 +1121,12 @@ connector github:
             .expect("github connector in contract");
         assert_eq!(c.base_url, "https://api.github.com");
         assert_eq!(c.modes, vec!["mock", "replay", "real"]);
-        assert_eq!(c.operations.len(), 1);
+        // The declared bounds are part of the advertised surface: where a
+        // request may be redirected, and how long each operation may take.
+        assert_eq!(c.redirects.as_deref(), Some("same_host"));
+        assert_eq!(c.operations.len(), 2);
+        assert_eq!(c.operations[0].timeout_secs, Some(10));
+        assert_eq!(c.operations[1].timeout_secs, Some(300));
         let op = &c.operations[0];
         assert_eq!(op.name, "get_repo");
         assert_eq!(op.method, "GET");
@@ -1101,6 +1146,8 @@ connector github:
     #[test]
     fn a_verified_provider_protocol_is_frontend_consumable_contract_data() {
         let contract = contract_for(r#"connector video:
+    timeout: 10s
+    redirects: never
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -1154,6 +1201,39 @@ public agent support(question: String) -> Answer uses ask:
         assert!(!agent.capabilities.streaming);
         assert_eq!(agent.capabilities.latency_class.as_deref(), Some("fast"));
         assert_eq!(agent.capabilities.max_cost_usd, Some(0.05));
+    }
+
+    #[test]
+    fn a_secret_never_appears_in_the_contract() {
+        let contract = contract_for(
+            "\
+public type Credentials:
+    user: String
+    password: Secret
+
+public type Account:
+    name: String
+    credentials: Credentials
+
+tool check(credentials: Credentials) -> Bool
+
+public agent log_in(credentials: Credentials) -> Bool:
+    return check(credentials)
+
+public agent greet(name: String) -> String:
+    return name
+",
+        );
+        let credentials = contract.types.iter().find(|t| t.name == "Credentials").unwrap();
+        let names: Vec<&str> = credentials.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["user"], "the secret field is server-only");
+        let account = contract.types.iter().find(|t| t.name == "Account").unwrap();
+        let names: Vec<&str> = account.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["name"], "a field holding a record with a secret is server-only too");
+        let agents: Vec<&str> = contract.agents.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(agents, ["greet"], "an agent taking a secret is server-only");
+        let json = serde_json::to_string(&contract).unwrap();
+        assert!(!json.contains("Secret") && !json.contains("password"), "{json}");
     }
 
     #[test]
@@ -1815,7 +1895,7 @@ server admin_api:
     #[test]
     fn a_valid_connector_compiles() {
         let errors = check_errors_of(
-            "connector github:\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
+            "connector github:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
         );
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
@@ -1823,7 +1903,7 @@ server admin_api:
     #[test]
     fn connector_non_absolute_base_url_is_rejected() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -1838,7 +1918,7 @@ server admin_api:
     #[test]
     fn connector_path_placeholder_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -1853,7 +1933,7 @@ server admin_api:
     #[test]
     fn connector_duplicate_operation_and_zero_retry_rejected() {
         let dup = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
         );
         assert!(
             dup.iter().any(|e| matches!(
@@ -1864,7 +1944,7 @@ server admin_api:
             "expected a duplicate-operation rejection, got {dup:?}"
         );
         let retry = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             retry.iter().any(|e| matches!(
@@ -1879,7 +1959,7 @@ server admin_api:
     #[test]
     fn connector_body_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
         );
         assert!(
             errors.iter().any(|e| matches!(

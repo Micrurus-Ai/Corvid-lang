@@ -59,6 +59,7 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     "json_object_set_bool",
     "json_object_finish",
     // std/secrets
+    "secret",
     "secret_read",
     // std/cache
     "cache_put",
@@ -82,6 +83,9 @@ pub const STDLIB_EXECUTING_TOOLS: &[&str] = &[
     // std/uuid
     "uuid_v4",
     "uuid_v7",
+    // std/crypto
+    "random_token",
+    "hash_password",
 ];
 
 /// One stdlib-executing-tool call found in the IR.
@@ -129,6 +133,9 @@ fn scan_stmt(stmt: &IrStmt, hits: &mut Vec<StdlibToolCall>) {
         }
         IrStmt::For { iter, body, .. } => {
             scan_expr(iter, hits);
+            scan_block(body, hits);
+        }
+        IrStmt::Atomic { body, .. } => {
             scan_block(body, hits);
         }
         IrStmt::While { cond, body, .. } => {
@@ -219,7 +226,11 @@ fn scan_expr(expr: &IrExpr, hits: &mut Vec<StdlibToolCall>) {
             scan_expr(items, hits);
             scan_expr(next_cursor, hits);
         }
-        IrExprKind::TableOp { arg, .. } => scan_expr(arg, hits),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                scan_expr(arg, hits);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             for e in corvid_ir::table_query_operands(filter, take) {
                 scan_expr(e, hits);

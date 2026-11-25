@@ -18,8 +18,12 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
             operand_supported(operand)
         }
-        IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. }
-            if (left.ty == Type::Int && right.ty == Type::Int) || (left.ty == Type::String && right.ty == Type::String) => {
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if (left.ty == Type::Int && right.ty == Type::Int) || (left.ty == Type::String && right.ty == Type::String)
+                || crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty)
+                || crate::time_methods::time_binary(*op, &left.ty, &right.ty).is_some()
+                || crate::currency_methods::currency_binary(*op, &left.ty, &right.ty).is_some()
+                || crate::bytes_methods::bytes_binary(*op, &left.ty, &right.ty).is_some() => {
                 operand_supported(left) && operand_supported(right)
             }
         IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),
@@ -27,7 +31,7 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::FieldAccess { target, .. } => operand_supported(target),
         IrExprKind::BuiltinMethod { receiver, args, kind } => {
             use corvid_types::BuiltinMethodKind::*;
-            (crate::native_string_method(*kind) || crate::native_text_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode))
+            (crate::native_string_method(*kind) || crate::native_text_method(*kind) || crate::is_native_decimal_method(*kind) || crate::is_native_time_method(*kind) || crate::is_native_currency_method(*kind) || crate::is_native_bytes_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode))
                 && operand_supported(receiver)
                 && args.iter().all(operand_supported)
         }

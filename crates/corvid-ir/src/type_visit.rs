@@ -82,6 +82,9 @@ fn visit_stmt(stmt: &mut IrStmt, visit: &mut dyn FnMut(&mut Type)) {
             }
         }
         IrStmt::Destructure { value, .. } => visit_expr(value, visit),
+        IrStmt::Atomic { body, .. } => {
+            visit_block(body, visit);
+        }
         IrStmt::While { cond, body, .. } => {
             visit_expr(cond, visit);
             visit_block(body, visit);
@@ -199,7 +202,11 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
             visit_expr(items, visit);
             visit_expr(next_cursor, visit);
         }
-        IrExprKind::TableOp { arg, .. } => visit_expr(arg, visit),
+        IrExprKind::TableOp { args, .. } => {
+            for arg in args {
+                visit_expr(arg, visit);
+            }
+        }
         IrExprKind::TableQuery { filter, take, .. } => {
             if let Some(filter) = filter {
                 filter.for_each_value_mut(&mut |value| visit_expr(value, visit));
