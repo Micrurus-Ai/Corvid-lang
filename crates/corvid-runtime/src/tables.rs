@@ -128,7 +128,7 @@ impl Runtime {
         let rows = match self.table_connection(table).await? {
             TableConnection::Sqlite(handle) => self
                 .db_registry()
-                .query(handle.handle_id, sql, params)
+                .query_table_rows(handle.handle_id, sql, params)
                 .map(|rows| rows.rows.into_iter().map(|cells| ordered_row(table, cells)).collect()),
             TableConnection::Postgres(connection) => connection.select(sql, params, table.columns).await,
         };

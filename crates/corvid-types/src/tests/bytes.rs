@@ -116,21 +116,20 @@ agent main(text: String) -> String:
     );
 }
 
+/// B09 P8c: `Bytes` is a binary table column, so a table may hold one.
 #[test]
-fn a_table_column_of_bytes_waits_for_its_storage_mapping() {
+fn a_table_column_of_bytes_is_accepted() {
     let errors = check(
-        "table Upload:
+        "database files:
+    engine: sqlite
+    location: \"files.sqlite\"
+    tables: Upload
+
+table Upload:
     key id: String
     digest: Bytes
 ",
     )
     .errors;
-    let error = errors
-        .iter()
-        .find(|e| {
-            matches!(&e.kind, TypeErrorKind::PendingJsonFormAtBoundary { type_name, boundary }
-                if type_name == "Bytes" && boundary == "a table column")
-        })
-        .unwrap_or_else(|| panic!("got {errors:?}"));
-    assert!(error.kind.hint().unwrap().contains("Bytes.from_base64_url"));
+    assert!(errors.is_empty(), "got {errors:?}");
 }

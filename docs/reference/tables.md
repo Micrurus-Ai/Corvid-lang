@@ -243,6 +243,7 @@ with a divergence naming the operation.
 | `Instant` | `INSTANT TEXT`: UTC with all nine fractional digits, which sorts in time order | not yet |
 | `ZonedTime` | `ZONED TIME TEXT`: the instant and the zone, `2026-03-29T01:30:00.000000000Z[Europe/Berlin]` | not yet |
 | `TimeZone`, `Currency`, `Locale` | `TIME ZONE TEXT`, `CURRENCY TEXT`, `LOCALE TEXT`: the canonical name | not yet |
+| `Bytes` | `BLOB`: the bytes themselves | `bytea` |
 | `Option<Option<T>>`, records, lists, maps, sums | `JSON TEXT` holding the value's public JSON | `jsonb` holding the value's public JSON |
 
 The table is named as declared, and columns as the fields are named.
@@ -286,7 +287,25 @@ in any SQLite tool.
 On Postgres these columns are a compile error for now: Postgres needs a
 column type for each that compares it exactly, which is
 [planned](../proposals/typed-persistence.md#exact-columns-for-money-and-time-p8).
-`Bytes` columns are planned too and are refused on both engines.
+### Binary values
+
+A `Bytes` field is stored as the bytes themselves, on both engines, and
+reads back exactly. A query can find a row by one, which is how a
+program looks up an API key by its token's hash:
+
+```corvid
+agent owner_of(token: String) -> List<ApiKey>:
+    digest = token.utf8().sha256()
+    return ApiKey.where(fn (k) -> k.token_hash == digest)
+```
+
+`Bytes` has no order, so `order_by` on one is a compile error. In Corvid
+code, `==` on two `Bytes` takes the same time whatever they hold; a
+database lookup does not, which is harmless for a hash of a random token
+and is why a lookup compares a hash, never the secret itself. A raw
+`std.db` query still reports a binary cell as `<blob:redacted>`, so the
+bytes reach an agent only through a table's declared type. A recorded
+run keeps them in the trace as base64url text.
 
 ## Migrations
 

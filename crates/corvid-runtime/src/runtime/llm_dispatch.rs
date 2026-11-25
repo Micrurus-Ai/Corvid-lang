@@ -2129,6 +2129,9 @@ fn db_value_to_json_param(value: &crate::db::DbValue) -> serde_json::Value {
         DbValue::Float(f) => serde_json::Value::from(*f),
         DbValue::Text(s) => serde_json::Value::String(s.clone()),
         DbValue::Bool(b) => serde_json::Value::Bool(*b),
+        // Only table reads produce bytes, and tables never pass through
+        // here; redact as `std.db` reports any other blob.
+        DbValue::Bytes(_) => serde_json::Value::String("<blob:redacted>".into()),
     }
 }
 

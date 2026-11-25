@@ -28,24 +28,11 @@ enum Direction {
 struct NoForm {
     reason: String,
     hint: String,
-    /// B06 — the type whose JSON form B06's JSON slice adds, when that
-    /// is what is missing.
-    pending: Option<&'static str>,
 }
 
 impl NoForm {
     fn new(reason: impl Into<String>, hint: impl Into<String>) -> Self {
-        Self { reason: reason.into(), hint: hint.into(), pending: None }
-    }
-
-    fn pending(type_name: &'static str) -> Self {
-        Self {
-            pending: Some(type_name),
-            ..NoForm::new(
-                format!("`{type_name}` has no table-column mapping yet"),
-                "store its text with `to_string()` in a String column until B09 maps it",
-            )
-        }
+        Self { reason: reason.into(), hint: hint.into() }
     }
 }
 
@@ -177,21 +164,6 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    /// The first type `ty` reaches that a table cannot store yet
-    /// (`Bytes`, until B09 P8c), walking records the way `to_json` does,
-    /// for the table-column check.
-    pub(super) fn unstored_column_type_reached(&mut self, ty: &Type) -> Option<&'static str> {
-        let outer = std::mem::replace(&mut self.refuse_b06_columns, true);
-        let pending = [Direction::Encode, Direction::Decode].into_iter().find_map(|direction| {
-            match self.json_form(ty, direction, &mut Vec::new()) {
-                Err(NoForm { pending, .. }) => pending,
-                Ok(_) => None,
-            }
-        });
-        self.refuse_b06_columns = outer;
-        pending
-    }
-
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
     /// reports whether any part of it is `Tainted`. `seen` stops
     /// recursion through self-referential records.
@@ -226,11 +198,9 @@ impl<'a> Checker<'a> {
                 )),
             },
             // B06 — each crosses JSON as its exact canonical text (see
-            // `corvid_public_json::text_scalar`). A table stores each B06
-            // type in a column that compares it exactly (B09 P8a), and
-            // inside a JSON-stored column as that same text. `Bytes`
-            // crosses JSON as base64url text, the same way, but a table
-            // refuses it until B09 P8c gives it a binary column.
+            // `corvid_public_json::text_scalar`), and `Bytes` as base64url
+            // text. A table stores each in a column of its own (B09 P8a
+            // and P8c), and inside a JSON-stored column as that text.
             Type::Decimal
             | Type::Duration
             | Type::Instant
@@ -239,11 +209,7 @@ impl<'a> Checker<'a> {
             | Type::Currency
             | Type::Locale
             | Type::Bytes => {
-                if self.refuse_b06_columns && matches!(ty, Type::Bytes) {
-                    Err(NoForm::pending("Bytes"))
-                } else {
-                    Ok(false)
-                }
+                Ok(false)
             }
             // A secret's text never leaves the program, so it has no
             // JSON form in either direction, and a record holding one has
