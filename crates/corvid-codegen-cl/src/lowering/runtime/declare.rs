@@ -267,6 +267,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare String typeinfo: {e}"), Span::new(0, 0))
         })?;
+    // Native dispatch N3 — the runtime's `Secret` object, for a list or
+    // record slot that holds one.
+    let secret_typeinfo = module
+        .declare_data("corvid_typeinfo_Secret", Linkage::Import, false, false)
+        .map_err(|e| CodegenError::cranelift(format!("declare Secret typeinfo: {e}"), Span::new(0, 0)))?;
     let map_typeinfo = module
         .declare_data("corvid_typeinfo_OrderedMap", Linkage::Import, false, false)
         .map_err(|e| CodegenError::cranelift(format!("declare Map typeinfo: {e}"), Span::new(0, 0)))?;
@@ -536,6 +541,15 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let register_connectors_id = module
         .declare_function("corvid_register_connectors", Linkage::Import, &register_connectors_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare register_connectors: {e}"), Span::new(0, 0)))?;
+
+    // Native dispatch N3 — `a == b` on two secrets, in constant time.
+    let mut secret_eq_sig = module.make_signature();
+    secret_eq_sig.params.push(AbiParam::new(I64));
+    secret_eq_sig.params.push(AbiParam::new(I64));
+    secret_eq_sig.returns.push(AbiParam::new(I64));
+    let secret_eq = module
+        .declare_function("corvid_secret_eq", Linkage::Import, &secret_eq_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare secret_eq: {e}"), Span::new(0, 0)))?;
 
     let runtime_shutdown_sig = module.make_signature();
     let runtime_shutdown_id = module
@@ -1336,6 +1350,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         weak_upgrade: weak_upgrade_id,
         weak_clear_self: weak_clear_self_id,
         string_typeinfo: string_typeinfo_id,
+        secret_typeinfo,
         map_typeinfo,
         weak_box_typeinfo: weak_box_typeinfo_id,
         entry_init: entry_init_id,
@@ -1365,6 +1380,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         invoke_tool_struct: invoke_tool_struct_id,
         runtime_init: runtime_init_id,
         register_connectors: register_connectors_id,
+        secret_eq,
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
         sleep_ms: sleep_ms_id,

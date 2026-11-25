@@ -1,6 +1,6 @@
 # Proposal: native dispatch of runtime-owned calls
 
-Status: **decided 2026-11-25; N1 and N2 built 2026-11-25, N3–N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
+Status: **decided 2026-11-25; N1, N2 and N3a built 2026-11-25, N3b–N5 to come.** The user chose to build this as B05 slice 7, by the laws in `AGENTS.md`. Owner: backend and AI development, macOS session. It changes no grammar.
 
 ## Problem
 
@@ -74,6 +74,36 @@ A native call that skipped the runtime would silently lose all of them. That is 
 - A user tool that happens to share a name with one of these is already dispatched by name to the runtime's implementation on the interpreter, so native code does the same; nothing changes for it.
 
 **Across the tiers.** Backend: a program that makes IDs, reads the clock or draws random numbers now builds into a native binary, and those values replay exactly. Frontend: nothing changes. AI: the recorded run is the same from either tier, so an assistant reviewing it sees the same clock reads and IDs.
+
+## N3: native `Secret`
+
+**The representation.** A native `Secret` is a reference-counted heap object of its own type, `corvid_typeinfo_Secret`, whose 8-byte payload points to a boxed `corvid_crypto::Secret`: the value the interpreter holds. When the last reference goes, the runtime drops the box. Native code treats the object as an opaque pointer: it retains and releases it, stores it in locals, record fields, lists, options and results, and passes it to runtime exports. It never reads it. Only the runtime's exports open the box, and they call the same `corvid_crypto::Secret` methods the interpreter does, so comparison, HMAC keys, password checks and base64 key decoding are one implementation on both tiers.
+
+**Why not a string, as `Bytes` is.** Native code holds `Bytes` and the B06 types as their text, which lets them reuse string printing and JSON. A secret must reuse neither. The checker already refuses every operation that would show the text, but a separate type means a path the checker missed still cannot reach it: a value walked by its type information is named `Secret`, never `String`, and no string function's input can be one. Holding the interpreter's own value also keeps a key made by `decode_base64_after`, which is bytes and has no text, the same thing on both tiers.
+
+**Where a secret comes from.** `secret(name)` and `random_token(bytes)` run through `corvid_runtime_call`. The runtime reads the environment or draws the token, records the result as `<redacted>`, and the decoder builds the secret object where the declared type says `Secret`. The public JSON decoder still refuses a `Secret` for `T.from_json(text)`: only a builder that accepts secrets, the one `corvid_runtime_call` uses for these two tools, can make one.
+
+**What native code can do with one,** as the interpreter can:
+- `==` and `!=`, in constant time, on secrets and on records, lists, options and results that hold them (a `Secret` layout in the shared equality table);
+- `hmac_sha256(key)` and `hmac_sha512(key)` keyed by a secret, `verify_password(hash)` and `decode_base64_after(prefix)`;
+- `hash_password(secret, cost)`, whose call is recorded with `<redacted>` in the secret's place: the runtime call builds the recorded and the revealed arguments, as the interpreter does, and calls `call_tool_revealing_secrets`.
+
+**What stays on the interpreter.**
+- A user tool whose signature holds a `Secret`. Native user tools are called directly and record their own arguments, with no redaction; moving user tools onto the runtime call is its own decision (see "Not in scope").
+- A library (`corvid build --target cdylib`) agent whose signature holds a `Secret`, because the ABI passes no secret across the boundary.
+
+The checker's refusals are unchanged, so a native program can do with a secret exactly what an interpreted one can.
+
+**Slices.**
+- **N3a.** The secret object, `secret(name)` and `random_token(bytes)` in native code, `==` and `!=`, secrets in records, lists, options and results, and the tier picker allowing them. Parity tests: the same comparisons on both tiers, and a trace that never holds the text.
+- **N3b.** HMAC keyed by a secret, `verify_password`, `decode_base64_after`, with the webhook-verification program from the cryptography reference running natively and giving the same answers.
+- **N3c.** `hash_password` through the runtime call with recorded and revealed arguments, and the sign-up and log-in programs running natively.
+
+**Simpler options considered.**
+- *A string with the checker as the only guard:* fewer lines, but a missed path would print the text, and a decoded key has no text to hold.
+- *An integer id into a runtime table:* the table would need its own lifetime rule, or it would keep every secret until the process ends. A reference-counted object is freed when the program lets go of it, with the release native code already performs.
+
+**Across the tiers.** Backend: a webhook receiver or a login service that holds keys as `Secret` can be built as a native binary without giving up redaction. Frontend: nothing changes; a route still cannot carry a secret. AI: the trace holds `<redacted>` on both tiers, so an assistant reading a run never sees a key.
 
 ## Not in scope
 

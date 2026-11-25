@@ -576,6 +576,20 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // Native dispatch N3 — `==` and `!=` on secrets are the runtime's
+        // constant-time comparison; the checker refuses every other
+        // operator on a secret.
+        IrExprKind::BinOp { op, left, right }
+            if matches!(op, BinaryOp::Eq | BinaryOp::NotEq)
+                && matches!(crate::text_scalar::scalar_of(&left.ty), Type::Secret) =>
+        {
+            scalar_call::lower_scalar_binop(
+                builder,
+                runtime.secret_eq,
+                crate::text_scalar::ScalarBinary { operation: (), swapped: false, reading: crate::text_scalar::BinaryReading::Equality },
+                *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
         // B06, B04 — time, currency, locale and `Bytes` operators are
         // runtime calls; `@wrapping` does not apply to them, and `==` on
         // `Bytes` is the runtime's constant-time comparison.

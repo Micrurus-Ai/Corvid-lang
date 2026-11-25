@@ -53,7 +53,7 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
     let unknown_fields = if strict != 0 { UnknownFields::Reject } else { UnknownFields::Ignore };
-    let mut builder = NativeValues { plan: &plan, typeinfos };
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false };
     let text = unsafe { text.as_str() };
     match corvid_public_json::decode_text(text, &plan.root, &types_by_id, unknown_fields, &mut builder) {
         Ok(value) => {
@@ -117,7 +117,8 @@ pub unsafe extern "C" fn corvid_runtime_call(
     };
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
-    let mut builder = NativeValues { plan: &plan, typeinfos };
+    let accepts_secrets = crate::runtime::is_stdlib_secret_value_tool(&name);
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets };
     let decoded = match corvid_public_json::decode(&answer, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder) {
         Ok(value) => value,
         Err(error) => match runtime.connector_failure_variant(&name) {
@@ -177,6 +178,9 @@ impl Slot {
 struct NativeValues<'a> {
     plan: &'a DecodePlan,
     typeinfos: *const *const c_void,
+    /// Whether a `Secret` position may be built: only for the answer of a
+    /// tool the runtime implements whose result it holds as a secret.
+    accepts_secrets: bool,
 }
 
 impl NativeValues<'_> {
@@ -238,6 +242,11 @@ impl ValueBuilder for NativeValues<'_> {
     }
     fn string(&mut self, value: &str) -> Slot {
         self.native_string(value)
+    }
+    fn secret(&mut self, text: &str) -> Option<Slot> {
+        self.accepts_secrets.then(|| {
+            Slot::reference(super::secret_object::new_secret_object(corvid_crypto::Secret::new(text)))
+        })
     }
     fn bool(&mut self, value: bool) -> Slot {
         Slot::scalar(i64::from(value))
@@ -336,7 +345,7 @@ pub unsafe extern "C" fn corvid_json_encode_typed(
 ) -> CorvidString {
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
-    let mut reader = NativeValues { plan: &plan, typeinfos };
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false };
     match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
         Ok(text) => crate::ffi_bridge::string_from_rust(text),
         Err(reason) => {

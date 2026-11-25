@@ -295,17 +295,19 @@ agent main() -> Bytes:
     assert_eq!(out, "Bytes(616263)");
 }
 
-/// A program that holds a `Secret` runs on the interpreter: native code
-/// has no form for one, and a native build says why rather than
-/// compiling a secret into a path that could not keep it out of a
-/// record. The driver's tier picker routes such programs to the
-/// interpreter before codegen runs (`NotNativeReason::SecretNotNative`).
+/// Native code holds a `Secret` as the runtime's object (native dispatch
+/// N3), so a program that compares secrets builds. Keying an HMAC with
+/// one and the secret methods wait for native secret cryptography, and a
+/// native build says why. The driver's tier picker routes such programs
+/// to the interpreter before codegen runs (`NotNativeReason::SecretNotNative`).
 #[test]
-fn a_native_build_refuses_a_secret_and_names_the_reason() {
+fn a_native_build_compares_secrets_and_names_what_waits() {
+    let ir = ir_of("agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    corvid_codegen_cl::build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[])
+        .expect("secret comparison compiles natively");
     for src in [
-        "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
         "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
-        "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaA\")\n\nagent main() -> Int:\n    return 1\n",
     ] {
         let ir = ir_of(src);
         let tmp = tempfile::tempdir().expect("tempdir");

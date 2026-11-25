@@ -23,6 +23,24 @@ pub(super) fn define_extern_c_wrapper(
     let Some(IrExternAbi::C) = agent.extern_abi else {
         return Ok(());
     };
+    // No secret crosses a library's boundary, in a record field either:
+    // a host would receive the text.
+    let types_by_id: HashMap<DefId, &corvid_ir::IrType> = runtime.ir_types.iter().map(|(id, ty)| (*id, ty)).collect();
+    if let Some(span) = agent
+        .params
+        .iter()
+        .find(|p| corvid_ir::holds_secret(&p.ty, &types_by_id))
+        .map(|p| p.span)
+        .or_else(|| corvid_ir::holds_secret(&agent.return_ty, &types_by_id).then_some(agent.span))
+    {
+        return Err(CodegenError::not_supported(
+            format!(
+                "extern-c agent `{}` takes or returns a `Secret`, and no secret crosses a library's boundary; keep the secret inside the library",
+                agent.name
+            ),
+            span,
+        ));
+    }
 
     let mut sig = module.make_signature();
     for param in &agent.params {
@@ -289,12 +307,6 @@ pub(super) fn define_extern_c_wrapper(
 }
 
 pub(super) fn reject_unsupported_types(agent: &IrAgent) -> Result<(), CodegenError> {
-    // B04 — a signature holding a `Secret` gets the reason native code
-    // has none, not the generic shape message.
-    if let Some(span) = agent.params.iter().find(|p| p.ty.mentions_secret()).map(|p| p.span)
-        .or_else(|| agent.return_ty.mentions_secret().then_some(agent.span)) {
-        return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, span));
-    }
     for p in &agent.params {
         cl_type_for(&p.ty, p.span).map_err(|_| {
             CodegenError::not_supported(
@@ -472,10 +484,8 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
         // B06, B04 — a native `Decimal`, time, currency, locale or
         // `Bytes` value is a String holding its canonical text.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Ok(I64),
-        Type::Secret => Err(CodegenError::not_supported(
-            crate::secret_boundary::SECRET_REQUIREMENT,
-            span,
-        )),
+        // Native dispatch N3 — a pointer to the runtime's secret object.
+        Type::Secret => Ok(I64),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
             span,

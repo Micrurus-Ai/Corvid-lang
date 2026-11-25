@@ -86,8 +86,9 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
-    /// B04 — a program that mentions `Secret` anywhere: a declared
-    /// field, a signature or an expression. See
+    /// A secret used where native code cannot keep its guarantees yet:
+    /// a tool other than the runtime's own that takes or returns one, or
+    /// a cryptography method keyed by one. See
     /// `corvid_codegen_cl::secret_boundary`.
     SecretNotNative,
 }
@@ -146,7 +147,7 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::SecretNotNative => write!(
                 f,
-                "program uses `Secret` - {}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
+                "{}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
                 corvid_codegen_cl::secret_boundary::SECRET_REQUIREMENT
             ),
             Self::TextScalarAtBoundary { name, type_name } => write!(
@@ -222,13 +223,7 @@ fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext
         || op.body.as_ref().is_some_and(|b| b.encoding == corvid_ast::BodyEncoding::Multipart)
     {
         Some("sends a file or multipart body")
-    } else if !tool
-        .params
-        .iter()
-        .map(|p| &p.ty)
-        .chain(std::iter::once(&tool.return_ty))
-        .all(|ty| corvid_codegen_cl::native_public_json_type(ty, context.types))
-    {
+    } else if !corvid_codegen_cl::native_runtime_call_types(tool, context.types) {
         Some("sends or reads a type with no native JSON form")
     } else {
         None
@@ -246,20 +241,11 @@ fn runtime_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'
     if !corvid_runtime::runtime::is_native_runtime_tool(&tool.name) {
         return None;
     }
-    let native = tool
-        .params
-        .iter()
-        .map(|p| &p.ty)
-        .chain(std::iter::once(&tool.return_ty))
-        .all(|ty| corvid_codegen_cl::native_public_json_type(ty, context.types));
-    Some(native)
+    Some(corvid_codegen_cl::native_runtime_call_types(tool, context.types))
 }
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
     let context = ScanContext { types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
-    if declared_types(ir).any(Type::mentions_secret) {
-        return Err(NotNativeReason::SecretNotNative);
-    }
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
         return Err(NotNativeReason::PythonImport { module: module.clone() });
     }
@@ -363,37 +349,16 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
         .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
-/// Every type a declared record field, prompt or agent signature, or a
-/// called tool's signature, names.
-///
-/// A tool that is never called produces no value, so its signature is
-/// left out: importing `std/secrets` for `secret_read` also brings in
-/// `secret`, whose signature holds a `Secret`.
-fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
-    let mut called = std::collections::HashSet::new();
-    corvid_ir::for_each_expr(ir, &mut |_, expr| {
-        if let IrExprKind::Call { kind: IrCallKind::Tool { def_id, .. }, .. } = &expr.kind {
-            called.insert(*def_id);
-        }
-    });
-    let fields = ir.types.iter().flat_map(|decl| {
-        decl.fields.iter().chain(decl.variants.iter().flat_map(|variant| &variant.fields)).map(|field| &field.ty)
-    });
-    let tools = ir
-        .tools
-        .iter()
-        .filter(move |tool| called.contains(&tool.id))
-        .flat_map(|tool| tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)));
-    let prompts =
-        ir.prompts.iter().flat_map(|prompt| prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty)));
-    let agents = ir.agents.iter().flat_map(|agent| agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)));
-    fields.chain(tools).chain(prompts).chain(agents)
+/// Whether a tool's declared signature holds a `Secret`, in a record
+/// field too.
+fn tool_takes_or_returns_secret(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> bool {
+    let types_by_id: std::collections::HashMap<_, _> = context.types.iter().map(|ty| (ty.id, ty)).collect();
+    context.tools.iter().find(|t| t.id == tool_id).is_some_and(|tool| {
+        tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)).any(|ty| corvid_ir::holds_secret(ty, &types_by_id))
+    })
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
-    if expr.ty.mentions_secret() {
-        return Err(NotNativeReason::SecretNotNative);
-    }
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
         scan_expr(receiver, current_return_ty, context)?;
         return scan_expr(key, current_return_ty, context);
@@ -439,6 +404,14 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             receiver,
             ..
         } if is_native_option_type(&expr.ty) => scan_expr(receiver, current_return_ty, context),
+        // `secret.verify_password(hash)` and `decode_base64_after`, and an
+        // HMAC keyed by a secret, run on the interpreter until N3b.
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if kind.is_crypto()
+                && std::iter::once(&**receiver).chain(args).any(|arg| arg.ty.mentions_secret()) =>
+        {
+            Err(NotNativeReason::SecretNotNative)
+        }
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
         } => scan_expr(receiver, current_return_ty, context),
@@ -478,9 +451,9 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         {
             scan_expr(receiver, current_return_ty, context)
         }
-        // `secret.verify_password(hash)` returns a `Bool`, so the secret
-        // it reads shows only in the method.
-        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() => Err(NotNativeReason::SecretNotNative),
+        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() && !corvid_codegen_cl::is_native_bytes_method(*kind) => {
+            Err(NotNativeReason::SecretNotNative)
+        }
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
@@ -516,6 +489,12 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                         scan_expr(a, current_return_ty, context)?;
                     }
                     return Ok(());
+                }
+                // A tool of the program's own, or `hash_password`, whose
+                // signature holds a secret: native code would record its
+                // arguments without redaction.
+                IrCallKind::Tool { def_id, .. } if tool_takes_or_returns_secret(*def_id, context) => {
+                    return Err(NotNativeReason::SecretNotNative)
                 }
                 IrCallKind::Tool { .. } if !context.has_tools_lib => {
                     return Err(NotNativeReason::ToolCall {
@@ -757,33 +736,32 @@ agent main() -> Decimal:
     }
 
     #[test]
-    fn secret_programs_run_on_the_interpreter() {
+    fn secrets_are_native_except_at_tool_boundaries_and_in_cryptography() {
+        // Native dispatch N3: reading a secret through the runtime,
+        // holding one in a record and comparing two compile natively.
         for src in [
             "effect secrets_read:\n    reversible: true\n\ntool secret(name: String) -> Result<Secret, String> uses secrets_read\n\nagent main() -> Bool:\n    return match secret(\"KEY\"):\n        Ok(key) -> true\n        Err(problem) -> false\n",
             "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
             "type Credentials:\n    user: String\n    password: Secret\n\nagent main() -> Int:\n    return 1\n",
-            "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
+            // A tool that is never called produces nothing.
+            "tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
-            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
+            assert_eq!(native_ability_with_tools(&ir, true), Ok(()), "{src}");
         }
-        // An HMAC keyed by a secret, and the secret methods, are
-        // refused even though their results are `Bytes` and `Bool`.
+        // A tool of the program's own that takes or returns a secret
+        // would record it without redaction; an HMAC keyed by a secret and
+        // the secret methods wait for native secret cryptography.
         for src in [
+            "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
             "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
             "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"x\")\n\nagent main() -> Int:\n    return 1\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
-            assert_eq!(native_ability(&ir), Err(NotNativeReason::SecretNotNative), "{src}");
+            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
         }
-        // A tool whose signature holds a `Secret` but is never called
-        // produces none, as when `std/secrets` is imported for
-        // `secret_read` and brings in `secret`.
-        let ir = crate::compile_to_ir("tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n")
-            .expect("valid program");
-        assert_eq!(native_ability(&ir), Ok(()));
         let reason = NotNativeReason::SecretNotNative.to_string();
-        assert!(reason.contains("do not dispatch the standard library's tools") || reason.contains("neither dispatch"), "{reason}");
+        assert!(reason.contains("tool of the program's own") && reason.contains("records its arguments without redaction"), "{reason}");
     }
 
     #[test]

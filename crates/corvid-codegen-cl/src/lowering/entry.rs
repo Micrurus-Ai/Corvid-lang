@@ -503,8 +503,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
         )),
         Type::Secret => Err(CodegenError::not_supported(
             format!(
-                "entry agent {role} of type `Secret` - {}; use the interpreter tier (`corvid run --tier interp`).",
-                crate::secret_boundary::SECRET_REQUIREMENT
+                "entry agent {role} of type `Secret` - the command line prints a result and passes arguments as text, so a secret can neither enter nor leave through it; read one with `secret(name)` inside the program"
             ),
             span,
         )),

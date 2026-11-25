@@ -80,6 +80,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// static string literals and List<String>'s elem_typeinfo slot.
     pub map_typeinfo: cranelift_module::DataId,
     pub string_typeinfo: cranelift_module::DataId,
+    /// Runtime-provided `corvid_typeinfo_Secret` (native dispatch N3).
+    pub secret_typeinfo: cranelift_module::DataId,
     pub weak_box_typeinfo: cranelift_module::DataId,
     // Entry helpers used by the codegen-emitted `main`.
     pub entry_init: FuncId,
@@ -115,6 +117,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_register_connectors(specs)`: install the embedded
     /// connector specs before `corvid_runtime_init`.
     pub register_connectors: FuncId,
+    /// `corvid_secret_eq(a, b) -> 1 | 0`: `==` on two secrets, in
+    /// constant time (native dispatch N3).
+    pub secret_eq: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,

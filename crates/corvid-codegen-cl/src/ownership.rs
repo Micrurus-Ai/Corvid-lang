@@ -592,7 +592,7 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
         Type::Function { .. } => crate::native_callback_type(ty),
         // B06, B04 — a native `Decimal`, time, currency, locale or `Bytes` value is a
         // String holding its canonical text.
-        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Secret | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }
         Type::Option(inner) => {
@@ -621,7 +621,7 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
 pub(crate) fn is_strong_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
-        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Secret | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
         // Weak is never a strong edge — it carries a weak slot.
         Type::Weak(_, _) => false,
         // Option<strong> is maybe-strong; callers requiring

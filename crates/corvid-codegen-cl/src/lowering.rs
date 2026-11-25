@@ -54,7 +54,7 @@ mod entry;
 use entry::*;
 mod public_json;
 mod runtime_call;
-pub use public_json::native_public_json_type;
+pub use public_json::{native_public_json_type, native_runtime_call_types};
 use public_json::{lower_json_decode, lower_json_encode};
 
 pub fn lower_file(
