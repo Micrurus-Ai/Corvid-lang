@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 mod dialect;
 pub mod exact_columns;
+mod indexes;
 mod migration;
 mod postgres;
 mod query;
@@ -30,6 +31,7 @@ mod recorded;
 mod schema;
 mod transaction;
 pub use dialect::TableEngine;
+pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
 pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};

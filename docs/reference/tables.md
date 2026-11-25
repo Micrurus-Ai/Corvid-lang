@@ -209,6 +209,35 @@ note.
 
 A query uses `db_egress_read`, like `Shelf.get`, so pure `fn`s and
 `@deterministic` agents cannot run one.
+## Indexes
+
+You never write an index. A table is private to its module, so the
+compiler sees every query the table gets, and `corvid migrate plan`
+creates the index each query needs: the columns the condition requires
+to be equal (joined by `and` at the top of the condition), in
+declaration order, then the column it orders by, or else the column it
+compares with `<`, `<=`, `>` or `>=`.
+
+```corvid
+agent latest(owner: String) -> List<Job>:
+    return Job.where(fn (j) -> j.owner == owner and not j.paused).order_by(fn (j) -> j.job).descending().take(1)
+```
+
+plans
+
+```sql
+-- `Job`: index (owner, job) for the queries in `latest`.
+CREATE INDEX IF NOT EXISTS "Job_by_owner_job" ON "Job" ("owner", "job");
+```
+
+A query the key serves needs no index, and an index whose columns lead a
+longer one's is served by the longer one. When a query changes, the next
+plan replaces its index; when no query needs an index Corvid made, the
+plan drops it. Corvid names its indexes `Table_by_columns` and touches
+no other index, so an index a database administrator adds by hand
+stays. Conditions under `or` or `not` are filtered by the database
+without an index of their own.
+
 ## Effects and determinism
 
 `Shelf.get` uses the built-in `db_egress_read` effect, and `insert`,

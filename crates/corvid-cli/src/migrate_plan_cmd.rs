@@ -17,7 +17,7 @@
 use crate::migrate_cmd::{migration_version, scan_migration_files};
 use crate::migrate_postgres;
 use anyhow::{bail, Context, Result};
-use corvid_runtime::tables::{create_table_sql_on, plan_table_change, StoredColumn, TableEngine, TableSchema};
+use corvid_runtime::tables::{create_table_sql_on, plan_index_changes, plan_table_change, StoredColumn, TableEngine, TableSchema};
 use rusqlite::Connection;
 use std::path::Path;
 
@@ -111,6 +111,21 @@ impl History<'_, '_> {
             History::Postgres(tx) => migrate_postgres::stored_columns(tx, table),
         }
     }
+
+    /// The names of a table's indexes as the migrations left them, not
+    /// counting the one SQLite makes for a key.
+    fn stored_indexes(&mut self, table: &str) -> Result<Vec<String>> {
+        match self {
+            History::Sqlite(connection) => {
+                let mut statement = connection.prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?1 AND sql IS NOT NULL ORDER BY name",
+                )?;
+                let names = statement.query_map([table], |row| row.get(0))?;
+                Ok(names.collect::<rusqlite::Result<_>>()?)
+            }
+            History::Postgres(tx) => migrate_postgres::stored_indexes(tx, table),
+        }
+    }
 }
 
 fn plan(source: &Path, dir: &Path, dry_run: bool, schemas: &[TableSchema], history: &mut History<'_, '_>) -> Result<u8> {
@@ -145,15 +160,7 @@ fn plan(source: &Path, dir: &Path, dry_run: bool, schemas: &[TableSchema], histo
         eprintln!("plan: no migration written; change the declarations as each refusal says, then plan again");
         return Ok(1);
     }
-    if created.is_empty() && changed.is_empty() {
-        println!("plan: the migrations already match every declared table");
-        return Ok(0);
-    }
-
-    let mut sql = format!(
-        "-- Planned by `corvid migrate plan` from {}. Review before `corvid migrate up`.\n\n",
-        source.display()
-    );
+    let mut sql = String::new();
     for table in &created {
         sql.push_str(&format!("-- Create `{}`.\n", table.name));
         sql.push_str(&create_table_sql_on(table, table.engine));
@@ -169,19 +176,53 @@ fn plan(source: &Path, dir: &Path, dry_run: bool, schemas: &[TableSchema], histo
         }
         sql.push('\n');
     }
+    // Indexes are planned against the tables as these changes leave them:
+    // a rebuilt SQLite table has lost its indexes, a renamed column keeps
+    // its index under the old name.
+    history.run(&sql).context("the planned migration does not run on the migrated schema")?;
+    let mut indexed: Vec<&TableSchema> = Vec::new();
+    let mut index_sql = String::new();
+    for schema in schemas {
+        let stored = history.stored_indexes(&schema.name)?;
+        let statements = plan_index_changes(schema, &stored);
+        if statements.is_empty() {
+            continue;
+        }
+        for (comment, statement) in &statements {
+            index_sql.push_str(&format!("-- {comment}.\n{statement}\n"));
+        }
+        index_sql.push('\n');
+        indexed.push(schema);
+    }
+    if sql.is_empty() && index_sql.is_empty() {
+        println!("plan: the migrations already match every declared table");
+        return Ok(0);
+    }
+    history.run(&index_sql).context("the planned indexes do not build on the migrated schema")?;
+    let sql = format!(
+        "-- Planned by `corvid migrate plan` from {}. Review before `corvid migrate up`.\n\n{sql}{index_sql}",
+        source.display()
+    );
 
     // The plan must bring the history to the declarations exactly;
     // check that before handing it to a person.
-    history.run(&sql).context("the planned migration does not run on the migrated schema")?;
     for schema in schemas {
         let stored = history.stored_columns(&schema.name)?;
         if !matches!(plan_table_change(schema, &stored), Ok(None)) {
             bail!("the planned migration leaves table `{}` different from its declaration; this is a planner bug", schema.name);
         }
+        if !plan_index_changes(schema, &history.stored_indexes(&schema.name)?).is_empty() {
+            bail!("the planned migration leaves the indexes of table `{}` different from its queries; this is a planner bug", schema.name);
+        }
     }
 
-    let verb = if changed.is_empty() { "create" } else { "change" };
-    let names: Vec<&str> = created.iter().copied().chain(changed.iter().map(|(t, _)| *t)).map(|t| t.name.as_str()).collect();
+    let verb = if changed.is_empty() && indexed.iter().all(|t| created.iter().any(|c| c.name == t.name)) { "create" } else { "change" };
+    let mut names: Vec<&str> = created.iter().copied().chain(changed.iter().map(|(t, _)| *t)).map(|t| t.name.as_str()).collect();
+    for table in &indexed {
+        if !names.contains(&table.name.as_str()) {
+            names.push(&table.name);
+        }
+    }
     let file_name = format!("{}_{verb}_{}.sql", next_version(&migrations), names.join("_").to_lowercase());
     if dry_run {
         println!("plan: would write {}\n\n{sql}", dir.join(&file_name).display());
@@ -231,6 +272,7 @@ mod tests {
             renamed: Vec::new(),
             retired: Vec::new(),
             engine: corvid_runtime::tables::TableEngine::Sqlite,
+            indexes: Vec::new(),
         }
     }
 

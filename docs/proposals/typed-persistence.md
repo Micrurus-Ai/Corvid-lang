@@ -358,6 +358,57 @@ tells the two apart by type. Decisions:
   value the table stores. Nothing new is exposed: the bytes leave the
   database only through a table's declared type.
 
+## Indexes from queries (P9)
+
+The reading list's extraction store finds a reviewer's latest job with
+`ExtractionJob.where(fn (j) -> j.owner == owner)`. The hand-written
+schema it replaced had an index on `(owner, id)`; the table declaration
+had no way to ask for one, so the port left a full scan.
+
+**Decision: derive indexes from the queries; write none in source.** A
+table is private to its module, so the compiler sees every query it
+gets, which no other language's ORM can rely on. Each query's index is
+its top-level equality columns in declaration order, then its `order_by`
+column, or else its range column. The key serves its own lookups, and an
+index whose columns lead a longer one's is merged into it. The migration
+planner creates what is missing and drops what Corvid made that no query
+needs, and the migration names the agents each index serves.
+
+Simpler alternatives considered:
+
+- **An `index owner, job` line in the table**, like `retired`. A reader
+  understands it, but it repeats what the queries already say, goes stale
+  when a query changes, and a missing one is only found under load.
+  "If the compiler can know something for certain, the source does not
+  repeat it."
+- **Indexes on every column.** It costs every write, and it still does
+  not serve a query on two columns.
+- **Leave indexes to the database administrator.** Then the program
+  that runs the queries does not say how they are served, and the
+  planner cannot keep the two in step.
+
+Decisions:
+
+- **Corvid touches only its own indexes**, named `Table_by_columns`
+  (or the table and a stable digest past Postgres's 63-byte limit), so an
+  index added by hand is never dropped.
+- **Indexes are planned after the table changes**, against the table as
+  those leave it: a rebuilt SQLite table has lost its indexes and gets
+  them back, a renamed column changes its index's name. Each statement is
+  `IF EXISTS` or `IF NOT EXISTS`, and the planner checks the result as it
+  checks columns.
+- **Conditions under `or` or `not` get no index of their own**: which
+  index would serve them depends on the data, so the database filters
+  them.
+- **Across the tiers:** an assistant's action and a person's form reach
+  the same agents, so the queries they cause are the queries the
+  compiler indexed; a new screen that needs a new lookup gets its index
+  from the agent it calls, in the same migration.
+
+Not yet: unique constraints (a uniqueness rule is a correctness
+decision, not an index, and needs its own conflict value), and using an
+index for `starts_with`.
+
 ## Open questions for review
 
 - `renamed from` versus an attribute such as `@renamed(from: name)`.

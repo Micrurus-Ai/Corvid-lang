@@ -331,6 +331,37 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Indexes follow the queries (B09 P9)
+
+The reading list's port to tables left a full scan where the
+hand-written schema had an index: a table declaration had no way to ask
+for one. Rather than add an `index` line, the planner now derives
+indexes from the queries. A table is private to its module, so the
+compiler sees every query it will ever get, and an `index` line would
+only repeat what those queries say, and go stale the day one changes.
+
+Each query's index is its top-level equality columns in declaration
+order, then its `order_by` column or else its range column. The key
+serves its own lookups, and an index that leads a longer one is merged
+into it. The planner applies the table changes to its planning database
+first and reads the indexes back, because a SQLite rebuild drops a
+table's indexes. It then creates what is missing and drops what Corvid
+named (`Table_by_columns`) that no query needs, naming the agents each
+index serves in the migration. It verifies the result as it does
+columns. Indexes added by hand are never touched.
+
+Finding the queries needed a read-only walk of every IR expression, so
+`corvid-ir` gained `for_each_expr`. Its matches are exhaustive like the
+type visitor's, so a new expression kind cannot be silently skipped. The
+test plans an index for a query, checks with `EXPLAIN QUERY PLAN` that
+SQLite uses it, changes the query and sees the index replaced, then
+makes the query a key lookup and sees it dropped. The migration
+lifecycle on Postgres passes with the derived index for its decimal
+query. Unique constraints are recorded as their own item, since a
+uniqueness rule needs a conflict value of its own.
+
+---
+
 ## 2026-11-24 - Money and time columns on Postgres (B09 P8b)
 
 The money and time columns now run on Postgres too, so a finance or

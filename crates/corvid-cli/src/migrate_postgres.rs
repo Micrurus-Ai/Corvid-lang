@@ -187,6 +187,15 @@ pub(crate) fn stored_columns(tx: &mut Transaction<'_>, table: &str) -> Result<Ve
         .collect())
 }
 
+/// The names of a table's indexes in the current schema.
+pub(crate) fn stored_indexes(tx: &mut Transaction<'_>, table: &str) -> Result<Vec<String>> {
+    let rows = tx.query(
+        "SELECT indexname::text FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 ORDER BY indexname",
+        &[&table],
+    )?;
+    Ok(rows.iter().map(|row| row.get(0)).collect())
+}
+
 /// The first transaction-control statement in `sql`, if any. Comments,
 /// quoted strings, quoted identifiers and dollar-quoted bodies are
 /// skipped, and a `BEGIN ATOMIC ... END` function body is one statement.
