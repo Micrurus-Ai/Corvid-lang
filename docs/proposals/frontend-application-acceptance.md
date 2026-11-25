@@ -26,28 +26,26 @@ toolchain version, pages used, commands and results, time to the first useful
 result, remaining blockers and any maintainer help. Record a blocker even if
 it prevents the build from finishing.
 
-## Evidence on the F18 working tree
+## Acceptance at `5299b6fd33cc4d820a21284971f6a86583038fde`
 
-| Trial | Observed result | Still required |
+Both application checks passed on hosted Windows with Edge. F18 remains open.
+[Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45624130574)
+
+| Trial | Verified behavior | Scope of the trial |
 | --- | --- | --- |
-| Storefront | A fresh CLI project built a web archive. HTTP checks found the empty catalog message and all 1,000 edition links in the large catalog. Checkout returned the empty-cart page, rejected 100 notebooks with HTTP 400 and then returned 56,925 cents for 99 of each product. | Run the responsive Edge trial. The large catalog fixture links to one notebook detail screen. Checkout has two product lines. |
-| Sketchbook | The Wasm build and all eight Node tests passed. With simulated IndexedDB and HTTP, reopening restored all 6,144 cells, and synchronization uploaded the complete drawing. The suite also covered migration, conflicting writes and a lost acknowledgement. | Run the browser trial with real IndexedDB, service-worker reload and reconnect. The canvas is fixed at 96 × 64 and supports additive marks. |
-| Collaborative workspace | The roadmap still lists the shared B14/F08 subscription contract as a dependency. | After F08 merges, disconnect one client, commit an edit from another, reconnect and verify the resumed subscription delivers missed and subsequent edits. |
-| Independent component | No independent developer report is available for this revision. | Record the developer's own component and report from the public-docs-only trial. |
+| Storefront | The packaged app served empty and 1,000-entry catalogs. Checkout showed the empty cart, rejected 100 notebooks with HTTP 400, then accepted 99 of each product for 56,925 cents. Edge exercised checkout at 320 and 960 CSS pixels with scripting enabled and disabled. | The large catalog links to one notebook detail screen. Checkout has two product lines. Touch checkout used Pixel 7 emulation. |
+| Sketchbook | Edge opened an empty drawing, loaded 6,143 marked cells and saved the final cell offline. A service-worker reload restored all 6,144 marks and reconnect uploaded the same cells. The two-tab migration and conflict checks also passed. | The 96 by 64 canvas supports additive marks. Synchronization uses conditional HTTP requests against the trial server. |
 
-Hosted Edge reached the empty and 6,143-cell canvas assertions at
-`aa59242bba98fb80972488267e274c18e37a2bfa`. After the offline click the
-storage message still read “Drawings save on this device.” The run stopped
-before storefront verification. Target the final cell relative to the canvas
-so Playwright scrolls it into view and checks that it receives the click.
-Verify that the mark is painted, saved, restored and synchronized.
-[Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45621854525)
-
-The two Edge checks stopped while importing Playwright on this local Windows runner
-with `PermissionError: [Errno 13]`. Run both from the repository root on hosted
-Windows with the CLI built from the revision under test.
+The hosted workflow ran these commands from the repository root.
 
 ```powershell
-python scripts/verify_storefront.py --cli target/debug/corvid.exe --channel msedge
-python scripts/verify_drawing_editor.py --cli target/debug/corvid.exe --channel msedge
+cargo build --locked -p corvid-cli --bin corvid
+$cli = (Resolve-Path target/debug/corvid.exe).Path
+python -B scripts/verify_drawing_editor.py --cli $cli --channel msedge
+python -B scripts/verify_storefront.py --cli $cli --channel msedge
 ```
+
+## Open acceptance criteria
+
+- **Streaming collaborative workspace.** F08 awaits the shared typed subscription contract from B14. After F08 merges, exercise an ordinary workspace project in empty and large states. Disconnect one client, commit an edit from the other, then reconnect the first client and verify that its resumed subscription delivers both the missed edit and a subsequent live edit. [B14 contract dependency](../backend-ai-roadmap.md)
+- **Independent component.** The public-docs-only trial above still needs an independent developer's component and report of the build outcome and remaining blockers.

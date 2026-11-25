@@ -9,10 +9,11 @@ The acceptance exercises use the cart's declared quantity limits and the
 sketchbook's actual canvas dimensions. The packaged HTTP and local storage
 checks passed. [Results and open dependencies](docs/proposals/frontend-application-acceptance.md)
 
-Hosted Edge reached the nearly full canvas but timed out waiting for the
-offline click to save. The revised trial clicks relative to the canvas and
-checks the full drawing before and after reload. Both Edge trials await
-verification on the updated tree.
+Hosted Edge passed the responsive storefront and offline sketchbook checks at
+`5299b6fd33cc4d820a21284971f6a86583038fde`, including reload and synchronization
+of the full canvas. F18 still needs F08 to merge, a workspace subscription to
+resume after disconnect, and the independent component report.
+[Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45624130574)
 
 ### F16 web starter and installed component tooling
 
