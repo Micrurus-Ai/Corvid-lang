@@ -503,6 +503,21 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The shared-actions example returns its conflict (B09 Conflict-3)
+
+The B10 proposal's `move_card` example declared a `MoveRefused` sum type
+and a `placed` helper that turned a save's `Err(Some(current))` and
+`Err(None)` into it. With named conflicts the action returns
+`Result<Card, Conflict<Card>>` and its body is one `match`: the save's
+conflict is already `Changed(current)` or `Deleted`, and a missing card is
+`Err(Deleted)`. This is the measured gain the cross-tier rule asks for:
+the example lost a type, a helper and seven lines, and the conflict a
+form, an assistant and the CLI receive is the one the table produced.
+The proposal still waits on frontend agreement; it changes no grammar
+the frontend reviews, only the example's types.
+
+---
+
 ## 2026-11-25 - Table writes return their conflicts by name (B09 Conflict-2)
 
 `insert`, `save` and `delete` now return `Result<Row, Conflict<Row>>`,
