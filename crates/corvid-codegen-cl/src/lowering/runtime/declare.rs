@@ -46,7 +46,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let list_new = declare("corvid_list_new", 2, true)?;
     let list_bounds_error = declare("corvid_list_bounds_error", 2, false)?;
     let list_append = declare("corvid_list_append", 2, false)?;
-    let map_new = declare("corvid_ordered_map_new_typed", 2, true)?;
+    let map_new = declare("corvid_ordered_map_new_keyed", 3, true)?;
     let map_set = declare("corvid_ordered_map_set", 3, false)?;
     let map_require_int = declare("corvid_ordered_map_require_int", 2, true)?;
     let map_find = declare("corvid_ordered_map_find", 2, true)?;

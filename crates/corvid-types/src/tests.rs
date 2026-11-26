@@ -8743,3 +8743,16 @@ fn duration_literals_check_and_explain_calendar_units() {
     let mismatch = errors("agent wait() -> Int:\n    return 30 seconds\n");
     assert!(!mismatch.is_empty(), "a duration is not an Int");
 }
+
+/// A map literal's keys take the expected key type, as its values take
+/// the expected value type: number keys where a `Map<Decimal, _>` is
+/// meant are `Decimal`s, and text keys where a `Map<Currency, _>` is
+/// meant are currencies, checked as such.
+#[test]
+fn map_literal_keys_take_the_expected_key_type() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent main() -> Int:\n    prices: Map<Decimal, String> = {1.0: \"one\", 2.50: \"two\"}\n    return prices.length()\n").is_empty());
+    assert!(errors("agent main() -> Int:\n    rates: Map<Currency, Int> = {\"EUR\": 1}\n    return rates.length()\n").is_empty());
+    let bad = errors("agent main() -> Int:\n    rates: Map<Currency, Int> = {\"EURO\": 1}\n    return rates.length()\n");
+    assert!(!bad.is_empty(), "an unknown currency code is refused at the key");
+}

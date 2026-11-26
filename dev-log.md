@@ -104,6 +104,40 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native maps with text-held keys and values (B3)
+
+Native maps held only `String` keys and a few value types, and compared
+keys by their text. A `Decimal` key needs value comparison: `1.0` and
+`1.00` are one key, by `==` and in the interpreter's map.
+
+Now each native map records its key type's comparison layout. The C map
+compares a `String` key as text and any other key through
+`corvid_map_keys_equal`, the runtime's by-value comparison behind `==`.
+Map equality matches keys the same way. Which types the runtime
+compares as one text slot is now one function,
+`EqualityLayout::of_text_slot`, shared by the comparison layouts and
+the map key kinds. A test holds the C file's `String` key kind in step
+with it. Values held as canonical text are reference-counted slots, as
+`String` values are. JSON decoding still builds `String`-keyed maps
+only, since a JSON object's keys are text.
+
+Found and fixed: a map literal's keys did not take the expected key
+type, though its values did. `{1.0: "one"}` where a
+`Map<Decimal, String>` was meant checked as `Map<Float, String>`, and
+`{"EUR": 1}` as `String`-keyed. Keys now get the same expected-type
+treatment as values.
+
+This completes the [native scalar boundaries](docs/proposals/native-scalar-boundaries.md)
+proposal: prompts, tools and maps all carry the text-held types
+natively, through the one public mapping.
+
+Tests: parity tests cover a `Decimal` key at two scales (one entry, the
+first text kept), keys and values of `Instant`, `Duration`, `Currency`
+and `Bytes`, and by-value equality of `Decimal`-keyed maps. A checker
+test covers map literal keys taking the declared type.
+
+---
+
 ## 2026-11-26 - Native user tools through the runtime call (B2b)
 
 Native code called a tool of the program's own through its typed C
