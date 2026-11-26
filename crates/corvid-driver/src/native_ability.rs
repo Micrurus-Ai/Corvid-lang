@@ -912,6 +912,7 @@ agent main() -> Int:
             servers: vec![],
             models: Vec::new(),
             connectors: vec![],
+            actions: vec![],
         };
 
         assert!(matches!(

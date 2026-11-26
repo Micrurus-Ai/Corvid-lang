@@ -262,10 +262,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] P5. MySQL, after B10 (see the order note).
 - [ ] P6. Native target, after B10 (see the order note). Follow [native dispatch](proposals/native-dispatch.md): native code reaches the runtime's table operations through one runtime export, so recording, replay, transactions and the `WriteConflict` cases are the interpreter's own, never re-implemented in generated code; `Conflict<Row>` then becomes a native sum type built from `ConflictCase`.
 
-**B10 shared actions** (proposal awaiting frontend agreement). [Proposal](proposals/shared-actions.md)
+**B10 shared actions** (building under the propose-then-build grammar law). [Proposal](proposals/shared-actions.md)
 
-- [ ] Agree the grammar with frontend development (F15): the `action` declaration, the `assistants:` line, `ui.form(action)` and `ui.button(label, action, value)` by name, one endpoint per action, and the typed refusal shape.
-- [ ] B10-1 to B10-5, as the proposal lists them, after agreement.
+- [x] Post the grammar for frontend development (F15): the `action` declaration, the `assistants:` line, `ui.form(action)` and `ui.button(label, action, value)` by name, one endpoint per action, and the typed refusal shape. No objection within a working day, so built.
+- [x] B10-1. The `action` declaration: parsed beside agents (`action` is contextual), called from Corvid code as an agent, a mandatory `requires` (`requires anyone` stands alone) checked against the identity block, and `actions` in the application contract with input, result and caller policy. Built 2026-11-26.
+- [ ] B10-2. `POST /actions/<name>` for forms and JSON, the policy enforced before decoding, the `action:<name>` trace entry, annotations on actions, `ui.form(action)` and `ui.button(label, action, value)`.
+- [ ] B10-3 to B10-5, as the proposal lists them.
 - [ ] Recoverable failures (`try <expr> else <fallback>`), also shared grammar awaiting agreement; the reading list's move onto tables merges with it. [Proposal](proposals/recoverable-failures.md)
 
 **B14 real-time connections** (shared design agreed with F08; split between this session and Codex by the owner, 2026-11-25). [Proposal](proposals/real-time.md)

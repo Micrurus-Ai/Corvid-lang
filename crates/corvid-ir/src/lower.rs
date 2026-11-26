@@ -341,6 +341,7 @@ impl<'a> Lowerer<'a> {
         let mut servers = Vec::new();
         let mut models = Vec::new();
         let mut connectors = Vec::new();
+        let mut actions = Vec::new();
 
         for decl in &file.decls {
             let Decl::Import(import) = decl else { continue };
@@ -383,7 +384,18 @@ impl<'a> Lowerer<'a> {
                 Decl::Database(_) => {}
                 Decl::Tool(t) => tools.push(self.lower_tool(t)),
                 Decl::Prompt(p) => prompts.push(self.lower_prompt(p)),
-                Decl::Agent(a) => agents.push(self.lower_agent(a)),
+                Decl::Agent(a) => {
+                    let agent = self.lower_agent(a);
+                    if let Some(spec) = &a.action {
+                        actions.push(crate::types::IrAction {
+                            name: a.name.name.clone(),
+                            agent: agent.id,
+                            policy: crate::types::IrRoutePolicy::from_ast(&spec.policy),
+                            span: spec.span,
+                        });
+                    }
+                    agents.push(agent);
+                }
                 Decl::Fn(f) => agents.push(self.lower_fn(f)),
                 Decl::Eval(e) => evals.push(self.lower_eval(e)),
                 Decl::Test(t) => tests.push(self.lower_test(t)),
@@ -495,6 +507,7 @@ impl<'a> Lowerer<'a> {
             servers,
             models,
             connectors,
+            actions,
         }
     }
 
@@ -678,11 +691,7 @@ impl<'a> Lowerer<'a> {
             upload_policy: r.upload.clone(),
             approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
-            policy: r.policy.as_ref().map(|p| crate::types::IrRoutePolicy {
-                authenticated: p.authenticated,
-                roles: p.roles.clone(),
-                permissions: p.permissions.clone(),
-            }),
+            policy: r.policy.as_ref().map(crate::types::IrRoutePolicy::from_ast),
             span: r.span,
         }
     }

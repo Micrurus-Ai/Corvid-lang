@@ -125,6 +125,7 @@ pub fn analyze(ir: IrFile) -> (IrFile, HashMap<DefId, AgentSummary>) {
         servers: ir.servers,
         models: Vec::new(),
         connectors: ir.connectors,
+        actions: ir.actions,
     };
     (out, summaries)
 }

@@ -57,6 +57,7 @@ decl              ::= visibility? (
                       | tool_decl
                       | prompt_decl
                       | agent_decl
+                      | action_decl
                       | component_decl
                       | fn_decl
                       | effect_decl
@@ -279,6 +280,13 @@ component_decl    ::= 'component' IDENT ':' INDENT 'state' IDENT (':' 'Int')? '=
 component_button  ::= 'button' '(' STRING ')' 'on' 'click' ':' INDENT IDENT '+=' INT NEWLINE DEDENT
 
 agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref uses_clause? ':' INDENT block DEDENT
+
+# B10: an operation people, assistants and the program share. Corvid code
+# calls it as an agent. `requires` is mandatory: it says who may call it
+# from outside, and `requires anyone` must stand alone. `action` is
+# contextual: an ordinary name unless followed by a name and `(`.
+action_decl       ::= 'action' IDENT params '->' type_ref uses_clause? action_policy ':' INDENT block DEDENT
+action_policy     ::= 'requires' 'anyone' | route_policy
 
 # Pure function (slice 45r) — the fourth callable kind. The body is
 # statically EFFECT-FREE: it may call other fns and pure builtins,

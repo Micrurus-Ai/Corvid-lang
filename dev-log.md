@@ -1465,6 +1465,40 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - The `action` declaration (B10-1)
+
+`action move_card(move: MoveCard) -> Card requires permission("board.edit"):`
+declares the operation a person, an assistant and the program share.
+It is an agent with an `ActionSpec` beside it, so Corvid code calls it
+as any agent and every walker, effect check and cost rule already
+covers its body. `action` is contextual: a name unless followed by a
+name and `(`, so `action: String` parameters still compile.
+
+`requires` is mandatory on an action. An operation reachable from
+outside must never become open because a line was left out (no hidden
+defaults), so leaving it out is a parse error listing the choices, and
+an open action says `requires anyone`, on its own. The checker refuses
+a signed-in policy without an identity block and a role or permission
+the identity block never declares, sharing one authority check with
+routes. The contract lists `actions` with the callable's fields, input
+and result, and the caller policy; an action is not listed again among
+`agents`.
+
+Alternatives considered for an open action: an omitted clause meaning
+open (rejected, the silent default), `requires nothing` and `public`
+(rejected: `anyone` reads as the plain answer to "who may call it",
+and `public` already means visible outside the file).
+
+Moved to B10-2, because they happen where outside callers arrive:
+enforcing the policy, the `action:<name>` trace entry, and annotations
+on an action, which the parser does not read yet.
+
+Found and fixed: the native ownership pass rebuilt the program with
+`models: Vec::new()`, silently dropping declared models from every
+later pass. Nothing reads them there today; it now carries them.
+
+---
+
 ## 2026-11-26 - `try ... else` on the interpreter (TE-2)
 
 `else <fallback>` joins `timeout` and `on error retry` as the last clause

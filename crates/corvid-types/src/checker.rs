@@ -943,6 +943,7 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------
 }
 
+mod actions;
 mod call;
 mod case;
 mod decl;

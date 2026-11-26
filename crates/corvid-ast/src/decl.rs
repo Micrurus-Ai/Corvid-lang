@@ -1906,6 +1906,22 @@ pub struct AgentDecl {
     /// visibility by definition.
     #[serde(default)]
     pub visibility: Visibility,
+    /// `action name(...) -> T requires ...:` (B10): the operation a
+    /// person, an assistant and the program share. An action is an agent
+    /// in every other respect; this says who may call it from outside the
+    /// program.
+    #[serde(default)]
+    pub action: Option<ActionSpec>,
+    pub span: Span,
+}
+
+/// What makes an agent an action (B10).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionSpec {
+    /// Who may call it from outside the program. Always written:
+    /// `requires anyone` is an empty policy, and leaving `requires` out is
+    /// a parse error, so an action is never open by accident.
+    pub policy: RoutePolicy,
     pub span: Span,
 }
 

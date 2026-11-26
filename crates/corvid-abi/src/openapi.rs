@@ -532,6 +532,7 @@ mod tests {
             prompts: vec![],
             identities: vec![],
             connectors: vec![],
+            actions: vec![],
             connector_wire: Default::default(),
         }
     }

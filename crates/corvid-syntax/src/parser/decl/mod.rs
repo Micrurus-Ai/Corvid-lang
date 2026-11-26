@@ -12,7 +12,7 @@ use super::{describe_token, Parser};
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
 use corvid_ast::{
-    AgentDecl, Decl, DimensionValue, Effect,
+    ActionSpec, AgentDecl, Decl, DimensionValue, Effect,
     ExternAbi, OwnershipAnnotation, OwnershipMode,
     Ident,
     Param,
@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
                 | TokKind::KwModel
                 | TokKind::KwFn
                 | TokKind::At => {}
-                TokKind::Ident(word) if word == "choice" || word == "local" => {}
+                TokKind::Ident(word) if word == "choice" || word == "local" || word == "action" => {}
                 TokKind::Ident(word) if word == "table" && self.at_contextual_block_decl("table") => {}
                 TokKind::Ident(word) if word == "database" && self.at_contextual_block_decl("database") => {}
                 other => {
@@ -76,6 +76,15 @@ impl<'a> Parser<'a> {
                 self.parse_browser_callback()
             }
             TokKind::Ident(word) if word == "component" => self.parse_component_decl(),
+            // `action name(` (B10): contextual, so `action` stays an
+            // ordinary name everywhere else.
+            TokKind::Ident(word)
+                if word == "action"
+                    && matches!(self.peek_ahead(1), TokKind::Ident(_))
+                    && matches!(self.peek_ahead(2), TokKind::LParen) =>
+            {
+                self.parse_action_decl(visibility).map(Decl::Agent)
+            }
             TokKind::Ident(_) if self.at_contextual_block_decl("table") => self.parse_table_decl(visibility).map(Decl::Table),
             TokKind::Ident(_) if self.at_contextual_block_decl("database") => self.parse_database_decl(visibility).map(Decl::Database),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
@@ -392,6 +401,48 @@ impl<'a> Parser<'a> {
             constraints: Vec::new(),
             attributes: Vec::new(),
             visibility,
+            action: None,
+            span: start.merge(end),
+        })
+    }
+
+    /// `action name(params) -> T [uses ...] requires <who>:` (B10): an
+    /// agent with a declared caller policy. `requires` is required, so an
+    /// action meant for everyone says `requires anyone`.
+    pub(super) fn parse_action_decl(&mut self, visibility: Visibility) -> Result<AgentDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // action
+        let (name, name_span) = self.expect_ident()?;
+        let params = self.parse_params()?;
+        self.expect(TokKind::Arrow, "`->` before the action's result type")?;
+        let return_ty = self.parse_type_ref()?;
+        let effect_row = self.parse_uses_clause()?;
+        let Some(policy) = self.parse_route_policy()? else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: describe_token(self.peek()),
+                    expected: "`requires` naming who may call the action: `requires anyone`, `requires authenticated`, `requires role(\"...\")` or `requires permission(\"...\")`".into(),
+                },
+                span: self.peek_span(),
+            });
+        };
+        self.expect(TokKind::Colon, "`:` after the action's signature")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let end = body.span;
+        let spec = ActionSpec { policy, span: start.merge(name_span) };
+        Ok(AgentDecl {
+            name: Ident::new(name, name_span),
+            extern_abi: None,
+            params,
+            return_ty,
+            return_ownership: None,
+            body,
+            effect_row,
+            constraints: Vec::new(),
+            attributes: Vec::new(),
+            visibility,
+            action: Some(spec),
             span: start.merge(end),
         })
     }

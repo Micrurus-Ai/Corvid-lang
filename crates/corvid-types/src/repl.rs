@@ -122,6 +122,7 @@ fn synthetic_agent(locals: &[ReplLocal], stmts: Vec<Stmt>, symbols: &SymbolTable
         constraints: Vec::new(),
         attributes: Vec::new(),
         visibility: Visibility::Private,
+        action: None,
         span,
     }
 }

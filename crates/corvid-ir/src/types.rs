@@ -38,6 +38,22 @@ pub struct IrFile {
     /// needs to build a `ConnectorRequest` when one of those tools is
     /// called.
     pub connectors: Vec<IrConnector>,
+    /// `action` declarations (B10): which agents are actions, and who
+    /// may call each from outside the program. Each also lowers to an
+    /// `IrAgent` in `agents` of the same name, so Corvid code calls it
+    /// as any agent.
+    pub actions: Vec<IrAction>,
+}
+
+/// An `action` (B10): the agent `name`, callable from outside the program
+/// only by a caller its `policy` admits. An empty policy is `requires
+/// anyone`, which the source spelled out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IrAction {
+    pub name: String,
+    pub agent: DefId,
+    pub policy: IrRoutePolicy,
+    pub span: Span,
 }
 
 /// A `connector` block lowered to IR (slice 52g-3). Its operations
@@ -235,6 +251,16 @@ pub struct IrRoutePolicy {
 }
 
 impl IrRoutePolicy {
+    /// The policy a `requires` clause declares; routes and actions both
+    /// lower through this.
+    pub fn from_ast(policy: &corvid_ast::RoutePolicy) -> Self {
+        Self {
+            authenticated: policy.authenticated,
+            roles: policy.roles.clone(),
+            permissions: policy.permissions.clone(),
+        }
+    }
+
     /// Whether the route requires authentication at all — an explicit
     /// `authenticated`, or any role/permission requirement (which implies
     /// it).

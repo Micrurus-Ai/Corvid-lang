@@ -302,6 +302,7 @@ mod tests {
             }],
             models: vec![],
             connectors: vec![],
+            actions: vec![],
         }
     }
 
