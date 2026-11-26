@@ -1,4 +1,5 @@
 use super::assert_parity_bool;
+use super::scalar_harness::assert_parity_text;
 
 #[test]
 fn float_addition_eq_check() {
@@ -83,4 +84,28 @@ agent f() -> Bool:
 ",
         true,
     );
+}
+
+/// A Float result prints as `corvid run` prints it on the interpreter.
+/// Native code used `%.17g`, which printed `0.1` as `0.10000000000000001`.
+#[test]
+fn float_results_print_alike() {
+    for (src, expected) in [
+        ("agent f() -> Float:\n    return 0.1\n", "0.1"),
+        ("agent f() -> Float:\n    return 2.0\n", "2"),
+        ("agent f() -> Float:\n    return 0.1 + 0.2\n", "0.30000000000000004"),
+        ("agent f() -> Float:\n    return 1.0 / 3.0\n", "0.3333333333333333"),
+    ] {
+        assert_eq!(assert_parity_text(src), expected, "{src}");
+    }
+}
+
+/// `to_string()` on Int, Float and Bool compiles natively and writes the
+/// interpreter's text: a Float always shows its decimal point.
+#[test]
+fn scalars_to_string_alike() {
+    let text = assert_parity_text(
+        "agent f() -> String:\n    return 0.1.to_string() + \" \" + 2.0.to_string() + \" \" + (0 - 7).to_string() + \" \" + true.to_string() + \" \" + (1 < 0).to_string() + \" \" + (1.0 / 0.0).to_string()\n",
+    );
+    assert_eq!(text, "0.1 2.0 -7 true false inf");
 }

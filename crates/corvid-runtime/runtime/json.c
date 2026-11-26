@@ -100,6 +100,8 @@ void corvid_json_buffer_append_int(void* buf_ptr, long long value) {
     }
 }
 
+extern size_t corvid_float_json_text(double value, char* buffer, size_t capacity);
+
 void corvid_json_buffer_append_float(void* buf_ptr, double value) {
     corvid_json_buffer* buf = (corvid_json_buffer*)buf_ptr;
     if (!isfinite(value)) {
@@ -110,14 +112,11 @@ void corvid_json_buffer_append_float(void* buf_ptr, double value) {
         buffer_append_bytes(buf, "null", 4);
         return;
     }
+    /* The JSON number text the interpreter writes, from the runtime's
+     * `number_text`, so a native trace records the same text. */
     char tmp[64];
-    /* `%.17g` is the canonical IEEE-754 round-trip format for f64. */
-    int written = snprintf(tmp, sizeof(tmp), "%.17g", value);
-    if (written <= 0) {
-        buffer_append_bytes(buf, "null", 4);
-        return;
-    }
-    buffer_append_bytes(buf, tmp, (size_t)written);
+    size_t written = corvid_float_json_text(value, tmp, sizeof(tmp));
+    buffer_append_bytes(buf, tmp, written);
 }
 
 void corvid_json_buffer_append_bool(void* buf_ptr, signed char value) {

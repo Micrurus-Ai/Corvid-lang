@@ -45,6 +45,7 @@ pub use assignment::{native_indexed_assignment, native_list_append, native_local
 pub use lowering::{native_public_json_type, native_runtime_call_types};
 pub use lowering::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod json_error_record;
+mod response_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
@@ -85,13 +86,22 @@ pub fn compile_to_object(
     // pair for Borrowed parameters.
     // `JsonError` becomes an ordinary record before ownership analysis,
     // so its values are reference counted like any record's.
+    // A program with connectors embeds their dispatch specs, the
+    // projection the interpreter's runtime gets (native dispatch N1). It
+    // reads the program as checked, before the rewrites below: a spec
+    // says whether its operation returns a `Response`, which the rewrite
+    // turns into a record.
+    let connector_specs = corvid_runtime::connectors::connector_calls_json(ir);
     let mut ir = ir.clone();
     json_error_record::represent_json_error_as_record(&mut ir);
+    // `Response<Body>` becomes a record per body type, after `JsonError`
+    // so a body holding one already names its record (native dispatch N4).
+    response_record::represent_responses_as_records(&mut ir);
     let (ir_analyzed, _summaries) = ownership::analyze(ir);
 
     let mut module = module::make_host_object_module(module_name)?;
     let _func_ids =
-        lowering::lower_file(&ir_analyzed, &mut module, entry_agent_name, tools_via_registry)?;
+        lowering::lower_file(&ir_analyzed, &mut module, entry_agent_name, tools_via_registry, connector_specs.as_deref())?;
     if let Some(bytes) = embedded_descriptor {
         define_embedded_descriptor(&mut module, bytes)?;
     }
@@ -368,6 +378,14 @@ pub fn native_string_method(kind: corvid_types::BuiltinMethodKind) -> bool {
     use corvid_types::BuiltinMethodKind::*;
     matches!(kind, StringLength | StringSubstring | StringToUpper | StringToLower | StringTrim
         | StringContains | StringStartsWith | StringEndsWith | StringSplit | StringReplace)
+}
+
+/// `int.to_string()`, `float.to_string()` and `bool.to_string()`: one
+/// runtime call each, writing the interpreter's text
+/// (`corvid_runtime::number_text`).
+pub fn native_scalar_to_string(kind: corvid_types::BuiltinMethodKind) -> bool {
+    use corvid_types::BuiltinMethodKind::*;
+    matches!(kind, IntToString | FloatToString | BoolToString)
 }
 
 pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool {

@@ -207,6 +207,13 @@ pub fn connector_calls_from_json(text: &str) -> Result<std::collections::HashMap
     serde_json::from_str(text).map_err(|e| format!("the embedded connector specs do not read back: {e}"))
 }
 
+/// `response.header(name)`: the value of the first response header
+/// called `name`, compared without regard to case, as HTTP names are.
+/// The interpreter and native code both answer through this.
+pub fn response_header<'a>(headers: impl IntoIterator<Item = (&'a str, &'a str)>, wanted: &str) -> Option<&'a str> {
+    headers.into_iter().find(|(name, _)| name.eq_ignore_ascii_case(wanted)).map(|(_, value)| value)
+}
+
 /// Derive the real-mode dispatch specs for every connector operation in
 /// a lowered file, keyed by the operation's tool name. This is the
 /// single projection from IR to dispatch spec — the driver installs the

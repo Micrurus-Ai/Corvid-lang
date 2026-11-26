@@ -71,11 +71,6 @@ pub enum NotNativeReason {
     /// is interpreter-only in slice 45b; native lowering is filed
     /// with the 47c backend-parity work.
     PlaceAssignmentNotNative,
-    /// A refined field given a value computed at run time (B09):
-    /// native code does not check refinements yet (Refine-2), so the
-    /// program runs where the check does. A constant is proven by the
-    /// checker and stays native.
-    RefinedValueNotNative { type_name: String, field: String },
     UnsupportedEquality,
     CallbackNotNative,
     PromptToolsRequireInterpreter,
@@ -160,10 +155,6 @@ impl std::fmt::Display for NotNativeReason {
                 corvid_codegen_cl::text_scalar_boundary::text_scalar_boundary_requirement(type_name)
             ),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
-            Self::RefinedValueNotNative { type_name, field } => write!(
-                f,
-                "`{type_name}.{field}` is given a computed value, and its refinement is checked only on the interpreter until native code checks refinements"
-            ),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
             Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
@@ -225,8 +216,6 @@ fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext
         Some("runs a provider protocol, whose durable lifecycle the interpreter drives")
     } else if op.streams.is_some() {
         Some("streams its response")
-    } else if tool.return_ty.mentions_response() {
-        Some("returns a `Response`")
     } else if tool.params.iter().any(|p| matches!(p.ty, Type::Bytes | Type::Upload(_)))
         || op.body.as_ref().is_some_and(|b| b.encoding == corvid_ast::BodyEncoding::Multipart)
     {
@@ -282,41 +271,6 @@ pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Res
     Ok(())
 }
 
-/// The first refined field a constructor gives a value that is not a
-/// literal. A literal was checked against the refinement by the type
-/// checker; anything else is checked at run time, on the interpreter.
-fn computed_refined_argument(
-    def_id: corvid_resolve::DefId,
-    args: &[IrExpr],
-    types: &[corvid_ir::IrType],
-) -> Option<(String, String)> {
-    let record = types.iter().find(|ty| ty.id == def_id)?;
-    record.fields.iter().zip(args).find_map(|(field, arg)| {
-        let constant = matches!(arg.kind, IrExprKind::Literal(_))
-            || matches!(&arg.kind, IrExprKind::UnOp { operand, .. } if matches!(operand.kind, IrExprKind::Literal(_)));
-        (field.refinement.is_some() && !constant).then(|| (record.name.clone(), field.name.clone()))
-    })
-}
-
-/// The refined field a place assignment stores into, if it ends at one.
-fn refined_field_at(root_ty: &Type, path: &[corvid_ir::IrPathSeg], types: &[corvid_ir::IrType]) -> Option<(String, String)> {
-    let mut owner = root_ty.clone();
-    let mut found = None;
-    for segment in path {
-        let corvid_ir::IrPathSeg::Field(name) = segment else {
-            owner = Type::Unknown;
-            found = None;
-            continue;
-        };
-        let Type::Struct(id) = owner else { return None };
-        let record = types.iter().find(|ty| ty.id == id)?;
-        let field = record.fields.iter().find(|f| f.name == *name)?;
-        found = field.refinement.is_some().then(|| (record.name.clone(), field.name.clone()));
-        owner = field.ty.clone();
-    }
-    found
-}
-
 fn scan_block(block: &IrBlock, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
     for stmt in &block.stmts {
         scan_stmt(stmt, current_return_ty, context)?;
@@ -331,10 +285,6 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty, context),
-        IrStmt::Assign { root_ty, path, .. } if refined_field_at(root_ty, path, context.types).is_some() => {
-            let (type_name, field) = refined_field_at(root_ty, path, context.types).expect("checked above");
-            Err(NotNativeReason::RefinedValueNotNative { type_name, field })
-        }
         IrStmt::Assign { value, .. } if corvid_codegen_cl::native_record_assignment(stmt) || corvid_codegen_cl::native_local_compound(stmt) => scan_expr(value, current_return_ty, context),
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
@@ -454,6 +404,18 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
         } => scan_expr(receiver, current_return_ty, context),
+        // Native dispatch N4 — a `Response`'s accessors.
+        IrExprKind::BuiltinMethod {
+            kind:
+                corvid_types::BuiltinMethodKind::ResponseStatus
+                | corvid_types::BuiltinMethodKind::ResponseBody
+                | corvid_types::BuiltinMethodKind::ResponseHeader,
+            receiver,
+            args,
+        } => {
+            scan_expr(receiver, current_return_ty, context)?;
+            args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_string_map(&receiver.ty) && matches!(kind,
                 corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues |
@@ -468,6 +430,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) || corvid_codegen_cl::native_numeric_conversion(*kind)
+                || corvid_codegen_cl::native_scalar_to_string(*kind)
                 || corvid_codegen_cl::native_string_method(*kind)
                 || corvid_codegen_cl::native_text_method(*kind)
                 || corvid_codegen_cl::is_native_decimal_method(*kind)
@@ -497,11 +460,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             callee_name,
             args,
         } => {
-            if let IrCallKind::StructConstructor { def_id } = kind {
-                if let Some((type_name, field)) = computed_refined_argument(*def_id, args, context.types) {
-                    return Err(NotNativeReason::RefinedValueNotNative { type_name, field });
-                }
-            }
             match kind {
                 IrCallKind::EnumConstructor { .. } => {}
                 IrCallKind::ClosureLocal { signature, .. } if corvid_codegen_cl::native_callback_type(signature) => {}

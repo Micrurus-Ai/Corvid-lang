@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 mod conflict;
 mod dialect;
+mod live;
 pub mod exact_columns;
 mod indexes;
 mod migration;
@@ -31,8 +32,12 @@ mod postgres;
 mod query;
 mod recorded;
 mod schema;
+mod shared_commits;
 mod transaction;
+pub(crate) use shared_commits::new_instance_id;
+pub use shared_commits::LISTENER_NAME;
 pub use conflict::WriteConflict;
+pub use live::{apply_live_changes, live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit};
 pub use dialect::TableEngine;
 pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_prefix, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
@@ -48,6 +53,8 @@ use schema::{create_table_named, quote};
 #[derive(Debug, Clone, Copy)]
 pub struct TableRef<'a> {
     pub name: &'a str,
+    /// The name of the database it lives in, which a commit announces.
+    pub database: &'a str,
     /// The key's columns, in declaration order: one, or several that
     /// identify a row together.
     pub keys: &'a [String],

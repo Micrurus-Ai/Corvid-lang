@@ -17,7 +17,6 @@ corvid-syntax = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-ir = { workspace = true }
-corvid-codegen-py = { workspace = true }
 corvid-codegen-cl = { workspace = true }
 corvid-codegen-wasm = { workspace = true }
 corvid-c-header = { workspace = true }

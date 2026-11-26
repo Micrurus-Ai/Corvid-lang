@@ -1551,7 +1551,7 @@ impl<'a> Lowerer<'a> {
                 // type on this expression's span.
                 let def_id = match self.types.get(&e.span()) {
                     Some(Type::Struct(id)) => self.remap_def_id(*id),
-                    _ => DefId(u32::MAX),
+                    _ => corvid_types::UNRESOLVED_DEF_ID,
                 };
                 IrExprKind::StructLiteral {
                     def_id,
@@ -1838,7 +1838,7 @@ impl<'a> Lowerer<'a> {
                         .variant_owners
                         .get(def_id)
                         .copied()
-                        .unwrap_or((DefId(u32::MAX), 0));
+                        .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                     IrPattern::Variant {
                         owner: self.remap_def_id(owner),
                         variant_index: idx,
@@ -1876,7 +1876,7 @@ impl<'a> Lowerer<'a> {
                             .variant_owners
                             .get(def_id)
                             .copied()
-                            .unwrap_or((DefId(u32::MAX), 0));
+                            .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                         IrPattern::Variant {
                             owner: self.remap_def_id(owner),
                             variant_index: idx,
@@ -1938,7 +1938,7 @@ impl<'a> Lowerer<'a> {
                     .variant_owners
                     .get(def_id)
                     .copied()
-                    .unwrap_or((DefId(u32::MAX), 0));
+                    .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                 IrExprKind::Call {
                     kind: IrCallKind::EnumConstructor {
                         def_id: self.remap_def_id(owner),
@@ -2255,7 +2255,7 @@ impl<'a> Lowerer<'a> {
                                 .variant_owners
                                 .get(def_id)
                                 .copied()
-                                .unwrap_or((DefId(u32::MAX), 0));
+                                .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                             IrCallKind::EnumConstructor {
                                 def_id: self.remap_def_id(owner),
                                 variant_index: idx,
@@ -2500,7 +2500,7 @@ impl<'a> Lowerer<'a> {
         let id = self
             .symbols
             .lookup_def(&t.name.name)
-            .unwrap_or(DefId(u32::MAX));
+            .unwrap_or(corvid_types::UNRESOLVED_DEF_ID);
         IrTest {
             id,
             name: t.name.name.clone(),
@@ -2519,7 +2519,7 @@ impl<'a> Lowerer<'a> {
         let id = self
             .symbols
             .lookup_def(&f.name.name)
-            .unwrap_or(DefId(u32::MAX));
+            .unwrap_or(corvid_types::UNRESOLVED_DEF_ID);
         IrFixture {
             id,
             name: f.name.name.clone(),
@@ -2533,7 +2533,7 @@ impl<'a> Lowerer<'a> {
     fn lower_mock(&self, m: &MockDecl) -> IrMock {
         let target_id = match self.bindings.get(&m.target.span) {
             Some(Binding::Decl(def_id)) => self.remap_def_id(*def_id),
-            _ => DefId(u32::MAX),
+            _ => corvid_types::UNRESOLVED_DEF_ID,
         };
         IrMock {
             target_id,

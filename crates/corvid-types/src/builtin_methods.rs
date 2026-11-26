@@ -800,6 +800,14 @@ pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32:
 /// variant index.
 pub const CONFLICT_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 3);
 
+/// The id IR lowering gives a reference it could not resolve: a
+/// variant's owner, a struct literal's type, a test or a mock target.
+/// A checked program never needs it, because the checker resolved each
+/// of them first. It names no record, so a lookup through it fails
+/// loudly ("missing from the IR") instead of finding a compiler-known
+/// record such as `JsonError`, whose id `u32::MAX` it used to share.
+pub const UNRESOLVED_DEF_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1000);
+
 /// Every type id reserved for a compiler-known record, by name. A new
 /// compiler-known record takes the next free id below these and joins
 /// this list; the test beside it fails if two share an id, which would
@@ -811,9 +819,31 @@ pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 4] = [
     ("Conflict", CONFLICT_TYPE_ID),
 ];
 
+/// The ids native code gives the record it holds a `Response<Body>`
+/// as, one per distinct body type (native dispatch N4). The band sits
+/// below the reserved ids above and far above any id the resolver
+/// assigns, which counts up from zero.
+pub const RESPONSE_RECORD_IDS: std::ops::Range<u32> = (u32::MAX - 4 - 65_536)..(u32::MAX - 4);
+
 #[cfg(test)]
 mod reserved_type_id_tests {
-    use super::RESERVED_TYPE_IDS;
+    use super::{RESERVED_TYPE_IDS, RESPONSE_RECORD_IDS};
+
+    #[test]
+    fn the_response_record_band_holds_no_reserved_id() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert!(!RESPONSE_RECORD_IDS.contains(&id.0), "`{name}`'s id {id:?} is inside the Response record band");
+        }
+        assert!(RESPONSE_RECORD_IDS.start > 1 << 24, "the band must sit far above resolver-assigned ids");
+    }
+
+    /// Lowering's fallback id is none of the reserved ones.
+    #[test]
+    fn the_unresolved_id_names_no_reserved_record() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert_ne!(id, super::UNRESOLVED_DEF_ID, "the unresolved id must not be `{name}`'s");
+        }
+    }
 
     #[test]
     fn every_reserved_type_id_is_distinct() {

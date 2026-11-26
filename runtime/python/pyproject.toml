@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "corvid-runtime"
 version = "0.0.1"
-description = "Runtime library for Corvid-generated Python code."
+description = "Write Corvid tools in Python: the @tool decorator corvid serve and corvid run load."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -14,7 +14,6 @@ authors = [{ name = "Corvid Authors" }]
 dependencies = []
 
 [project.optional-dependencies]
-anthropic = ["anthropic>=0.40"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [tool.hatch.build.targets.wheel]

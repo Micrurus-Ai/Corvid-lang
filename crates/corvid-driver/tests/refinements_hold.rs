@@ -89,17 +89,22 @@ async fn a_stored_row_that_breaks_a_refinement_is_refused_when_read() {
     assert!(error.contains("a stored `Shelf` row breaks `Shelf.title` must be len_between(1, 10)"), "{error}");
 }
 
-/// Native code does not check refinements yet, so a program that gives a
-/// refined field a computed value runs on the interpreter, where it is
-/// checked. A constant, which the checker proved, stays native.
+/// Native code checks refinements too (Refine-2), so a program that gives
+/// a refined field a computed value compiles natively; the parity tests
+/// in `corvid-codegen-cl` hold the two tiers' checks to one message.
 #[test]
-fn a_computed_refined_value_keeps_the_program_on_the_interpreter() {
-    let ir = |body: &str| compile_to_ir(&format!("{TYPES}\n{body}")).unwrap_or_else(|errors| panic!("{errors:#?}"));
-    let constant = ir("agent main() -> Int:\n    search = Search(\"dune\", 20)\n    return search.limit\n");
-    assert!(corvid_driver::native_ability(&constant).is_ok());
-    let computed = ir("agent main(n: Int) -> Int:\n    search = Search(\"dune\", n)\n    return search.limit\n");
-    let reason = corvid_driver::native_ability(&computed).expect_err("a computed refined value is not native yet");
-    assert!(reason.to_string().contains("`Search.limit` is given a computed value"), "{reason}");
-    let assigned = ir("agent main(n: Int) -> Int:\n    search = Search(\"dune\", 20)\n    search.limit = n\n    return search.limit\n");
-    assert!(corvid_driver::native_ability(&assigned).is_err());
+fn a_computed_refined_value_compiles_natively() {
+    let ir = |body: &str| compile_to_ir(&format!("{TYPES}
+{body}")).unwrap_or_else(|errors| panic!("{errors:#?}"));
+    let computed = ir("agent main(n: Int) -> Int:
+    search = Search(\"dune\", n)
+    return search.limit
+");
+    assert!(corvid_driver::native_ability(&computed).is_ok());
+    let assigned = ir("agent main(n: Int) -> Int:
+    search = Search(\"dune\", 20)
+    search.limit = n
+    return search.limit
+");
+    assert!(corvid_driver::native_ability(&assigned).is_ok());
 }

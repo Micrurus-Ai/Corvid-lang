@@ -61,22 +61,23 @@ const CODE_REVIEW_EVAL_MOCK_LLM: &str = "{\"draft_review_comment\":[{\"path\":\"
 fn build_and_run_default_to_project_main_source() {
     let app = repo_root().join("examples").join("refund_bot");
 
+    // A plain `corvid build` builds the project's main source natively.
+    // refund_bot's tools need a tools library, so the build refuses by
+    // name, before compiling, and says what runs the program instead.
     let build = Command::new(corvid_bin())
         .arg("build")
         .current_dir(&app)
         .output()
         .expect("run corvid build");
+    let build_output = format!("{}{}", String::from_utf8_lossy(&build.stdout), String::from_utf8_lossy(&build.stderr));
+    assert!(!build.status.success(), "a program whose tools are not linked must not build natively: {build_output}");
+    assert!(build_output.contains("src\\main.cor") || build_output.contains("src/main.cor"), "{build_output}");
+    assert!(build_output.contains("cannot be built as native code yet"), "{build_output}");
+    assert!(build_output.contains("--with-tools-lib"), "the refusal names the fix: {build_output}");
+    assert!(build_output.contains("corvid run"), "and what runs the program instead: {build_output}");
     assert!(
-        build.status.success(),
-        "build failed:\nstdout={}\nstderr={}",
-        String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
-    );
-    let build_stdout = String::from_utf8_lossy(&build.stdout);
-    assert!(build_stdout.contains("src\\main.cor") || build_stdout.contains("src/main.cor"));
-    assert!(
-        app.join("target").join("py").join("main.py").exists(),
-        "default build should emit target/py/main.py"
+        !build_output.contains("Undefined symbols") && !build_output.contains("undefined reference"),
+        "the refusal comes before the linker: {build_output}"
     );
 
     let run = Command::new(corvid_bin())

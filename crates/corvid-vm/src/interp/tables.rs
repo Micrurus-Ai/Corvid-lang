@@ -360,6 +360,7 @@ fn table_target<'t>(
         .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
     Ok(TableRef {
         name: &table.name,
+        database: &table.database.name,
         keys: &table.keys,
         columns: &table.columns,
         kinds,

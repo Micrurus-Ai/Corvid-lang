@@ -68,6 +68,27 @@ and column. In an agent that returns `Result<_, String>`, write
 `T.from_json(text).map_err(fn (e) -> e.message)?` to pass a failure
 to the caller.
 
+`JsonError` is a type you can write, so a helper agent can take the
+error and a signature can return it. Only `from_json` and
+`from_json_strict` produce one.
+
+```corvid
+type Reading:
+    sensor: String
+    value: Int
+
+agent explain(problem: JsonError) -> String:
+    return problem.path + ": " + problem.message
+
+agent read(text: String) -> Result<Reading, JsonError>:
+    return Reading.from_json(text)
+
+agent describe(text: String) -> String:
+    return match read(text):
+        Ok(reading) -> reading.sensor
+        Err(problem) -> explain(problem)
+```
+
 To decode a list, map or option at the top level, name it with a type
 alias:
 

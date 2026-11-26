@@ -555,6 +555,33 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .declare_function("corvid_register_connectors", Linkage::Import, &register_connectors_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare register_connectors: {e}"), Span::new(0, 0)))?;
 
+    // `int.to_string()`, `float.to_string()`, `bool.to_string()`, in the
+    // interpreter's text.
+    let mut int_text_sig = module.make_signature();
+    int_text_sig.params.push(AbiParam::new(I64));
+    int_text_sig.returns.push(AbiParam::new(I64));
+    let int_to_string = module
+        .declare_function("corvid_int_to_string", Linkage::Import, &int_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare int_to_string: {e}"), Span::new(0, 0)))?;
+    let bool_to_string = module
+        .declare_function("corvid_bool_to_string", Linkage::Import, &int_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare bool_to_string: {e}"), Span::new(0, 0)))?;
+    let mut float_text_sig = module.make_signature();
+    float_text_sig.params.push(AbiParam::new(F64));
+    float_text_sig.returns.push(AbiParam::new(I64));
+    let float_to_string = module
+        .declare_function("corvid_float_to_string", Linkage::Import, &float_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare float_to_string: {e}"), Span::new(0, 0)))?;
+
+    // Native dispatch N4 — `response.header(name)` as an Option<String>.
+    let mut response_header_sig = module.make_signature();
+    response_header_sig.params.push(AbiParam::new(I64));
+    response_header_sig.params.push(AbiParam::new(I64));
+    response_header_sig.returns.push(AbiParam::new(I64));
+    let response_header = module
+        .declare_function("corvid_response_header", Linkage::Import, &response_header_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare response_header: {e}"), Span::new(0, 0)))?;
+
     // Native dispatch N3 — `a == b` on two secrets, in constant time.
     let mut secret_eq_sig = module.make_signature();
     secret_eq_sig.params.push(AbiParam::new(I64));
@@ -1395,6 +1422,10 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         runtime_init: runtime_init_id,
         register_connectors: register_connectors_id,
         secret_eq,
+        int_to_string,
+        float_to_string,
+        bool_to_string,
+        response_header,
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
         sleep_ms: sleep_ms_id,

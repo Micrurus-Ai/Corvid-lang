@@ -33,6 +33,182 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - A comparison's literal takes the other side's type
+
+`s.price == Some(10)` against an `Option<Decimal>`, `zone == "UTC"`
+against a `TimeZone`, `money != "USD"` against a `Currency` and
+`zones == ["UTC"]` against a `List<TimeZone>` now type-check. Before, a
+literal in a comparison was typed alone, so `Some(10)` was an
+`Option<Int>` and `"UTC"` a `String`, and each was refused, though the
+same literal in an annotated binding (`home: TimeZone = "UTC"`) was
+accepted.
+
+**The rule.** In a comparison that would otherwise fail, a side written
+only as literals is checked again against the other side's type with
+`check_expr_as`, the contextual typing an annotated binding uses. The
+literals are text, numbers, `None`, `Some`, `Ok` or `Err` of one, or a
+list of them. The constructors are recognised by what they resolve to,
+so a declared variant called `Some` is not one. The rule runs before the
+type-specific operator rules, so it covers every type with one rule
+instead of one per type.
+
+**What stays the same.**
+- A comparison the checker already accepted keeps its typing, because
+  only a failing one is re-read.
+- The re-read checks the literal, so `zone == "Europe/Nowhere"` is still
+  a compile error that names the zone.
+- A computed side keeps its own type, so a `String` variable is never
+  compared with a `TimeZone`.
+- A text literal still never compares with a `Secret`, with the same
+  message as before.
+
+**Simpler options considered.** Per-type special cases, as `Decimal` has
+for `price * 1.08`, would need one for each of `TimeZone`, `Currency`,
+`Locale` and every container of them. Asking authors to annotate a
+binding first is what this removes.
+
+**Tests.** Checker tests cover acceptance for each case, the unknown
+zone, a text literal against `Option<Int>`, a computed side and a
+secret. Parity tests run the `Option<Decimal>`, `TimeZone` and `Currency`
+comparisons on both tiers.
+
+---
+
+## 2026-11-25 - Replay on either tier (native dispatch N5)
+
+A recording from a native binary now replays on the interpreter, and an
+interpreter recording in a native binary, with the provider, clock and
+model gone. This closes native dispatch.
+
+**Why the refusal could go.** Replay compares every substituted call
+exactly: a tool call's name and arguments; a prompt call's name, model,
+model version, rendered text and arguments; an approval; each seed and
+clock read. A run the replaying tier would record differently therefore
+already stops with a divergence naming the first differing event. The
+writer check refused before that comparison, so it added only a blanket
+error. It is removed from the replay loader, replay dispatch and both
+shadow-daemon executors, with `CrossTierReplayUnsupported`. The replay
+constructors lost their writer argument, which nothing else read.
+
+**Measured first.** An exact comparison of the two tiers' traces for a
+program with a user tool, an approval and a prompt, removing only times,
+run ids and draw values, found one difference: the interpreter records
+an `llm.usage` host event and the native run does not. Replay skips host
+events. It is on the roadmap as a telemetry gap, and the comment in
+`record_native.rs` that named the wrong tier is corrected.
+
+**Tests.** Cross-tier replay in both directions:
+- connector calls and responses with their headers;
+- clock reads, IDs and draws, returned exactly;
+- sign-up and log-in, with the hash substituted and the password re-read;
+- a program with a tool, an approval and a prompt.
+
+The tests that asserted the refusal now assert the replay. A unit test
+checks that a trace's writer never changes whether it loads.
+
+**Also found and fixed:**
+- *A divergence's step.* Differential replay reported a divergence one
+  event early when a host event sat between a prompt call and its result.
+  The interpreter records `llm.usage` there, so the two tiers named
+  different steps for the same divergence, and an interpreter test had
+  encoded the off-by-one. Fixed in its own commit, at all five sites.
+- *Warnings.* N4 left three compiler warnings, because the gate looked
+  only for errors. It now reports warnings too.
+- *A stray probe.* An exploratory probe was committed by mistake, then
+  removed.
+- *Stale builds.* Sharing the target directory with a temporary worktree
+  left stale builds that looked like regressions. A clean build cleared
+  them.
+
+---
+
+## 2026-11-25 - Connector responses in native code (native dispatch N4)
+
+A connector operation that returns `Response<Body>`, or
+`Result<Response<Body>, E>`, now runs in native code, so a client that
+reads a status code or an `ETag` builds into a native binary. Native code
+holds each `Response<Body>` as a record of `RESPONSE_FIELDS`, the record
+the interpreter builds, with one declaration per body type because
+native records have fixed field types. The code generator rewrites the
+type before ownership analysis, as it does for `JsonError`, so reference
+counting and `Result` payloads apply unchanged. The record ids come from
+a reserved band, `RESPONSE_RECORD_IDS`, which a test keeps clear of the
+other reserved ids. `status()` and `body()` lower as field reads;
+`header(name)` is one runtime call into `connectors::response_header`,
+which the interpreter now calls too, so both tiers find the same header.
+
+**Simpler options considered.** One record with an untyped body would
+need no per-body declarations, but its type information could not say
+whether the body is reference counted, so the body could never be freed.
+Rewriting the accessors into field reads in the IR would need a second,
+mutable expression walk; lowering them as methods uses the convention
+ownership analysis already understands.
+
+**Found, all fixed.**
+- Records of the same name defined the same native symbols. They now
+  carry the record's id; this went in its own commit.
+- The embedded connector specs were projected from the rewritten IR, so
+  a `Response` operation's spec said it returned no response and the
+  runtime answered with the bare body. They are now projected from the
+  program as checked.
+- The JSON-form check asked the lowering question about a `Result`.
+- `Nothing` had no JSON form.
+- `to_string()` on the scalars had no native form, which led to the
+  number-text fix.
+
+**Tests.** The native response test checks:
+- the status;
+- a header read without regard to case, and an absent header;
+- `Set-Cookie` never reaching the program or the trace;
+- a mapped 404 through `Result`;
+- a `HEAD` request's `Response<Nothing>`;
+- the same recorded run as the interpreter;
+- native replay;
+- balanced allocations.
+
+---
+
+## 2026-11-25 - Numbers read the same on both tiers
+
+Found while building native `Response` (N4): `Int.to_string()`,
+`Float.to_string()` and `Bool.to_string()` had no native form, so a
+program that wrote `r.status().to_string()` stayed on the interpreter.
+Looking at how native code writes numbers turned up a worse problem:
+it formatted a `Float` with C's `%.17g` in three places, where the
+interpreter writes the shortest text.
+
+- **A printed result.** `agent main() -> Float: return 0.1` printed
+  `0.1` on the interpreter and `0.10000000000000001` natively.
+- **A prompt.** A `Float` interpolated into a prompt was sent to the
+  model as `0.10000000000000001`, and `2.0` as `2`, where the
+  interpreter sends `0.1` and `2.0`. The recorded prompt text differed
+  between tiers.
+- **A native trace.** Arguments and results recorded natively wrote
+  floats in that form too. They read back as the same numbers, but the
+  text differed from the interpreter's.
+
+The three forms now live in `corvid_runtime::number_text`, the one
+source both tiers read: `float_to_string` (always a decimal point, the
+language's rule, moved from the interpreter), `float_display` (a printed
+result) and `float_json` (JSON number text, for prompts and traces). The
+C printer, prompt formatter and trace writer call into it for the text,
+so output stays on C's buffered stdout, and the interpreter's
+`to_string()` and printing call it too. `to_string()` on `Int`, `Float`
+and `Bool` is now one runtime call each in native code.
+
+**Tests.** Parity tests: printed `Float` results (`0.1`, `2.0`,
+`0.1 + 0.2`, `1 / 3`), and `to_string()` on all three scalars including
+infinity. A driver test checks that the recorded prompt is
+`Price 0.1, ratio 2.0` on both tiers.
+
+**Still different, on the roadmap.** On both tiers a printed `Float`
+result drops the decimal point (`2`), while `to_string()` keeps it
+(`2.0`). That goes against the language's rule that a `Float` always
+reads as one. Changing the printed form changes every program's output,
+so it is a roadmap item rather than part of this fix.
+
+---
+
 ## 2026-11-25 - Serve tests no longer share ports
 
 `approval_transition_endpoints_approve_re_executes_and_deny_drops_pending`
@@ -731,6 +907,239 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-25 - `JsonError` in signatures (B01)
+
+`T.from_json` returned `Result<T, JsonError>`, but a program could not
+write `JsonError` itself: the checker knew the name and the
+resolver did not, so `agent explain(problem: JsonError)` was an
+undefined-name error. Helper agents that format or log a decode failure,
+and agents that pass the error on as `Result<T, JsonError>`, could not
+be written. The resolver now registers it as it does `RegexMatch`, and
+naming it as a value stays a `TypeAsValue` error, since only
+`from_json` builds one. Native code already lowered `JsonError` to an
+ordinary record, so a parity test passing it to a helper agent holds both
+tiers to one result with nothing leaked. The parent roadmap item for
+`Conflict<T>` is ticked too: all its slices had shipped.
+
+The Dependabot alerts that the last push reported were not examined:
+`gh` is not installed here, and installing `cargo-audit` was not
+permitted in this session. They are reported to the owner.
+
+---
+
+## 2026-11-25 - The Python package holds only `@tool`
+
+The `corvid_runtime` Python package was a parallel runtime for the
+generated Python code: `tool_call`, `approve_gate`, `llm_call`, its own
+tracing, model adapters and test helpers. With the Python build target
+retired, nothing calls them. Their behavior differed from the Rust
+runtime, which is the real one, and anyone who imported them got a
+second, weaker runtime. What remains is what `tools.py` needs and what
+the Rust loader (`corvid_runtime::python_tools`) reads: `@tool`, the
+`_TOOL_IMPLS` dict and `invoke_tool`. The package tests now cover
+exactly that.
+
+Found while removing them:
+- **The release-archive test was broken.** `install/test_release_archive.py`
+  still ran `corvid build --target python` and imported `run_sync`,
+  which fails since the retirement. It runs only against a built
+  release archive, so the gate never ran it. It now builds the same
+  numbers program natively and runs the binary, which prints `42` only
+  if the checked multiply and the floored `Float` remainder are both
+  right.
+- **Dead example code.** `examples/offline_refund_bot/tools.py` drove
+  the retired `target/py` output. The example's runner is Rust, so the
+  file, its "legacy Python" instructions and the CONTRIBUTING steps that
+  used it are gone.
+- **Stale docs.** ARCHITECTURE.md described a generated Python layout
+  and a mirrored Python runtime; it now describes the `@tool` package.
+
+---
+
+## 2026-11-25 - Commits shared between server processes (B14 RT-6)
+
+An application served by several processes on one Postgres database
+needs a write through one process to reach live subscribers on the
+others. Every committed table write on Postgres now also sends
+`pg_notify('corvid_commits', …)`. An `atomic:` block sends its
+notification inside its transaction, so Postgres itself guarantees that
+a rolled-back block reaches nobody. `Runtime::share_table_commits`
+listens on one named connection and forwards other processes' commits
+into the local feed. Each runtime has a random 128-bit instance id and
+skips its own notifications, so a subscriber hears a commit once. A
+listener that loses its connection reconnects with backoff and then
+announces an empty table set, which means "any table may have changed",
+so subscribers re-run their queries instead of missing a commit.
+
+Found while building it: Postgres notification channels are
+database-wide, not per schema, so two applications in two schemas of one
+Postgres would have heard each other's commits. The server now stamps
+`current_schema()` into the payload, and each listener keeps only its
+own schema's commits. If a write commits but its notification cannot be
+sent, the run fails loudly and says the write committed, rather than a
+subscriber missing it.
+
+Considered and rejected:
+- **A polling table of commits.** It adds latency and a table to
+  migrate, where `NOTIFY` already has the transactional delivery rule
+  that is needed.
+- **Sending the notification after `COMMIT`.** A crash between the
+  two would lose it; sent inside the transaction, it commits or not
+  with the writes.
+
+Tested on Postgres, with two runtimes standing in for two processes:
+- a write and an `atomic:` block reach the other process;
+- a conflict and a rollback reach nobody;
+- no process hears its own commit twice;
+- sharing works in both directions;
+- after both listening connections are terminated, each reconnects,
+  announces "anything may have changed", and hears new commits.
+
+---
+
+## 2026-11-25 - The change feed for live subscriptions (B14 RT-2)
+
+A `live` subscriber needs to hear about committed writes and receive the
+difference. The runtime now has a commit feed: a broadcast of
+`TableCommit { database, tables }`. A table write outside an `atomic:`
+block announces its table once the write succeeds; inside a block the
+transaction collects the tables it wrote and announces them when it
+commits, so a rolled-back block announces nothing and a subscriber never
+sees an undone write. A conflict writes nothing and announces nothing.
+`TableRef` now carries its database's name so the announcement can say
+which database changed.
+
+The difference is `live_changes`, a pure function from the rows a
+subscriber holds and the new ordered result to the wire changes: removals
+first, then each row not already in place is added or updated at its
+destination index, so applying them in order yields the new result
+exactly. Tests apply every change list to the old rows with the client's
+algorithm and compare, across every reordering and dropped row of a small
+result; heavier churn than the result's size becomes a snapshot.
+
+The transport re-runs a live's snapshot query on each commit that
+touches its table, so the database stays the one judge of matching and
+order. Considered: matching each written row against the filter in
+memory, which is faster but is a second implementation of the query's
+semantics; it is filed as a later optimization, to be tested against the
+re-run.
+
+---
+
+## 2026-11-25 - Lowering's fallback id names no record
+
+IR lowering used `DefId(u32::MAX)` in eight places for a reference it
+could not resolve: a variant's owner, a struct literal's type, a test,
+a fixture and a mock target. The checker resolves each first, so a
+checked program never reaches them, but `u32::MAX` is `JsonError`'s
+reserved id, so had one been reached, the interpreter or native code
+would have looked up `JsonError` instead of failing. The fallback is now
+`UNRESOLVED_DEF_ID`, declared beside `RESERVED_TYPE_IDS` with a test
+that it is none of them, so any lookup through it reports the missing
+type. The Mac session found it while listing the reserved ids.
+
+---
+
+## 2026-11-25 - A refined field bounds a query loop (B09 Refine-3)
+
+`@budget` could bound a loop over a table query only when it ended in a
+literal `take(3)`. With every refined value now holding its refinement on
+both tiers, `take(search.limit)` with `limit: Int where between(1, 50)` is
+a real bound of fifty, so the cost analysis charges the body fifty times
+instead of warning. The analysis ran on the AST alone; it now receives the
+checker's type of every expression
+(`compute_worst_case_cost_with_types`), finds `search`'s record, and reads
+the field's `between` maximum. A `len_between` refinement or an unrefined
+count gives no bound, and a negative maximum bounds the rows at zero.
+
+Found on the way: the REPL's cost report called the untyped analysis, so
+it would have shown a refined `take` as unbounded while `@budget` charged
+fifty; it now type-checks the turn and reads the same types, so the two
+agree.
+
+---
+
+## 2026-11-25 - A native build refuses by name, before linking
+
+Making `native` the default build target exposed a gap the Mac session
+found on `main`: `corvid build` in `examples/refund_bot` failed in the
+linker with `undefined reference to __corvid_tool_issue_refund`. The
+program declares tools, and no tools library was given. `corvid run
+--target native` refuses that program by name through the native
+ability check, but the native build never ran the check, so the only
+signal was a raw link error. `build_native_entry` now runs
+`native_ability_with_tools` after the server wrapper drops its route
+handlers, and a refusal names the source file, the reason (here,
+`program calls tool issue_refund - pass --with-tools-lib ...`) and
+what runs the program instead. `demo_project_defaults` expected the
+retired Python output; it now expects that refusal from a plain
+`corvid build` and a working `corvid run`. My own default-target test
+had used a table program, which a later stage refuses, so it missed
+the tools case.
+
+---
+
+## 2026-11-25 - Native code holds refinements too (B09 Refine-2)
+
+Refine-1 checked refined values on the interpreter and kept any program
+that gave a refined field a computed value off native code, so the
+tiers could not disagree. Native code now checks them itself. At a
+constructor (record or variant) and at a field assignment, an `Int`
+under `between` is compared against its bounds and a `String` under
+`len_between` has its characters counted; a value out of range calls
+`corvid_refinement_violated_int` or `_text` with the interpreter's
+message up to the value, embedded as an immortal string literal, and
+the handler appends the value and exits. The text handler writes the
+value as serde_json writes it, quoted with the same escapes, so the
+messages match byte for byte; a parity test with a quote inside the
+value holds that. The check lives in its own module,
+`lowering/expr/refinement.rs`. The routing rule from Refine-1 is gone,
+so a refined program builds with `corvid build`.
+
+Found on the way: the parity harness links against a prebuilt
+`corvid-test-tools` release staticlib, which bundles the C runtime, so a
+new C symbol fails to link until that library is rebuilt
+(`cargo build --release -p corvid-test-tools`); rebuild it before
+running the parity tests after changing the C runtime.
+
+---
+
+## 2026-11-25 - The Python build target is retired
+
+`corvid build` defaulted to a Python transpiler from Corvid's first
+version. It predated tables, decimals, time, conflicts and most of the
+standard library, and degraded what it could not express to `object`,
+so a new user's first build looked successful and produced a partial
+translation. The owner decided to retire it. `corvid build` now
+defaults to `native`, which refuses by name what it cannot compile yet;
+`--target python` stops with a message saying why it is gone and where
+to go. The `corvid-codegen-py` crate is removed.
+
+The larger finding was in `corvid_driver::compile()`, which `corvid
+check`-style callers, the tour and the spec checks use. It translated
+every program to Python as a side effect and applied that target's
+refusals, so a program calling a standard-library tool that does real
+work, or a typed Python import, failed a check although the interpreter
+and native code run it. `compile()` is now check-only, and a test holds
+that it accepts what only the Python target refused. The CLI reference
+already said "default native", so the docs had drifted from the code;
+they agree now.
+
+Kept: the Python client SDK (`corvid contract sdk`), `corvid bind
+python` (native bindings), `corvid bench` against Python baselines, and
+`runtime/python`, which is how a project writes tools in Python
+(`tools.py`). Filed: trimming the parts of `runtime/python` that only
+generated code used.
+
+Found after the push: the retirement commit kept the old `Cargo.lock`,
+which still listed `corvid-codegen-py`, so a `--locked` build of `main`
+would have failed to resolve. The lock was corrected in its own commit,
+checked with `cargo metadata --locked`. The habit of restoring the lock
+after every local build is right for incidental churn but wrong when a
+change adds or removes a crate; such a change commits its lock update.
 
 ---
 

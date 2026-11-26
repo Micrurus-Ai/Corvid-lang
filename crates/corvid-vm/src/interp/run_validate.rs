@@ -205,7 +205,6 @@ fn should_validate_run_completion(outcome: &Result<(Value, Env), InterpError>) -
             kind: InterpErrorKind::Runtime(
                 RuntimeError::ReplayDivergence(_)
                     | RuntimeError::ReplayTraceLoad { .. }
-                    | RuntimeError::CrossTierReplayUnsupported { .. }
             ),
             ..
         })

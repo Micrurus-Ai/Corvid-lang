@@ -258,9 +258,14 @@ void corvid_print_bool(long long v) {
     fflush(stdout);
 }
 
+/* The interpreter's printed form, from the runtime's `number_text`, so a
+ * native result prints exactly as `corvid run` prints it there. */
+extern size_t corvid_float_display_text(double value, char* buffer, size_t capacity);
+
 void corvid_print_f64(double v) {
-    /* %.17g is round-trippable for IEEE 754 doubles. */
-    printf("%.17g\n", v);
+    char buf[64];
+    size_t len = corvid_float_display_text(v, buf, sizeof(buf));
+    printf("%.*s\n", (int)len, buf);
     fflush(stdout);
 }
 

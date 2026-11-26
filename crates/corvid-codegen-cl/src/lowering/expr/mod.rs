@@ -7,6 +7,7 @@ mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
+mod refinement;
 mod scalar_call;
 mod try_propagate;
 mod try_retry;
@@ -23,6 +24,7 @@ pub(super) use operand::{
     lower_string_operand_maybe_borrowed,
 };
 pub(super) use overflow::{trap_if, with_overflow_trap};
+pub(super) use refinement::hold_refinement;
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
@@ -157,6 +159,20 @@ pub(super) fn lower_expr(
             }
             Ok(map)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_scalar_to_string(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let (func, input) = match kind {
+                corvid_types::BuiltinMethodKind::FloatToString => (runtime.float_to_string, input),
+                corvid_types::BuiltinMethodKind::BoolToString => {
+                    let widened = if builder.func.dfg.value_type(input) == I8 { builder.ins().uextend(I64, input) } else { input };
+                    (runtime.bool_to_string, widened)
+                }
+                _ => (runtime.int_to_string, input),
+            };
+            let call = module.declare_func_in_func(func, builder.func);
+            let call = builder.ins().call(call, &[input]);
+            Ok(builder.inst_results(call)[0])
+        }
         IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
             let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             overflow::convert_number(builder, module, *kind, input, expr.span)
@@ -284,6 +300,43 @@ pub(super) fn lower_expr(
                 crate::currency_methods::CurrencyOperation::is_parse,
                 receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
+        }
+        // Native dispatch N4 — a `Response` is a record (see
+        // `response_record`): `status()` and `body()` are field reads,
+        // lowered as one so they own and release exactly as a field
+        // read does, and `header(name)` asks the runtime.
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ResponseStatus | corvid_types::BuiltinMethodKind::ResponseBody),
+            receiver,
+            ..
+        } => {
+            let field = if *kind == corvid_types::BuiltinMethodKind::ResponseStatus { "status" } else { "body" };
+            let read = IrExpr {
+                kind: IrExprKind::FieldAccess { target: receiver.clone(), field: field.to_string() },
+                ty: expr.ty.clone(),
+                span: expr.span,
+            };
+            lower_expr(builder, &read, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ResponseHeader, receiver, args } => {
+            let (offset, _) = record_field(runtime, &receiver.ty, "headers", expr.span)?;
+            let (record, record_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let headers = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+            let (name, name_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let lookup = module.declare_func_in_func(runtime.response_header, builder.func);
+            let call = builder.ins().call(lookup, &[headers, name]);
+            let found = builder.inst_results(call)[0];
+            if !name_borrowed {
+                emit_release(builder, module, runtime, name);
+            }
+            if !record_borrowed {
+                emit_release(builder, module, runtime, record);
+            }
+            Ok(found)
         }
         IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
             // An HMAC keyed by a `Secret` calls the entry point that opens
@@ -1289,16 +1342,18 @@ pub(super) fn lower_expr(
             IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
                 let ty = runtime.ir_types.get(def_id).ok_or_else(||
                     CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
-                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                // A refinement message names the record, or the variant as the
+                // interpreter does.
+                let (fields, info, tag, owner) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
                     let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
                         CodegenError::cranelift("unknown constructor tag", expr.span))?;
-                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index), variant.name.as_str())
                 } else {
-                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None, ty.name.as_str())
                 };
                 let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder, module, runtime, fields, *info, tag,
+                    builder, module, runtime, owner, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,

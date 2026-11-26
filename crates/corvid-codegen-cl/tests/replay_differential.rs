@@ -379,8 +379,11 @@ fn native_differential_prompt_mismatch_is_replay_divergence() {
     );
 }
 
+/// A native binary runs differential replay over an interpreter
+/// recording (native dispatch N5) and reports the swapped model's
+/// different answer, as it does over a native recording.
 #[tokio::test]
-async fn native_differential_rejects_interpreter_trace() {
+async fn native_differential_replays_an_interpreter_trace() {
     let trace_dir = tempfile::tempdir().unwrap();
     let (interp_result, interpreter_trace) = run_interpreter(trace_dir.path()).await;
     assert_eq!(interp_result, Value::Bool(true));
@@ -399,11 +402,14 @@ async fn native_differential_rejects_interpreter_trace() {
         Some(&report_path),
         "{\"decide_refund\":false}",
     );
-    assert!(!replayed.status.success(), "cross-tier replay should fail");
     assert!(
-        String::from_utf8_lossy(&replayed.stderr)
-            .contains("cross-tier replay is not supported in v1"),
-        "stderr should mention cross-tier replay rejection: {}",
+        replayed.status.success(),
+        "differential replay of an interpreter recording should succeed: {}",
         String::from_utf8_lossy(&replayed.stderr)
     );
+    let report = read_report(&report_path);
+    assert_eq!(report.llm_divergences.len(), 1);
+    assert_eq!(report.llm_divergences[0].step, llm_result_step(&interpreter_trace, "decide_refund"));
+    assert_eq!(report.llm_divergences[0].recorded, json!(true));
+    assert_eq!(report.llm_divergences[0].live, json!(false));
 }

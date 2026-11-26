@@ -8,7 +8,7 @@ use corvid_ir::IrFile;
 use corvid_runtime::{
     AnthropicAdapter, EnvVarMockAdapter, OpenAiAdapter, ProgrammaticApprover, RedactionSet,
     ReplayDifferentialReport, ReplayDivergence, ReplayMutationReport, Runtime, RuntimeError,
-    TraceEvent, Tracer, WRITER_INTERPRETER, WRITER_NATIVE,
+    TraceEvent, Tracer,
 };
 use corvid_syntax::{lex, parse_file};
 use corvid_trace_schema::{read_events_from_path, validate_supported_schema};

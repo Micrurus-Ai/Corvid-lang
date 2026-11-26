@@ -63,15 +63,28 @@ fn decodable(ty: &Type, rules: &Decodable<'_, '_>, seen: &mut HashSet<DefId>) ->
     let types = rules.types;
     match ty {
         Type::Secret => rules.secrets,
+        // Native dispatch N4 — before the rewrite into its record, a
+        // `Response<Body>` decodes wherever its body does.
+        Type::Response(body) => decodable(body, rules, seen),
         // B06 — a `Decimal`, time, currency or locale value travels as
         // its canonical text.
         Type::Int | Type::Float | Type::String | Type::Bool => true,
+        // JSON `null`, which the decoder and the native builder already
+        // read; a `HEAD` request's `Response<Nothing>` has this body.
+        Type::Nothing => true,
         ty if crate::text_scalar::is_text_scalar(ty) => true,
         Type::Tainted(inner) | Type::List(inner) => decodable(inner, rules, seen),
         Type::Option(inner) => is_native_option_type(ty) && decodable(inner, rules, seen),
         Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, rules, seen),
+        // The program question, so a `Result` holding a `Response`
+        // counts before `compile_to_object` rewrites the `Response` into
+        // its record (native dispatch N4); after the rewrite the two
+        // questions agree.
         Type::Result(ok, err) => {
-            is_native_result_type(ty) && decodable(ok, rules, seen) && decodable(err, rules, seen)
+            is_native_value_type_for(ok, NativeTypeQuestion::Program)
+                && is_native_value_type_for(err, NativeTypeQuestion::Program)
+                && decodable(ok, rules, seen)
+                && decodable(err, rules, seen)
         }
         // The driver checks programs before `JsonError` becomes a record
         // and this backend after, so the record is excluded here too:

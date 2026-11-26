@@ -664,7 +664,7 @@ mod tests {
         let errored = run_test_from_traces(
             vec![trace.clone()],
             TestFromTracesOptions::default(),
-            |_req| async { Ok(run_ok(Some("cross-tier replay is not supported".into()))) },
+            |_req| async { Ok(run_ok(Some("the trace could not be loaded".into()))) },
         )
         .await;
         assert_eq!(errored.summary.errored, 1, "errored run must not count as passed");
