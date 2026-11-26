@@ -27,7 +27,7 @@ table Card:
     title: String where len_between(1, 120)
 
 server board_app:
-    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+    live "/boards/{board: Int}/cards" -> Card requires permission("board.view"):
         return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
 ```
 
@@ -144,10 +144,10 @@ RT-1 shipped the declaration: it parses beside `route`, a body is checked to be 
 
 **The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
 
-Two corrections to the example agreed above, both written so a first-time reader sees one way:
+Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route parameter record and the declared parameter type. The example above shows the agreed syntax; typed placeholders still require implementation.
 
-1. **Path parameters are read as `path.board`**, as a route reads them. The agreed example's bare `board` would make `live` the one place a path parameter is a bare name.
-2. **Typed path placeholders, proposed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. Not built until agreed, since the frontend parses route paths too.
+1. **Path parameters are read as `path.board`**, as a route reads them. A subscription handler receives the same path record as a route handler.
+2. **Typed path placeholders, agreed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. The generated client takes its parameter types from the contract. A client subscribing to board 7 sends the concrete path `/boards/7/cards`.
 
 ## Non-scope
 
