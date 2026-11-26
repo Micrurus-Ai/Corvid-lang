@@ -71,9 +71,9 @@ async fn document_replacement_preserves_an_index_on_failure() {
     return first.source + "|" + first.text + "|" + hits.length().to_string() + "|" + first.start_char.to_string() + "|" + first.end_char.to_string() + "|" + first.provenance_key"#,
         )
     };
-    assert_eq!(ingest("flower", "garden", "orchid", 30).trim(), "\"1\"");
+    assert_eq!(ingest("flower", "garden", "orchid", 30).trim(), "1");
     let count = ingest("note", "old-note", "abcdefghi", 4);
-    assert_eq!(count.trim(), "\"3\"");
+    assert_eq!(count.trim(), "3");
     let old = search();
     assert!(old.contains("old-note|") && old.contains("|4|"), "{old}");
     assert!(ingest("note", "new-note", "broken", 30)
@@ -87,7 +87,7 @@ async fn document_replacement_preserves_an_index_on_failure() {
     assert!(ingest("note", "new-note", "café", 30).contains("vector write failed"));
     assert_eq!(search(), old);
     db.execute_batch("DROP TRIGGER fail_vector").unwrap();
-    assert_eq!(ingest("note", "new-note", "café", 30).trim(), "\"1\"");
+    assert_eq!(ingest("note", "new-note", "café", 30).trim(), "1");
     let updated = search();
     assert!(
         updated.contains("new-note|café|2|0|4|rag_"),
@@ -152,7 +152,7 @@ server library:
         .unwrap()
         .starts_with("rag_"));
     drop(server);
-    assert_eq!(ingest("note", "empty", "", 30).trim(), "\"0\"");
+    assert_eq!(ingest("note", "empty", "", 30).trim(), "0");
     assert!(search().contains("garden|orchid|1|"));
     provider.abort();
 }

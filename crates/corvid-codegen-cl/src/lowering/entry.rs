@@ -486,7 +486,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str, types: &[corvid_
         | Type::Stream(_) | Type::Partial(_) | Type::ResumeToken(_) | Type::RouteParams(_) => {
             Err(CodegenError::not_supported(
                 format!(
-                    "entry agent {role} of type `{}` - the native command-line boundary supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `List`, `Result`, `Option`, `Weak`, `Stream`, `Partial`, `ResumeToken`, and `RouteParams` each need their own dedicated serialization paths (use a wrapper agent that converts internally for now)",
+                    "entry agent {role} of type `{}` - the native command line takes `Int`, `Float`, `Bool` and `String` arguments and prints scalars, records, variants, lists, options, results and maps; a `Weak`, `Stream`, `Partial`, `ResumeToken` or `RouteParams` has no form there, nor does a `List`, `Option` or `Result` argument",
                     ty.display_name()
                 ),
                 span,

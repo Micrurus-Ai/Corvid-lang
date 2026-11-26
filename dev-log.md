@@ -2,6 +2,19 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Tests the printed-result slice missed
+
+The printed-result slice (`4193f4e5`) reached `main` with four test files
+still pinning the old forms: quoted strings in `retrieval`, `Ok(true)` in
+`stdlib_configuration`, a source-order record in `struct_prompt_return`, and a
+`List` fallback in `run_entry_boundary` that no longer happens. They were
+missed because `cargo test -p <crate>` stops at the first failing test binary.
+That gate run stopped at `demo_project_defaults` and never ran the rest. The
+gate now runs `cargo test --no-fail-fast`. The four tests expect the shared
+printed form, `run_entry_boundary` uses a `Weak` result that still falls back,
+and the boundary's refusal message no longer claims lists, options and results
+are unsupported.
+
 ### Diagnostic codes DC-1: type errors declare their codes
 
 [Proposal](docs/proposals/diagnostic-codes.md). A diagnostic's code was
