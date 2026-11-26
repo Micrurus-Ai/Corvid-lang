@@ -8403,3 +8403,7 @@ An integer literal where a `Float` is meant is a `Float`: `ratio: Float = 3`, `h
 
 A skill's computed label puts each std tool it uses in the group named after the std module that declares it: `random_token` and `hash_password` are `crypto`, `secret` and `secret_read` are `secrets`, `uuid_v4` is `uuid`, `path_join` is `path`. A skill that used `secret`, a UUID, a path helper or the browser tools was not labeled with those groups before, so its label could claim less than the code did. A tool of the skill's own is in no group, even if its name starts like a std tool's.
 
+### `corvid run` falls back when native code cannot carry the entry agent
+
+A program whose entry agent returns a `List`, `Option` or `Result`, or takes a record, runs on the interpreter under `corvid run`. It prints `↻ running via interpreter:` with the reason first, where it used to stop with a native build error. `--target=native` refuses it with the same reason.
+

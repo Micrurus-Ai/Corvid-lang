@@ -38,6 +38,9 @@ pub enum NotNativeReason {
     /// `--mode mock` on a program with connectors: a mock payload is a
     /// Corvid expression the interpreter evaluates.
     ConnectorMockMode,
+    /// The entry agent takes or returns a type the native command line
+    /// cannot carry; the reason is the code generator's own.
+    EntryBoundary { reason: String },
     /// A connector operation that native code cannot call yet; the
     /// reason names what (native dispatch N1 covers JSON-shaped calls).
     ConnectorNotNative {
@@ -106,6 +109,7 @@ impl std::fmt::Display for NotNativeReason {
                 f,
                 "program imports Python module `{module}` - native Python FFI is not implemented yet"
             ),
+            Self::EntryBoundary { reason } => write!(f, "{reason}"),
             Self::ConnectorMockMode => write!(
                 f,
                 "connectors run in `mock` mode, whose payloads are Corvid expressions the interpreter evaluates"

@@ -52,6 +52,7 @@ mod agent;
 use agent::*;
 mod entry;
 use entry::*;
+pub(crate) use entry::check_entry_boundary;
 mod public_json;
 mod runtime_call;
 pub use public_json::{native_public_json_type, native_runtime_call_types};

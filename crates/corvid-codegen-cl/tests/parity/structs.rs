@@ -80,8 +80,8 @@ fn list_entry_return_is_blocked_with_clear_error() {
                 "expected message to mention list: {msg}"
             );
             assert!(
-                msg.contains("encoder") || msg.contains("encoder primitives"),
-                "expected message to point at missing encoder primitives: {msg}"
+                msg.contains("dedicated serialization"),
+                "expected the command-line boundary's rule, naming the missing serialization: {msg}"
             );
         }
         other => panic!("expected NotSupported, got {other:?}"),

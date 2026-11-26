@@ -2,6 +2,22 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `corvid run` routes an entry agent native code cannot carry
+
+While measuring how the tiers print results, `corvid run` on
+`agent main() -> List<Int>` failed with a native build error. `auto` is meant
+to fall back to the interpreter for anything native code cannot do, but
+the run's native scan never asked about the command-line boundary. That
+boundary's rule had two copies: `check_entry_boundary_type` in the emitted
+`main`, and a stricter guard in `build_native_to_disk` that alone refused a
+record parameter. Now `check_entry_boundary` is the one rule. It includes the
+record-parameter refusal and is exposed as `native_entry_refusal`, which
+`corvid run` asks before choosing a tier. A CLI test runs a list-returning
+program through `corvid run` and `--target=native`.
+
+Still open: what the two tiers print for the same result (the command-line
+printing item).
+
 ### Skill capability groups read from the std modules
 
 The skill audit mapped a std tool to its capability group with a hand-kept

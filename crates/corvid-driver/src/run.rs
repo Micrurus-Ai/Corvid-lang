@@ -171,6 +171,13 @@ pub fn run_with_target(
     };
 
     let mut scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    // The command-line boundary's own rule: an entry agent that takes or
+    // returns what native code cannot carry runs on the interpreter.
+    if scan.is_ok() {
+        if let Some(reason) = corvid_codegen_cl::native_entry_refusal(&ir) {
+            scan = Err(crate::native_ability::NotNativeReason::EntryBoundary { reason });
+        }
+    }
     // A connector's mock is a Corvid expression the interpreter evaluates.
     if scan.is_ok() && !ir.connectors.is_empty() && connector_mode == Some(corvid_ast::ConnectorMode::Mock) {
         scan = Err(crate::native_ability::NotNativeReason::ConnectorMockMode);

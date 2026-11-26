@@ -154,10 +154,7 @@ pub(super) fn emit_entry_main(
     // Validate that every entry parameter and the return type are
     // representable at the command-line / stdout boundary. Struct and
     // List are deliberately excluded ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â they need a serialization implementation.
-    for p in &entry_agent.params {
-        check_entry_boundary_type(&p.ty, p.span, "parameter")?;
-    }
-    check_entry_boundary_type(&entry_agent.return_ty, entry_agent.span, "return")?;
+    check_entry_boundary(entry_agent)?;
 
     // main signature: (i32 argc, i64 argv) -> i32
     let mut sig = module.make_signature();
@@ -435,6 +432,17 @@ pub(super) fn emit_entry_main(
 /// Result, Option, Weak, Stream, Partial, ResumeToken, RouteParams,
 /// and ImportedStruct each need their own dedicated serialization
 /// paths and are filed as later slices.
+/// Why the entry agent cannot cross the native command-line boundary, or
+/// `Ok` when every parameter and its return can. The one rule: the
+/// emitted `main` enforces it, and `corvid run` asks it first so a
+/// program it refuses runs on the interpreter instead.
+pub(crate) fn check_entry_boundary(entry_agent: &IrAgent) -> Result<(), CodegenError> {
+    for p in &entry_agent.params {
+        check_entry_boundary_type(&p.ty, p.span, "parameter")?;
+    }
+    check_entry_boundary_type(&entry_agent.return_ty, entry_agent.span, "return")
+}
+
 fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), CodegenError> {
     match ty {
         Type::Map(_, _) => Err(CodegenError::not_supported(
@@ -444,6 +452,10 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),
         // Taint is compile-time only: the entry boundary sees the inner.
         Type::Tainted(inner) => check_entry_boundary_type(inner, span, role),
+        Type::Struct(_) if role == "parameter" => Err(CodegenError::not_supported(
+            "entry agent parameter of a record type - `corvid run` passes arguments as `Int`, `Float`, `Bool` or `String` text; take a `String` and decode it with the record type's `from_json(text)`",
+            span,
+        )),
         Type::Struct(_) => Ok(()),
         Type::ImportedStruct(_) => Err(CodegenError::not_supported(
             format!(
