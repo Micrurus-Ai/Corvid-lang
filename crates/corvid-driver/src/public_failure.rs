@@ -52,11 +52,9 @@ pub fn public_failure(error: &RunError) -> PublicFailure {
 
 fn interp_failure(kind: &InterpErrorKind) -> PublicFailure {
     match kind {
-        InterpErrorKind::Timeout { milliseconds } => PublicFailure::new(
-            504,
-            "handler_timeout",
-            format!("the handler did not finish within its {milliseconds} ms timeout"),
-        ),
+        InterpErrorKind::Timeout { milliseconds } => {
+            PublicFailure::new(504, "handler_timeout", timeout_detail(*milliseconds as u128))
+        }
         InterpErrorKind::BudgetExceeded { budget, .. } => PublicFailure::new(
             500,
             "budget_exceeded",
@@ -87,6 +85,26 @@ fn interp_failure(kind: &InterpErrorKind) -> PublicFailure {
 /// The answer to any failure the mapping has no more specific code for.
 pub fn handler_failed() -> PublicFailure {
     PublicFailure::new(500, "handler_failed", "the request handler failed; the server log has the details")
+}
+
+/// The answer when the server could not start the handler at all. The
+/// reason (a path, an OS error) is logged, not sent.
+pub fn handler_not_started() -> PublicFailure {
+    PublicFailure::new(
+        500,
+        "handler_spawn_failed",
+        "the request handler could not be started; the server log has the details",
+    )
+}
+
+/// The timeout sentence around its number. The server `corvid build`
+/// generates reads its timeout at run time, so it embeds the two parts
+/// and joins them as [`timeout_detail`] does.
+pub const TIMEOUT_DETAIL: [&str; 2] = ["the handler did not finish within its ", " ms timeout"];
+
+/// The detail for a handler stopped by its `milliseconds` timeout.
+pub fn timeout_detail(milliseconds: u128) -> String {
+    format!("{}{milliseconds}{}", TIMEOUT_DETAIL[0], TIMEOUT_DETAIL[1])
 }
 
 #[cfg(test)]

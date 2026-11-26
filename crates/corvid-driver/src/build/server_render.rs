@@ -55,6 +55,12 @@ serde_json = "1"
 
 pub(super) fn render_axum_server_source(handler_path: &Path) -> String {
     let handler = handler_path.to_string_lossy().replace('\\', "\\\\");
+    // The public failure answers come from the mapping `corvid serve`
+    // uses, embedded as string literals so the server stays standalone.
+    use crate::public_failure::{handler_failed, handler_not_started, TIMEOUT_DETAIL};
+    let handler_failed_detail = format!("{:?}", handler_failed().detail);
+    let handler_not_started_detail = format!("{:?}", handler_not_started().detail);
+    let (timeout_before, timeout_after) = (format!("{:?}", TIMEOUT_DETAIL[0]), format!("{:?}", TIMEOUT_DETAIL[1]));
     format!(
         r#"use axum::extract::State;
 use axum::http::{{HeaderValue, Method, Request, StatusCode}};
@@ -83,6 +89,12 @@ use tower_http::trace::TraceLayer;
 type HmacSha256 = Hmac<Sha256>;
 
 const HANDLER: &str = "{handler}";
+// A failure's public answer is a fixed sentence (the mapping in
+// `corvid_driver::public_failure`, shared with `corvid serve`); the
+// handler's own error text goes to this server's log, never a body.
+const HANDLER_FAILED_DETAIL: &str = {handler_failed_detail};
+const HANDLER_NOT_STARTED_DETAIL: &str = {handler_not_started_detail};
+const HANDLER_TIMEOUT_DETAIL: [&str; 2] = [{timeout_before}, {timeout_after}];
 const MAX_REQUEST_BYTES: usize = 4096;
 // Mirrors `corvid-runtime::auth::csrf` (the canonical
 // implementation + adversarial tests live there). Inlined here
@@ -338,7 +350,10 @@ async fn ops_show(
                 "GET",
                 request.uri().path(),
                 "ops_snapshot_serialise_failed",
-                &err.to_string(),
+                {{
+                    log_failure(&request_id, "GET", request.uri().path(), "ops_snapshot_serialise_failed", &err.to_string());
+                    "the operations snapshot could not be encoded; the server log has the details"
+                }},
                 request_id,
                 started,
             );
@@ -354,7 +369,10 @@ async fn ops_show(
                 "GET",
                 request.uri().path(),
                 "ops_envelope_serialise_failed",
-                &err.to_string(),
+                {{
+                    log_failure(&request_id, "GET", request.uri().path(), "ops_envelope_serialise_failed", &err.to_string());
+                    "the operations envelope could not be encoded; the server log has the details"
+                }},
                 request_id,
                 started,
             );
@@ -490,38 +508,40 @@ async fn handle_app(
             complete(state, &method_text, &path, 200, "application/json", json, request_id, started)
         }}
         Ok(out) => {{
-            let err = out.stderr.trim().to_string();
+            log_failure(&request_id, &method_text, &path, "handler_failed", out.stderr.trim());
             error_response(
                 state,
                 500,
                 &method_text,
                 &path,
                 "handler_failed",
-                if err.is_empty() {{ "handler failed" }} else {{ &err }},
+                HANDLER_FAILED_DETAIL,
                 request_id,
                 started,
             )
         }}
-        Err(HandlerError::TimedOut) => error_response(
-            state,
-            504,
-            &method_text,
-            &path,
-            "handler_timeout",
-            "handler timed out",
-            request_id,
-            started,
-        ),
-        Err(HandlerError::Spawn(err)) => error_response(
-            state,
-            500,
-            &method_text,
-            &path,
-            "handler_spawn_failed",
-            &err,
-            request_id,
-            started,
-        ),
+        Err(HandlerError::TimedOut) => {{
+            let detail = format!(
+                "{{}}{{}}{{}}",
+                HANDLER_TIMEOUT_DETAIL[0],
+                handler_timeout().as_millis(),
+                HANDLER_TIMEOUT_DETAIL[1]
+            );
+            error_response(state, 504, &method_text, &path, "handler_timeout", &detail, request_id, started)
+        }}
+        Err(HandlerError::Spawn(err)) => {{
+            log_failure(&request_id, &method_text, &path, "handler_spawn_failed", &err);
+            error_response(
+                state,
+                500,
+                &method_text,
+                &path,
+                "handler_spawn_failed",
+                HANDLER_NOT_STARTED_DETAIL,
+                request_id,
+                started,
+            )
+        }}
     }}
 }}
 
@@ -577,6 +597,19 @@ fn maybe_shutdown(state: &AppState) {{
             let _ = sender.send(());
         }}
     }}
+}}
+
+/// The full text of a failure, for the operator: the public answer
+/// carries only a fixed sentence.
+fn log_failure(request_id: &str, method: &str, route: &str, kind: &str, full: &str) {{
+    eprintln!(
+        "{{{{\"event\":\"corvid.server.failure\",\"request_id\":{{}},\"method\":{{}},\"route\":{{}},\"kind\":{{}},\"error\":{{}}}}}}",
+        json_string(request_id),
+        json_string(method),
+        json_string(route),
+        json_string(kind),
+        json_string(full)
+    );
 }}
 
 fn trace_response(request_id: &str, method: &str, route: &str, status: u16, started: Instant) {{

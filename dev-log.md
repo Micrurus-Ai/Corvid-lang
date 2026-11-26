@@ -1254,6 +1254,36 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - The built server's failures leak nothing
+
+The Mac session found that the server `corvid build --target server`
+generates sent a failing handler's stderr as the `message` of its 500,
+which can show a browser a URL, a file path or a provider's message.
+`corvid serve` had just stopped doing the same. Three more spots
+echoed raw text: the handler's path when it could not start, and two
+ops endpoint encoding errors.
+
+The mapping from a failure to its public code and fixed sentence now
+lives in `corvid_driver::public_failure`, moved from `corvid-cli` in a
+refactor commit of its own. `serve` uses it, and the generator embeds
+its sentences into the server it writes, so the two cannot drift. The
+generated server reads its timeout at run time, so the timeout
+sentence is shared as two parts around the number. A test holds the
+generated server's sentence to `serve`'s for the same timeout.
+
+The test replaces the handler with one that prints
+`http://10.0.0.7:8080/admin` and `/Users/ops/app/secrets.toml` to
+stderr and fails. The body holds neither, and the server's log holds
+both in a `corvid.server.failure` event.
+
+Found while testing: with the reason out of the body, a test that
+receives an unexpected 500 had nothing to show. The test now prints the
+server's log when its first request fails, which an intermittent
+failure under parallel load needed. Filed: the two servers still use
+two different failure envelopes for the same stops.
+
+---
+
 ## 2026-11-26 - One rule for what an outage is (TE-1)
 
 `try ... else` must catch outages and never bugs or decisions. Building
