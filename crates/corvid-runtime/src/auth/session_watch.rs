@@ -107,15 +107,24 @@ impl SessionAuthRuntime {
     /// expiry. An invalid, expired or unknown token is an error, like
     /// [`Self::resolve_session_cookie`], and is audited the same way.
     pub fn observe_session(&self, raw_token: &str, trace_id: &str) -> Result<watch::Receiver<SessionState>, RuntimeError> {
+        self.observe_with_clock(raw_token, trace_id, now_ms).map(|(receiver, _)| receiver)
+    }
+
+    pub(super) fn observe_with_clock(
+        &self,
+        raw_token: &str,
+        trace_id: &str,
+        clock: fn() -> u64,
+    ) -> Result<(watch::Receiver<SessionState>, u64), RuntimeError> {
         let timer = tokio::runtime::Handle::try_current().map_err(|_| {
             RuntimeError::Other("watching a session needs a Tokio runtime to time its expiry".into())
         })?;
         let mut watched = self.watchers.lock();
-        let at = now_ms();
+        let at = clock();
         let resolved = self.resolve_session_cookie(raw_token, trace_id, at)?;
         let session = resolved.session;
         if let Some(entry) = watched.get(&session.id) {
-            return Ok(entry.sender.subscribe());
+            return Ok((entry.sender.subscribe(), session.expires_ms));
         }
         let (sender, receiver) = watch::channel(SessionState::Active);
         let generation = self.watchers.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -128,7 +137,7 @@ impl SessionAuthRuntime {
             tokio::time::sleep(remaining).await;
             watchers.expired(&session.id, generation);
         });
-        Ok(receiver)
+        Ok((receiver, session.expires_ms))
     }
 }
 

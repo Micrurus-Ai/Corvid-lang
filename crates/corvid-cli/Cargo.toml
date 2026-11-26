@@ -35,10 +35,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 toml = { workspace = true }
 async-stream = "0.3"
+tokio-stream = "0.1"
 tempfile = { workspace = true }
 time = { version = "0.3", features = ["parsing", "formatting"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "signal", "net"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+matchit = "0.7"
+percent-encoding = "2"
 multer = "3"
 futures = "0.3"
 rayon = { workspace = true }
@@ -59,6 +62,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 corvid-test-paths = { workspace = true }
 cc = "1"
 tempfile = { workspace = true }

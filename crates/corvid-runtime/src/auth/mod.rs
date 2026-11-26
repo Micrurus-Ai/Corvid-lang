@@ -10,6 +10,8 @@ mod audit;
 pub mod csrf;
 mod invitations;
 mod oauth;
+mod observation;
+pub use observation::SessionObservation;
 mod provisioning;
 mod records;
 mod roles;
@@ -233,7 +235,8 @@ impl SessionAuthRuntime {
                 create index if not exists auth_audit_tenant on auth_audit_events(tenant_id);
                 create index if not exists auth_audit_session on auth_audit_events(session_id);",
             )
-            .map_err(|err| RuntimeError::Other(format!("failed to initialize auth schema: {err}")))
+            .map_err(|err| RuntimeError::Other(format!("failed to initialize auth schema: {err}")))?;
+        observation::initialize(&self.conn.lock().unwrap())
     }
 }
 

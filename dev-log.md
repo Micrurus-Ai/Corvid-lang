@@ -38,6 +38,31 @@ The generated client's type check covers a wrong path type, an omitted
 observer and an unknown row field. The Edge check reached the server startup
 gate for RT-3 (`E5204`). The component binding and a reconnect across
 committed edits remain open.
+### RT-3 Windows deployment check
+
+The [hosted Edge run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45789832802) passed the SQLite scenario on `e182a19`. Its Postgres check stopped before either replica started because `initdb` could not read the temporary password file. On elevated Windows runners the verifier now gives the runner's user SID inheritable access to a dedicated cluster directory before creating that file. Postgres drops the administrator group when it starts. The two-process Edge check remains open.
+
+### RT-3 transport integration with the merged runtime
+
+Serve now passes the committed row revisions into the RT-2 diff. A filtered removal carries the revision that moved the row out of view. The connection registers the runtime session watcher during the same cookie validation used to capture the durable authority revision. This wakes idle sockets after local logout and keeps the cross-process check at final enqueue.
+
+The authenticated SQLite wire check passed reconnect, live edit, idle permission loss, logout and expiry. On two Postgres processes, the reader returned the offline commit in its reconnect snapshot. The writer saved the next edit, but the reader timed out waiting for its change frame. An independent libpq connection also received no notification on the disposable Windows cluster. The grouped Edge check stopped at the Playwright import with access denied. Both deployment modes still need the hosted Edge run. [Verification command](docs/reference/cli.md#live-subscriptions)
+
+### RT-3 authenticated live connections
+
+Serve uses the durable auth store's per-actor revision to detect changes during cookie validation and to guard the final frame enqueue. A timer checks idle connections across processes. An in-memory notification alone would miss a logout made by another replica. The check exercises fresh snapshots and committed edits with one SQLite server or two Postgres servers. A failed logout write now reports service unavailable. The SQLite wire check passed. The two-process Postgres check reached the reopened snapshot but timed out on the live edit. A separate libpq listener also received no notification on the local Windows test cluster. The hosted Edge and Postgres checks remain open. [Transport checks](docs/reference/cli.md#live-subscriptions)
+
+### RT-3 committed subscription rows
+
+The serve adapter registers for RT-2 commits before running the compiled query with the subscription's path and actor. Registering first closes the gap in which a write could otherwise be missed. The SQLite regression exercises reopening after an offline write and receiving a later matching write. A save can move a row outside the filter at an unseen revision. Serve sends a replacement snapshot for removals until RT-2 supplies that revision. End-to-end socket acceptance awaits synchronized session notifications for idle connections.
+
+### RT-3 compiled subscription paths
+
+Serve now selects the compiled live query and its declared permission even when a GET route shares its path. HTTP handlers and subscriptions use the same path argument conversion. A compiler-backed transport test covers that distinction, encoded captures and refusal of ordinary HTTP paths. RT-2 must still supply the snapshot and stream together, and the session runtime must notify idle connections of authority changes. The startup gate stays in effect. The RT-1 checker follow-up for an omitted `requires` is tracked on the backend roadmap.
+
+### RT-3 WebSocket transport
+
+The RT-3 transport now decodes page requests, forwards revisioned rows, releases unsubscribed handles and refreshes active queries on authority changes. Each open goes through serve's existing GET permission check. The upgrade refuses service until the live declaration, session notifications and committed stream are connected. The CLI smoke check exercises this boundary with the booking example. F08 reconnect acceptance remains pending. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
 
 ### Live subscriptions protocol agreement
 
