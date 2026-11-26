@@ -41,7 +41,13 @@ pub struct ApplicationContract {
     /// Empty when the program declares none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub live: Vec<ContractLive>,
-    /// Public agents (agent invocations, not ordinary REST).
+    /// Declared `action`s (B10): the operations a person, an assistant
+    /// and the program share, each with who may call it from outside.
+    /// Empty when the program declares none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ContractAction>,
+    /// Public agents (agent invocations, not ordinary REST). An action is
+    /// listed under `actions`, not here.
     pub agents: Vec<ContractCallable>,
     /// Public prompts exposed to callers.
     pub prompts: Vec<ContractCallable>,
@@ -421,6 +427,18 @@ pub struct ContractLive {
     pub policy: Option<ContractRoutePolicy>,
 }
 
+/// An `action` in the contract (B10): its input and result as any
+/// callable's, and who may call it from outside the program. `policy`
+/// absent means the source wrote `requires anyone`; an action always
+/// declares its callers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractAction {
+    #[serde(flatten)]
+    pub callable: ContractCallable,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ContractRoutePolicy>,
+}
+
 /// A route's authentication/authorization policy (slice 51h).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractRoutePolicy {
@@ -571,7 +589,7 @@ pub fn emit_application_contract(
                 path_params: contract_path_params(route, &names),
                 row_type: row,
                 key_fields: table.keys.iter().map(|key| key.name.clone()).collect(),
-                policy: contract_policy(route),
+                policy: route_policy(route),
             })
         })
         .collect();
@@ -589,7 +607,8 @@ pub fn emit_application_contract(
             // A public agent whose signature holds a `Secret` is
             // server-only: no client could supply or receive one.
             Decl::Agent(a)
-                if a.visibility.is_callable_from_outside_file()
+                if a.action.is_none()
+                    && a.visibility.is_callable_from_outside_file()
                     && !signature_holds_secret(&a.params, &a.return_ty, checked) =>
             {
                 Some(
@@ -603,6 +622,20 @@ pub fn emit_application_contract(
                 ),
                 )
             }
+            _ => None,
+        })
+        .collect();
+
+    // An action is reachable from outside by declaration, whatever its
+    // visibility, so every one is listed.
+    let actions = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Agent(a) => a.action.as_ref().map(|spec| ContractAction {
+                callable: contract_callable(&a.name.name, &a.params, &a.return_ty, &a.effect_row, registry, &names),
+                policy: contract_policy(&spec.policy),
+            }),
             _ => None,
         })
         .collect();
@@ -653,6 +686,7 @@ pub fn emit_application_contract(
         types,
         routes,
         live,
+        actions,
         agents,
         prompts,
         identities,
@@ -1140,7 +1174,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             .map(|e| e.name.name.clone())
             .collect(),
         pagination: names.pagination(&r.response.ty),
-        policy: contract_policy(r),
+        policy: route_policy(r),
     }
 }
 
@@ -1151,11 +1185,17 @@ fn contract_path_params(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>
     }).collect()
 }
 
-fn contract_policy(r: &corvid_ast::HttpRouteDecl) -> Option<ContractRoutePolicy> {
-    r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| ContractRoutePolicy {
+fn route_policy(r: &corvid_ast::HttpRouteDecl) -> Option<ContractRoutePolicy> {
+    r.policy.as_ref().and_then(contract_policy)
+}
+
+/// A `requires` clause as the contract carries it: `None` when it names
+/// no authority (`requires anyone`).
+fn contract_policy(policy: &corvid_ast::RoutePolicy) -> Option<ContractRoutePolicy> {
+    policy.requires_auth().then(|| ContractRoutePolicy {
         authenticated: true,
-        roles: p.roles.clone(),
-        permissions: p.permissions.clone(),
+        roles: policy.roles.clone(),
+        permissions: policy.permissions.clone(),
     })
 }
 

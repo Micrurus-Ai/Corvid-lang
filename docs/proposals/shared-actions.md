@@ -1,6 +1,6 @@
 # Shared actions (B10)
 
-**Status:** proposal, awaiting frontend agreement (F15). No code until the grammar is agreed.
+**Status:** building, under the propose-then-build grammar law (posted for frontend development; no objection within a working day). B10-1 shipped 2026-11-26.
 **Owner:** backend and AI grammar (Claude Code); the UI binding is shared with frontend development (Codex).
 **Roadmap:** [B10](../backend-ai-roadmap.md) and, for assistant authority, B11.
 
@@ -47,6 +47,8 @@ action move_card(move: MoveCard) -> Result<Card, Conflict<Card>> requires permis
 | Contract | `corvid contract app` lists each action with its input, result, permission and exposure, so a change shows up as a contract diff. | Agents listed without permission or exposure |
 
 **Validation runs once, at the boundary, from the type.** Every caller that is not Corvid code (form, JSON, assistant, CLI, worker) reaches the body only after the input decodes into `MoveCard` and its refinements hold. A refused input is a typed `invalid_input` response that names the field; the body never sees it. The browser shows the same refinement before submitting.
+
+**Every action says who may call it.** The `requires` clause is mandatory on an action: leaving it out is a parse error that lists the choices, and an action every caller may use says `requires anyone`, on its own. An operation reachable from outside never becomes open by silence ([no hidden defaults](../../AGENTS.md#no-hidden-defaults-for-consequential-policy)). The checker refuses a signed-in policy without an `identity` block, and a role or permission the identity block does not declare, because no caller could ever meet it.
 
 **Permission is checked once, before decoding, for every caller.** `requires permission("board.edit")` applies to the endpoint, the assistant tool, the CLI and the worker alike. Under B11, an assistant acts with the authority of the person it acts for, never more.
 
@@ -102,8 +104,8 @@ Changing `MoveCard` (renaming `to`, adding a required field) is a compile error 
 
 ## Slices
 
-- [ ] B10-1. The declaration: parse and check `action`, typed calls from Corvid code, `requires` checked for every caller, the trace entry, and `corvid contract app` listing actions.
-- [ ] B10-2. The endpoint and the UI binding: `POST /actions/<name>` for forms and JSON with boundary validation; `ui.form(action)` and `ui.button(label, action, value)`.
+- [x] B10-1. The declaration: parse and check `action`, typed calls from Corvid code, the mandatory `requires` checked against the identity block, and `corvid contract app` listing actions with their input, result and caller policy. Built 2026-11-26. The policy is enforced where outside callers arrive, so enforcement and the `action:<name>` trace entry move to B10-2, which adds the first such caller.
+- [ ] B10-2. The endpoint and the UI binding: `POST /actions/<name>` for forms and JSON with boundary validation, the policy enforced before decoding, and the `action:<name>` trace entry with the calling surface; `ui.form(action)` and `ui.button(label, action, value)`. Annotations on an action (`@budget`, `@trust`, ...) are refused by the parser today; B10-2 accepts them as on an agent.
 - [ ] B10-3. Assistant exposure: the `assistants:` line (`confirm` and absence), WebMCP tools in the page and an MCP endpoint from `corvid serve`, both from the declaration.
 - [ ] B10-4. The CLI and workers: `corvid act` and `jobs enqueue --task <action>`, decoding through the same type.
 - [ ] B10-5. Cross-tier change report: `corvid contract app --diff`, and the project-board example (`move_card`), with a test that renames an input and checks every reported caller. Port the reading list's `apply_reviewed_titles` and `read_page` onto actions, deleting the hand-written form script.

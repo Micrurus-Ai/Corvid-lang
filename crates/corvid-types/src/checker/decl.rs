@@ -29,6 +29,9 @@ impl<'a> Checker<'a> {
         if a.extern_abi.is_some() {
             self.check_extern_c_signature(a);
         }
+        if let Some(spec) = &a.action {
+            self.check_action_policy(a, spec);
+        }
 
         let declared_ret = self.type_ref_to_type(&a.return_ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret.clone()));
@@ -870,37 +873,12 @@ impl<'a> Checker<'a> {
                         policy.span,
                     ));
                 }
-                // A `requires role/permission` clause must reference a name
-                // declared in the identity block's `roles:` — otherwise the
-                // requirement can never be satisfied and is almost certainly
-                // a typo (slice 52f). Only checked when an identity block
-                // exists (the missing-identity error above already fires).
-                if self.has_identity {
-                    for role in &policy.roles {
-                        if !self.identity_roles.contains(role) {
-                            self.errors.push(TypeError::new(
-                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
-                                    kind: "role",
-                                    name: role.clone(),
-                                    path: route.path.clone(),
-                                },
-                                policy.span,
-                            ));
-                        }
-                    }
-                    for permission in &policy.permissions {
-                        if !self.identity_permissions.contains(permission) {
-                            self.errors.push(TypeError::new(
-                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
-                                    kind: "permission",
-                                    name: permission.clone(),
-                                    path: route.path.clone(),
-                                },
-                                policy.span,
-                            ));
-                        }
-                    }
-                }
+                let path = route.path.clone();
+                self.check_policy_authorities(policy, &|kind, name| TypeErrorKind::RoutePolicyUndeclaredAuthority {
+                    kind,
+                    name: name.to_string(),
+                    path: path.clone(),
+                });
                 self.bind_route_local_by_name(&route.body, "actor", actor_type());
             }
         }

@@ -40,6 +40,7 @@ mod currency;
 mod crypto;
 #[path = "interp/secret_tools.rs"]
 mod secret_tools;
+mod tool_json;
 #[path = "interp/connector_json.rs"]
 mod connector_json;
 #[path = "interp/test_trace.rs"]
@@ -1822,8 +1823,13 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
 
-                let json_args: Vec<serde_json::Value> =
-                    arg_values.iter().map(value_to_json).collect();
+                // The arguments in the public form, by declared type, a
+                // `Secret` as `<redacted>`: what the trace records, an
+                // approver is shown, and a tool without secrets receives.
+                let json_args = tool_json::tool_arguments(
+                    &tool, &arg_values, &self.types_by_id, crate::public_json::SecretArgument::Recorded,
+                )
+                .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(problem), span))?;
 
                 if tool.python_approval_required && !self.env.consume_python_approval(callee_name, &json_args) {
                     return Err(InterpError::new(
@@ -1924,7 +1930,7 @@ impl<'ir> Interpreter<'ir> {
                         })
                         .await?;
                     if let StepAction::Override(val) = action {
-                        let value = json_to_value(val, result_decode_ty, &self.types_by_id)
+                        let value = tool_json::tool_result(val, result_decode_ty, &self.types_by_id)
                             .map_err(|e| {
                                 InterpError::new(
                                     InterpErrorKind::Marshal(format!(
@@ -2060,7 +2066,7 @@ impl<'ir> Interpreter<'ir> {
                         }
                     }
                     let result = outcome?;
-                    json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
+                    tool_json::tool_result(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                             span,
@@ -2068,13 +2074,13 @@ impl<'ir> Interpreter<'ir> {
                     })?
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                let result = value_to_json(&result_value);
-                let result = match &echo_scrub {
-                    Some(revealed) => revealed.scrub_json(result),
-                    None => result,
-                };
-
                 if self.should_yield_boundary() {
+                    // The debugger sees the answer as the tool sent it.
+                    let result = tool_json::debugger_view(&result_value, result_decode_ty, &self.types_by_id);
+                    let result = match &echo_scrub {
+                        Some(revealed) => revealed.scrub_json(result),
+                        None => result,
+                    };
                     let action = self
                         .maybe_yield(StepEvent::AfterToolCall {
                             tool_name: callee_name.to_string(),

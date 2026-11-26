@@ -244,7 +244,7 @@ agent run(label: Grounded<String>) -> String:
     let approvals_for_closure = Arc::clone(&approvals);
     let rt = Runtime::builder()
         .tool("act", |args| async move {
-            Ok(json!(format!("acted:{}", args[0]["value"].as_str().unwrap())))
+            Ok(json!(format!("acted:{}", args[0].as_str().unwrap())))
         })
         .approver(Arc::new(ProgrammaticApprover::new(move |req| {
             approvals_for_closure.fetch_add(1, Ordering::SeqCst);
@@ -319,7 +319,7 @@ agent run(label: Grounded<String>) -> String:
     let approvals_for_closure = Arc::clone(&approvals);
     let rt = Runtime::builder()
         .tool("act", |args| async move {
-            Ok(json!(format!("acted:{}", args[0]["value"].as_str().unwrap())))
+            Ok(json!(format!("acted:{}", args[0].as_str().unwrap())))
         })
         .approver(Arc::new(ProgrammaticApprover::new(move |_| {
             approvals_for_closure.fetch_add(1, Ordering::SeqCst);
@@ -366,7 +366,7 @@ agent run(input: String) -> String:
         .llm(Arc::new(MockAdapter::new("mock").reply("classify", json!("refund"))))
         .default_model("mock")
         .tool("act", |args| async move {
-            Ok(json!(format!("acted:{}", args[0]["value"].as_str().unwrap())))
+            Ok(json!(format!("acted:{}", args[0].as_str().unwrap())))
         })
         .approver(Arc::new(ProgrammaticApprover::new(move |req| {
             approvals_for_closure.fetch_add(1, Ordering::SeqCst);
@@ -407,7 +407,7 @@ agent run(input: String) -> String:
         .llm(Arc::new(MockAdapter::new("mock").reply("classify", json!("refund"))))
         .default_model("mock")
         .tool("act", |args| async move {
-            Ok(json!(format!("acted:{}", args[0]["value"].as_str().unwrap())))
+            Ok(json!(format!("acted:{}", args[0].as_str().unwrap())))
         })
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .build();

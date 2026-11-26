@@ -13,8 +13,8 @@
 //! everywhere or nowhere. A misspelled symbol fails to link.
 //!
 //! `time_now()` is not here: it reads the clock through a `std/time`
-//! tool, whose `Instant` return keeps a program that calls it on the
-//! interpreter (see `crate::text_scalar_boundary`).
+//! tool, a runtime-owned call (native dispatch N2) that records and
+//! replays the clock.
 
 use crate::text_scalar::{scalar_of, BinaryReading, NativeScalarMethod, ScalarBinary};
 use corvid_ast::BinaryOp;

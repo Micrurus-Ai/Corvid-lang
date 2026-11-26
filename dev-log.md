@@ -108,6 +108,90 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native user tools through the runtime call (B2b)
+
+Native code called a tool of the program's own through its typed C
+wrapper, `__corvid_tool_<name>`. Around that call sat a replay branch per
+return type and a trace encoding of its own. So a tool whose signature
+held a `Decimal`, a time value, a record with an `Option`, or a `Secret`
+sent the program to the interpreter.
+
+Now `ToolRegistry::call` falls back to the host registry, where every
+linked `#[tool]` registers its JSON entry point at startup. It runs the
+entry point on a blocking thread, because the macro's wrapper calls
+`block_on` itself. Native code calls every tool through
+`corvid_runtime_call`: arguments in the public form, secrets redacted
+and revealed, the answer decoded through the embedded plan, the call
+recorded and replayed by the runtime. A grounded answer is grounded
+after the call, as before.
+
+Found while building: once nothing called the wrapper symbols, the
+linker dropped the tools library's objects, and with them the startup
+registration. So each called tool now gets an exported data object
+holding the address of its JSON entry point. The tool stays linked, and
+a tool nobody implemented is still a link error, as it was.
+
+Removed: the direct calls and their replay branches, the typed
+`corvid_invoke_tool_*` and `corvid_replay_tool_call_*` families, the
+tool trace exports, `corvid_runtime_is_replay`, and the two modules that
+explained the old refusals. The tier picker now refuses a user tool only
+when a type has no native JSON form, or when the tool returns a
+`Secret`, which only the runtime's tools produce.
+
+Filed: native run-start and `approve` traces still encode non-scalar
+arguments with a second, hand-written JSON mapping.
+
+The batch gate caught three more problems with B2a, fixed in their own
+commit:
+- An `Upload`, including one in a record field, has no public form. It
+  crosses as the runtime's own value, as database handles do.
+- `path_parent` and `path_filename` answered an `Option` in the internal
+  tagged envelope, the only runtime tools that still did. They now
+  answer the text or `null`.
+- The record-aware type walk the secret check used is now
+  `corvid_ir::holds`, shared by the secret check and the runtime-value
+  check.
+
+A native-secrets test that pinned the old refusal now checks that a
+tool taking a secret needs only its tools library.
+
+Tests: `native_user_tools.rs` calls a tool taking a record that holds
+`None` and a variant, plus a `Decimal`, and answering a record, on both
+tiers. The value and the recorded arguments match. The parity suite's
+tool tests run through the runtime call. The tier picker's tests now
+expect a `Decimal` tool, a `Bytes` tool, a clock tool and a tool taking
+a secret to be native.
+
+---
+
+## 2026-11-26 - Tool calls exchange the public JSON form (B2a)
+
+Found while starting B2: the interpreter sent a tool its arguments in its
+internal form (`{"tag": "some", ...}` for an `Option`, no `type` on a
+variant) and read the answer the same way, while native runtime calls
+already sent the public form. Moving native user tools onto the runtime
+call alone would have made the tiers disagree, so B2 became two slices,
+recorded in the [proposal](docs/proposals/native-scalar-boundaries.md).
+
+B2a: `interp/tool_json.rs` encodes each argument by its parameter's
+declared type with the public mapping. A `Secret` is `<redacted>` in the
+recorded form and its text in the form the tool receives, through the
+public encoder's secret hook. A grounded value at a plain parameter
+crosses as its value. A type holding a runtime handle (`DbHandle`,
+`JsonBuilder`) crosses as the handle; that rule is decided by the type.
+The answer is decoded by the declared return type, ignoring undeclared
+keys. Those arguments are what the trace records, what an approver sees,
+and what Python, host and Rust tools receive. The step debugger shows
+the same form.
+
+Behaviour that changed: tests that read a grounded argument as
+`args[0]["value"]` now read the value. The Python import test's message
+for `sqrt(2)` declared `-> Int` is the public decoder's: "expected Int,
+found the fractional number". No committed recording held an old-form
+tool argument.
+
+---
+
 ## 2026-11-26 - Native prompts through the public JSON plan (B1b)
 
 A native prompt could take only `Int`, `Bool`, `Float` and `String`, and
@@ -1468,6 +1552,40 @@ receives an unexpected 500 had nothing to show. The test now prints the
 server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
+
+## 2026-11-26 - The `action` declaration (B10-1)
+
+`action move_card(move: MoveCard) -> Card requires permission("board.edit"):`
+declares the operation a person, an assistant and the program share.
+It is an agent with an `ActionSpec` beside it, so Corvid code calls it
+as any agent and every walker, effect check and cost rule already
+covers its body. `action` is contextual: a name unless followed by a
+name and `(`, so `action: String` parameters still compile.
+
+`requires` is mandatory on an action. An operation reachable from
+outside must never become open because a line was left out (no hidden
+defaults), so leaving it out is a parse error listing the choices, and
+an open action says `requires anyone`, on its own. The checker refuses
+a signed-in policy without an identity block and a role or permission
+the identity block never declares, sharing one authority check with
+routes. The contract lists `actions` with the callable's fields, input
+and result, and the caller policy; an action is not listed again among
+`agents`.
+
+Alternatives considered for an open action: an omitted clause meaning
+open (rejected, the silent default), `requires nothing` and `public`
+(rejected: `anyone` reads as the plain answer to "who may call it",
+and `public` already means visible outside the file).
+
+Moved to B10-2, because they happen where outside callers arrive:
+enforcing the policy, the `action:<name>` trace entry, and annotations
+on an action, which the parser does not read yet.
+
+Found and fixed: the native ownership pass rebuilt the program with
+`models: Vec::new()`, silently dropping declared models from every
+later pass. Nothing reads them there today; it now carries them.
+
+---
 
 ## 2026-11-26 - `try ... else` on the interpreter (TE-2)
 

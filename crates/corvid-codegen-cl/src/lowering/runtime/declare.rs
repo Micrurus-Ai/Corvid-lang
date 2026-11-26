@@ -417,136 +417,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare bench_finish_trial: {e}"), Span::new(0, 0))
         })?;
 
-    let mut runtime_is_replay_sig = module.make_signature();
-    runtime_is_replay_sig.returns.push(AbiParam::new(I8));
-    let runtime_is_replay_id = module
-        .declare_function(
-            RUNTIME_IS_REPLAY_SYMBOL,
-            Linkage::Import,
-            &runtime_is_replay_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare runtime_is_replay: {e}"), Span::new(0, 0))
-        })?;
-
-    let make_replay_tool_sig =
-        |module: &mut ObjectModule, ret_ty: Option<cranelift_codegen::ir::Type>| {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-            if let Some(ret_ty) = ret_ty {
-                sig.returns.push(AbiParam::new(ret_ty));
-            }
-            sig
-        };
-    let replay_tool_nothing_sig = make_replay_tool_sig(module, None);
-    let replay_tool_call_nothing_id = module
-        .declare_function(
-            REPLAY_TOOL_CALL_NOTHING_SYMBOL,
-            Linkage::Import,
-            &replay_tool_nothing_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare replay_tool_call_nothing: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-    let replay_tool_int_sig = make_replay_tool_sig(module, Some(I64));
-    let replay_tool_call_int_id = module
-        .declare_function(
-            REPLAY_TOOL_CALL_INT_SYMBOL,
-            Linkage::Import,
-            &replay_tool_int_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare replay_tool_call_int: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-    let replay_tool_bool_sig = make_replay_tool_sig(module, Some(I8));
-    let replay_tool_call_bool_id = module
-        .declare_function(
-            REPLAY_TOOL_CALL_BOOL_SYMBOL,
-            Linkage::Import,
-            &replay_tool_bool_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare replay_tool_call_bool: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-    let replay_tool_float_sig = make_replay_tool_sig(module, Some(F64));
-    let replay_tool_call_float_id = module
-        .declare_function(
-            REPLAY_TOOL_CALL_FLOAT_SYMBOL,
-            Linkage::Import,
-            &replay_tool_float_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare replay_tool_call_float: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-    let replay_tool_string_sig = make_replay_tool_sig(module, Some(I64));
-    let replay_tool_call_string_id = module
-        .declare_function(
-            REPLAY_TOOL_CALL_STRING_SYMBOL,
-            Linkage::Import,
-            &replay_tool_string_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare replay_tool_call_string: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    // Live host-registered tool dispatch (library targets): same
-    // signature shape as the replay family (tool, arg_types, argc,
-    // args_ptr).
-    let invoke_tool_nothing_sig = make_replay_tool_sig(module, None);
-    let invoke_tool_nothing_id = module
-        .declare_function(INVOKE_TOOL_NOTHING_SYMBOL, Linkage::Import, &invoke_tool_nothing_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_nothing: {e}"), Span::new(0, 0))
-        })?;
-    let invoke_tool_int_sig = make_replay_tool_sig(module, Some(I64));
-    let invoke_tool_int_id = module
-        .declare_function(INVOKE_TOOL_INT_SYMBOL, Linkage::Import, &invoke_tool_int_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_int: {e}"), Span::new(0, 0))
-        })?;
-    let invoke_tool_bool_sig = make_replay_tool_sig(module, Some(I8));
-    let invoke_tool_bool_id = module
-        .declare_function(INVOKE_TOOL_BOOL_SYMBOL, Linkage::Import, &invoke_tool_bool_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_bool: {e}"), Span::new(0, 0))
-        })?;
-    let invoke_tool_float_sig = make_replay_tool_sig(module, Some(F64));
-    let invoke_tool_float_id = module
-        .declare_function(INVOKE_TOOL_FLOAT_SYMBOL, Linkage::Import, &invoke_tool_float_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_float: {e}"), Span::new(0, 0))
-        })?;
-    let invoke_tool_string_sig = make_replay_tool_sig(module, Some(I64));
-    let invoke_tool_string_id = module
-        .declare_function(INVOKE_TOOL_STRING_SYMBOL, Linkage::Import, &invoke_tool_string_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_string: {e}"), Span::new(0, 0))
-        })?;
-    let invoke_tool_struct_sig = make_replay_tool_sig(module, Some(I64));
-    let invoke_tool_struct_id = module
-        .declare_function(INVOKE_TOOL_STRUCT_SYMBOL, Linkage::Import, &invoke_tool_struct_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare invoke_tool_struct: {e}"), Span::new(0, 0))
-        })?;
-
     let mut runtime_init_sig = module.make_signature();
     runtime_init_sig.returns.push(AbiParam::new(I32));
     let runtime_init_id = module
@@ -1257,99 +1127,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
                 Span::new(0, 0),
             )
         })?;
-    let mut trace_tool_call_sig = module.make_signature();
-    trace_tool_call_sig.params.push(AbiParam::new(I64));
-    trace_tool_call_sig.params.push(AbiParam::new(I64));
-    trace_tool_call_sig.params.push(AbiParam::new(I64));
-    trace_tool_call_sig.params.push(AbiParam::new(I64));
-    let trace_tool_call_id = module
-        .declare_function(
-            TRACE_TOOL_CALL_SYMBOL,
-            Linkage::Import,
-            &trace_tool_call_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare trace_tool_call: {e}"), Span::new(0, 0))
-        })?;
-
-    let mut trace_tool_result_null_sig = module.make_signature();
-    trace_tool_result_null_sig.params.push(AbiParam::new(I64));
-    let trace_tool_result_null_id = module
-        .declare_function(
-            TRACE_TOOL_RESULT_NULL_SYMBOL,
-            Linkage::Import,
-            &trace_tool_result_null_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_tool_result_null: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_tool_result_int_sig = module.make_signature();
-    trace_tool_result_int_sig.params.push(AbiParam::new(I64));
-    trace_tool_result_int_sig.params.push(AbiParam::new(I64));
-    let trace_tool_result_int_id = module
-        .declare_function(
-            TRACE_TOOL_RESULT_INT_SYMBOL,
-            Linkage::Import,
-            &trace_tool_result_int_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_tool_result_int: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_tool_result_bool_sig = module.make_signature();
-    trace_tool_result_bool_sig.params.push(AbiParam::new(I64));
-    trace_tool_result_bool_sig.params.push(AbiParam::new(I8));
-    let trace_tool_result_bool_id = module
-        .declare_function(
-            TRACE_TOOL_RESULT_BOOL_SYMBOL,
-            Linkage::Import,
-            &trace_tool_result_bool_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_tool_result_bool: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_tool_result_float_sig = module.make_signature();
-    trace_tool_result_float_sig.params.push(AbiParam::new(I64));
-    trace_tool_result_float_sig.params.push(AbiParam::new(F64));
-    let trace_tool_result_float_id = module
-        .declare_function(
-            TRACE_TOOL_RESULT_FLOAT_SYMBOL,
-            Linkage::Import,
-            &trace_tool_result_float_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_tool_result_float: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_tool_result_string_sig = module.make_signature();
-    trace_tool_result_string_sig.params.push(AbiParam::new(I64));
-    trace_tool_result_string_sig.params.push(AbiParam::new(I64));
-    let trace_tool_result_string_id = module
-        .declare_function(
-            TRACE_TOOL_RESULT_STRING_SYMBOL,
-            Linkage::Import,
-            &trace_tool_result_string_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_tool_result_string: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
 
     Ok(RuntimeFuncs {
         overflow: overflow_func_id,
@@ -1407,18 +1184,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         bench_server_enabled: bench_server_enabled_id,
         bench_next_trial: bench_next_trial_id,
         bench_finish_trial: bench_finish_trial_id,
-        runtime_is_replay: runtime_is_replay_id,
-        replay_tool_call_nothing: replay_tool_call_nothing_id,
-        replay_tool_call_int: replay_tool_call_int_id,
-        replay_tool_call_bool: replay_tool_call_bool_id,
-        replay_tool_call_float: replay_tool_call_float_id,
-        replay_tool_call_string: replay_tool_call_string_id,
-        invoke_tool_nothing: invoke_tool_nothing_id,
-        invoke_tool_int: invoke_tool_int_id,
-        invoke_tool_bool: invoke_tool_bool_id,
-        invoke_tool_float: invoke_tool_float_id,
-        invoke_tool_string: invoke_tool_string_id,
-        invoke_tool_struct: invoke_tool_struct_id,
         runtime_init: runtime_init_id,
         register_connectors: register_connectors_id,
         secret_eq,
@@ -1475,12 +1240,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         trace_run_completed_bool: trace_run_completed_bool_id,
         trace_run_completed_float: trace_run_completed_float_id,
         trace_run_completed_string: trace_run_completed_string_id,
-        trace_tool_call: trace_tool_call_id,
-        trace_tool_result_null: trace_tool_result_null_id,
-        trace_tool_result_int: trace_tool_result_int_id,
-        trace_tool_result_bool: trace_tool_result_bool_id,
-        trace_tool_result_float: trace_tool_result_float_id,
-        trace_tool_result_string: trace_tool_result_string_id,
         literal_counter: std::cell::Cell::new(0),
         // The unified ownership pass is the default. It produces
         // refcount-correct code

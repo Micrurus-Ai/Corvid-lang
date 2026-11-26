@@ -3,10 +3,12 @@ use crate::io::IoRuntime;
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// An `Option<String>` answer in the public form a tool answers in: the
+/// text, or `null`.
 fn option_text(value: Option<String>) -> Value {
     match value {
-        Some(text) => json!({"tag": "some", "value": text}),
-        None => json!({"tag": "none"}),
+        Some(text) => json!(text),
+        None => Value::Null,
     }
 }
 

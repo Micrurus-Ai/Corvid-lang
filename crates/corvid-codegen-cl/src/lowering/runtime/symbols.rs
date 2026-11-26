@@ -66,26 +66,12 @@ pub(in crate::lowering) const BENCH_NEXT_TRIAL_SYMBOL: &str = "corvid_bench_next
 pub(in crate::lowering) const BENCH_FINISH_TRIAL_SYMBOL: &str = "corvid_bench_finish_trial";
 
 // Async tool dispatch bridge. Signature in Rust:
-pub(in crate::lowering) const RUNTIME_IS_REPLAY_SYMBOL: &str = "corvid_runtime_is_replay";
-pub(in crate::lowering) const REPLAY_TOOL_CALL_NOTHING_SYMBOL: &str =
-    "corvid_replay_tool_call_nothing";
-pub(in crate::lowering) const REPLAY_TOOL_CALL_INT_SYMBOL: &str = "corvid_replay_tool_call_int";
-pub(in crate::lowering) const REPLAY_TOOL_CALL_BOOL_SYMBOL: &str = "corvid_replay_tool_call_bool";
-pub(in crate::lowering) const REPLAY_TOOL_CALL_FLOAT_SYMBOL: &str = "corvid_replay_tool_call_float";
-pub(in crate::lowering) const REPLAY_TOOL_CALL_STRING_SYMBOL: &str =
-    "corvid_replay_tool_call_string";
 
 // Live host-registered tool dispatch (library targets only): the
 // cdylib/staticlib calls these instead of a link-time
 // `__corvid_tool_<name>` symbol. A host registers the implementation at
 // load via `corvid_register_tool` (or a linked `#[tool]` lib
 // self-registers at `corvid_runtime_init`).
-pub(in crate::lowering) const INVOKE_TOOL_NOTHING_SYMBOL: &str = "corvid_invoke_tool_nothing";
-pub(in crate::lowering) const INVOKE_TOOL_INT_SYMBOL: &str = "corvid_invoke_tool_int";
-pub(in crate::lowering) const INVOKE_TOOL_BOOL_SYMBOL: &str = "corvid_invoke_tool_bool";
-pub(in crate::lowering) const INVOKE_TOOL_FLOAT_SYMBOL: &str = "corvid_invoke_tool_float";
-pub(in crate::lowering) const INVOKE_TOOL_STRING_SYMBOL: &str = "corvid_invoke_tool_string";
-pub(in crate::lowering) const INVOKE_TOOL_STRUCT_SYMBOL: &str = "corvid_invoke_tool_struct";
 
 // JSON encoder primitives backing the trace-payload `'j'` slot. The
 // Cranelift codegen walks each non-scalar tool/prompt/approve argument
@@ -165,14 +151,6 @@ pub(in crate::lowering) const TRACE_RUN_COMPLETED_FLOAT_SYMBOL: &str =
     "corvid_trace_run_completed_float";
 pub(in crate::lowering) const TRACE_RUN_COMPLETED_STRING_SYMBOL: &str =
     "corvid_trace_run_completed_string";
-pub(in crate::lowering) const TRACE_TOOL_CALL_SYMBOL: &str = "corvid_trace_tool_call";
-pub(in crate::lowering) const TRACE_TOOL_RESULT_NULL_SYMBOL: &str = "corvid_trace_tool_result_null";
-pub(in crate::lowering) const TRACE_TOOL_RESULT_INT_SYMBOL: &str = "corvid_trace_tool_result_int";
-pub(in crate::lowering) const TRACE_TOOL_RESULT_BOOL_SYMBOL: &str = "corvid_trace_tool_result_bool";
-pub(in crate::lowering) const TRACE_TOOL_RESULT_FLOAT_SYMBOL: &str =
-    "corvid_trace_tool_result_float";
-pub(in crate::lowering) const TRACE_TOOL_RESULT_STRING_SYMBOL: &str =
-    "corvid_trace_tool_result_string";
 
 // Runtime bridge init/shutdown called from `corvid_init`
 // at the start of codegen-emitted `main` when the program uses any

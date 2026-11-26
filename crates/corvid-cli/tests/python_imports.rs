@@ -34,7 +34,8 @@ public agent compute() -> Int:
                 .replace("gcd(left: Int, right: Int)", "sqrt(n: Int)")
                 .replace("gcd(18, 12)", "sqrt(2)"),
             false,
-            "expected `Int`",
+            // Read with the public decoder, as every tool result is.
+            "expected Int, found the fractional number",
         ),
         (
             source

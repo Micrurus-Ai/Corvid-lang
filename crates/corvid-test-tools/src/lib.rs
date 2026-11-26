@@ -135,3 +135,20 @@ async fn string_len(s: String) -> i64 {
 async fn add_two(a: i64, b: i64) -> i64 {
     a + b
 }
+
+/// A tool of the program's own with structured arguments and answer
+/// (native scalar boundaries B2b). It answers with the ticket's severity,
+/// the budget it was given and the ticket's title, so a test can see the
+/// public JSON each tier sent it.
+#[tool("assign_ticket")]
+async fn assign_ticket(
+    ticket: corvid_runtime::serde_json::Value,
+    budget: corvid_runtime::serde_json::Value,
+) -> corvid_runtime::serde_json::Value {
+    corvid_runtime::serde_json::json!({
+        "owner": ticket["owner"],
+        "severity": ticket["severity"],
+        "budget": budget,
+        "title": ticket["title"],
+    })
+}

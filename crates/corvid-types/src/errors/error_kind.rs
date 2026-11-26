@@ -275,6 +275,12 @@ pub enum TypeErrorKind {
     /// A typed path placeholder, `{board: Int}`, of a type a path
     /// segment cannot be read as.
     RoutePathParamType { path: String, param: String, ty: String },
+    /// An `action` whose `requires` names authorities, with no
+    /// `identity` block to authenticate against (B10).
+    ActionPolicyWithoutIdentity { action: String },
+    /// An `action` requiring a role or permission the identity block
+    /// does not declare (B10).
+    ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
     /// A route's `query` record with a field the server cannot read
     /// from a query string; `field` is empty when the query type is not
     /// a record at all.
@@ -867,6 +873,12 @@ impl TypeErrorKind {
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
             }
+            Self::ActionPolicyWithoutIdentity { action } => format!(
+                "action `{action}` requires a signed-in caller, but the program declares no `identity` block to authenticate against"
+            ),
+            Self::ActionPolicyUndeclaredAuthority { kind, name, action } => format!(
+                "action `{action}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` - the requirement could never be satisfied"
+            ),
             Self::RoutePathParamType { path, param, ty } => {
                 format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
             }
@@ -1623,6 +1635,12 @@ impl TypeErrorKind {
             ),
             Self::TryElseAroundOnFailure { variant, .. } => Some(format!(
                 "drop the `try` and match the result: `Err({variant}(reason)) -> ...`"
+            )),
+            Self::ActionPolicyWithoutIdentity { .. } => Some(
+                "add an `identity <name>:` block declaring the sign-in providers, or write `requires anyone` for an action every caller may use".into(),
+            ),
+            Self::ActionPolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
+                "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
             Self::RoutePathParamType { .. } => Some(format!(
                 "a path parameter is one of {}",
