@@ -4,6 +4,8 @@
 
 The `corvid_runtime` Python package now holds only `@tool`, the decorator a project's `tools.py` uses to supply tool implementations to `corvid serve` and `corvid run`. `tool_call`, `approve_gate`, `llm_call`, `run_sync`, `register_adapter` and the `testing` helpers served the retired Python build target and are gone; model calls, approvals and traces belong to the Corvid runtime. A `tools.py` that imports only `tool` works unchanged. [Python tools](runtime/python/README.md)
 
+`total += price` on a `Decimal`, and `+=` or `-=` on a `Duration` or `Instant`, now run in native code; they used to keep a program on the interpreter.
+
 `find_regex` and `find_all_regex` now run in native code, so every regex method does; the matches have the same text, byte positions and groups as on the interpreter. [Text and encoding](docs/reference/text-and-encoding.md)
 
 A native program that binds a text, list or record value inside a loop and uses it after the loop no longer keeps every iteration's value in memory; only the last one survives the loop, as on the interpreter.

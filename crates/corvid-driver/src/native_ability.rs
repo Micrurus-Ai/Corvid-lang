@@ -285,7 +285,13 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty, context),
-        IrStmt::Assign { value, .. } if corvid_codegen_cl::native_record_assignment(stmt) || corvid_codegen_cl::native_local_compound(stmt) => scan_expr(value, current_return_ty, context),
+        IrStmt::Assign { value, .. }
+            if corvid_codegen_cl::native_record_assignment(stmt)
+                || corvid_codegen_cl::native_local_compound(stmt)
+                || corvid_codegen_cl::native_scalar_compound(stmt) =>
+        {
+            scan_expr(value, current_return_ty, context)
+        }
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
         IrStmt::Return { value: Some(v), .. } => scan_expr(v, current_return_ty, context),
@@ -714,7 +720,9 @@ agent main() -> Decimal:
     total += 0.10
     return total
 "#).expect("valid compound decimal assignment");
-        assert!(matches!(native_ability(&ir), Err(NotNativeReason::PlaceAssignmentNotNative)));
+        // Compound assignment on a `Decimal` local is the rebinding it
+        // means, which is native (`scalar_compound`).
+        assert!(native_ability(&ir).is_ok(), "{:?}", native_ability(&ir));
     }
 
     #[test]

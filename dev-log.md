@@ -25,6 +25,31 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Compound assignment on Decimal and time values in native code
+
+`total += price` on a `Decimal` local, and `+=` and `-=` on a `Duration`
+or an `Instant`, now compile to native code. Before, any compound
+assignment except on a plain number kept a program on the interpreter.
+
+**How.** On these types `total += price` means exactly
+`total = total + price`, and that rebinding was already native: one
+runtime call for the operator, and the release of the old value that
+every reassignment of a reference-counted local gets. `scalar_compound`
+rewrites the one into the other once, before ownership analysis, so the
+analysis and lowering both see a form they already handle. The tier
+picker accepts what `native_scalar_compound` names. The checker's
+refusals, such as `total /= 3` without a rounding mode, are unchanged.
+
+**Simpler options considered.** Lowering the compound form directly would
+need its own ownership modelling of the old value, the reassignment
+path's logic written a second time.
+
+**Tests.** Parity tests under the leak detector cover a `Decimal` total
+in a loop with `+=`, `-=` and `*=`, and a `Duration` and an `Instant`
+with `+=` and `-=`.
+
+---
+
 ## 2026-11-26 - Native find_regex and find_all_regex
 
 `text.find_regex(pattern)` and `text.find_all_regex(pattern)` now
