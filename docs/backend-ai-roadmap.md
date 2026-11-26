@@ -320,7 +320,7 @@ B01 to B06 are the foundation. Interoperability (B02, B07, B08) and built-in cap
 
 ### Coordination with frontend development
 
-Backend and AI semantics are owned here. Changes to shared types, actions or parser rules are agreed with frontend development before either side implements them. The shared points in this queue are:
+Backend and AI semantics are owned here. Changes to shared types, actions or parser rules are proposed to frontend development first and built after one working day without objection, and revised on both sides if an objection comes later (AGENTS.md, "Decide by these laws, then build", amended 2026-11-26). The shared points in this queue are:
 
 - **B10 and B11 with F15.** One meaning for an action across the UI, the backend and assistants.
 - **B08 with F09.** One package resolution, lock format and type import path for npm packages on the server and in the browser.

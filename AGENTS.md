@@ -35,11 +35,11 @@ How to apply:
 
 ## Use all three tiers in every step
 
-**For every decision, line of code, task and step, analyze how it can take advantage of Corvid having the backend, the frontend and AI native in one language, and use that to make the work more efficient, more powerful and stronger.** Set by the CTO 2026-11-24. A feature designed as if Corvid were only a backend language, only a UI language or only an AI language throws away the advantage no other language has.
+**For every decision, line of code, task and step, analyze how it can take advantage of Corvid having the backend, the frontend and AI native in one language, and use that to make the work more efficient, more powerful and stronger.** Set by the CTO 2026-11-24; written answers limited to slices with design choices by the owner 2026-11-26. A feature designed as if Corvid were only a backend language, only a UI language or only an AI language throws away the advantage no other language has.
 
 How to apply:
 
-1. **Ask the three questions before designing.** What does the backend know here that the frontend and AI could use? What could the UI give the person for free (forms, validation messages, conflict handling, progress)? What could an assistant do with it, safely, through declared actions? Write the answers in the slice's proposal, even when the answer is "nothing yet, because…".
+1. **Ask the three questions before designing.** What does the backend know here that the frontend and AI could use? What could the UI give the person for free (forms, validation messages, conflict handling, progress)? What could an assistant do with it, safely, through declared actions? For a slice with design choices, write the answers in its proposal, even when the answer is "nothing yet, because…". A bug fix, security update or housekeeping change still asks the questions, but needs no written answers.
 2. **One definition, every tier.** A type, validation, permission or error declared once must reach every tier from that one declaration, never a copy per tier (see "Single source of truth"). For example, a table's `where` refinement validates the frontend form, the backend write and the agent's tool call alike.
 3. **Let the compiler see across tiers.** Prefer designs where the compiler can check a change in one tier against its users in the others: a renamed column, a changed action input or a new error variant points at every affected screen, route and agent call.
 4. **Agents get typed state, not scraping.** When a feature produces data or actions, make it available to an authorized assistant as typed values and declared actions, with effects, approval, replay and budgets applied, and nothing exposed to an AI unless the source says so.
@@ -84,9 +84,8 @@ A 3,000-line file that does one thing cleanly is fine. A 400-line grab bag is no
 
 **When splitting:**
 
-- One commit per file extraction. No batching.
-- Validation gate between every commit: `cargo check --workspace` + targeted `cargo test -p <crate> --lib` + `cargo run -q -p corvid-cli -- verify --corpus tests/corpus` (must still exit `1` only on the two deliberate fixtures).
-- Push before starting the next extraction.
+- One commit per file extraction, so each move can be read and reverted on its own.
+- `cargo check --workspace` after each commit. The full gate (`cargo check --workspace` + targeted `cargo test -p <crate> --lib` + `cargo run -q -p corvid-cli -- verify --corpus tests/corpus`, which must still exit `1` only on the two deliberate fixtures) runs once over the batch of extractions, before it is pushed. If the gate fails, find the commit that broke it and fix that commit, never with a later one. (Amended by the owner 2026-11-26: one gate and one push per batch instead of per file.)
 - Zero semantic changes during a refactor commit. Move code, add `pub use` re-exports to preserve the public API, nothing else. Bugs spotted mid-refactor get a separate branch.
 - Commit message: `refactor(<crate>): extract <responsibility> from <file>` — body names which rubric criterion failed and how the split resolves it.
 
@@ -159,7 +158,7 @@ How to apply:
 
 1. **Write the scope down before the code.** For a new phase or a slice with design choices, write the proposal in `docs/proposals/` first: the design in a realistic program, the alternatives considered and why the chosen one wins under these laws, the slices and the non-scope. This applies to refactor slices too: the decomposition plan is written before any file moves. Then build it.
 2. **Record each decision where the next reader looks.** Put the rationale in the proposal and the slice's `dev-log.md` entry, and the slices on the roadmap.
-3. **Grammar shared with the frontend is still agreed with frontend development** before either side implements it, because both sides parse it. Post the proposal, ask the owner to pass it on, and work on something else meanwhile.
+3. **Grammar shared with the frontend: propose, then build.** Both sides parse it, so frontend development sees it first. Post the proposal in `docs/proposals/` and ask the owner to pass it on. If frontend development has not objected within one working day, build it. Frontend development can still object afterwards, and the grammar is then revised on both sides. `docs/reference/grammar.md`, held by the grammar drift test, stays the one copy both sides parse from. (Amended by the owner 2026-11-26: a proposal no longer waits indefinitely for agreement.)
 4. **Still ask the owner** before destructive git operations, publishing anything outside the repository, and owner business decisions: hosting, telemetry, billed services, bundled models.
 
 ## Commit at slice boundaries
@@ -188,6 +187,22 @@ In-progress phases carry slice-by-slice `- [ ]` checklists so deferred work neve
 
 Doc-and-feature land together. No drift between shipped behavior and the learnings record.
 
-## Follow ROADMAP order strictly
+## Follow ROADMAP order by default
 
-Work proceeds in the defined sequence. Never skip ahead or reorder without first writing the amendment into the ROADMAP, with its reason.
+Work proceeds in the defined sequence by default. Work may go ahead of it in three cases:
+- it unblocks another session;
+- it fixes a weakness found while working (see "Make what you find stronger");
+- the next item is blocked.
+
+The commit that does so records the reason in the roadmap, so the order and the reasons stay readable. (Amended by the owner 2026-11-26: the order is a default, not a gate.)
+
+## Narrowing is temporary
+
+**A feature narrowed so it can ship safely (only some types, only one engine, only the interpreter) is a step, never the design.** Set by the owner 2026-11-26.
+
+How to apply:
+
+1. **Say so where users read it.** The reference, guide or error message states the narrowing plainly and names what is still to come. It is never presented as the intended shape.
+2. **Schedule the widening.** The slice that ships the narrowing adds a `- [ ]` roadmap item to widen it, placed at the front of its section, with what stronger looks like.
+3. **Narrow by refusing, never by degrading.** What is not supported yet is a compile error or a refuse-to-start that names it, never a silent fallback to weaker behavior (see "No hidden defaults").
+4. **Safety refusals are not narrowings.** A refusal that removes a failure mode (secrets that cannot be printed, no hidden rounding, strict signature checks) is the design, and stays.
