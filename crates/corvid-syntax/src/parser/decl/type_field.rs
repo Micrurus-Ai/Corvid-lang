@@ -236,11 +236,14 @@ impl<'a> Parser<'a> {
                 let (fname, fname_span) = self.expect_ident()?;
                 self.expect(TokKind::Colon, "`:` between variant field name and type")?;
                 let ty = self.parse_type_ref()?;
-                let fend = ty.span();
+                // A payload field takes a refinement as a record field
+                // does: `ColumnFull(limit: Int where between(1, 50))`.
+                let refinement = self.parse_field_refinement()?;
+                let fend = self.prev_span();
                 fields.push(Field {
                     name: Ident::new(fname, fname_span),
                     ty,
-                    refinement: None,
+                    refinement,
                     ui: Vec::new(),
                     upload: None,
                     json_key: None,

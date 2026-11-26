@@ -112,7 +112,7 @@ choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
 # bare values; payload variants construct with `Approved("alice")`.
 # Variant names are file-scope constructors (duplicates across types
 # are duplicate-declaration errors).
-type_field        ::= json_key_attr? IDENT ':' type_ref NEWLINE
+type_field        ::= json_key_attr? IDENT ':' type_ref refinement? NEWLINE
                     | '|' IDENT ('(' field_list ')')? NEWLINE       # sum-type variant
 
 # B01: a field's key in the public JSON form (HTTP bodies, `to_json`,
@@ -125,7 +125,13 @@ type_field        ::= json_key_attr? IDENT ':' type_ref NEWLINE
 json_case_attr    ::= '@' 'json' '(' 'case' ':' ('camel' | 'pascal' | 'kebab') ')' NEWLINE
 json_key_attr     ::= '@' 'json' '(' 'key' ':' STRING_LITERAL ')' NEWLINE
 
-field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
+field_list        ::= IDENT ':' type_ref refinement? (',' IDENT ':' type_ref refinement?)*
+
+# A refinement bounds every value of the field, however it is built or
+# decoded: `between` an `Int` field's value, `len_between` a `String`
+# field's length, both inclusive. It works the same on a record field
+# and a variant's payload field: `ColumnFull(limit: Int where between(1, 50))`.
+refinement        ::= 'where' ('between' | 'len_between') '(' INT ',' INT ')'
 
 # Aliases are TRANSPARENT: `type CustomerId = String` makes
 # `CustomerId` the same type as `String` everywhere (no newtype

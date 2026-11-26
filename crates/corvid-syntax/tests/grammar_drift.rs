@@ -311,6 +311,15 @@ memory prefs:
 "#,
     ),
     (
+        "refinements",
+        r#"type Search:
+    limit: Int where between(1, 50)
+
+type BoardError:
+    | ColumnFull(limit: Int where between(1, 50), note: String where len_between(0, 80))
+"#,
+    ),
+    (
         "json_keys",
         r#"@json(case: camel)
 type Order:
@@ -721,6 +730,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("import_item", "imports"),
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
+    ("refinement", "refinements"),
     ("json_case_attr", "json_keys"),
     ("json_key_attr", "json_keys"),
     ("choice_variant", "choice_declaration"),

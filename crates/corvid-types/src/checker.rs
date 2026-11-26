@@ -605,7 +605,8 @@ impl<'a> Checker<'a> {
     }
 
     fn check_field_refinements(&mut self, t: &corvid_ast::TypeDecl) {
-        for field in &t.fields {
+        // A variant's payload fields take refinements as record fields do.
+        for field in t.fields.iter().chain(t.variants.iter().flat_map(|v| v.fields.iter())) {
             let Some(refinement) = &field.refinement else {
                 continue;
             };

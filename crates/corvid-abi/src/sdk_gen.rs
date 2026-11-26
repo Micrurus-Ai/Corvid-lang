@@ -169,6 +169,23 @@ public agent latest(n: Int) -> Order:
         assert!(python.contains("(\"order_id\", \"orderId\", ") && python.contains("    order_id: int"), "{python}");
     }
 
+    /// A variant payload field's refinement reaches the contract as its
+    /// bounds, as a record field's does.
+    #[test]
+    fn a_variant_payload_refinement_reaches_the_contract() {
+        let c = contract_for(
+            "public type BoardError:
+    | ColumnFull(limit: Int where between(1, 50))
+
+public agent full() -> BoardError:
+    return ColumnFull(5)
+",
+        );
+        let error = c.types.iter().find(|t| t.name == "BoardError").expect("published");
+        let limit = &error.variants[0].fields[0];
+        assert_eq!((limit.minimum, limit.maximum), (Some(1), Some(50)));
+    }
+
     #[test]
     fn emit_sdk_dispatches_by_language() {
         let c = contract_for(SRC);

@@ -104,6 +104,29 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Refinements on variant payload fields
+
+`| ColumnFull(limit: Int where between(1, 50))` was a parse error,
+because the variant-field parser built each field with `refinement:
+None`. Decoding, the contract, the interpreter's construction check, the
+checker's constant check and native code's constructor check all handled
+a refined payload field already; they had nothing to read. The parser
+now calls `parse_field_refinement` for a payload field, and the checker's
+refinement-form validation visits payload fields too.
+
+Found and strengthened: the published grammar showed no refinement at
+all, on records or variants, though the parser has accepted
+`where between(...)` since slice 50j. `refinement` is now a production
+used by record and payload fields, with drift evidence.
+
+Tests: a parity test builds `ColumnFull(12)` on both tiers and stops
+both at `ColumnFull(80)` with one message. Checker tests cover a
+constant out of range and a `between` on a `String` payload. Decoding
+refuses an out-of-range payload at `fields[0]`, and the contract carries
+the bounds.
+
+---
+
 ## 2026-11-26 - JSON keys that differ from field names (B01)
 
 A Corvid program reading a camelCase API had to name its fields

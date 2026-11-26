@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A variant's payload field takes a refinement as a record field does: `| ColumnFull(limit: Int where between(1, 50))`. `ColumnFull(80)` is a compile error, a computed value out of range stops the program where the variant is built, a decoded one is refused at `fields[0]`, and the contract publishes the bounds. [Types](docs/reference/grammar.md#types-and-stores)
+
 A field can have a different JSON key from its name: `@json(key: "userId")` on the field, or `@json(case: camel)` (also `pascal`, `kebab`) before the `type` to derive every key from the snake_case names, `order_id` becoming `orderId`. HTTP bodies, `to_json`, `from_json`, prompts, OpenAPI and the generated clients use the key, an error path names it (`at orderId`), and code still writes `order.order_id`. Two fields with one key is a compile error. [Types](docs/reference/grammar.md#types-and-stores)
 
 A prompt now shows the model its arguments, and reads its reply, in the same JSON form `to_json()` writes: an `Option` is its value or `null` (not `{"tag": "some", "value": …}`), and a variant is `{"tag": "variant", "type": "Severity", "variant": "High", "fields": ["outage"]}`. The reply schema the model is given describes that form, an `Option` field may be `null` or left out, and extra fields in a reply are ignored. A recording made earlier whose prompt arguments or replies hold an `Option` or a variant no longer replays; record it again. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)

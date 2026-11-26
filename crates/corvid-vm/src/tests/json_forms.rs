@@ -126,3 +126,21 @@ async fn a_record_reads_and_writes_its_json_keys() {
     );
     assert_eq!(text_of(&src).await, "order_id");
 }
+
+/// A variant payload's refinement holds when the variant is decoded: an
+/// out-of-range payload is refused with its position.
+#[tokio::test]
+async fn a_decoded_variant_payload_holds_its_refinement() {
+    let src = "\
+type BoardError:
+    | ColumnFull(limit: Int where between(1, 50))
+    | Closed
+
+agent main() -> String:
+    return match BoardError.from_json(\"{\\\"variant\\\": \\\"ColumnFull\\\", \\\"fields\\\": [80]}\"):
+        Ok(e) -> \"decoded\"
+        Err(e) -> e.path + \": \" + e.expected
+";
+    let out = text_of(src).await;
+    assert!(out.starts_with("fields[0]: ") && out.contains("between(1, 50)"), "{out}");
+}

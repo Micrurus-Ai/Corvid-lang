@@ -8711,3 +8711,18 @@ fn json_keys_name_one_field_each_and_are_not_empty() {
     assert_eq!(empty, vec!["type `Order`: field `id` has an empty JSON key".to_string()]);
     assert!(messages("@json(case: kebab)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    id: Int\n").is_empty());
 }
+
+/// A variant payload field takes a refinement as a record field does: a
+/// constant out of range is a compile error at the constructor, and a
+/// refinement that does not fit the field's type is refused at the
+/// declaration.
+#[test]
+fn variant_payload_fields_take_refinements() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    let base = "type BoardError:\n    | ColumnFull(limit: Int where between(1, 50))\n    | Closed\n\n";
+    assert!(errors(&format!("{base}agent ok() -> BoardError:\n    return ColumnFull(12)\n")).is_empty());
+    let out = errors(&format!("{base}agent bad() -> BoardError:\n    return ColumnFull(80)\n"));
+    assert!(out.iter().any(|m| m.contains("ColumnFull") && m.contains("limit") && m.contains("80")), "{out:?}");
+    let wrong = errors("type Problem:\n    | Named(label: String where between(1, 5))\n");
+    assert!(wrong.iter().any(|m| m.contains("requires an Int field")), "{wrong:?}");
+}
