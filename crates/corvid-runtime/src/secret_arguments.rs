@@ -117,18 +117,18 @@ impl RevealedToolArguments {
         }
     }
 
-    /// The recorded form of a failed call's error message, marked when
-    /// it held a secret's text.
-    pub(crate) fn recorded_error(&self, message: &str) -> J {
-        let scrubbed = self.scrub_text(message);
-        if scrubbed == message {
-            serde_json::json!({ crate::replay::CORVID_TOOL_ERROR_KEY: message })
-        } else {
-            serde_json::json!({
-                crate::replay::CORVID_TOOL_ERROR_KEY: scrubbed,
-                CORVID_SECRET_SCRUBBED_KEY: true,
-            })
+    /// The recorded form of a failed call, marked when its message held
+    /// a secret's text, with whether it was an outage as every recorded
+    /// failure has (`replay::recorded_failure`).
+    pub(crate) fn recorded_error(&self, error: &crate::errors::RuntimeError) -> J {
+        let mut recorded = crate::replay::recorded_failure(error);
+        let message = error.to_string();
+        let scrubbed = self.scrub_text(&message);
+        if scrubbed != message {
+            recorded[crate::replay::CORVID_TOOL_ERROR_KEY] = J::String(scrubbed);
+            recorded[CORVID_SECRET_SCRUBBED_KEY] = J::Bool(true);
         }
+        recorded
     }
 }
 
@@ -180,11 +180,19 @@ mod tests {
             json!({"__corvid_secret_scrubbed__": {"echo": "key=<redacted>;pw=<redacted>", "n": 1}})
         );
         assert_eq!(arguments.recorded_result(&json!({"ok": true})), json!({"ok": true}), "no echo, no marker");
+        let failed = |message: &str| crate::errors::RuntimeError::ToolFailed { tool: "t".into(), message: message.into() };
         assert_eq!(
-            arguments.recorded_error("bad key whsec_abc123"),
-            json!({"__corvid_tool_error__": "bad key <redacted>", "__corvid_secret_scrubbed__": true})
+            arguments.recorded_error(&failed("bad key whsec_abc123")),
+            json!({
+                "__corvid_tool_error__": "tool `t` failed: bad key <redacted>",
+                "__corvid_secret_scrubbed__": true,
+                "__corvid_outage__": true,
+            })
         );
-        assert_eq!(arguments.recorded_error("timed out"), json!({"__corvid_tool_error__": "timed out"}));
+        assert_eq!(
+            arguments.recorded_error(&failed("timed out")),
+            json!({"__corvid_tool_error__": "tool `t` failed: timed out", "__corvid_outage__": true})
+        );
     }
 
     #[test]

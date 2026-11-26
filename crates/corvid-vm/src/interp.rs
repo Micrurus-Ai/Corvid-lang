@@ -572,7 +572,7 @@ impl<'ir> Interpreter<'ir> {
                         Err(problem) => match &on_failure {
                             Some(variant) => connector_json::failure_value(variant, &problem, &event_ty, &types_by_id)
                                 .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)),
-                            None => Err(InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {problem}")), span)),
+                            None => Err(InterpError::new(InterpErrorKind::UnusableReply(format!("connector `{name}`: {problem}")), span)),
                         },
                     },
                     Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
@@ -617,7 +617,7 @@ impl<'ir> Interpreter<'ir> {
                 Some(variant) => connector_json::failure_value(variant, &problem, result_decode_ty, &self.types_by_id)
                     .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span)),
                 None => Err(InterpError::new(
-                    InterpErrorKind::Marshal(format!("connector `{callee_name}`: {problem}")),
+                    InterpErrorKind::UnusableReply(format!("connector `{callee_name}`: {problem}")),
                     span,
                 )),
             },
@@ -1437,6 +1437,10 @@ impl<'ir> Interpreter<'ir> {
                         }
                         Ok((ExprFlow::Value(v), _)) => return Ok(ExprFlow::Value(v)),
                         Ok((ExprFlow::Propagate(v), _)) => return Ok(ExprFlow::Propagate(v)),
+                        // Only an outage is worth another attempt: a bug
+                        // fails the same way again, and a denied approval
+                        // or an exceeded budget is a decision to respect.
+                        Err(err) if !err.is_outage() => return Err(err),
                         Err(err) => last_runtime_error = Some(err),
                     }
                 }
@@ -2050,7 +2054,7 @@ impl<'ir> Interpreter<'ir> {
                     let result = outcome?;
                     json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
-                            InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                            InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                             span,
                         )
                     })?
@@ -2417,7 +2421,7 @@ async fn dispatch_stdlib_db_tool(
                     let ok_value =
                         json_to_value(json, ok_decode_ty, types_by_id).map_err(|e| {
                             InterpError::new(
-                                InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                                InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                                 span,
                             )
                         })?;

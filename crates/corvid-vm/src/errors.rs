@@ -19,6 +19,43 @@ impl InterpError {
     pub fn new(kind: InterpErrorKind, span: Span) -> Self {
         Self { kind, span }
     }
+
+    /// Whether this failure is the outside world's (see
+    /// [`InterpErrorKind::is_outage`]).
+    pub fn is_outage(&self) -> bool {
+        self.kind.is_outage()
+    }
+}
+
+impl InterpErrorKind {
+    /// The one rule `try ... retry` and `try ... else` use: a timeout,
+    /// an unusable reply, or a runtime outage (a tool, model, database
+    /// or provider that failed). A bug (arithmetic, an index, a
+    /// refinement, a type mismatch) and a decision or a limit (a denied
+    /// approval, a budget, a confidence floor, a token ceiling) are never
+    /// outages.
+    pub fn is_outage(&self) -> bool {
+        match self {
+            Self::Timeout { .. } | Self::UnusableReply(_) => true,
+            Self::Runtime(error) => error.is_outage(),
+            Self::UndefinedLocal(_)
+            | Self::TypeMismatch { .. }
+            | Self::UnknownField { .. }
+            | Self::Arithmetic(_)
+            | Self::IndexOutOfBounds { .. }
+            | Self::RefinementViolated { .. }
+            | Self::BudgetExceeded { .. }
+            | Self::ParallelArmCancelled
+            | Self::ConfidenceFloorBreached { .. }
+            | Self::TokenLimitExceeded { .. }
+            | Self::NotImplemented(_)
+            | Self::MissingReturn
+            | Self::ApprovalDenied(_)
+            | Self::DispatchFailed(_)
+            | Self::Marshal(_)
+            | Self::Other(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,8 +117,16 @@ pub enum InterpErrorKind {
     Runtime(RuntimeError),
 
     /// Marshalling between `Value` and `serde_json::Value` failed at the
-    /// runtime boundary.
+    /// runtime boundary: the program's own value could not be sent, or a
+    /// developer's override did not fit. A bug, never an outage.
     Marshal(String),
+
+    /// A model's reply, a tool's result or a provider's response did not
+    /// fit the declared type, or a judged guard found the reply below its
+    /// floor. The outside world answered unusably: an outage, which
+    /// `try` can retry or catch, and which a prompt's `with repair`
+    /// answers by asking again.
+    UnusableReply(String),
 
     /// Catch-all with message. Prefer adding a dedicated variant over this.
     Other(String),
@@ -130,6 +175,7 @@ impl fmt::Display for InterpErrorKind {
             Self::DispatchFailed(msg) => write!(f, "call dispatch failed: {msg}"),
             Self::Runtime(err) => write!(f, "{err}"),
             Self::Marshal(msg) => write!(f, "marshalling error: {msg}"),
+            Self::UnusableReply(msg) => write!(f, "unusable reply: {msg}"),
             Self::Other(m) => f.write_str(m),
         }
     }

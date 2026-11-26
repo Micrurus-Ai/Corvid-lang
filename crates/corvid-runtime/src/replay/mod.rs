@@ -55,6 +55,26 @@ use zone_rules::ReplayZoneRules;
 /// recorded here.
 pub const CORVID_TOOL_ERROR_KEY: &str = "__corvid_tool_error__";
 
+/// Reserved key beside [`CORVID_TOOL_ERROR_KEY`] saying whether the
+/// failure was an outage (`RuntimeError::is_outage`), so a replay
+/// retries and catches exactly what the recorded run did.
+pub const CORVID_OUTAGE_KEY: &str = "__corvid_outage__";
+
+/// How a failed call is recorded: its message and whether it was an
+/// outage. Every place that records a failure goes through this.
+pub fn recorded_failure(error: &RuntimeError) -> serde_json::Value {
+    serde_json::json!({ CORVID_TOOL_ERROR_KEY: error.to_string(), CORVID_OUTAGE_KEY: error.is_outage() })
+}
+
+/// The failure a replay serves for a recorded one. A trace written
+/// before failures recorded their kind says nothing, and is not an
+/// outage, as such a failure replayed before.
+pub fn replayed_failure(recorded: &serde_json::Value) -> Option<RuntimeError> {
+    let message = recorded.get(CORVID_TOOL_ERROR_KEY)?.as_str()?.to_string();
+    let outage = recorded.get(CORVID_OUTAGE_KEY).and_then(serde_json::Value::as_bool).unwrap_or(false);
+    Some(RuntimeError::Recorded { message, outage })
+}
+
 #[derive(Debug, Clone)]
 enum ReplayMode {
     Substitute,

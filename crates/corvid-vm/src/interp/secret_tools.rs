@@ -61,5 +61,5 @@ pub(super) async fn dispatch_secret_value_tool(
         .await
         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
     secret_tool_result_to_value(result, return_ty)
-        .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")), span))
+        .map_err(|e| InterpError::new(InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")), span))
 }
