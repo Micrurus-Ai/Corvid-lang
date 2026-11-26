@@ -161,8 +161,58 @@ pub enum RuntimeError {
         function: String,
     },
 
+    /// A table or database operation failed: no connection, a missing
+    /// table, a statement the database refused, a transaction it could
+    /// not commit. A write conflict is not one; it is a value.
+    DatabaseFailed { database: String, message: String },
+
+    /// A failure served from a replay trace. The trace keeps the text
+    /// and whether it was an outage, so the same rule decides it in the
+    /// replay as in the recorded run.
+    Recorded { message: String, outage: bool },
+
     /// Catch-all. Prefer adding a dedicated variant.
     Other(String),
+}
+
+impl RuntimeError {
+    /// Whether this failure is the outside world's: a tool, a model, a
+    /// database or a provider that failed or answered unusably. Only an
+    /// outage is retried by `try ... retry` or caught by `try ... else`.
+    /// A bug (no such tool, no model configured, a refused policy) and a
+    /// decision (a denied or queued approval, a replay divergence) are
+    /// never outages, so neither can be retried or papered over.
+    pub fn is_outage(&self) -> bool {
+        match self {
+            Self::ToolFailed { .. }
+            | Self::AdapterFailed { .. }
+            | Self::PythonFailed { .. }
+            | Self::DatabaseFailed { .. } => true,
+            Self::Recorded { outage, .. } => *outage,
+            Self::UnknownTool(_)
+            | Self::UnknownPrompt(_)
+            | Self::NoAdapter(_)
+            | Self::PythonPolicyDenied { .. }
+            | Self::ApprovalDenied { .. }
+            | Self::ApprovalQueued { .. }
+            | Self::ApprovalFailed(_)
+            | Self::Marshal(_)
+            | Self::StoreConflict { .. }
+            | Self::StorePolicyViolation { .. }
+            | Self::NoModelConfigured
+            | Self::ModelCatalogParse { .. }
+            | Self::NoEligibleModel { .. }
+            | Self::ModelOutputFormatMismatch { .. }
+            | Self::NoMatchingRoute { .. }
+            | Self::InvalidAdversarialVerdict { .. }
+            | Self::ReplayTraceLoad { .. }
+            | Self::ReplayDivergence(_)
+            | Self::InvalidReplayMutation { .. }
+            | Self::QuarantineViolation { .. }
+            | Self::SurfaceNotImplemented { .. }
+            | Self::Other(_) => false,
+        }
+    }
 }
 
 impl fmt::Display for RuntimeError {
@@ -292,6 +342,8 @@ impl fmt::Display for RuntimeError {
                  33S1/33S2/33S3 per-surface slices; calling this function before those land returns \
                  SurfaceNotImplemented so the program fails closed rather than silently no-op."
             ),
+            Self::DatabaseFailed { database, message } => write!(f, "database `{database}`: {message}"),
+            Self::Recorded { message, .. } => f.write_str(message),
             Self::Other(msg) => f.write_str(msg),
         }
     }

@@ -191,10 +191,8 @@ impl Runtime {
                     // A tool that echoed a secret it was given in its
                     // error has the text replaced in the record only.
                     let recorded = match &revealed {
-                        Some(revealed) => revealed.recorded_error(&e.to_string()),
-                        None => serde_json::json!({
-                            crate::replay::CORVID_TOOL_ERROR_KEY: e.to_string(),
-                        }),
+                        Some(revealed) => revealed.recorded_error(&e),
+                        None => crate::replay::recorded_failure(&e),
                     };
                     self.tracer.emit(TraceEvent::ToolResult {
                         ts_ms: now_ms(),

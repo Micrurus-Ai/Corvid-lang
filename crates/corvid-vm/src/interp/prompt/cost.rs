@@ -232,7 +232,7 @@ impl<'ir> Interpreter<'ir> {
             })?;
         if score < *min {
             return Err(InterpError::new(
-                InterpErrorKind::Marshal(format!(
+                InterpErrorKind::UnusableReply(format!(
                     "prompt `{callee_name}`: judged guard failed — score {score:.2} is below min {min} for criteria {criteria:?}"
                 )),
                 span,
@@ -265,7 +265,7 @@ impl<'ir> Interpreter<'ir> {
 
         let value = json_to_value(response_value, result_ty, &self.types_by_id).map_err(|e| {
             InterpError::new(
-                InterpErrorKind::Marshal(format!("prompt `{callee_name}`: {e}")),
+                InterpErrorKind::UnusableReply(format!("prompt `{callee_name}`: {e}")),
                 span,
             )
         })?;
@@ -547,7 +547,7 @@ impl<'ir> Interpreter<'ir> {
         // accumulates onto the final result.
         let (mut last_err, mut wasted_cost) = match first {
             Ok(result) => return Ok(result),
-            Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+            Err(e) if matches!(e.kind, InterpErrorKind::UnusableReply(_)) => {
                 let wasted = self.prompt_call_cost(prompt, &actual_model, rendered, resp.usage);
                 (e, wasted)
             }
@@ -556,7 +556,7 @@ impl<'ir> Interpreter<'ir> {
         let attempts = prompt.repair_attempts.unwrap_or(0);
         let mut failed_value = resp.value;
         for _ in 0..attempts {
-            let InterpErrorKind::Marshal(feedback) = &last_err.kind else {
+            let InterpErrorKind::UnusableReply(feedback) = &last_err.kind else {
                 return Err(last_err);
             };
             let retry_rendered = format!(
@@ -598,7 +598,7 @@ impl<'ir> Interpreter<'ir> {
                     result.cost += wasted_cost;
                     return Ok(result);
                 }
-                Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+                Err(e) if matches!(e.kind, InterpErrorKind::UnusableReply(_)) => {
                     wasted_cost +=
                         self.prompt_call_cost(prompt, &actual_model, &retry_rendered, retry_resp.usage);
                     failed_value = retry_resp.value;
