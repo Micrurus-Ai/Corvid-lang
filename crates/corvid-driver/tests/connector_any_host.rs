@@ -28,6 +28,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: allowed_hosts
+    published: no
     modes: [real, replay]
     operation fetch(url: String) -> Response<String> uses http_read:
         GET url
@@ -194,6 +195,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 1s
     redirects: never
+    published: no
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -340,6 +342,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 5s
     redirects: never
+    published: no
     circuit_breaker: 2
     modes: [real]
     operation page(url: String) -> {ret} uses http_read:

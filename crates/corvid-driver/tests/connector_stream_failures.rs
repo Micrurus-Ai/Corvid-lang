@@ -33,6 +33,7 @@ connector provider:
     base_url: "http://model.example"
     timeout: 1s
     redirects: never
+    published: no
 {connector_extra}    modes: [mock, real, replay]
     operation complete(question: String) -> Stream<Result<Delta, ModelError>> uses model_read:
         POST "/v1/complete" body question

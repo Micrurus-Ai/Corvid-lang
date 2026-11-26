@@ -62,7 +62,9 @@ import "std:db" use db_open, db_execute, db_query, db_param_int, db_param_text
 # 1. The service. `hosts: allowed_hosts` lets each call name its URL; the
 #    host must appear in `[http] allow`, and the always-on SSRF block
 #    refuses private, loopback and link-local addresses whatever the list
-#    says. A request takes at most 10 seconds and follows no redirect.
+#    says. A request takes at most 10 seconds and follows no redirect,
+#    and `published: no` keeps the service out of the app's published
+#    contract, so a browser or partner reading it never learns of it.
 #    `on failure` turns a refused URL, a timeout, a network error, an
 #    error status or a body that is not a `User` into an `Unreachable`
 #    VALUE carrying the reason, never a crash.
@@ -70,6 +72,7 @@ connector users:
     hosts: allowed_hosts
     timeout: 10s
     redirects: never
+    published: no
     modes: [real, replay]
     operation user_at(url: String) -> Result<User, FetchError> uses http_read:
         GET url

@@ -422,6 +422,7 @@ extend Customer:
         r#"connector reports:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]

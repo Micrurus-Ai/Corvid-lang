@@ -67,7 +67,10 @@ use libloading::{Library, Symbol};
 
 mod browser_asset;
 mod live;
+mod public_failure;
+mod route_stream;
 use browser_asset::browser_asset;
+use public_failure::{log_failure, public_failure};
 
 use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
 
@@ -1366,7 +1369,8 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent))
+    let route = format!("{} {}", meta.method.as_str(), meta.route_path);
+    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
 }
 
 enum RouteRequestBody {
@@ -1632,52 +1636,14 @@ fn finish(
     response_kind: RouteResponseKind,
     page_scripts: &browser_asset::PageScripts,
     reply: ReplyEncoding,
+    route: String,
 ) -> Response {
     match outcome {
-        // A Stream-returning handler responds as Server-Sent Events:
-        // each chunk flushes to the client the moment it arrives
-        // (`data: <json>` per chunk, `event: done` terminator) — the
-        // modern AI-app transport, straight from the language's
-        // Stream type with zero glue.
+        // A Stream-returning handler answers with Server-Sent Events in
+        // the one stream protocol (`chunk`, `completed`, `failed`).
         Ok(Value::Stream(stream)) => {
-            let chunk_ty = match &reply.ty {
-                Type::Stream(item) => (**item).clone(),
-                other => other.clone(),
-            };
-            let sse = async_stream::stream! {
-                loop {
-                    match stream.next().await {
-                        Some(Ok(chunk)) => {
-                            let payload = match reply.encode(&chunk, &chunk_ty) {
-                                Ok(payload) => payload,
-                                Err(reason) => {
-                                    yield Ok(axum::response::sse::Event::default()
-                                        .event("error")
-                                        .data(reason));
-                                    break;
-                                }
-                            };
-                            yield Ok::<_, std::convert::Infallible>(
-                                axum::response::sse::Event::default()
-                                    .data(payload.to_string()),
-                            );
-                        }
-                        Some(Err(err)) => {
-                            yield Ok(axum::response::sse::Event::default()
-                                .event("error")
-                                .data(format!("{err:?}")));
-                            break;
-                        }
-                        None => {
-                            yield Ok(axum::response::sse::Event::default()
-                                .event("done")
-                                .data(""));
-                            break;
-                        }
-                    }
-                }
-            };
-            axum::response::Sse::new(sse).into_response()
+            let stream_ty = reply.ty.clone();
+            route_stream::route_stream_response(stream, &stream_ty, reply, route)
         }
         Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
             let mut document = html.to_string();
@@ -1688,11 +1654,6 @@ fn finish(
             Ok(body) => (StatusCode::OK, Json(body)).into_response(),
             Err(reason) => internal_error("unencodable_response", &reason),
         },
-        Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {
-            (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
-                "error": "handler_timeout", "detail": e.kind.to_string()
-            }))).into_response()
-        }
         Err(RunError::Interp(e)) => {
             if let Some(approval_id) = approval_queued_id(&e.kind) {
                 let approval_id = approval_id.to_string();
@@ -1721,26 +1682,18 @@ fn finish(
                 )
                     .into_response();
             }
-            // 33Q10: emit user-facing detail (no IR byte-span prefix)
-            // so clients don't see `[1227..1269] ...` they can't act on.
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "handler_failed",
-                    "detail": RunError::Interp(e).user_facing_detail(),
-                })),
-            )
-                .into_response()
+            failure_response(&route, &RunError::Interp(e))
         }
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "handler_failed",
-                "detail": err.user_facing_detail(),
-            })),
-        )
-            .into_response(),
+        Err(err) => failure_response(&route, &err),
     }
+}
+
+/// An ordinary route's failure answer: the public `{error, detail}` body
+/// with its status, and the full error in the server log.
+fn failure_response(route: &str, err: &RunError) -> Response {
+    let failure = public_failure(err);
+    log_failure(route, &failure, &err.user_facing_detail());
+    (failure.status, Json(failure.body())).into_response()
 }
 
 /// If the interpreter error carries an `ApprovalQueued` from the
@@ -1971,11 +1924,12 @@ async fn approve_approval(
             // the same `ProgrammaticApprover::always_yes` bypass
             // runtime that's local to this handler call.
             //
-            // 33Q10: user_facing_detail strips the IR `[start..end]`
-            // byte-span prefix from interpreter errors so 500 bodies
-            // (and the `last_handler_error` field that surfaces in
-            // GET) don't leak internal compiler artifacts to clients.
-            let detail = err.user_facing_detail();
+            // The 500 body and the `last_handler_error` a reviewer reads
+            // over HTTP carry the public sentence, never the error's own
+            // text, which may hold a URL or a path; the log has it all.
+            let failure = public_failure(&err);
+            log_failure("approved execution", &failure, &err.user_facing_detail());
+            let detail = failure.detail.clone();
             {
                 let mut pending = state.pending_invocations.lock().unwrap();
                 if let Some(stored) = pending.get_mut(&id) {

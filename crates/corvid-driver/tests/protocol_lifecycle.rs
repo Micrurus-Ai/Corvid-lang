@@ -27,6 +27,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     modes: [real]

@@ -1,4 +1,6 @@
-// The server emits JSON strings followed by a named done or error event.
+// The server sends each item as a `chunk` event, then `completed` (data
+// `null`) or `failed` (data `{error, detail}`). A connection that drops
+// before either terminal event is reported as interrupted.
 // Reconnect only on user request: a new GET starts a new model invocation.
 class CorvidTextStream extends HTMLElement {
   connectedCallback() {
@@ -40,7 +42,7 @@ class CorvidTextStream extends HTMLElement {
     this.status.textContent = "Loading";
     this.start.disabled = true;
     this.cancel.disabled = false;
-    source.onmessage = event => {
+    source.addEventListener("chunk", event => {
       if (source !== this.source) return;
       try {
         const chunk = JSON.parse(event.data);
@@ -50,14 +52,21 @@ class CorvidTextStream extends HTMLElement {
       } catch {
         this.stop("Invalid text response");
       }
-    };
-    source.addEventListener("done", () => {
+    });
+    source.addEventListener("completed", () => {
       if (source === this.source) this.stop("Complete");
     });
-    source.onerror = event => {
-      if (source === this.source) {
-        this.stop(event instanceof MessageEvent ? "Stream failed: " + event.data : "Connection interrupted");
-      }
+    source.addEventListener("failed", event => {
+      if (source !== this.source) return;
+      let detail = "the server stopped the stream";
+      try {
+        const failure = JSON.parse(event.data);
+        if (typeof failure?.detail === "string") detail = failure.detail;
+      } catch {}
+      this.stop("Stream failed: " + detail);
+    });
+    source.onerror = () => {
+      if (source === this.source) this.stop("Connection interrupted");
     };
   }
 

@@ -609,6 +609,15 @@ impl<'a> Checker<'a> {
                 decl.span,
             ));
         }
+        if decl.published.is_none() {
+            self.errors.push(invalid(
+                format!(
+                    "connector `{}` must declare whether the published contract lists it: add `published: no` (backend only) or `published: yes` (its name, URL, paths and protocol are listed at /.well-known/corvid). There is no default: which outside services an app calls, and where, is a security decision",
+                    decl.name.name
+                ),
+                decl.span,
+            ));
+        }
 
         // Each operation: a unique name, a path that starts with `/`, and
         // `{placeholders}` that name declared parameters.
@@ -1621,8 +1630,10 @@ const CONNECTOR_MANAGED_HEADERS: [(&str, &str); 7] = [
     ("transfer-encoding", "the transport sets it"),
 ];
 
-/// A query parameter's value: one scalar written as text.
-fn is_query_scalar(ty: &Type) -> bool {
+/// A multipart text part's value: one scalar written as text. A query
+/// field is checked through `text_parameters` instead; a multipart body
+/// is its own form, where `Bytes` is a file part, not text.
+fn is_multipart_scalar(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Int
@@ -1697,15 +1708,16 @@ impl<'a> Checker<'a> {
                             .collect();
                         for (field, field_ty) in fields {
                             let ty = self.type_ref_to_type(&field_ty);
-                            let ok = match &ty {
-                                Type::Option(inner) | Type::List(inner) => is_query_scalar(inner),
-                                other => is_query_scalar(other),
-                            };
+                            // The shape a route reads its query through, so
+                            // a value goes out as a route would read it in.
+                            let plain = |ty: &Type| self.has_plain_variants(ty);
+                            let ok = crate::text_parameters::query_field_shape(&ty, &plain).is_some();
                             if !ok {
                                 self.errors.push(invalid(
                                     format!(
-                                        "operation `{operation}` query field `{field}` is `{}`; a query field is a number, text, `Bool`, a decimal or time value, an `Option` of one (omitted when `None`) or a `List` of one (the name repeated)",
-                                        self.json_type_name(&ty)
+                                        "operation `{operation}` query field `{field}` is `{}`; a query field is one of {}, an `Option` of one (omitted when `None`) or a `List` of one (the name repeated)",
+                                        self.json_type_name(&ty),
+                                        crate::text_parameters::TEXT_TYPES
                                     ),
                                     field_ty.span(),
                                 ));
@@ -2065,7 +2077,7 @@ fn mentions_stream(ty: &Type) -> bool {
 /// A multipart field's value: a scalar part, or an `Upload` or `Bytes`
 /// file part.
 fn is_multipart_value(ty: &Type) -> bool {
-    is_query_scalar(ty) || matches!(ty, Type::Upload(_) | Type::Bytes)
+    is_multipart_scalar(ty) || matches!(ty, Type::Upload(_) | Type::Bytes)
 }
 
 impl<'a> Checker<'a> {

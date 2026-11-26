@@ -41,6 +41,101 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - One stream protocol for the server and the generated client
+
+`corvid serve` sent a `Stream<T>` route as bare `data:` events, `event:
+done` and an `event: error` carrying the Rust error's debug text. The
+generated TypeScript client posted to `/agents/{name}/stream`, which
+nothing serves, and dropped all three. So a frontend using the generated
+client could not read a served stream at all, and a failure could show a
+browser a URL or a file path. Frontend development agreed to
+[part 2](docs/proposals/stream-failures.md#agreed-with-frontend-development-2026-11-26)
+and its three answers, and asked the backend to build the server, the
+client and the end-to-end test in one change.
+
+- **Server.** Each item is a `chunk` event with its public JSON, so a
+  typed `Err` is a value in the same loop as `Ok`. The stream ends with
+  `completed` (`null`) or `failed`. One function, `public_failure`, maps a
+  handler error to a code and a fixed sentence holding only declared
+  numbers, and the full error goes to standard error, tagged with the route.
+- **Found and strengthened.** The `500` body of an ordinary route and the
+  approval retry's `last_handler_error` had the same leak: their `detail`
+  was the error's own text. Both now use `public_failure`. The server that
+  `corvid build` generates has it too; it is Desktop's area, so it is
+  filed on the roadmap instead of changed here.
+- **Every reader moved together.** The page element `stream.js` reads
+  `chunk`, `completed` and `failed`, and reports a dropped connection as
+  interrupted. The benchmark's TypeScript comparison server sends the same
+  events. The tests that pinned `event: done`, and one that asserted a
+  provider's message reached the browser, now assert the new protocol.
+- **Client.** One SSE reader (`sse.ts`) serves agent and route streams. A
+  route stream is a `RouteStream<Item>` of `chunk`, `completed` (`null`),
+  `failed` (`RouteFailure`) and `interrupted`, whose `result()` resolves to
+  `null`. `AgentStream<T>` is unchanged.
+- **Generated calls.** Routes have no names in source, and the generated
+  client had no route methods at all, although its documentation said it
+  did. Names derived from paths (`getBoardsFeed`) collide and read like
+  nothing the author wrote. So the `Api` gets `route("GET
+  /boards/{board}/feed", 7)`, keyed by the method and path as declared,
+  with arguments in the order live subscriptions use. A changed path or
+  parameter type fails to compile at every caller. Only streaming routes
+  are generated so far; ordinary routes and multipart bodies are filed on
+  the frontend roadmap, along with a React hook for route streams.
+
+Proof: `serve_smoke.rs::a_route_stream_sends_typed_items_and_a_sanitized_failure`
+checks the events and that the refused URL reaches only the log.
+`scripts/verify_generated_route_stream.py` generates and type-checks the
+client, serves `sdk/typescript/client/test/route_stream.cor`, and runs
+`test/route-stream.ts` under Node. The script covers `Ok` and `Err`
+chunks, `completed` with `null`, a sanitized `failed`, and a stream
+cut mid-body by a proxy, which is reported as `interrupted`. Lines the
+compiler must reject (a `String` for an `Int` path value, a missing
+argument, an undeclared route, a value from `result()`) are
+`@ts-expect-error`. `verify_browser_stream.py` passes in Chrome with
+the new page element.
+
+The live subscriptions branch also edits `transport.ts` and
+`ts_client.rs`. Its `livePath` and this slice's `fillPath` should become
+one function when it lands; the roadmap item says so.
+
+---
+
+## 2026-11-26 - Each connector declares whether the published contract lists it
+
+The published Application Contract at `/.well-known/corvid` listed every
+connector's name, URL, operation paths and provider protocol, a default
+from slice 52g-3d. Which outside services an app calls, and where, maps
+its vendors for anyone who reads the contract, so under "no hidden
+defaults" the source now decides: each connector declares `published: yes`
+or `published: no`, and leaving the line out is a compile error that names
+the connector and both values. `published: no` keeps the connector out of
+the contract and out of the generated TypeScript client's protocol types;
+the backend's private wire description, startup check, modes and traces
+are unchanged. Frontend development agreed to the
+[proposal](docs/proposals/connector-publication.md) on 2026-11-26.
+
+Simpler forms considered are in the proposal: a three-value
+`publish: everything | protocol_only | nothing` (no program needs the
+middle value yet), hiding by default (a default the law forbids), a
+project-wide setting (publication is a property of each integration) and
+other words (`published:` matches the endpoint's name).
+
+Every connector in the repository's examples, book chapter, references,
+tours and tests now declares the line: `published: no` everywhere except
+the contract and client tests, which declare `published: yes` because they
+check what is listed. New tests: a `published: no` connector leaves no
+name or path in the published JSON while the wire description keeps it;
+its protocol types are absent from the generated client; omission is the
+one compile error; a wrong value and a repeated line are parse errors.
+
+The proposal's route check (refuse a route that exposes an unpublished
+protocol's intent state) has nothing to check yet: no Corvid type carries
+a protocol's state to a route today, and the client's status types come
+only from the contract. The check lands with the first such type; the
+roadmap says so.
+
+---
+
 ## 2026-11-26 - A native prompt's text argument reads as its JSON form
 
 The grammar says a prompt parameter "renders as its JSON form", and the
@@ -1098,6 +1193,25 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-26 - Connector queries write request text as routes read it
+
+The typed reader left one narrowing behind, filed under "Narrowing is
+temporary": a connector's query fields were checked against
+`is_query_scalar`, a second type list without `Bytes` or plain
+variants. The encoder wrote numbers, text and booleans, and gave up on
+anything else. Now the checker uses `text_parameters::query_field_shape`
+for connector queries too, and the encoder writes each value through
+`corvid_public_json::request_text::json_request_text`, the reverse of
+`request_text_json`. A test holds the two directions together: writing
+a value and reading it back gives the same JSON. So a value goes out to
+a provider exactly as a Corvid route reads the same field in.
+
+`is_query_scalar` remains only for multipart text parts, renamed
+`is_multipart_scalar`. In a multipart body `Bytes` is a file part, not
+text, so it is a different form and keeps its own list.
 
 ---
 

@@ -33,6 +33,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
 {operations}
 {main}"#
@@ -249,6 +250,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation charges(filter: ChargeQuery, request_id: String) -> List<Charge> uses http_write:
         GET "/v1/charges" query filter
@@ -281,4 +283,48 @@ agent main() -> Int:
     assert_eq!(result, Value::Int(2));
     let sent = &server.received_requests().await.unwrap()[0];
     assert_eq!(sent.url.query(), Some("customer=cus%201&status=paid&status=refunded"));
+}
+
+/// A query field of plain variants goes out by the variant's name, and
+/// `Bytes` as its base64url text: exactly the text a Corvid route reads
+/// the same field from.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_query_sends_plain_variants_by_name_and_bytes_as_text() {
+    let src = format!(
+        r#"{TYPES}
+type ChargeStatus:
+    | Paid
+    | Refunded
+
+type ChargeQuery:
+    status: List<ChargeStatus>
+    fingerprint: Bytes
+
+connector payments:
+    base_url: "http://api.payments.example"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation charges(filter: ChargeQuery) -> List<Charge> uses http_write:
+        GET "/v1/charges" query filter
+
+agent main() -> Int:
+    found = charges(ChargeQuery([Paid, Refunded], "hi".utf8()))
+    return found.length()
+"#
+    );
+    let (_dir, ir) = compile(&src);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/charges"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+        .mount(&server)
+        .await;
+
+    let result = run_ir_with_runtime(&ir, None, vec![], &runtime(&ir, &server)).await.expect("lists");
+
+    assert_eq!(result, Value::Int(0));
+    let sent = &server.received_requests().await.unwrap()[0];
+    assert_eq!(sent.url.query(), Some("fingerprint=aGk&status=Paid&status=Refunded"));
 }

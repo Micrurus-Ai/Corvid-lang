@@ -620,6 +620,7 @@ connector github:
     base_url: \"https://api.github.com\"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation activity_of(repo: String) -> String uses repo_read:
         GET \"/repos/{repo}/activity\"

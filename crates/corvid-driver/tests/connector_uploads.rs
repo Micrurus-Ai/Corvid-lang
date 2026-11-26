@@ -28,6 +28,7 @@ connector storage:
     base_url: "http://storage.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real, replay]
     operation attach(file: Upload<Pdf>) -> Stored uses files_write:
         POST "/files" body file
