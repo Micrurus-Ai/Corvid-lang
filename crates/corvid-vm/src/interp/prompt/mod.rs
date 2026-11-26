@@ -58,6 +58,21 @@ impl<'ir> Interpreter<'ir> {
             .collect()
     }
 
+    /// The text a citation check compares: a `String`'s own words, and any
+    /// other value's JSON form. Quoting a string would make a short
+    /// context fail to match a longer reply that contains it; native code
+    /// compares the same texts.
+    pub(super) fn citation_text(&self, value: &Value, ty: &Type, span: Span) -> Result<String, InterpError> {
+        let value = match value {
+            Value::Grounded(grounded) => grounded.inner.get(),
+            other => other.clone(),
+        };
+        match value {
+            Value::String(text) => Ok(text.to_string()),
+            other => Ok(self.model_json(&other, ty, span)?.to_string()),
+        }
+    }
+
     /// A value of type `ty` as a model is shown it.
     pub(super) fn model_json(&self, value: &Value, ty: &Type, span: Span) -> Result<serde_json::Value, InterpError> {
         let ty = match ty {
