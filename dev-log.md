@@ -25,6 +25,47 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - A comparison's literal takes the other side's type
+
+`s.price == Some(10)` against an `Option<Decimal>`, `zone == "UTC"`
+against a `TimeZone`, `money != "USD"` against a `Currency` and
+`zones == ["UTC"]` against a `List<TimeZone>` now type-check. Before, a
+literal in a comparison was typed alone, so `Some(10)` was an
+`Option<Int>` and `"UTC"` a `String`, and each was refused, though the
+same literal in an annotated binding (`home: TimeZone = "UTC"`) was
+accepted.
+
+**The rule.** In a comparison that would otherwise fail, a side written
+only as literals is checked again against the other side's type with
+`check_expr_as`, the contextual typing an annotated binding uses. The
+literals are text, numbers, `None`, `Some`, `Ok` or `Err` of one, or a
+list of them. The constructors are recognised by what they resolve to,
+so a declared variant called `Some` is not one. The rule runs before the
+type-specific operator rules, so it covers every type with one rule
+instead of one per type.
+
+**What stays the same.**
+- A comparison the checker already accepted keeps its typing, because
+  only a failing one is re-read.
+- The re-read checks the literal, so `zone == "Europe/Nowhere"` is still
+  a compile error that names the zone.
+- A computed side keeps its own type, so a `String` variable is never
+  compared with a `TimeZone`.
+- A text literal still never compares with a `Secret`, with the same
+  message as before.
+
+**Simpler options considered.** Per-type special cases, as `Decimal` has
+for `price * 1.08`, would need one for each of `TimeZone`, `Currency`,
+`Locale` and every container of them. Asking authors to annotate a
+binding first is what this removes.
+
+**Tests.** Checker tests cover acceptance for each case, the unknown
+zone, a text literal against `Option<Int>`, a computed side and a
+secret. Parity tests run the `Option<Decimal>`, `TimeZone` and `Currency`
+comparisons on both tiers.
+
+---
+
 ## 2026-11-25 - Replay on either tier (native dispatch N5)
 
 A recording from a native binary now replays on the interpreter, and an

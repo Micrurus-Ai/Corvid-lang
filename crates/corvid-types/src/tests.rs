@@ -12,6 +12,7 @@ mod text_methods;
 mod bytes;
 mod hmac;
 mod secrets;
+mod comparison_literals;
 mod passwords;
 mod signatures;
 

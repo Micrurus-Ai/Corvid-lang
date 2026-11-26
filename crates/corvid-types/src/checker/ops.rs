@@ -75,6 +75,23 @@ impl<'a> Checker<'a> {
         let lt = lt.ungrounded().untainted().clone();
         let rt = rt.ungrounded().untainted().clone();
 
+        // A side of a comparison written only as literals takes the other
+        // side's type, as an annotated binding gives one its type:
+        // `price == Some(10)` against an `Option<Decimal>`,
+        // `zone == "Europe/Berlin"` against a `TimeZone`. It runs before
+        // the type-specific rules below, so it applies to every type. Only
+        // a comparison that would fail is re-read, so every accepted
+        // comparison keeps its typing, and the re-read checks the literal
+        // (an unknown zone is still an error).
+        let (lt, rt) = if matches!(op, Eq | NotEq | Lt | LtEq | Gt | GtEq)
+            && !lt.is_assignable_to(&rt)
+            && !rt.is_assignable_to(&lt)
+        {
+            self.read_literal_side_by_the_other(l, r, lt, rt)
+        } else {
+            (lt, rt)
+        };
+
         // A `Secret` operand is checked first, so its message wins over
         // any other type's.
         let b06 = match self.check_secret_binop(op, l, r, &lt, &rt) {
@@ -295,5 +312,48 @@ impl<'a> Checker<'a> {
             )),
         }
     }
-}
 
+    /// In a comparison whose sides do not match, re-check the side that
+    /// is written only as literals against the other side's type, and
+    /// return both types. When neither or both sides are literals, the
+    /// types are returned unchanged.
+    fn read_literal_side_by_the_other(&mut self, l: &Expr, r: &Expr, lt: Type, rt: Type) -> (Type, Type) {
+        let (left_literal, right_literal) = (self.is_literal_expr(l), self.is_literal_expr(r));
+        if right_literal && !left_literal && !matches!(lt, Type::Unknown) {
+            let rt = self.check_expr_as(r, Some(&lt)).ungrounded().untainted().clone();
+            (lt, rt)
+        } else if left_literal && !right_literal && !matches!(rt, Type::Unknown) {
+            let lt = self.check_expr_as(l, Some(&rt)).ungrounded().untainted().clone();
+            (lt, rt)
+        } else {
+            (lt, rt)
+        }
+    }
+
+    /// Whether `e` is written only as literals: a text, number or bool
+    /// literal, `None`, `Some`, `Ok` or `Err` of one, or a list of them.
+    /// The constructors are recognised by what they resolve to, so a
+    /// declared variant that happens to be called `Some` is not one.
+    pub(super) fn is_literal_expr(&self, e: &Expr) -> bool {
+        use corvid_resolve::{Binding, BuiltIn};
+        match e {
+            Expr::Literal { value, .. } => !matches!(value, corvid_ast::Literal::Nothing),
+            _ if super::decimal::is_number_literal_expr(e) => true,
+            Expr::Ident { name, .. } => {
+                matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::None)))
+            }
+            Expr::Call { callee, args, .. } => match callee.as_ref() {
+                Expr::Ident { name, .. } => {
+                    matches!(
+                        self.bindings.get(&name.span),
+                        Some(Binding::BuiltIn(BuiltIn::Some | BuiltIn::Ok | BuiltIn::Err))
+                    ) && args.len() == 1
+                        && self.is_literal_expr(&args[0])
+                }
+                _ => false,
+            },
+            Expr::List { items, .. } => !items.is_empty() && items.iter().all(|item| self.is_literal_expr(item)),
+            _ => false,
+        }
+    }
+}

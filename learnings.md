@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A literal in a comparison now takes the type of the other side: `s.price == Some(10)` works when `price` is an `Option<Decimal>`, and `home == "Europe/Berlin"` when `home` is a `TimeZone` (an unknown zone is still a compile error). Only literals are read this way; a `String` variable still never compares with a `TimeZone`. [Decimal](docs/reference/decimal.md)
+
 A run recorded by a native binary now replays on the interpreter, and an interpreter recording replays in a native binary: tool and connector calls, prompts, approvals, clock reads, IDs and draws come back exactly as recorded. If the two tiers would have recorded the run differently, replay stops at the first event that differs, as it does on one tier. The shadow daemon replays either tier's traces with either executor. [Replay](docs/internals/effect-spec/14-replay.md)
 
 A connector operation that returns `Response<Charge>` now runs as native code: `r.status()`, `r.body()` and `r.header("ETag")` give the same answers in a native binary, and `Set-Cookie` still never reaches the program. [Response](docs/reference/functions.md#response)
