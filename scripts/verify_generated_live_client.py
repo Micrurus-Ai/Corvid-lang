@@ -64,8 +64,8 @@ def exercise(page, context, url, headers, root):
             send(data) { (this.frames ??= []).push(JSON.parse(data)); super.send(data); }
         };""")
 
-    def write(card, title):
-        request = Request(f"{url}/boards/7/cards/{card}/{title}", data=b"", headers=headers)
+    def write(card, title, board=7):
+        request = Request(f"{url}/boards/{board}/cards/{card}/{title}", data=b"", headers=headers)
         with urlopen(request, timeout=10) as reply:
             assert json.load(reply) == title
 
@@ -126,6 +126,17 @@ def exercise(page, context, url, headers, root):
     page.wait_for_function("updates.at(-1)?.[2]?.title === 'after-unmount'")
     page.evaluate("() => { stop(); stop(); }")
     page.wait_for_function("sockets.every(s => s.readyState === WebSocket.CLOSED)")
+
+    # Board 9 was empty in the authenticated snapshot above. Populate it
+    # through the public write route, then check its full initial render.
+    count = 1000
+    for card in range(count):
+        write(card, f"card-{card}", board=9)
+    page.goto(url + "/boards/9")
+    large_titles = page.locator("corvid-live li [data-record-text]")
+    expect(large_titles).to_have_count(count, timeout=30000)
+    assert large_titles.all_text_contents() == [f"card-{card}" for card in range(count)]
+
 
 
 def main():
