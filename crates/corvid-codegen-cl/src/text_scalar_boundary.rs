@@ -23,7 +23,7 @@ use std::collections::HashSet;
 /// is the text-held type the signature holds.
 pub fn text_scalar_boundary_requirement(type_name: &str) -> String {
     format!(
-        "a tool or prompt whose signature holds a `{type_name}` runs on the interpreter tier, which checks the value's text at the boundary; native tool and prompt bridges carry no `{type_name}` form yet"
+        "a tool of the program's own whose signature holds a `{type_name}` runs on the interpreter tier, which checks the value's text at the boundary; the native tool bridge carries no `{type_name}` form yet (native scalar boundaries B2)"
     )
 }
 

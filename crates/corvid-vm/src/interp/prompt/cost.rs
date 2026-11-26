@@ -271,8 +271,8 @@ impl<'ir> Interpreter<'ir> {
         if let Some(param_idx) = prompt.cites_strictly_param {
             if let Some(ctx_value) = arg_values.get(param_idx) {
                 let ctx_ty = &prompt.params[param_idx].ty;
-                let ctx_text = self.model_json(ctx_value, ctx_ty, span)?.to_string();
-                let response_text = self.model_json(&value, result_ty, span)?.to_string();
+                let ctx_text = self.citation_text(ctx_value, ctx_ty, span)?;
+                let response_text = self.citation_text(&value, result_ty, span)?;
                 if !corvid_runtime::citation::citation_verified(&ctx_text, &response_text) {
                     return Err(InterpError::new(
                         InterpErrorKind::Other(format!(

@@ -89,6 +89,12 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
+    /// A prompt whose argument or reply type has no native JSON form
+    /// (a function, a stream, a map with non-text keys, `JsonValue`).
+    PromptTypeNotNative {
+        name: String,
+        type_name: String,
+    },
     /// A secret passed to or returned by a tool other than the runtime's
     /// own, where native code cannot keep it out of the record. See
     /// `corvid_codegen_cl::secret_boundary`.
@@ -164,6 +170,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
             Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
+            Self::PromptTypeNotNative { name, type_name } => write!(
+                f,
+                "prompt `{name}` sends or reads a `{type_name}`, which has no native JSON form; the auto-dispatcher runs the interpreter tier"
+            ),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
@@ -518,10 +528,23 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                     return Err(NotNativeReason::PromptToolsRequireInterpreter);
                 }
                 IrCallKind::Prompt { .. } => {
-                    // Prompt calls compile and run natively. No extra
-                    // user-provided lib is needed because corvid-runtime
-                    // ships the LLM adapters built in. Runtime errors
-                    // surface if no provider is configured.
+                    // Prompt calls compile and run natively: arguments and
+                    // replies cross in the public JSON form through the
+                    // embedded plan (B1b), so any type with a native JSON
+                    // form may cross. The runtime ships the LLM adapters.
+                    let shown = |ty: &Type| match ty {
+                        Type::Grounded(inner) => (**inner).clone(),
+                        other => other.clone(),
+                    };
+                    let crossing = std::iter::once(shown(&expr.ty)).chain(args.iter().map(|arg| shown(&arg.ty)));
+                    for ty in crossing {
+                        if !corvid_codegen_cl::native_public_json_type(&ty, context.types) {
+                            return Err(NotNativeReason::PromptTypeNotNative {
+                                name: callee_name.clone(),
+                                type_name: ty.display_name(),
+                            });
+                        }
+                    }
                 }
                 IrCallKind::Tool { .. }
                 | IrCallKind::Agent { .. }
@@ -529,7 +552,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 | IrCallKind::StructConstructor { .. }
                 | IrCallKind::Unknown => {}
             }
-            if matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. }) {
+            if matches!(kind, IrCallKind::Tool { .. }) {
                 if let Some(held) = text_scalar_at_boundary(expr, context) {
                     return Err(NotNativeReason::TextScalarAtBoundary {
                         name: callee_name.clone(),
@@ -811,6 +834,45 @@ agent main() -> String:
         assert_eq!(
             native_ability_with_tools(&ir, true),
             Err(NotNativeReason::TextScalarAtBoundary { name: "now".into(), type_name: "Instant".into() })
+        );
+    }
+
+    /// B1b: a prompt whose arguments and reply have a native JSON form
+    /// runs natively, records, lists, `Option`, sum types and text-held
+    /// scalars included; one with a type that has none stays on the
+    /// interpreter and says which.
+    #[test]
+    fn prompts_are_native_when_their_types_have_a_native_json_form() {
+        let ir = crate::compile_to_ir(r#"
+type Severity:
+    | Low
+    | High(reason: String)
+
+type Verdict:
+    summary: String
+    owner: Option<String>
+    severity: Severity
+    refund: Decimal
+
+prompt triage(tags: List<String>, budget: Decimal, wait: Duration) -> Verdict:
+    "Triage {tags} within {budget} and {wait}"
+
+agent main() -> String:
+    return triage(["login"], 12.50, 30 seconds).summary
+"#).expect("valid prompt program");
+        assert_eq!(native_ability(&ir), Ok(()));
+
+        let ir = crate::compile_to_ir(r#"
+prompt read(n: Int) -> JsonValue:
+    "Read {n}"
+
+agent main() -> Int:
+    raw = read(1)
+    return 1
+"#).expect("valid prompt program");
+        assert_eq!(
+            native_ability(&ir),
+            Err(NotNativeReason::PromptTypeNotNative { name: "read".into(), type_name: "JsonValue".into() })
         );
     }
 

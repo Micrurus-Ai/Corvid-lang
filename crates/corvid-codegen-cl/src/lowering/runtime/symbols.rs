@@ -130,7 +130,7 @@ pub(in crate::lowering) const PROMPT_CALL_STRING_SYMBOL: &str = "corvid_prompt_c
 ///      generated per struct type by `lowering::struct_decode`.
 /// Returns the heap-allocated struct pointer (i64) on success;
 /// the bridge panics on max-retries-exhausted.
-pub(in crate::lowering) const PROMPT_CALL_STRUCT_SYMBOL: &str = "corvid_prompt_call_struct";
+pub(in crate::lowering) const PROMPT_CALL_TYPED_SYMBOL: &str = "corvid_prompt_call_typed";
 
 // Generic JSON parse / build primitives used by codegen-emitted
 // per-struct decoders and encoders. Type-agnostic at the C ABI

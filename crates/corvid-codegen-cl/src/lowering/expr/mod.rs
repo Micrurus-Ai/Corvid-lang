@@ -1352,20 +1352,10 @@ pub(super) fn lower_expr(
                     Ok(builder.block_params(join_b)[0])
                 }
             }
+            // A prompt's arguments and reply cross in the public JSON form
+            // through the embedded plan (B1b), text-held scalars included;
+            // `lower_prompt_call` refuses a type with no native JSON form.
             IrCallKind::Prompt { def_id, .. } => {
-                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
-                if let Some(prompt) = runtime.ir_prompts.get(def_id) {
-                    if let Some(held) = prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
-                        .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
-                        return Err(CodegenError::not_supported(
-                            format!(
-                                "prompt `{callee_name}`: {}",
-                                crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
-                            ),
-                            expr.span,
-                        ));
-                    }
-                }
                 lower_prompt_call(
                     builder,
                     module,

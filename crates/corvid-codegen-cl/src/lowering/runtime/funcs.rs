@@ -160,22 +160,17 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_from_int: FuncId,
     pub string_from_bool: FuncId,
     pub string_from_float: FuncId,
-    /// `corvid_string_json_quote`: a String's JSON form, for a prompt
-    /// argument.
-    pub string_json_quote: FuncId,
     pub approve_sync: FuncId,
     // Typed prompt bridges, one per return type.
     pub prompt_call_int: FuncId,
     pub prompt_call_bool: FuncId,
     pub prompt_call_float: FuncId,
     pub prompt_call_string: FuncId,
-    /// Typed prompt-dispatch bridge for `Struct` returns. Takes 9
-    /// args (the standard 7 plus `schema_json: CorvidString` and
-    /// `decoder: extern "C" fn(CorvidString) -> i64`); returns
-    /// `i64` (the heap struct pointer). Codegen emits one decoder
-    /// function per `Type::Struct(def_id)` referenced as a prompt
-    /// return and threads its address through this bridge.
-    pub prompt_call_struct: FuncId,
+    /// The prompt bridge for every non-scalar reply (B1b): the standard
+    /// 7 args plus the schema text, the public JSON decode plan, its
+    /// length and typeinfo table, and the slot the decoded value is
+    /// written to.
+    pub prompt_call_typed: FuncId,
     /// Generic JSON parse / build primitives. Used inside codegen-
     /// emitted per-struct decoder and encoder functions. Runtime
     /// stays type-agnostic; the language-aware decoding logic lives

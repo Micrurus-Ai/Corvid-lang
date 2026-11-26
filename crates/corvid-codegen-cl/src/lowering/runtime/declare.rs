@@ -903,9 +903,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     sfi_sig.returns.push(AbiParam::new(I64));
     // A `String` prompt argument renders as its JSON form, quoted and
     // escaped, as the interpreter renders it.
-    let string_json_quote = module
-        .declare_function("corvid_string_json_quote", Linkage::Import, &sfi_sig)
-        .map_err(|e| CodegenError::cranelift(format!("declare string_json_quote: {e}"), Span::new(0, 0)))?;
     let string_from_int_id = module
         .declare_function(STRING_FROM_INT_SYMBOL, Linkage::Import, &sfi_sig)
         .map_err(|e| {
@@ -986,22 +983,14 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare prompt_call_string: {e}"), Span::new(0, 0))
         })?;
 
-    // Struct prompt bridge: 9 params (the standard 7 + schema_json + decoder),
-    // returns i64 (the heap struct pointer).
-    let mut prompt_struct_sig = module.make_signature();
-    for _ in 0..9 {
-        prompt_struct_sig.params.push(AbiParam::new(I64));
+    let mut prompt_typed_sig = module.make_signature();
+    for _ in 0..12 {
+        prompt_typed_sig.params.push(AbiParam::new(I64));
     }
-    prompt_struct_sig.returns.push(AbiParam::new(I64));
-    let prompt_call_struct_id = module
-        .declare_function(
-            PROMPT_CALL_STRUCT_SYMBOL,
-            Linkage::Import,
-            &prompt_struct_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare prompt_call_struct: {e}"), Span::new(0, 0))
-        })?;
+    prompt_typed_sig.returns.push(AbiParam::new(I64));
+    let prompt_call_typed_id = module
+        .declare_function(PROMPT_CALL_TYPED_SYMBOL, Linkage::Import, &prompt_typed_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare prompt_call_typed: {e}"), Span::new(0, 0)))?;
 
     // Generic JSON parse / build primitives. All take CorvidString
     // descriptors as i64 pointers; field-name accessors take
@@ -1461,13 +1450,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_from_int: string_from_int_id,
         string_from_bool: string_from_bool_id,
         string_from_float: string_from_float_id,
-        string_json_quote,
         approve_sync: approve_sync_id,
         prompt_call_int: prompt_call_int_id,
         prompt_call_bool: prompt_call_bool_id,
         prompt_call_float: prompt_call_float_id,
         prompt_call_string: prompt_call_string_id,
-        prompt_call_struct: prompt_call_struct_id,
+        prompt_call_typed: prompt_call_typed_id,
         json_parse: json_parse_id,
         json_release: json_release_id,
         json_field_present: json_field_present_id,

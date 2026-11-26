@@ -104,6 +104,49 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native prompts through the public JSON plan (B1b)
+
+A native prompt could take only `Int`, `Bool`, `Float` and `String`, and
+return those or a record of them, because it rendered arguments with a
+per-type function and decoded a record reply with a decoder generated
+per record. Any other type sent the program to the interpreter.
+
+Now each argument is encoded once through the plan the compiler embeds,
+the mapping `to_json` uses. Its text fills the template and is the
+call's recorded argument, so native code renders and records what the
+interpreter does since B1. A non-scalar reply goes through a new bridge,
+`corvid_prompt_call_typed`. It sends the interpreter's request, the
+rendered prompt and the public-form schema as structured output, and
+reads the reply with the public decoder through the same plan. Records,
+lists, `Option`, `Result`, sum types and text-held scalars cross both
+ways. The tier picker sends a prompt to the interpreter only when one of
+its types has no native JSON form, and names it. Scalar replies keep
+their bridges.
+
+Removed: the old record bridge and its test, the C string quoter, and
+the prompt path's per-type renderer. `struct_decode.rs` now serves only
+the C ABI.
+
+Found and fixed: the interpreter's citation check compared a string
+context in its JSON quotes, so a context shorter than four words never
+matched a reply that contained it. It now compares a string's own words,
+as native code always did.
+
+Found and filed: native scalar replies still send a text instruction
+instead of the schema, and every native prompt retries where the
+interpreter retries only under `with repair N`.
+
+Tests: `native_prompt_json.rs` runs a triage prompt on both tiers. The
+prompt takes a record holding `None` and a variant, a list, a `Decimal`
+and a `Duration`, and returns a record holding `null`, a variant, a
+`Decimal` and an extra key. The test compares the value, the rendered
+text, the recorded arguments and the recorded reply. A reply missing a
+field is refused on both tiers with the field named. The tier picker's
+tests cover a structured prompt that is native and a `JsonValue` reply
+that is not.
+
+---
+
 ## 2026-11-26 - The duration literal
 
 A duration could only come from subtracting instants or from parsing

@@ -333,6 +333,31 @@ pub(super) fn lower_prompt_call(
         }
     }
 
+    // Each argument as the model is shown it: its public JSON text,
+    // encoded through the plan the compiler embeds, the form the
+    // interpreter renders and records (native scalar boundaries B1b). A
+    // `Grounded<T>` argument shows its `T`. The texts fill the template
+    // and are the call's recorded arguments, so both tiers send and trace
+    // the same text.
+    let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
+    let mut arg_json: Vec<ClValue> = Vec::with_capacity(args.len());
+    for (arg, value) in args.iter().zip(&arg_vals) {
+        let shown = match &arg.ty {
+            Type::Grounded(inner) => inner.as_ref(),
+            other => other,
+        };
+        if !super::public_json::native_public_json_type(shown, &types) {
+            return Err(CodegenError::not_supported(
+                format!(
+                    "prompt `{callee_name}` takes a `{}`, which has no native JSON form; use the interpreter tier",
+                    shown.display_name()
+                ),
+                arg.span,
+            ));
+        }
+        arg_json.push(super::public_json::lower_json_encode(builder, module, runtime, shown, *value, arg.span)?);
+    }
+
     let segments = parse_prompt_template(&prompt.template, &prompt.params, span)?;
     let (rendered, rendered_borrowed) = if let Some(text) =
         render_prompt_constant(&segments, args)
@@ -346,18 +371,8 @@ pub(super) fn lower_prompt_call(
                     emit_string_const(builder, module, runtime, text, span)?,
                     false,
                 ),
-                TemplateSegment::Param(idx) => {
-                    let av = arg_vals[*idx];
-                    let aty = &args[*idx].ty;
-                    if is_string_like_prompt_arg(aty) {
-                        // Its JSON form: a fresh string the chain owns.
-                        let quote = module.declare_func_in_func(runtime.string_json_quote, builder.func);
-                        let call = builder.ins().call(quote, &[av]);
-                        (builder.inst_results(call)[0], false)
-                    } else {
-                        (emit_stringify_arg(builder, module, runtime, av, aty, span)?, false)
-                    }
-                }
+                // The argument's JSON text, released after the call.
+                TemplateSegment::Param(idx) => (arg_json[*idx], true),
             };
             parts.push(part);
         }
@@ -373,20 +388,19 @@ pub(super) fn lower_prompt_call(
         span,
     )?;
     let model_val = emit_string_const(builder, module, runtime, "", span)?;
-    let arg_tys = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
-    let trace_payload = emit_trace_payload(builder, module, runtime, &arg_vals, &arg_tys, span)?;
+    let trace_payload = json_trace_payload(builder, module, runtime, &arg_json, span)?;
 
     let bridge_return_ty = match return_ty {
         Type::Grounded(inner) => inner.as_ref(),
         other => other,
     };
-    // Build the call. Scalar returns use the four typed bridges with
-    // 7 args. Struct returns use `corvid_prompt_call_struct` with 9
-    // args (the standard 7 plus `schema_json` and a per-struct
-    // decoder function pointer); the language-aware decoding logic
-    // lives in `crate::lowering::struct_decode`, runtime stays
-    // type-agnostic.
-    let call = match bridge_return_ty {
+    // Scalar replies use the four scalar bridges, whose text parsing is
+    // the interpreter's for those types. Every other reply (a record, a
+    // list, an `Option`, a `Result`, a sum type, a text-held scalar) goes
+    // through `corvid_prompt_call_typed`: the model is shown the
+    // public-form schema and the reply is read with the public decoder
+    // through the embedded plan, as on the interpreter (B1b).
+    let result_value = match bridge_return_ty {
         Type::Int | Type::Bool | Type::Float | Type::String => {
             let bridge_id = match bridge_return_ty {
                 Type::Int => runtime.prompt_call_int,
@@ -396,7 +410,7 @@ pub(super) fn lower_prompt_call(
                 _ => unreachable!("guarded by outer match arm"),
             };
             let fref = module.declare_func_in_func(bridge_id, builder.func);
-            builder.ins().call(
+            let call = builder.ins().call(
                 fref,
                 &[
                     prompt_name_val,
@@ -407,40 +421,29 @@ pub(super) fn lower_prompt_call(
                     trace_payload.count,
                     trace_payload.values_ptr,
                 ],
-            )
+            );
+            builder.inst_results(call)[0]
         }
-        Type::Struct(def_id) => {
-            // Build the JSON Schema for the struct's shape. The
-            // schema generator from `corvid-prompt-format` walks
-            // `Type::Struct` recursively, inlining nested struct
-            // schemas. We embed the schema as a compact JSON
-            // string in the call site's `.rodata` so the runtime
-            // bridge can splice it into the system prompt.
+        reply_ty if super::public_json::native_public_json_type(reply_ty, &types) => {
             let types_by_id: std::collections::HashMap<DefId, &corvid_ir::IrType> =
                 runtime.ir_types.iter().map(|(k, v)| (*k, v)).collect();
-            let schema_value =
-                corvid_prompt_format::schema_for(bridge_return_ty, &types_by_id);
+            let schema_value = corvid_prompt_format::schema_for(reply_ty, &types_by_id);
             let schema_text = serde_json::to_string(&schema_value).map_err(|e| {
-                CodegenError::cranelift(
-                    format!(
-                        "failed to serialise schema for prompt `{callee_name}` return: {e}"
-                    ),
-                    span,
-                )
+                CodegenError::cranelift(format!("failed to serialise schema for prompt `{callee_name}` return: {e}"), span)
             })?;
+            // `.rodata`: an immortal string, never released.
             let schema_val = emit_string_const(builder, module, runtime, &schema_text, span)?;
-
-            // Look up or emit the per-struct JSON decoder. Cached
-            // by `DefId` so repeated prompt returns of the same
-            // struct re-use one decoder.
-            let decoder_fid =
-                lookup_or_emit_struct_decoder(module, runtime, *def_id, span)?;
-            let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
-            let decoder_addr = builder.ins().func_addr(I64, decoder_ref);
-
-            let bridge_ref =
-                module.declare_func_in_func(runtime.prompt_call_struct, builder.func);
-            let result = builder.ins().call(
+            let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, reply_ty, span)?;
+            let plan = module.declare_data_in_func(plan, builder.func);
+            let plan = builder.ins().symbol_value(I64, plan);
+            let plan_len = builder.ins().iconst(I64, plan_len);
+            let table = module.declare_data_in_func(table, builder.func);
+            let table = builder.ins().symbol_value(I64, table);
+            let payload_slot =
+                builder.create_sized_stack_slot(clir::StackSlotData::new(clir::StackSlotKind::ExplicitSlot, 8, 3));
+            let payload = builder.ins().stack_addr(I64, payload_slot, 0);
+            let bridge_ref = module.declare_func_in_func(runtime.prompt_call_typed, builder.func);
+            builder.ins().call(
                 bridge_ref,
                 &[
                     prompt_name_val,
@@ -451,39 +454,30 @@ pub(super) fn lower_prompt_call(
                     trace_payload.count,
                     trace_payload.values_ptr,
                     schema_val,
-                    decoder_addr,
+                    plan,
+                    plan_len,
+                    table,
+                    payload,
                 ],
             );
-            // The schema literal is `.rodata` (immortal refcount
-            // sentinel — `release_string` is a no-op for it), so
-            // we don't need to track it for an explicit release
-            // here. Same convention all four scalar bridges use
-            // for their static format-instruction strings.
-            result
+            let bits = builder.ins().stack_load(I64, payload_slot, 0);
+            match cl_type_for(reply_ty, span)? {
+                I8 => builder.ins().ireduce(I8, bits),
+                F64 => builder.ins().bitcast(F64, MemFlags::new(), bits),
+                _ => bits,
+            }
         }
         other => {
             return Err(CodegenError::not_supported(
                 format!(
-                    "prompt `{callee_name}` returns `{}` — the native prompt bridge supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `ImportedStruct` requires the cross-file native layout work tracked separately, and `List` / `Result` / `Option` / `Stream` returns each need their own decoder primitives",
+                    "prompt `{callee_name}` returns `{}`, which has no native JSON form; use the interpreter tier",
                     other.display_name()
                 ),
                 span,
             ));
         }
     };
-    let result_vals: Vec<ClValue> =
-        builder.inst_results(call).iter().copied().collect();
-
-    if result_vals.len() != 1 {
-        return Err(CodegenError::cranelift(
-            format!(
-                "prompt bridge returned {} values; expected 1 for return type `{}`",
-                result_vals.len(),
-                return_ty.display_name()
-            ),
-            span,
-        ));
-    }
+    let result_vals = [result_value];
 
     if let Some(param_idx) = prompt.cites_strictly_param {
         let (context_text, context_borrowed) = emit_citation_text(
@@ -525,6 +519,9 @@ pub(super) fn lower_prompt_call(
     }
     emit_release(builder, module, runtime, model_val);
     emit_release(builder, module, runtime, trace_payload.type_tags);
+    for text in arg_json {
+        emit_release(builder, module, runtime, text);
+    }
 
     for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
         emit_release(builder, module, runtime, value);
@@ -543,6 +540,35 @@ pub(super) fn lower_prompt_call(
         );
     }
     Ok(result_vals[0])
+}
+
+/// The recorded arguments of a prompt call: each argument's public JSON
+/// text, tagged `j` so the runtime parses it back into the JSON value the
+/// interpreter records. The texts stay owned by the caller.
+fn json_trace_payload(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    texts: &[ClValue],
+    span: Span,
+) -> Result<TracePayload, CodegenError> {
+    let tags = "j".repeat(texts.len());
+    let type_tags = lower_string_literal(builder, module, runtime, &tags, span)?;
+    let count = builder.ins().iconst(I64, texts.len() as i64);
+    let values_ptr = if texts.is_empty() {
+        builder.ins().iconst(I64, 0)
+    } else {
+        let slot = builder.create_sized_stack_slot(clir::StackSlotData::new(
+            clir::StackSlotKind::ExplicitSlot,
+            (texts.len() as u32) * 8,
+            3,
+        ));
+        for (index, text) in texts.iter().enumerate() {
+            builder.ins().stack_store(*text, slot, (index * 8) as i32);
+        }
+        builder.ins().stack_addr(I64, slot, 0)
+    };
+    Ok(TracePayload { type_tags, count, values_ptr, owned_values: Vec::new() })
 }
 
 fn format_prompt_signature(p: &corvid_ir::IrPrompt) -> String {
