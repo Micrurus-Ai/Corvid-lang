@@ -22,6 +22,12 @@ revision whose interpreter reports E5204 for live routes.
 The invalid path-type test now changes only the live declaration and checks
 that the shared path reader's diagnostic identifies its parameter and route.
 
+Hosted Windows reached migration setup and then failed to find a global
+TypeScript compiler. The Edge verifier now runs TypeScript 5.9.3 through npm
+by default and accepts a local compiler through `--tsc` for offline checks.
+Both paths compiled the board client and matched the embedded modules locally.
+Startup then stopped at E5204 for the board's live route, before Edge launched.
+
 ### RT-4 live row schemas and typed client generation
 
 The contract uses each reachable table's record and ordered keys. Generated

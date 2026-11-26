@@ -34,7 +34,14 @@ def build(cli, root, tsc):
         "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
         "strict": True, "paths": {"@corvid/client": ["./index.ts"]}, "outDir": "../js",
     }}))
-    compiler = ["node", tsc] if tsc else [shutil.which("tsc") or "tsc"]
+    if tsc:
+        compiler = ["node", tsc]
+    else:
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        if not npm:
+            raise RuntimeError("Install npm or pass the TypeScript bin/tsc entrypoint with --tsc")
+        # Compare the embedded assets with the compiler version that emitted them.
+        compiler = [npm, "exec", "--yes", "--package=typescript@5.9.3", "--", "tsc"]
     subprocess.run([*compiler, "-p", modules], cwd=root, check=True)
 
     for packaged in (SDK / "browser").glob("*.js"):
