@@ -85,16 +85,19 @@ def write(path, value):
     tmp.replace(path)
 
 
-def worker(tree, state, task, title, check, previous):
+FRONTEND_SCOPE = """Work only on frontend capabilities. Coordinate shared compiler changes by keeping them
+frontend-specific. Claude Code owns backend and AI syntax. If a new backend interface is
+required, report that dependency."""
+
+
+def worker(tree, state, task, title, check, previous, scope=FRONTEND_SCOPE):
     revision = git(tree, "rev-parse", "HEAD")
     receipt = state / f"verification-{revision}.txt"
     host_result = receipt.read_text(encoding="utf-8") if receipt.is_file() else "None."
     prompt = f"""Implement the remaining acceptance criteria for {task}, {title}, from {ROADMAP}.
 Acceptance for the whole task: {check}
-Inspect the repository and relevant examples before editing. Work only on frontend
-capabilities. Coordinate shared compiler changes by keeping them frontend-specific.
-Claude Code owns backend and AI syntax. If a new backend interface is required,
-report that dependency. Use ordinary readable Corvid and document every public
+Inspect the repository and relevant examples before editing. {scope}
+Use ordinary readable Corvid and document every public
 function or grammar change in the learning guide and reference. Run the relevant
 checks through the public toolchain. No release, deployment, messages, or Git
 mutations. The supervisor handles commits and GitHub. Report the exact changed
@@ -264,7 +267,7 @@ def verify_blocked_browser(tree, state, task, report):
     return True
 
 
-def run_task(tree, state, task, title, check):
+def run_task(tree, state, task, title, check, scope=FRONTEND_SCOPE):
     branch = BRANCHES[task]
     note = state / f"{task}.json"
     refs = git(tree, "branch", "--list", branch)
@@ -287,7 +290,7 @@ def run_task(tree, state, task, title, check):
         print(f"{task} started at {head[:9]}: {title}", flush=True)
         previous = load(note)
         write(state / f"current-{task}.json", {"task": task, "head": head, "status": "working"})
-        report = worker(tree, state, task, title, check, previous)
+        report = worker(tree, state, task, title, check, previous, scope)
         if git(tree, "rev-parse", "HEAD") != head or git(tree, "diff", "--cached", "--name-only"):
             raise RuntimeError("Checkout changed during the worker pass.")
         status = report["status"]
