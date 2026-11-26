@@ -1085,6 +1085,39 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - One typed reader for request text
+
+The owner pointed out that `Int`-only path types were a limit, and they
+were. They stopped there because `serve`'s `coerce_str_to_value` read
+only `Int`, `Float` and `Bool` exactly and turned every other type into
+a `String` value. The same function read query fields, so `query
+Search` with a `Decimal`, time, `Option` or `List` field type-checked
+and handed the handler a `String`: a type hole at the HTTP boundary.
+
+The fix has two halves, each with one copy:
+- **The shape.** `corvid_types::text_parameters::text_shape` (and
+  `query_field_shape`, which adds `Option` and `List`) decides which
+  types request text can have. The checker uses it to refuse the rest,
+  and `serve` uses it to read, so the two agree by construction. A
+  type of plain variants is answered from the declarations in the
+  checker and from the IR in the server.
+- **The reading.** `corvid_public_json::request_text` turns the text
+  into the JSON the type's public mapping reads, and the public JSON
+  decoder builds the value. So a `Decimal` keeps its digits, a variant
+  is checked against the type's names, and an `Instant` reads RFC 3339,
+  exactly as in a JSON body, with no second parser. An `Int` is digits
+  with an optional minus: no `+`, spaces or exponent.
+
+Found and fixed along the way: the query reader kept the last value of
+a repeated name and silently dropped the others. A `List` field now
+reads every value in order, and a one-value field given twice is a 400.
+
+Filed under "Narrowing is temporary": connector query fields still use
+their own type list. Next is making them use the same shape, so request
+text has one shape in both directions.
+
+---
+
 ## 2026-11-26 - Typed path parameters for routes and live subscriptions
 
 Agreed with frontend development in PR #47:

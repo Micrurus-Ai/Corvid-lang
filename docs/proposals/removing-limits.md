@@ -23,7 +23,7 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 
 | # | Limit removed | Owner | Kind |
 | --- | --- | --- | --- |
-| 1 | Path parameters take only `Int`; route query fields of most types reach the handler as text. One typed reader for both, every scalar a segment can name. | Windows session | type hole, narrowing |
+| 1 | ~~Path parameters take only `Int`; route query fields of most types reach the handler as text.~~ Done 2026-11-26: one typed reader for both, through the public JSON decoder. | Windows session | type hole, narrowing |
 | 2 | `try ... else`: a failing table, tool or prompt call stops the request instead of degrading. [Proposal](recoverable-failures.md) | Windows session | grammar |
 | 3 | Shared actions (B10): actions are named by strings, with no derived endpoint, form, tool or CLI. The defining feature, and it blocks B11, B13 and RT-5. [Proposal](shared-actions.md) | Windows session | grammar |
 | 4 | JSON key renaming for camelCase APIs. [Proposal](json-field-keys.md) | Windows session | grammar |

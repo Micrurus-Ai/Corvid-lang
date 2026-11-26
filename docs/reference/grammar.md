@@ -331,12 +331,14 @@ approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
 http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
 
 # A route or live path is a string literal whose `{...}` parts are
-# parameters: `{board}` is a String, `{board: Int}` an Int, read as
-# `path.board`. The router and the contract see the path as `{board}`;
-# a segment that is not an Int is refused with a 400 before the handler
-# runs.
+# parameters, read as `path.board`: `{board}` is a String, and
+# `{board: T}` a T, where T is Int, Float, Bool, Decimal, Duration,
+# Instant, TimeZone, ZonedTime, Currency, Locale, Bytes or a type of
+# plain variants (read by the variant's name). The router and the
+# contract see the path as `{board}`; a segment that is not a T is
+# refused with a 400 naming the parameter before the handler runs.
 route_path        ::= '"' (PATH_TEXT | path_placeholder)* '"'
-path_placeholder  ::= '{' IDENT (':' 'Int')? '}'
+path_placeholder  ::= '{' IDENT (':' IDENT)? '}'
 
 schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
                       '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE
