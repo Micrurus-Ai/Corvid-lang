@@ -82,6 +82,13 @@ Notes on the shape:
   shape; `uses transfer_money` declares the effect row the route
   carries; the body block can reference the parsed body as
   `body`.
+- `route GET "/refunds/{refund: Int}" -> json RefundStatus: ...` — a
+  `{...}` part of the path is a parameter, read as `path.refund`.
+  `{refund: Int}` makes it an `Int`, and a request whose segment is not
+  a whole number is answered with a 400 naming the parameter before the
+  handler runs. `{refund}` alone is a `String`. The contract and the
+  generated clients carry the type, and `live` paths read parameters the
+  same way.
 
 The typechecker enforces:
 

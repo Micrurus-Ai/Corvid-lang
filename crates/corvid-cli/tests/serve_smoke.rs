@@ -2044,6 +2044,56 @@ server items_api:
     assert_eq!(items[0].get("id").and_then(|v| v.as_str()), Some("i1"));
 }
 
+/// A typed path placeholder, `{board: Int}`: the handler reads
+/// `path.board` as an `Int`, a segment that is not one is refused with a
+/// 400 naming the parameter before the handler runs, and the contract
+/// carries the type for generated clients.
+#[test]
+fn serve_reads_a_typed_path_parameter_and_refuses_a_segment_that_is_not_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Board:
+    id: Int
+    next: Int
+
+server boards_api:
+    route GET "/boards/{board: Int}/summary" -> json Board:
+        return Board(path.board, path.board + 1)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port = free_port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "typed path app did not become ready on :{port}");
+
+    let (status, body) = http_get(port, "/boards/7/summary").expect("GET a board");
+    assert_eq!(status, 200, "{body}");
+    let board: serde_json::Value = serde_json::from_str(&body).expect("valid JSON");
+    assert_eq!((board["id"].as_i64(), board["next"].as_i64()), (Some(7), Some(8)), "path.board is an Int: {body}");
+
+    let (status, body) = http_get(port, "/boards/seven/summary").expect("GET a non-number");
+    assert_eq!(status, 400, "a segment that is not an Int is refused: {body}");
+    assert!(body.contains("board") && body.contains("seven"), "the refusal names the parameter and value: {body}");
+
+    let (status, contract) = http_get(port, "/.well-known/corvid").expect("GET the contract");
+    assert_eq!(status, 200);
+    assert!(contract.contains("/boards/{board}/summary"), "the contract's path is the router's: {contract}");
+    let contract: serde_json::Value = serde_json::from_str(&contract).expect("contract JSON");
+    let param = contract.pointer("/routes/0/path_params/0").expect("the route's path parameter");
+    assert_eq!(param["name"], "board");
+    assert!(param.to_string().contains("Int"), "the contract carries the type: {param}");
+}
+
 /// Minimal HTTP/1.1 GET returning the FULL raw response (status line +
 /// headers + body), so a test can assert on the `Location` /
 /// `Set-Cookie` headers of a redirect.

@@ -1063,6 +1063,44 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - Typed path parameters for routes and live subscriptions
+
+Agreed with frontend development in PR #47:
+`"/boards/{board: Int}/cards"` makes `path.board` an `Int`. Most of the
+pipeline already carried a type per path parameter: the AST, the
+checker's `path` record, the contract and OpenAPI. The server already
+converted segments by type with a 400. Only the parser hardcoded
+`String`. It now reads `{name}` and `{name: Type}` and keeps the path in
+its plain form, `"/boards/{board}/cards"`, because the router, the
+contract and RT-3's live path resolution all match on that.
+
+Decisions, against the laws:
+- **Only `Int` takes a type, for now.** The checker allows exactly the
+  types the server reads exactly (`Int`, and `String` by default) and
+  refuses others by name. A `Decimal` segment would otherwise have
+  reached the handler as text.
+- **`{board: String}` is refused**, as a second spelling of `{board}`
+  ("one obvious way").
+- **A malformed placeholder is a parse error.** `{9x}` or an unclosed
+  `{` used to be passed to the router silently as a parameter no
+  handler reads.
+- **Considered:** `/boards/:board` and `<int:board>`. Both are symbols
+  a first-time reader has to learn. `{board: Int}` reads as the same
+  `name: Type` Corvid writes everywhere else.
+
+Found and fixed: each placeholder's span started at the literal's
+opening quote rather than the path text, so diagnostics pointed one
+character early. A test now pins the name's and the type's spans to
+their text.
+
+Found and filed ahead of the next item: route query fields of any type
+but `Int`, `Float`, `Bool` and `String` reach the handler as a `String`
+value, because the server's string-to-value conversion falls through
+to text. The checker does not limit route query field types the way it
+limits connector queries. A type hole at the HTTP boundary.
+
+---
+
 ## 2026-11-26 - A removal's revision in the live change feed (B14 RT-2)
 
 The agreed protocol says a `removed` change carries the row as the
