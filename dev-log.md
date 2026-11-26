@@ -2,6 +2,16 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native `llm.usage` confirmed and held by the trace comparison
+
+The roadmap said native runs record no `llm.usage` host event. That stopped
+being true with B1b: every native prompt calls the runtime's
+`call_llm_ref_with_trace_rendered`, the path that records usage. The N5 trace
+comparison still filtered the event out, so nothing would catch it going
+missing again. The comparison now covers the whole trace, host events
+included. Only the mock adapter's name is normalized, because the fixture
+gives each tier its own mock.
+
 ### Native builds check the runtime they link
 
 A native build linked whatever `libcorvid_runtime.a` was on disk. After a

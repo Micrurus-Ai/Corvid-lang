@@ -226,12 +226,22 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             issued_at_ms: 0,
             expires_at_ms: 0,
         },
-        TraceEvent::HostEvent { name, payload, .. } => TraceEvent::HostEvent {
-            ts_ms: 0,
-            run_id: "normalized-run".into(),
-            name: name.clone(),
-            payload: payload.clone(),
-        },
+        TraceEvent::HostEvent { name, payload, .. } => {
+            // The fixture gives each tier its own mock: a `MockAdapter`
+            // named `mock-1` in the interpreter, the environment mock in
+            // the native binary. Everything else in the usage record is
+            // compared.
+            let mut payload = payload.clone();
+            if name == "llm.usage" {
+                payload["adapter"] = json!("normalized-adapter");
+            }
+            TraceEvent::HostEvent {
+                ts_ms: 0,
+                run_id: "normalized-run".into(),
+                name: name.clone(),
+                payload,
+            }
+        }
         TraceEvent::SeedRead { purpose, value, .. } => TraceEvent::SeedRead {
             ts_ms: 0,
             run_id: "normalized-run".into(),
@@ -307,22 +317,15 @@ async fn refund_bot_native_trace_matches_interpreter_shape() {
         "native trace should include rollout_default_seed"
     );
 
-    // Filter out the `llm.usage` HostEvent before comparing: the
-    // interpreter records it in this fixture and the native run does not,
-    // a telemetry gap on the roadmap. Replay skips host events, so it does
-    // not affect replay. Drop on both sides for symmetry.
-    fn drop_host_llm_usage(event: &TraceEvent) -> bool {
-        !matches!(event, TraceEvent::HostEvent { name, .. } if name == "llm.usage")
-    }
+    // The whole trace is compared, host events included: both tiers
+    // record the `llm.usage` record from the runtime's one LLM call path.
     let normalized_interp = interp_events
         .iter()
-        .filter(|e| drop_host_llm_usage(e))
         .map(normalize_event)
         .map(|event| serialize_event_line(&event).expect("serialize interp event"))
         .collect::<Vec<_>>();
     let normalized_native = native_events
         .iter()
-        .filter(|e| drop_host_llm_usage(e))
         .map(normalize_event)
         .map(|event| serialize_event_line(&event).expect("serialize native event"))
         .collect::<Vec<_>>();
