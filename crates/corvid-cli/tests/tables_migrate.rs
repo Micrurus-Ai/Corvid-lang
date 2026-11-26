@@ -101,8 +101,8 @@ fn lifecycle(engine: &Engine) {
     assert!(created.contains("CREATE TABLE \"Shelf\""), "on {on}: {created}");
     assert!(ok(&plan()).contains("already match every declared table"), "on {on}");
     up();
-    // `corvid run` prints a String result quoted.
-    assert_eq!(run().trim(), "\"stored r1\"", "on {on}");
+    // `corvid run` prints a String result as its text.
+    assert_eq!(run().trim(), "stored r1", "on {on}");
 
     // A required column has no value for the stored row.
     write(&format!("{first}\n    owner: String"), READ_TITLE);
@@ -122,7 +122,7 @@ fn lifecycle(engine: &Engine) {
     assert!(change.contains("RENAME COLUMN \"title\" TO \"name\""), "on {on}: {change}");
     assert!(change.contains("DROP COLUMN \"legacy\""), "on {on}: {change}");
     up();
-    assert_eq!(run().trim(), "\"Reading r1\"", "on {on}");
+    assert_eq!(run().trim(), "Reading r1", "on {on}");
 
     // An exact type change keeps every row: SQLite rebuilds the table,
     // Postgres alters the column.
@@ -135,7 +135,7 @@ fn lifecycle(engine: &Engine) {
     };
     assert!(widened.contains(expected), "on {on}: {widened}");
     up();
-    assert_eq!(run().trim(), "\"Reading r1\"", "on {on}");
+    assert_eq!(run().trim(), "Reading r1", "on {on}");
 
     // A lossy change is refused.
     write("    name: Int renamed from title\n    note: Option<String>\n    count: Option<Float>\n    retired legacy", "    return \"x\"");
@@ -156,7 +156,7 @@ fn lifecycle(engine: &Engine) {
     };
     assert!(added.contains(expected), "on {on}: {added}");
     up();
-    assert_eq!(run().trim(), "\"Reading 10.0\"", "on {on}");
+    assert_eq!(run().trim(), "Reading 10.0", "on {on}");
     assert!(ok(&plan()).contains("already match every declared table"), "on {on}");
 }
 
