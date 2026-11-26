@@ -95,10 +95,69 @@ impl MiniApproverProgram {
                 _ => None,
             })
             .collect();
-        Ok(Self {
+        let program = Self {
             body,
             struct_fields,
-        })
+        };
+        if let Some(construct) = program.unsupported_in_block(&program.body) {
+            return Err(ApproverLoadError {
+                status: CorvidApproverLoadStatus::CompileError,
+                message: format!(
+                    "`{APPROVER_AGENT_NAME}` uses {construct}, which an approver loaded from source cannot run yet. Such an approver runs on Corvid's approval evaluator, which takes `if`, `return`, bindings, constructor calls, field and list access, `not`, `-`, `+`, `and`, `or`, `==`, `!=` and ordering comparisons on `Int`, `Float`, `Bool` and `String` values."
+                ),
+            });
+        }
+        Ok(program)
+    }
+
+    /// The first construct in `block` the evaluator cannot run, so an
+    /// approver is refused when it is loaded rather than failing its
+    /// first approval. Mirrors what `eval_stmt` and `eval_expr` accept.
+    fn unsupported_in_block(&self, block: &corvid_ast::Block) -> Option<String> {
+        block.stmts.iter().find_map(|stmt| self.unsupported_in_stmt(stmt))
+    }
+
+    fn unsupported_in_stmt(&self, stmt: &Stmt) -> Option<String> {
+        match stmt {
+            Stmt::Let { value, .. } => self.unsupported_in_expr(value),
+            Stmt::Return { value, .. } => value.as_ref().and_then(|value| self.unsupported_in_expr(value)),
+            Stmt::If { cond, then_block, else_block, .. } => self
+                .unsupported_in_expr(cond)
+                .or_else(|| self.unsupported_in_block(then_block))
+                .or_else(|| else_block.as_ref().and_then(|block| self.unsupported_in_block(block))),
+            Stmt::Expr { expr, .. } => self.unsupported_in_expr(expr),
+            other => Some(format!("a `{}` statement", variant_name(&format!("{other:?}")))),
+        }
+    }
+
+    fn unsupported_in_expr(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Literal { value: Literal::Duration { count, unit }, .. } => {
+                Some(format!("the duration `{count} {unit}`"))
+            }
+            Expr::Literal { .. } | Expr::Ident { .. } => None,
+            Expr::List { items, .. } => items.iter().find_map(|item| self.unsupported_in_expr(item)),
+            Expr::FieldAccess { target, .. } => self.unsupported_in_expr(target),
+            Expr::Index { target, index, .. } => {
+                self.unsupported_in_expr(target).or_else(|| self.unsupported_in_expr(index))
+            }
+            Expr::Call { callee, args, .. } => match callee.as_ref() {
+                Expr::Ident { name, .. } if self.struct_fields.contains_key(&name.name) => {
+                    args.iter().find_map(|arg| self.unsupported_in_expr(arg))
+                }
+                Expr::Ident { name, .. } => Some(format!("a call to `{}`", name.name)),
+                _ => Some("a method call".to_string()),
+            },
+            Expr::BinOp { op, left, right, .. } => match op {
+                BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::And | BinaryOp::Or | BinaryOp::Gt | BinaryOp::GtEq
+                | BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Add => {
+                    self.unsupported_in_expr(left).or_else(|| self.unsupported_in_expr(right))
+                }
+                other => Some(format!("the `{other:?}` operator")),
+            },
+            Expr::UnOp { operand, .. } => self.unsupported_in_expr(operand),
+            other => Some(format!("a `{}` expression", variant_name(&format!("{other:?}")))),
+        }
     }
 
     pub(super) fn evaluate(
@@ -202,12 +261,9 @@ impl MiniApproverProgram {
                 Literal::String(value) => MiniValue::String(value.clone()),
                 Literal::Bool(value) => MiniValue::Bool(*value),
                 Literal::Nothing => MiniValue::Nothing,
-                // Narrowed for now: the simulator has no duration value,
-                // so it refuses one rather than guessing (roadmap).
+                // Refused when the approver is loaded (`unsupported_in_expr`).
                 Literal::Duration { count, unit } => {
-                    return Err(format!(
-                        "the approver simulator does not evaluate durations yet (`{count} {unit}`); run the approver itself"
-                    ))
+                    return Err(format!("an approver cannot evaluate the duration `{count} {unit}`"))
                 }
             }),
             Expr::Ident { name, .. } => env
@@ -229,7 +285,8 @@ impl MiniApproverProgram {
             },
             Expr::Index { target, index, .. } => {
                 let index = match self.eval_expr(index, env)? {
-                    MiniValue::Int(value) => value as usize,
+                    MiniValue::Int(value) => usize::try_from(value)
+                        .map_err(|_| format!("list index {value} is negative"))?,
                     _ => return Err("list index must be Int".to_string()),
                 };
                 match self.eval_expr(target, env)? {
@@ -276,7 +333,10 @@ impl MiniApproverProgram {
                 match op {
                     UnaryOp::Not => Ok(MiniValue::Bool(!value.truthy())),
                     UnaryOp::Neg => match value {
-                        MiniValue::Int(value) => Ok(MiniValue::Int(-value)),
+                        MiniValue::Int(value) => value
+                            .checked_neg()
+                            .map(MiniValue::Int)
+                            .ok_or_else(|| "integer overflow in an approver's `-`".to_string()),
                         MiniValue::Float(value) => Ok(MiniValue::Float(-value)),
                         _ => Err("negation expects Int or Float".to_string()),
                     },
@@ -331,7 +391,10 @@ impl MiniApproverProgram {
                 _ => Err("comparison expects matching scalar operands".to_string()),
             },
             BinaryOp::Add => match (left, right) {
-                (MiniValue::Int(left), MiniValue::Int(right)) => Ok(MiniValue::Int(left + right)),
+                (MiniValue::Int(left), MiniValue::Int(right)) => left
+                    .checked_add(right)
+                    .map(MiniValue::Int)
+                    .ok_or_else(|| "integer overflow in an approver's `+`".to_string()),
                 (MiniValue::Float(left), MiniValue::Float(right)) => {
                     Ok(MiniValue::Float(left + right))
                 }
@@ -435,4 +498,10 @@ fn context_value(site: &ApprovalSiteInput) -> MiniValue {
             ),
         ]),
     }
+}
+
+/// The variant name at the start of a `Debug` rendering, for naming an
+/// unsupported construct without dumping its tree.
+fn variant_name(debug: &str) -> &str {
+    debug.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or(debug)
 }

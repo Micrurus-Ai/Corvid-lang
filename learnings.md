@@ -8385,3 +8385,7 @@ A trace records a run's arguments, its result and each `approve`'s arguments in 
 
 A native build links the `corvid-runtime` staticlib only if it holds the runtime the compiler was built from. Every archive holding the runtime exports a symbol named after a stamp of the runtime's sources, and the build checks the archive's symbol index for the compiler's stamp before linking. In a source checkout, a stale archive is rebuilt automatically. Any other stale archive, such as one set by `CORVID_RUNTIME_STATICLIB_OVERRIDE` or shipped with an install, is refused with an error that names it and the command that rebuilds it. Cached native binaries are keyed by the same kind of stamp, so `corvid run` rebuilds after any change to the compiler or runtime sources.
 
+### An approver loaded from source is checked when it loads
+
+A host that loads an `approve_site` approver from source runs it on Corvid's approval evaluator, which takes `if`, `return`, bindings, constructor calls, field and list access, and arithmetic and comparisons on `Int`, `Float`, `Bool` and `String` values. An approver that uses anything else, such as a duration literal or a method call, is refused when it is loaded or simulated, with an error that names the construct, rather than failing its first approval. Its arithmetic is checked: an overflow is an error, not a wrapped number.
+

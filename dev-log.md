@@ -2,6 +2,25 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Approvers loaded from source are checked when they load
+
+The roadmap asked for a duration value in the approver simulator. Reading
+it showed a larger weakness: the "simulator" is also the evaluator real
+approvals run on (`evaluate_registered_approver`). It needs to exist because a
+native host registers approvers from source without an interpreter linked in.
+An approver using a construct the evaluator lacks, a duration or a method
+call, compiled and loaded, then failed its first real approval. The message
+even advised running the approver itself. Its `+` and `-` on `Int` were also
+unchecked, and a negative list index wrapped to a huge one.
+
+Now the approver is walked when it is loaded, by registration and by
+simulation, and refused with a message naming the first unsupported construct
+and what is supported. Arithmetic is checked, and a negative index is an
+error. A duration value was considered and not added. Approval arguments
+reach the evaluator as JSON text, so a duration could only be compared with
+another literal. Filed: one evaluator for approvers, with typed arguments and
+every value type.
+
 ### Native `llm.usage` confirmed and held by the trace comparison
 
 The roadmap said native runs record no `llm.usage` host event. That stopped
