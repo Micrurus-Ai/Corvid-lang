@@ -25,6 +25,65 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - One stream protocol for the server and the generated client
+
+`corvid serve` sent a `Stream<T>` route as bare `data:` events, `event:
+done` and an `event: error` carrying the Rust error's debug text. The
+generated TypeScript client posted to `/agents/{name}/stream`, which
+nothing serves, and dropped all three. So a frontend using the generated
+client could not read a served stream at all, and a failure could show a
+browser a URL or a file path. Frontend development agreed to
+[part 2](docs/proposals/stream-failures.md#agreed-with-frontend-development-2026-11-26)
+and its three answers, and asked the backend to build the server, the
+client and the end-to-end test in one change.
+
+- **Server.** Each item is a `chunk` event with its public JSON, so a
+  typed `Err` is a value in the same loop as `Ok`. The stream ends with
+  `completed` (`null`) or `failed`. One function, `public_failure`, maps a
+  handler error to a code and a fixed sentence holding only declared
+  numbers, and the full error goes to standard error, tagged with the route.
+- **Found and strengthened.** The `500` body of an ordinary route and the
+  approval retry's `last_handler_error` had the same leak: their `detail`
+  was the error's own text. Both now use `public_failure`. The server that
+  `corvid build` generates has it too; it is Desktop's area, so it is
+  filed on the roadmap instead of changed here.
+- **Every reader moved together.** The page element `stream.js` reads
+  `chunk`, `completed` and `failed`, and reports a dropped connection as
+  interrupted. The benchmark's TypeScript comparison server sends the same
+  events. The tests that pinned `event: done`, and one that asserted a
+  provider's message reached the browser, now assert the new protocol.
+- **Client.** One SSE reader (`sse.ts`) serves agent and route streams. A
+  route stream is a `RouteStream<Item>` of `chunk`, `completed` (`null`),
+  `failed` (`RouteFailure`) and `interrupted`, whose `result()` resolves to
+  `null`. `AgentStream<T>` is unchanged.
+- **Generated calls.** Routes have no names in source, and the generated
+  client had no route methods at all, although its documentation said it
+  did. Names derived from paths (`getBoardsFeed`) collide and read like
+  nothing the author wrote. So the `Api` gets `route("GET
+  /boards/{board}/feed", 7)`, keyed by the method and path as declared,
+  with arguments in the order live subscriptions use. A changed path or
+  parameter type fails to compile at every caller. Only streaming routes
+  are generated so far; ordinary routes and multipart bodies are filed on
+  the frontend roadmap, along with a React hook for route streams.
+
+Proof: `serve_smoke.rs::a_route_stream_sends_typed_items_and_a_sanitized_failure`
+checks the events and that the refused URL reaches only the log.
+`scripts/verify_generated_route_stream.py` generates and type-checks the
+client, serves `sdk/typescript/client/test/route_stream.cor`, and runs
+`test/route-stream.ts` under Node. The script covers `Ok` and `Err`
+chunks, `completed` with `null`, a sanitized `failed`, and a stream
+cut mid-body by a proxy, which is reported as `interrupted`. Lines the
+compiler must reject (a `String` for an `Int` path value, a missing
+argument, an undeclared route, a value from `result()`) are
+`@ts-expect-error`. `verify_browser_stream.py` passes in Chrome with
+the new page element.
+
+The live subscriptions branch also edits `transport.ts` and
+`ts_client.rs`. Its `livePath` and this slice's `fillPath` should become
+one function when it lands; the roadmap item says so.
+
+---
+
 ## 2026-11-26 - Each connector declares whether the published contract lists it
 
 The published Application Contract at `/.well-known/corvid` listed every

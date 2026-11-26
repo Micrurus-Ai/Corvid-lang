@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A route that returns `Stream<T>` now sends one event per item named `chunk`, then `completed` with `null`, or `failed` with `{"error": code, "detail": sentence}`. The generated TypeScript client reads it: `for await (const event of api.route("GET /boards/{board}/feed", 7))` gives typed `chunk`, `completed`, `failed` and `interrupted` events (a typed `Err` item is a `chunk`), and `.result()` resolves to `null` when the route completes. A failure's `detail`, in a stream and in an ordinary route's `500` body, is a fixed sentence that never carries the error's own text; the full error is in the server's log. A client that read `data:`, `done` or `error` events must read the new names.
+
 Every `connector` now declares `published: yes` or `published: no`, and leaving it out is a compile error naming the connector. `published: no` keeps the connector (its name, URL, paths and protocol) out of the contract `corvid serve` publishes at `/.well-known/corvid` and out of the generated TypeScript client; `published: yes` lists it as before. To upgrade, add `published: no` under each connector's `redirects:` line, or `published: yes` for one whose protocol types a frontend imports.
 
 A connector's `query` record takes the same field types as a route's: a type of plain variants goes out by the variant's name (`?status=Paid&status=Refunded`), and `Bytes` as its base64url text, written exactly as a Corvid route reads them in. Both were compile errors in a connector query before. [Connector grammar](docs/reference/grammar.md#connector-declarations)

@@ -1,0 +1,31 @@
+effect vault_read:
+    cost: 0.0
+
+type Delta:
+    text: String
+
+type FeedError:
+    | Paused(reason: String)
+
+connector vault:
+    hosts: allowed_hosts
+    timeout: 2s
+    redirects: never
+    published: no
+    modes: [real]
+    operation secret_note(url: String) -> Delta uses vault_read:
+        GET url
+
+agent feed(board: Int) -> Stream<Result<Delta, FeedError>>:
+    yield Ok(Delta("board " + board.to_string()))
+    yield Err(Paused("rate limited"))
+
+agent broken(board: Int) -> Stream<Result<Delta, FeedError>> uses vault_read:
+    yield Ok(Delta("before"))
+    yield Ok(secret_note("http://127.0.0.1:9/Users/ops/vault/notes/" + board.to_string()))
+
+server feed_app:
+    route GET "/boards/{board: Int}/feed" -> json Stream<Result<Delta, FeedError>>:
+        return feed(path.board)
+    route GET "/boards/{board: Int}/broken" -> json Stream<Result<Delta, FeedError>>:
+        return broken(path.board)
