@@ -169,11 +169,18 @@ Several `corvid serve` processes on one Postgres database each have their own co
 
 ## RT-4 client implementation boundary
 
+In a child block, `for card in ui.live(board_app.cards, board):` takes its
+row type and identity from the declaration. Use `ui.value(bind card.title)`
+to display a field. A second `by` clause could disagree with the table key.
+The component owns an ordered list and an inert row template. Its browser
+module reads the same contract and applies the SDK's versioned row objects
+to that template. Disconnecting the component releases its subscriber.
+
 The client extension takes ordered `key_fields` from the table declaration
 and publishes its record through the contract's ordinary `types` projection.
 A live entry identifies its server so that two servers may both declare
 `cards`. The generated caller uses `api.live.board_app.cards(board, observer)`
-and returns the SDK's unsubscribe function. The component binding needs that
+and returns the SDK's unsubscribe function. The component binding uses that
 same route identity, path arguments and release operation.
 
 The SDK can reconcile the public JSON rows in a snapshot using the ordered key
@@ -207,8 +214,9 @@ On a build containing RT-3, run
 `python scripts/verify_generated_live_client.py --cli <corvid> --channel msedge`.
 The check uses RT-3's test login fixture and writes through a Corvid route.
 It disconnects a browser, commits while it is offline and checks the fresh
-snapshot and the next edit on the resumed socket. Component unmount through
-Corvid source still requires the browser list binding.
+snapshot and the next edit on the resumed socket. The same page renders the Corvid
+child loop and checks the retained input, selection, focus and component
+unsubscribe alongside the generated observer.
 
 ## Non-scope
 

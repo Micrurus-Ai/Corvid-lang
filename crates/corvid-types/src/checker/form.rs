@@ -66,6 +66,12 @@ impl Checker<'_> {
             );
             return Type::String;
         };
+        self.check_field_path(name, model, key, *span, condition)
+    }
+
+    pub(super) fn check_field_path(
+        &mut self, name: &Ident, model: Type, key: &str, field_span: Span, condition: &[Expr],
+    ) -> Type {
         let mut ty = model;
         for part in key.split('.') {
             let field = self
@@ -80,14 +86,14 @@ impl Checker<'_> {
                             .map_or_else(|| ty.display_name(), |r| r.name.name.clone()),
                         field: part.into(),
                     },
-                    *span,
+                    field_span,
                 ));
                 return Type::String;
             };
             ty = self.browser_member_type(&ty, &field);
         }
         if self.record_decl(&ty).is_some_and(|r| r.variants.is_empty()) {
-            self.form_error(*span, "bind needs a field inside this record".into());
+            self.form_error(field_span, "bind needs a field inside this record".into());
         }
         match condition {
             [] => {}

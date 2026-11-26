@@ -23,10 +23,13 @@ def build(cli, root, tsc):
     shutil.copyfile(SDK / "test/boards.cor", source)
     modules = root / "modules"
     shutil.copytree(SDK / "src", modules)
-    for args in (["check", source], ["contract", "ts-client", source, "--out", modules],
+    for args in (["check", source], ["test", source], ["contract", "ts-client", source, "--out", modules],
                  ["migrate", "plan", source], ["migrate", "up", "--database", "boards.sqlite",
                                               "--state", "target/state.json"]):
         subprocess.run([cli, *args], cwd=root, check=True)
+    # Resolve the package to its local browser modules for this unbundled test.
+    api = modules / "api.ts"
+    api.write_text(api.read_text(encoding="utf-8").replace('"@corvid/client"', '"./index.js"'), encoding="utf-8")
     (modules / "tsconfig.json").write_text(json.dumps({"compilerOptions": {
         "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
         "strict": True, "paths": {"@corvid/client": ["./index.ts"]}, "outDir": "../js",
@@ -34,20 +37,25 @@ def build(cli, root, tsc):
     compiler = ["node", tsc] if tsc else [shutil.which("tsc") or "tsc"]
     subprocess.run([*compiler, "-p", modules], cwd=root, check=True)
 
+    for packaged in (SDK / "browser").glob("*.js"):
+        if (root / "js" / packaged.name).read_text(encoding="utf-8") != packaged.read_text(encoding="utf-8"):
+            raise RuntimeError(f"Embedded SDK asset differs from tsc output: {packaged.name}")
+
 
 def exercise(page, context, url, headers, root):
     cookies = SimpleCookie(headers["Cookie"])
     context.add_cookies([{"url": url, "name": k, "value": v.value,
                           "httpOnly": k == "corvid_session"} for k, v in cookies.items()])
-    # Supply the test page and compiled modules. Every subscription and write
-    # goes through the actual service, including the reconnect handshake.
+    # Only the generated TypeScript test modules use the local loader.
     assets = {p.name: p for p in (root / "js").glob("*.js")}
     page.route(url + "/test/*.js", lambda route: route.fulfill(
         path=assets[Path(urlsplit(route.request.url).path).name],
         content_type="application/javascript"))
-    page.route(url + "/test/page", lambda route: route.fulfill(
-        content_type="text/html", body="<title>Live client test</title>"))
-    page.goto(url + "/test/page")
+    page.add_init_script("""window.sockets = [];
+        window.WebSocket = class extends WebSocket {
+            constructor(...args) { super(...args); sockets.push(this); }
+            send(data) { (this.frames ??= []).push(JSON.parse(data)); super.send(data); }
+        };""")
 
     def write(card, title):
         request = Request(f"{url}/boards/7/cards/{card}/{title}", data=b"", headers=headers)
@@ -55,13 +63,19 @@ def exercise(page, context, url, headers, root):
             assert json.load(reply) == title
 
     write(1, "first")
+    page.goto(url + "/boards/7")
+    owner = page.locator("corvid-live")
+    titles = owner.locator("li [data-record-text]")
+    from playwright.sync_api import expect
+    expect(titles).to_have_text(["first"])
+    page.evaluate("window.originalRow = document.querySelector('corvid-live li')")
+    note = owner.get_by_label("Local note").first
+    note.fill("keep this edit")
+    note.focus()
+    note.evaluate("el => el.setSelectionRange(2, 6)")
     page.evaluate("""async () => {
         const { Api } = await import('/test/api.js');
         const { CorvidClient } = await import('/test/index.js');
-        window.sockets = [];
-        window.WebSocket = class extends WebSocket {
-            constructor(...args) { super(...args); sockets.push(this); }
-        };
         const api = new Api(new CorvidClient({baseUrl: location.origin}));
         window.updates = [];
         window.failures = [];
@@ -77,22 +91,32 @@ def exercise(page, context, url, headers, root):
     assert page.evaluate("sockets.length === 1 && otherUpdates.at(-1).length === 0")
     page.evaluate("() => { stopOther(); stopOther(); }")
     context.set_offline(True)
-    page.evaluate("""() => new Promise(resolve => {
-        const ws = sockets[0];
+    page.evaluate("""() => Promise.all(sockets.map(ws => new Promise(resolve => {
         if (ws.readyState === WebSocket.CLOSED) return resolve();
         ws.addEventListener('close', resolve, {once:true});
         ws.close(1000);
-    })""")
+    })))""")
     write(2, "offline")
     context.set_offline(False)
     page.wait_for_function("updates.at(-1)?.[1]?.title === 'offline'")
     assert page.evaluate("updates.at(-1)[0] === updates[0][0]")
-    page.evaluate("() => { window.resumed = sockets.at(-1); }")
+    expect(titles).to_have_text(["first", "offline"])
+    page.evaluate("window.resumed = sockets.filter(s => s.readyState === WebSocket.OPEN)")
+    assert page.evaluate("resumed.length === 1")
     write(2, "online")
     page.wait_for_function("updates.at(-1)?.[1]?.title === 'online'")
     assert page.evaluate("""updates.at(-1)[0] === updates[0][0]
         && updates.at(-1)[1] !== updates.at(-2)[1] && failures.length === 0
-        && sockets.at(-1) === resumed && otherUpdates.length === 1""")
+        && resumed.every(s => s.readyState === WebSocket.OPEN) && otherUpdates.length === 1""")
+    expect(titles).to_have_text(["first", "online"])
+    assert page.evaluate("originalRow === document.querySelector('corvid-live li')")
+    expect(note).to_be_focused()
+    expect(note).to_have_value("keep this edit")
+    assert note.evaluate("el => [el.selectionStart, el.selectionEnd]") == [2, 6]
+    page.evaluate("() => { document.querySelector('corvid-live').remove(); }")
+    page.wait_for_function("resumed[0].frames.filter(f => f.type === 'unsubscribe').length === 1")
+    write(3, "after-unmount")
+    page.wait_for_function("updates.at(-1)?.[2]?.title === 'after-unmount'")
     page.evaluate("() => { stop(); stop(); }")
     page.wait_for_function("sockets.every(s => s.readyState === WebSocket.CLOSED)")
 

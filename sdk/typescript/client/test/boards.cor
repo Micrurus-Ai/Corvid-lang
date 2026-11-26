@@ -1,3 +1,5 @@
+import "std:ui" as ui
+
 identity users:
     provider google
     provisioning:
@@ -19,6 +21,9 @@ server board_app:
     live "/boards/{board: Int}/cards" -> Card requires permission("board.view"):
         return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
 
+    route GET "/boards/{board: Int}" -> html:
+        return ui.page("Board", [card_list(path.board)])
+
     route POST "/boards/{board: Int}/cards/{card: Int}/{title}" -> json String requires permission("board.view"):
         return match Card.get(path.board, path.card):
             Some(row) -> saved(Card.save(Card { title: path.title, ..row }))
@@ -28,3 +33,16 @@ fn saved(result: Result<Card, Conflict<Card>>) -> String:
     return match result:
         Ok(row) -> row.title
         Err(_) -> "conflict"
+
+fn card_list(board: Int) -> ui.View:
+    return ui.stack:
+        for card in ui.live(board_app.cards, board):
+            ui.value(bind card.title)
+            ui.text_field("Local note", "note", "")
+
+test renders_typed_board_subscription:
+    html = card_list(7).html
+    assert html.contains("<corvid-live")
+    assert html.contains("data-live=\"cards\"")
+    assert html.contains("data-arguments=\"[&quot;7&quot;]\"")
+    assert html.contains("data-record-text=\"{title}\"")

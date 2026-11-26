@@ -18,6 +18,13 @@ A connector operation that returns `Response<Charge>` now runs as native code: `
 
 A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.
 
+A Corvid child loop can read `for card in ui.live(board_app.cards, board):`.
+Display the title with `ui.value(bind card.title)`. The compiler checks the
+path argument and row field. Its `ui.live_rows` template helper carries the
+subscription into the browser, where the shared SDK's `livePath` encodes the
+arguments. Real delivery requires an RT-3 server.
+[Live board example](docs/book/19-browser-views.md#display-a-live-board-in-corvid)
+
 The TypeScript SDK's low-level `client.subscribe(path, keyFields, observer)`
 shares a WebSocket across a client's subscriptions. Use `observer.rows` to
 display the ordered result, clear it on `observer.error`, and call the

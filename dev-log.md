@@ -2,6 +2,22 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-4 Corvid live child loops
+
+The child loop reads the declared live route's path parameters and row type.
+Its browser element consumes the SDK's reconciled row objects and uses the
+existing focus-preserving row placement algorithm. Each mounted list releases
+its own subscription. Generated callers and Corvid views share the page's
+same-origin connection. Cleanup also suppresses an already queued terminal
+error for the released observer. The generated caller also uses the same segment encoder
+as the element. The Edge script compares the embedded SDK modules to fresh
+TypeScript output before starting the service.
+
+The public board fixture checks the emitted component markup. The driver
+tests reject a missing subscription, a wrong or missing argument and an
+unknown row field. Real reconnect and component cleanup remain open on the
+revision whose interpreter reports E5204 for live routes.
+
 ### RT-4 live row schemas and typed client generation
 
 The contract uses each reachable table's record and ordered keys. Generated

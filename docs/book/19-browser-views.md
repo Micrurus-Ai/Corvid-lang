@@ -1137,6 +1137,32 @@ For example, a browser may ship `Blob.bytes()` before your installed toolchain d
 
 From the repository root, build the example with `python scripts/verify_file_preview.py --cli target/debug/corvid.exe --build-only`. This requires Node, npm and a built Corvid CLI. Serve it with `python -m http.server --directory examples/file_preview/target/site --bind 127.0.0.1 8000` and open `http://127.0.0.1:8000`. To run the browser assertions, replace `--build-only` with `--channel msedge`.
 
+## Display a live board in Corvid
+
+Use the subscription declared by the server as the source of a child loop.
+The table supplies the key, including every column of a composite key.
+
+```corvid
+fn card_list(board: Int) -> ui.View:
+    return ui.stack:
+        for card in ui.live(board_app.cards, board):
+            ui.value(bind card.title)
+            ui.text_field("Local note", "note", "")
+```
+
+The compiler checks `board` against the path declaration and `title` against
+the delivered row type. On a server with the WebSocket transport, mounting
+the view subscribes with the current session. A new snapshot supplies the
+query order. Rows whose keys and revisions match keep their DOM elements,
+including the local note input. Removing the view releases its subscription.
+A terminal error clears the rows and displays the reason.
+
+The compiler calls `ui.live_rows(server_name, subscription, arguments, content)`
+to render the component and its template. Generated TypeScript uses the SDK
+function `livePath(template, values)` to encode named path arguments. Run the
+markup example with `corvid test sdk/typescript/client/test/boards.cor`.
+[Subscription fixture](../../sdk/typescript/client/test/boards.cor)
+
 ## Subscribe to a board from TypeScript
 
 For rows from a live database query, the generated TypeScript client gets its

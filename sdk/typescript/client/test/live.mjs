@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CorvidClient, CorvidError } from "../target/index.js";
+import { CorvidClient, CorvidError, livePath } from "../target/index.js";
 
 // Drive the browser-facing WebSocket boundary without running an endpoint.
 function setup(t) {
@@ -124,4 +124,50 @@ test("unmount while disconnected cancels resubscription", t => {
   sub.stop();
   t.mock.timers.runAll();
   assert.equal(sockets.length, 1);
+});
+
+test("the page shares a socket and keeps other owners active after one unmounts", t => {
+  const { sockets, subscribe } = setup(t);
+  const page = {};
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousLocation = Object.getOwnPropertyDescriptor(globalThis, "location");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: page });
+  Object.defineProperty(globalThis, "location", { configurable: true, value: new URL("https://example.test") });
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else delete globalThis.window;
+    if (previousLocation) Object.defineProperty(globalThis, "location", previousLocation);
+    else delete globalThis.location;
+  });
+  const first = subscribe("/cards");
+  const client = new CorvidClient({baseUrl: location.origin});
+  const release = client.subscribe("/other", ["id"], { rows() {}, error(e) { throw e; } });
+  t.after(release);
+  assert.equal(sockets.length, 1);
+  sockets[0].open();
+  assert.equal(sockets[0].sent.length, 2);
+  first.stop();
+  assert.equal(sockets[0].readyState, 1);
+  release();
+  assert.equal(sockets[0].readyState, 3);
+});
+
+test("typed route arguments fill complete segments and retain literal values", () => {
+  assert.equal(livePath("/boards/{board}/{name}", {board: 7, name: "{board}/a b"}),
+    "/boards/7/%7Bboard%7D%2Fa%20b");
+  assert.equal(livePath("/board-{board}", {board: 7}), "/board-7");
+  assert.throws(() => livePath("/{board}", {board: 2 ** 53}), /inexact/i);
+  assert.throws(() => livePath("/{board}", {}), /missing/i);
+});
+
+test("cleanup suppresses a queued terminal error for the released owner", async t => {
+  const { sockets, subscribe } = setup(t);
+  const removed = subscribe("/removed");
+  const retained = subscribe("/retained");
+  sockets[0].open();
+  sockets[0].close(1008);
+  removed.stop();
+  await Promise.resolve();
+  assert.deepEqual(removed.errors, []);
+  assert.equal(retained.errors[0].body.code, "invalid_session");
 });

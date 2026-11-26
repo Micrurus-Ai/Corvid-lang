@@ -498,6 +498,8 @@ impl<'a> Checker<'a> {
                 Type::Option(Box::new(final_inner_ty))
             }
             BuiltIn::BrowserFieldKey => self.check_browser_field_key(name, args, false),
+            BuiltIn::LiveArguments => self.check_live_arguments(name, args),
+            BuiltIn::LiveField => self.check_live_field(name, args),
             BuiltIn::BrowserRowKey => self.check_browser_field_key(name, args, true),
             BuiltIn::BrowserFields => self.check_browser_fields(name, args),
             BuiltIn::FormFor => self.check_form_for(name, args),

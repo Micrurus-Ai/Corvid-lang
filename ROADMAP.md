@@ -2,13 +2,11 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-- [ ] RT-4 / F08. Bind `ui.live(board_app.cards, board)` to the component
-  lifetime using the generated client's typed path and public row schema.
-  Connect incoming snapshots to the keyed row renderer. It currently takes
-  one String key and constructs its children from the initial list.
-  Verify a missed commit and a subsequent live edit
-  against RT-2 and RT-3 before closing the F08 and F18 reconnect gates.
-  [Contract dependency](docs/proposals/real-time.md#rt-4-client-implementation-boundary)
+- [ ] RT-4 / F08. Verify the Corvid live child loop and generated TypeScript
+  observer on an integrated RT-3 server. The compiler checks the path arguments
+  and bound row fields. The hosted Edge check covers reconnect after a missed
+  commit, the next committed edit, retained focus and component unmount.
+  [Acceptance command](docs/proposals/real-time.md#rt-4-client-implementation-boundary)
 - [ ] Verify full-width integer table keys across RT-2, RT-3 and both clients.
   The SDK rejects JSON number keys outside JavaScript's safe integer range.
   Agree a lossless key representation before accepting those subscriptions.

@@ -70,7 +70,9 @@ fn the_contract_lists_a_live_by_name_apart_from_the_routes() {
 #[test]
 fn generated_live_client_uses_the_table_schema_and_typed_route() {
     let source = include_str!("../../../sdk/typescript/client/test/boards.cor");
-    let contract = compile_to_application_contract_with_config(source, "boards.cor", "test", None)
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk/typescript/client/test/boards.cor");
+    let check = |source: &str| corvid_driver::compile_to_ir_with_config_at_path(source, &path, None);
+    let contract = compile_to_application_contract_with_config(source, path.to_str().unwrap(), "test", None)
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
     let live = &contract.live[0];
     assert_eq!(live.server, "board_app");
@@ -86,9 +88,22 @@ fn generated_live_client_uses_the_table_schema_and_typed_route() {
     assert!(api.contains("[\"board\",\"card\"]"));
 
     let invalid = source.replace("{board: Int}", "{board}");
-    assert!(compile_to_ir(&invalid).is_err(), "String path.board cannot match an Int column");
+    assert!(check(&invalid).is_err(), "String path.board cannot match an Int column");
     let invalid = source.replace("{board: Int}", "{board: Card}");
-    assert!(compile_to_ir(&invalid).unwrap_err().iter().any(|error| error.message.contains("{name: Int}")));
+    assert!(check(&invalid).unwrap_err().iter().any(|error| error.message.contains("{name: Int}")));
+
+    let agent_row = source.replace("for card in ui.live", "for agent in ui.live")
+        .replace("bind card.title", "bind agent.title");
+    check(&agent_row).unwrap_or_else(|errors| panic!("{errors:#?}"));
+    for (original, replacement, expected) in [
+        ("bind card.title", "bind card.caption", "caption"),
+        ("board_app.cards, board", "board_app.unknown, board", "no live declaration"),
+        ("board_app.cards, board", "board_app.cards", "ui.live path"),
+        ("board_app.cards, board", "board_app.cards, \"7\"", "live path parameter"),
+    ] {
+        let errors = check(&source.replace(original, replacement)).unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains(expected)), "{errors:#?}");
+    }
 }
 
 #[test]

@@ -22,6 +22,15 @@ in declaration order, followed by the observer. Its `rows` callback receives
 callable uses the name `live`, the generated group appends underscores until
 its name is available.
 
+The SDK exports `livePath(template, values)`. Pass a normalized contract path
+and a record of named string or safe integer arguments. The result contains
+one percent-encoded segment per placeholder. Both browser clients use this
+function. The compiler's template helper
+`ui.live_rows(server_name: String, subscription: String, arguments: List<String>, content: List<ui.View>) -> ui.View`
+takes the positional arguments as text and wraps the child views in a live row
+template. Application code uses the checked child loop.
+[Live rows](grammar.md#live-rows-in-view-layouts)
+
 The TypeScript SDK provides
 `CorvidClient.subscribe<Row>(path, keyFields, observer): () => void` for client
 bindings. The binding supplies the concrete encoded path and the ordered names

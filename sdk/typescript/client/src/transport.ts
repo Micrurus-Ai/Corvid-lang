@@ -7,7 +7,7 @@
 // audited surface. Nothing here is regenerated per app.
 
 import { CorvidError } from "./errors.js";
-import { LiveConnection, type LiveObserver } from "./live-connection.js";
+import { connectionForPage, type LiveConnection, type LiveObserver } from "./live-connection.js";
 import { type AgentEvent, type AgentStream, type ApprovalRequest } from "./events.js";
 import { type Page, paginate } from "./pagination.js";
 
@@ -37,8 +37,8 @@ export class CorvidClient {
   subscribe<Row extends object>(
     path: string, keyFields: readonly (keyof Row)[], observer: LiveObserver<Row>,
   ): () => void {
-    this.live ??= new LiveConnection(this.baseUrl);
-    return this.live.subscribe(path, keyFields, observer);
+    this.live ??= connectionForPage(this.baseUrl);
+    return this.live.subscribe(path, keyFields, observer, CorvidError);
   }
 
   /** Invoke a public agent/prompt and await its single JSON result. */

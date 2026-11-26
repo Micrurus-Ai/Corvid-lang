@@ -439,6 +439,7 @@ fn emit_js_loader(
             out.push_str(&format!("const {name} = new Map({bindings});\n"));
         }
         out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
+        out.push_str(include_str!("row_order.js"));
         out.push_str(include_str!("record_projections.js"));
         out.push_str(include_str!("form_controls.js"));
         out.push_str("}\n");

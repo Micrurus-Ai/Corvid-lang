@@ -262,6 +262,9 @@ fn emit_api(contract: &ApplicationContract) -> String {
     let mut out = String::new();
     out.push_str(GENERATED_HEADER);
     out.push('\n');
+    if !contract.live.is_empty() {
+        out.push_str("import { livePath } from \"@corvid/client\";\n");
+    }
     out.push_str("import { CorvidClient, type AgentStream, type Page } from \"@corvid/client\";\n");
     // Import every generated type so method signatures resolve.
     if !contract.types.is_empty() {
@@ -313,15 +316,15 @@ fn live_methods(contract: &ApplicationContract) -> String {
         for live in declarations {
             let row = &live.row_type;
             let mut params = Vec::new();
-            let mut path = quote(&live.path);
+            let mut arguments = Vec::new();
             for param in &live.path_params {
                 // Prefix source identifiers so reserved JS names and 'observer'
                 // remain valid arguments. Each value fills one encoded segment.
                 let arg = format!("path_{}", param.name);
                 params.push(format!("{arg}: {}", ts_type(&param.type_name)));
-                let placeholder = quote(&format!("{{{}}}", param.name));
-                path.push_str(&format!(".replace({placeholder}, () => encodeURIComponent(String({arg})))"));
+                arguments.push(format!("[{}]: {arg}", quote(&param.name)));
             }
+            let path = format!("livePath({}, {{ {} }})", quote(&live.path), arguments.join(", "));
             params.push(format!("observer: import(\"@corvid/client\").LiveObserver<{row}>"));
             let keys = serde_json::to_string(&live.key_fields).expect("string key names");
             out.push_str(&format!(

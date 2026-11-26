@@ -2083,6 +2083,21 @@ impl<'a> Lowerer<'a> {
                         next_cursor: Box::new(next_cursor),
                     };
                 }
+                Some(Binding::BuiltIn(BuiltIn::LiveField)) => return self.lower_expr(&args[2]).kind,
+                Some(Binding::BuiltIn(BuiltIn::LiveArguments)) => {
+                    let items = args[2..].iter().map(|arg| {
+                        let value = self.lower_expr(arg);
+                        if value.ty != Type::Int { return value; }
+                        IrExpr {
+                            ty: Type::String, span: arg.span(),
+                            kind: IrExprKind::BuiltinMethod {
+                                kind: corvid_types::BuiltinMethodKind::IntToString,
+                                receiver: Box::new(value), args: Vec::new(),
+                            },
+                        }
+                    }).collect();
+                    return IrExprKind::List { items };
+                }
                 Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey | BuiltIn::BrowserRowKey)) if matches!(args.len(), 2 | 3) => {
                     return self.lower_expr(&args[1]).kind;
                 }

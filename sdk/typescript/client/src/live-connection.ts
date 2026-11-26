@@ -8,11 +8,24 @@ export interface LiveObserver<Row> {
   error(error: Error): void;
 }
 
+type LiveFailure = Error | "forbidden" | "invalid_session";
+
 interface Subscription {
   path: string;
   ready: boolean;
   apply(frame: LiveDelivery<object>): () => void;
-  error(error: Error): void;
+  error(failure: LiveFailure): void;
+}
+
+// Independently loaded generated clients and Corvid views on the same page
+// subscribe under the same browser session. Other origins stay isolated.
+const pageLive = Symbol.for("corvid.live.v1.page");
+export function connectionForPage(baseUrl: string): LiveConnection {
+  if (typeof window === "undefined" || new URL(baseUrl || ".", location.href).origin !== location.origin) {
+    return new LiveConnection(baseUrl);
+  }
+  const page = window as Window & { [pageLive]?: LiveConnection };
+  return page[pageLive] ??= new LiveConnection(location.origin);
 }
 
 /** The RT-3 session shared by subscriptions on one browser client. */
@@ -31,11 +44,17 @@ export class LiveConnection {
 
   subscribe<Row extends object>(
     path: string, keyFields: readonly (keyof Row)[], observer: LiveObserver<Row>,
+    // Each SDK bundle delivers instances of its own exported error class.
+    ErrorType = CorvidError,
   ): () => void {
     const rows = new LiveRows<Row>(keyFields);
     const id = String(++this.sequence);
+    let active = true;
     const sub: Subscription = {
-      path, ready: false, error: error => observer.error(error),
+      path, ready: false,
+      error: failure => {
+        if (active) observer.error(typeof failure === "string" ? new ErrorType(403, { code: failure }) : failure);
+      },
       apply(frame) {
         const value = rows.apply(frame as LiveDelivery<Row>);
         return () => observer.rows(value);
@@ -50,6 +69,7 @@ export class LiveConnection {
       throw error;
     }
     return () => {
+      active = false; // A terminal error may already be queued for this observer.
       if (!this.subscriptions.delete(id)) return;
       if (this.socket?.readyState === WebSocket.OPEN) {
         this.socket.send(JSON.stringify({ type: "unsubscribe", id }));
@@ -90,7 +110,7 @@ export class LiveConnection {
         if (frame.type === "error" && frame.code === "forbidden") {
           this.subscriptions.delete(frame.id);
           this.closeIfIdle();
-          notify = () => sub.error(new CorvidError(403, { code: "forbidden" }));
+          notify = () => sub.error("forbidden");
         } else {
           if (frame.type !== "snapshot" && !(sub.ready && frame.type === "change" &&
               ["added", "updated", "removed"].includes(frame.kind))) {
@@ -113,7 +133,7 @@ export class LiveConnection {
       this.socket = undefined;
       if (event.code === 1008 || event.code === 1002) {
         this.failAll(event.code === 1008
-          ? new CorvidError(403, { code: "invalid_session" })
+          ? "invalid_session"
           : new Error("Live protocol rejected"));
       } else if (this.subscriptions.size) {
         this.retry = setTimeout(() => {
@@ -125,7 +145,7 @@ export class LiveConnection {
     };
   }
 
-  private failAll(error: Error): void {
+  private failAll(error: LiveFailure): void {
     const subscriptions = [...this.subscriptions.values()];
     this.subscriptions.clear();
     for (const sub of subscriptions) queueMicrotask(() => sub.error(error));
