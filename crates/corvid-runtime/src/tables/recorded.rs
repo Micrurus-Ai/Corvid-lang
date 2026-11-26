@@ -21,19 +21,29 @@ impl Runtime {
         self.table_commits.subscribe()
     }
 
-    pub(super) fn announce_commit(&self, database: &str, tables: std::collections::BTreeSet<String>) {
-        if !tables.is_empty() {
+    pub(super) fn announce_commit(&self, database: &str, written: super::live::Written) {
+        if !written.tables.is_empty() {
             // No receiver is not an error: nobody is subscribed yet.
-            let _ = self.table_commits.send(super::TableCommit { database: database.to_string(), tables });
+            let _ = self.table_commits.send(super::TableCommit {
+                database: database.to_string(),
+                tables: written.tables,
+                rows: written.rows,
+            });
         }
     }
 
     /// A write that changed its table is announced now, or noted for its
-    /// `atomic:` block's commit.
-    fn wrote(&self, table: &TableRef<'_>) {
+    /// `atomic:` block's commit, with the row's key and the revision it
+    /// reached (`after`) when the caller gave the key.
+    fn wrote(&self, table: &TableRef<'_>, after: i64) {
+        let row = table.row_key.map(|key| (key, after));
         match table.transaction {
-            Some(transaction) => transaction.written.note(table.name),
-            None => self.announce_commit(table.database, std::iter::once(table.name.to_string()).collect()),
+            Some(transaction) => transaction.written.note(table.name, row),
+            None => {
+                let mut written = super::live::Written::default();
+                written.note(table.name, row);
+                self.announce_commit(table.database, written);
+            }
         }
     }
 
@@ -57,15 +67,15 @@ impl Runtime {
         let outcome = self
             .recorded_table_call(&call_name(table, "insert"), args, || async {
                 let outcome = self.table_insert_live(table, row).await?;
-                if outcome.is_ok() {
-                    self.notify_other_processes(table).await?;
+                if let Ok(row) = &outcome {
+                    self.notify_other_processes(table, stored_revision(table, row)).await?;
                 }
                 Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "insert", &outcome)?;
-        if outcome.is_ok() {
-            self.wrote(table);
+        if let Ok(row) = &outcome {
+            self.wrote(table, stored_revision(table, row));
         }
         Ok(outcome)
     }
@@ -77,15 +87,15 @@ impl Runtime {
         let outcome = self
             .recorded_table_call(&call_name(table, "save"), args, || async {
                 let outcome = self.table_save_live(table, row).await?;
-                if outcome.is_ok() {
-                    self.notify_other_processes(table).await?;
+                if let Ok(row) = &outcome {
+                    self.notify_other_processes(table, stored_revision(table, row)).await?;
                 }
                 Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "save", &outcome)?;
-        if outcome.is_ok() {
-            self.wrote(table);
+        if let Ok(row) = &outcome {
+            self.wrote(table, stored_revision(table, row));
         }
         Ok(outcome)
     }
@@ -97,17 +107,27 @@ impl Runtime {
         let outcome = self
             .recorded_table_call(&call_name(table, "delete"), args, || async {
                 let outcome = self.table_delete_live(table, row).await?;
-                if outcome.is_ok() {
-                    self.notify_other_processes(table).await?;
+                if let Ok(row) = &outcome {
+                    self.notify_other_processes(table, stored_revision(table, row) + 1).await?;
                 }
                 Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "delete", &outcome)?;
-        if outcome.is_ok() {
-            self.wrote(table);
+        if let Ok(row) = &outcome {
+            self.wrote(table, stored_revision(table, row) + 1);
         }
         Ok(outcome)
+    }
+}
+
+/// The revision of a row as stored (its last column), or 0 when the
+/// row does not hold one, which a well-formed table never does.
+fn stored_revision(table: &TableRef<'_>, row: &Row) -> i64 {
+    debug_assert_eq!(row.len(), table.columns.len());
+    match row.last() {
+        Some(DbValue::Integer(revision)) => *revision,
+        _ => 0,
     }
 }
 

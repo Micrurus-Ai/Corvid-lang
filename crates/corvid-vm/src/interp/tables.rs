@@ -8,7 +8,7 @@
 
 use super::Interpreter;
 use crate::errors::{InterpError, InterpErrorKind};
-use crate::public_json::{decode_public_json_text, encode_public_json_text, UnknownFields};
+use crate::public_json::{decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields};
 use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
@@ -61,6 +61,10 @@ impl<'ir> Interpreter<'ir> {
             }
             TableOp::Insert | TableOp::Save | TableOp::Delete => {
                 let row = self.value_row(record, &arg).map_err(fail)?;
+                // How live subscriptions identify the row (B14), so the
+                // commit can name it and the revision it reached.
+                let key = self.live_key(record, table, &arg).map_err(fail)?;
+                let target = TableRef { row_key: Some(&key), ..target };
                 let outcome = match op {
                     TableOp::Insert => self.runtime.table_insert(&target, row).await,
                     TableOp::Save => self.runtime.table_save(&target, row).await,
@@ -217,6 +221,31 @@ impl<'ir> Interpreter<'ir> {
     }
 
     /// A row value's columns, in declaration order.
+    /// A row's key as live subscriptions identify it: its key fields'
+    /// public JSON, in key order, as compact array text. The live
+    /// snapshot encodes rows with the same encoder, and
+    /// `LiveRow::from_json` reads its key from that JSON, so the two
+    /// agree by construction.
+    fn live_key(&self, record: &IrType, table: &IrTable, value: &Value) -> Result<String, String> {
+        let Value::Struct(fields) = value else {
+            return Err(format!("a `{}` row is {}", record.name, value.type_name()));
+        };
+        let values = table
+            .keys
+            .iter()
+            .map(|key| {
+                let field = record
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *key)
+                    .ok_or_else(|| format!("table `{}` has no key field `{key}`", table.name))?;
+                let value = fields.get_field(key).ok_or_else(|| format!("a `{}` row has no `{key}`", record.name))?;
+                encode_public_json(&value, &field.ty, &self.types_by_id)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(serde_json::Value::Array(values).to_string())
+    }
+
     fn value_row(&self, record: &IrType, value: &Value) -> Result<Row, String> {
         let Value::Struct(fields) = value else {
             return Err(format!("a `{}` row is {}", record.name, value.type_name()));
@@ -368,5 +397,6 @@ fn table_target<'t>(
         location: &table.database.location,
         engine,
         transaction,
+        row_key: None,
     })
 }

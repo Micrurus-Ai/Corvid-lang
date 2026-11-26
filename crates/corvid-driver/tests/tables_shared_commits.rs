@@ -53,13 +53,21 @@ agent undone(card: Int, zero: Int) -> Int:
     )
 }
 
-fn commit(tables: &[&str]) -> TableCommit {
-    TableCommit { database: "board".into(), tables: tables.iter().map(|t| t.to_string()).collect() }
+/// The tables a commit names.
+fn commit(tables: &[&str]) -> std::collections::BTreeSet<String> {
+    tables.iter().map(|t| t.to_string()).collect()
 }
 
 /// The next commit on a feed, waiting for a notification to arrive.
-async fn next(feed: &mut Receiver<TableCommit>) -> Option<TableCommit> {
+async fn next_commit(feed: &mut Receiver<TableCommit>) -> Option<TableCommit> {
     tokio::time::timeout(Duration::from_secs(5), feed.recv()).await.ok().and_then(Result::ok)
+}
+
+/// The tables of the next commit on a feed, which must be `board`'s.
+async fn next(feed: &mut Receiver<TableCommit>) -> Option<std::collections::BTreeSet<String>> {
+    let commit = next_commit(feed).await?;
+    assert_eq!(commit.database, "board");
+    Some(commit.tables)
 }
 
 /// Nothing more arrives in a while.
@@ -89,7 +97,9 @@ async fn a_commit_in_one_process_reaches_the_others() {
 
     let added = run_ir_with_runtime(&ir, Some("add"), vec![Value::Int(1)], &writer).await.expect("runs");
     assert_eq!(added, Value::String("added".into()));
-    assert_eq!(next(&mut read).await, Some(commit(&["Card"])), "the other process hears the write");
+    let heard = next_commit(&mut read).await.expect("the other process hears the write");
+    assert_eq!(heard.tables, commit(&["Card"]));
+    assert_eq!(heard.rows["Card"].revision("[1]"), Some(1), "with the row it wrote and its revision");
     assert_eq!(next(&mut written).await, Some(commit(&["Card"])), "the writer announces it locally");
     assert!(quiet(&mut written).await, "and does not hear its own commit a second time");
 

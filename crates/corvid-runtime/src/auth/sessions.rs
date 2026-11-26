@@ -182,6 +182,7 @@ impl SessionAuthRuntime {
                 params![actor_id, at_ms as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to revoke actor sessions: {err}")))?;
+        self.watchers.actor_changed(actor_id, super::SessionState::Invalid);
         Ok(revoked)
     }
 
@@ -322,6 +323,8 @@ impl SessionAuthRuntime {
                 params![session_id, token_hash, new_expires_ms as i64, now as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to rotate session: {err}")))?;
+        // The old token no longer works, so what it authorized ends.
+        self.watchers.session_changed(session_id, super::SessionState::Invalid);
         self.get_session(session_id)?
             .ok_or_else(|| RuntimeError::Other(format!("auth session `{session_id}` not found")))
     }
@@ -379,6 +382,7 @@ impl SessionAuthRuntime {
                 params![session_id, at_ms as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to revoke session: {err}")))?;
+        self.watchers.session_changed(session_id, super::SessionState::Invalid);
         self.get_session(session_id)?
             .ok_or_else(|| RuntimeError::Other(format!("auth session `{session_id}` not found")))
     }

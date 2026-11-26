@@ -206,3 +206,48 @@ agent main() -> String:
     );
     assert_eq!(out, "aqp");
 }
+
+/// A reference-counted local first bound inside a loop body and read after
+/// the loop: each iteration's value is released when the next one
+/// replaces it, and the last one after its read.
+#[test]
+fn a_string_first_bound_inside_a_loop_and_read_after_it_is_released_each_time() {
+    assert_eq!(
+        assert_parity_text(
+            "agent f() -> Int:\n    last = \"\"\n    for word in \"a,bb,ccc\".split(\",\"):\n        last = word + \"!\"\n    return last.length()\n"
+        ),
+        "4"
+    );
+    assert_eq!(
+        assert_parity_text(
+            "agent f() -> Int:\n    for word in \"a,bb,ccc\".split(\",\"):\n        last = word + \"!\"\n    return last.length()\n"
+        ),
+        "4"
+    );
+}
+
+/// The same rule in a nested loop, a `while` loop, for a record, and
+/// across a `break`.
+#[test]
+fn locals_carried_out_of_loops_are_released_each_time_in_every_loop_shape() {
+    for (src, expected) in [
+        (
+            "agent f() -> Int:\n    for row in \"a b,cc dd\".split(\",\"):\n        for word in row.split(\" \"):\n            last = word + \"!\"\n    return last.length()\n",
+            "3",
+        ),
+        (
+            "agent f() -> Int:\n    n = 0\n    while n < 3:\n        label = \"n\" + \"x\"\n        n = n + 1\n    return label.length() + n\n",
+            "5",
+        ),
+        (
+            "type Pair:\n    left: String\n    right: String\n\nagent f() -> String:\n    for word in \"a,bb\".split(\",\"):\n        pair = Pair(word + \"<\", word + \">\")\n    return pair.left + pair.right\n",
+            "bb<bb>",
+        ),
+        (
+            "agent f() -> Int:\n    for word in \"a,bb,ccc,dddd\".split(\",\"):\n        last = word + \"!\"\n        if word == \"ccc\":\n            break\n    return last.length()\n",
+            "4",
+        ),
+    ] {
+        assert_eq!(assert_parity_text(src), expected, "{src}");
+    }
+}

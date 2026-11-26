@@ -16,6 +16,7 @@ mod provisioning;
 mod records;
 mod roles;
 pub mod scope;
+mod session_watch;
 mod sessions;
 pub use api_keys::{hash_api_key_secret, verify_api_key_secret, API_KEY_HASH_COST};
 pub use approvals::{authorize_trace_permission, validate_jwt_verification_contract};
@@ -29,11 +30,14 @@ pub use roles::{
     authorize_route, effective_permissions_for, RouteAuthzOutcome, RoutePolicyRequirement,
 };
 pub use scope::{enforce_scope_grant, ApiKeyScope, ScopeError};
+pub use session_watch::SessionState;
 pub use sessions::{hash_session_secret, PrivilegeChangeReason};
 use sessions::read_actor_row;
 
 pub struct SessionAuthRuntime {
     conn: Mutex<Connection>,
+    /// Sessions a live subscription watches (B14 RT-3).
+    watchers: session_watch::SessionWatchers,
 }
 
 impl SessionAuthRuntime {
@@ -42,6 +46,7 @@ impl SessionAuthRuntime {
             .map_err(|err| RuntimeError::Other(format!("failed to open auth db: {err}")))?;
         let runtime = Self {
             conn: Mutex::new(conn),
+            watchers: Default::default(),
         };
         runtime.init()?;
         Ok(runtime)
@@ -52,6 +57,7 @@ impl SessionAuthRuntime {
             .map_err(|err| RuntimeError::Other(format!("failed to open auth db: {err}")))?;
         let runtime = Self {
             conn: Mutex::new(conn),
+            watchers: Default::default(),
         };
         runtime.init()?;
         Ok(runtime)
@@ -103,6 +109,8 @@ impl SessionAuthRuntime {
                 ],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to upsert actor: {err}")))?;
+        // Its authority may have changed: watching sessions re-check.
+        self.watchers.actor_changed(&actor.id, SessionState::Active);
         self.get_actor(&actor.id)?
             .ok_or_else(|| RuntimeError::Other(format!("auth actor `{}` not found", actor.id)))
     }
