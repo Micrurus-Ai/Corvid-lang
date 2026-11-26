@@ -184,7 +184,7 @@ fn shared_library_catalog_c_host_shows_accept_reject_and_fail_closed() {
     let host_source = demo_dir.join("host_c").join("approver_host.c");
     let trace_dir = demo_dir.join("trace_output");
     let trace_path = trace_dir.join("approval_demo.jsonl");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };
@@ -266,7 +266,7 @@ fn shared_library_catalog_filter_host_narrows_catalog() {
     let release_dir = demo_dir.join("target").join("release");
     let library = release_dir.join(shared_library_name("classify"));
     let host_source = demo_dir.join("host_c").join("host.c");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };
@@ -347,7 +347,7 @@ fn shared_library_catalog_capsule_create_and_replay_work() {
     let release_dir = demo_dir.join("target").join("release");
     let library = release_dir.join(shared_library_name("classify"));
     let host_source = demo_dir.join("host_c").join("capsule_host.c");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };

@@ -2,6 +2,15 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Host test binaries out of the source tree
+
+The shared-library tests compiled their C hosts into
+`examples/shared_library_catalog/host_c/`, beside the sources and outside
+`.gitignore`, so `git add -A` picked the binaries up. They now build into the
+example's ignored `target/release`, beside the library each host loads. The
+roadmap item to move a program's own tools onto the runtime call is closed;
+B2b did that.
+
 ### Approvers loaded from source are checked when they load
 
 The roadmap asked for a duration value in the approver simulator. Reading
