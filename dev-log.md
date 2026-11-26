@@ -2,6 +2,12 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-3 transport integration with the merged runtime
+
+Serve now passes the committed row revisions into the RT-2 diff. A filtered removal carries the revision that moved the row out of view. The connection registers the runtime session watcher during the same cookie validation used to capture the durable authority revision. This wakes idle sockets after local logout and keeps the cross-process check at final enqueue.
+
+The authenticated SQLite wire check passed reconnect, live edit, idle permission loss, logout and expiry. On two Postgres processes, the reader returned the offline commit in its reconnect snapshot. The writer saved the next edit, but the reader timed out waiting for its change frame. An independent libpq connection also received no notification on the disposable Windows cluster. The grouped Edge check stopped at the Playwright import with access denied. Both deployment modes still need the hosted Edge run. [Verification command](docs/reference/cli.md#live-subscriptions)
+
 ### RT-3 authenticated live connections
 
 Serve uses the durable auth store's per-actor revision to detect changes during cookie validation and to guard the final frame enqueue. A timer checks idle connections across processes. An in-memory notification alone would miss a logout made by another replica. The check exercises fresh snapshots and committed edits with one SQLite server or two Postgres servers. A failed logout write now reports service unavailable. The SQLite wire check passed. The two-process Postgres check reached the reopened snapshot but timed out on the live edit. A separate libpq listener also received no notification on the local Windows test cluster. The hosted Edge and Postgres checks remain open. [Transport checks](docs/reference/cli.md#live-subscriptions)

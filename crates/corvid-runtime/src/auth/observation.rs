@@ -1,5 +1,5 @@
 //! A durable authority revision brackets validation and guards live delivery.
-use super::{hash_session_secret, SessionAuthRuntime};
+use super::{hash_session_secret, SessionAuthRuntime, SessionState};
 use crate::errors::RuntimeError;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use std::sync::Arc;
@@ -63,23 +63,55 @@ impl SessionAuthRuntime {
         trace: &str,
         clock: fn() -> u64,
     ) -> Result<SessionObservation, RuntimeError> {
+        self.capture_observation(token, clock, || {
+            let session = self.resolve_session_cookie(token, trace, clock())?.session;
+            Ok(((), session.expires_ms))
+        })
+        .map(|(observation, ())| observation)
+    }
+
+    /// Observe durable authority and subscribe to local session notifications in one validation.
+    /// The caller must be running inside Tokio for the session expiry timer.
+    pub fn watch_session_cookie(
+        self: &Arc<Self>,
+        token: &str,
+        trace: &str,
+        clock: fn() -> u64,
+    ) -> Result<
+        (
+            SessionObservation,
+            tokio::sync::watch::Receiver<SessionState>,
+        ),
+        RuntimeError,
+    > {
+        self.capture_observation(token, clock, || {
+            self.observe_with_clock(token, trace, clock)
+        })
+    }
+
+    fn capture_observation<T>(
+        self: &Arc<Self>,
+        token: &str,
+        clock: fn() -> u64,
+        validate: impl FnOnce() -> Result<(T, u64), RuntimeError>,
+    ) -> Result<(SessionObservation, T), RuntimeError> {
         let token_hash = hash_session_secret(token);
         let before = revision(&self.conn.lock().unwrap(), &token_hash)?;
-        let resolved = self.resolve_session_cookie(token, trace, clock())?;
+        let (updates, expires_ms) = validate()?;
         let observation = SessionObservation {
             store: self.clone(),
             clock,
             token_hash,
             authority: before
                 .ok_or_else(|| RuntimeError::Other("session changed during validation".into()))?,
-            expires_ms: resolved.session.expires_ms,
+            expires_ms,
         };
         if !observation.is_current()? {
             return Err(RuntimeError::Other(
                 "session changed during validation".into(),
             ));
         }
-        Ok(observation)
+        Ok((observation, updates))
     }
 }
 

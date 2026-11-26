@@ -275,6 +275,17 @@ async fn multiplexes_and_discards_handles_before_refresh() {
     assert!(last.is_closed());
 }
 
+#[tokio::test(start_paused = true)]
+async fn local_logout_wakes_an_idle_socket_before_the_store_poll() {
+    let mut client = Client::new();
+    let handle = client.subscribe("cards").await;
+    client.auth.revoke_session("login", 101).unwrap();
+    tokio::time::timeout(Duration::from_millis(100), client.expect_close(1008))
+        .await
+        .expect("local logout wakes the idle connection immediately");
+    assert!(handle.is_closed());
+}
+
 #[tokio::test]
 async fn rejects_binary_duplicate_ids_and_invalid_sessions() {
     let mut client = Client::new();

@@ -6,6 +6,7 @@ use corvid_driver::{run_ir_with_runtime, Runtime, Value};
 use corvid_ir::{IrExprKind, IrFile, IrRoute, IrStmt, IrTable, IrType};
 use corvid_runtime::tables::{
     live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit, TableEngine,
+    WrittenRows,
 };
 use futures::StreamExt;
 use std::{collections::HashSet, sync::Arc};
@@ -92,19 +93,50 @@ async fn wait_for_commit(
     commits: &mut Receiver<TableCommit>,
     database: &str,
     table: &str,
-) -> Result<bool, Failure> {
+) -> Result<Option<WrittenRows>, Failure> {
     loop {
-        match commits.recv().await {
-            Ok(commit)
-                if commit.database == database
-                    && (commit.tables.is_empty() || commit.tables.contains(table)) =>
-            {
-                return Ok(false)
+        let commit = match commits.recv().await {
+            Ok(commit) => commit,
+            Err(RecvError::Lagged(_)) => {
+                *commits = commits.resubscribe();
+                return Ok(None);
             }
-            Ok(_) => continue,
-            Err(RecvError::Lagged(_)) => return Ok(true),
             Err(RecvError::Closed) => return Err(Failure::Unavailable),
+        };
+        let relevant = |c: &TableCommit| {
+            c.database == database && (c.tables.is_empty() || c.tables.contains(table))
+        };
+        if !relevant(&commit) {
+            continue;
         }
+        let mut written = WrittenRows::default();
+        let mut complete = true;
+        let mut merge = |commit: TableCommit| {
+            if relevant(&commit) {
+                if let Some(rows) = commit.rows.get(table) {
+                    written.merge(rows);
+                } else {
+                    complete = false;
+                }
+            }
+        };
+        merge(commit);
+        // Bound this batch even if another process is continuously writing.
+        for _ in 0..commits.len() {
+            match commits.try_recv() {
+                Ok(commit) => merge(commit),
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                    *commits = commits.resubscribe();
+                    return Ok(None);
+                }
+                Err(_) => break,
+            }
+        }
+        return Ok(Some(if complete {
+            written
+        } else {
+            WrittenRows::default()
+        }));
     }
 }
 
@@ -140,7 +172,7 @@ pub(super) fn subscribe(
     let mut commits = runtime.subscribe_table_commits();
     Ok(async_stream::try_stream! {
         let mut previous = Vec::new();
-        let mut replace = true;
+        let mut batch = None;
         loop {
             let value = run_ir_with_runtime(&ir, Some(&handler), args.clone(), &runtime)
                 .await.map_err(|_| Failure::Unavailable)?;
@@ -152,27 +184,23 @@ pub(super) fn subscribe(
             let next = rows.into_iter()
                 .map(|row| LiveRow::from_json(row, &table.keys).ok_or(Failure::Unavailable))
                 .collect::<Result<Vec<_>, _>>()?;
-            if replace {
-                yield snapshot(&next)?;
-            } else {
-                match live_changes(&previous, &next) {
+            if let Some(written) = &batch {
+                // A newer commit may already be visible to this read. Its removal
+                // revision is unknown until we consume that notification.
+                let unknown = WrittenRows::default();
+                let revisions = if commits.is_empty() { written } else { &unknown };
+                match live_changes(&previous, &next, revisions) {
                     LiveMessage::Unchanged => {}
                     LiveMessage::Snapshot(rows) => yield snapshot(&rows)?,
-                    // RT-2 compares visible results. A missing row could have
-                    // been saved outside the filter at an unseen revision.
-                    LiveMessage::Changes(changes) if changes.iter().any(|c| c.kind == LiveChangeKind::Removed) => {
-                        yield snapshot(&next)?;
-                    }
                     LiveMessage::Changes(changes) => for change in changes {
                         yield change_frame(change)?;
                     }
                 }
+            } else {
+                yield snapshot(&next)?;
             }
             previous = next;
-            replace = wait_for_commit(&mut commits, &table.database.name, &table.name).await?;
-            // The next read covers every commit already announced. Later commits
-            // remain on the new receiver, including writes racing that read.
-            commits = commits.resubscribe();
+            batch = wait_for_commit(&mut commits, &table.database.name, &table.name).await?;
         }
     }
     .boxed())
@@ -199,10 +227,10 @@ mod tests {
         let (sender, mut receiver) = tokio::sync::broadcast::channel(4);
         let announce = |database: &str, tables: &[&str]| {
             sender
-                .send(TableCommit {
-                    database: database.into(),
-                    tables: tables.iter().map(|name| name.to_string()).collect(),
-                })
+                .send(TableCommit::of_tables(
+                    database,
+                    tables.iter().map(|name| name.to_string()),
+                ))
                 .unwrap();
         };
         announce("archive", &[]);
@@ -211,13 +239,16 @@ mod tests {
         tokio::pin!(read);
         assert!(futures::poll!(&mut read).is_pending());
         announce("boards", &[]);
-        assert!(!read.await.unwrap());
+        assert!(read.await.unwrap().unwrap().is_empty());
 
         let mut slow = sender.subscribe();
         for _ in 0..5 {
             announce("boards", &["Card"]);
         }
-        assert!(wait_for_commit(&mut slow, "boards", "Card").await.unwrap());
+        assert!(wait_for_commit(&mut slow, "boards", "Card")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -296,7 +327,7 @@ fn saved(result: Result<Card, Conflict<Card>>) -> String:
         write("move_card", 4, "away").await.unwrap();
         assert_eq!(
             frame(&mut reopened).await,
-            json!({"type":"snapshot","rows":[{"revision":"1","row":{"card":7,"board":"home","revision":1}}]})
+            json!({"type":"change","kind":"removed","revision":"3","row":{"card":4,"board":"home","revision":2}})
         );
     }
 }

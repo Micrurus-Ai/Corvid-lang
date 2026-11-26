@@ -140,7 +140,7 @@ where
             page.open(session.source.as_mut(), &id)?
         } else {
             tokio::select! {
-                _ = tokio::time::sleep(session.status.next_check()) => continue,
+                _ = session.status.changed() => continue,
                 _ = sleep_until(heartbeat.deadline) => continue,
                 message = socket.next() => {
                     heartbeat.activity(Instant::now());

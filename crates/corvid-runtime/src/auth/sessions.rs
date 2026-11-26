@@ -425,8 +425,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn observed_authority_serializes_enqueue_with_another_stores_writes() {
+    #[tokio::test]
+    async fn observed_authority_serializes_enqueue_with_another_stores_writes() {
         use std::{sync::Arc, time::Duration};
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.sqlite");
@@ -452,7 +452,7 @@ mod tests {
              WHEN new.trace_id = 'during-connect' BEGIN
              INSERT INTO auth_actor_roles VALUES ('member', 'editor', 100); END"
         ).unwrap();
-        assert!(observe("during-connect").is_err());
+        assert!(reader.watch_session_cookie("cookie", "during-connect", || 100).is_err());
         let observation = observe("connect").unwrap();
         assert_eq!(observation.while_current(|| {
             assert!(writer.revoke_session("login", 100).is_err());
