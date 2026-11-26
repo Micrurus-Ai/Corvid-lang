@@ -386,6 +386,7 @@ impl<'a> Lowerer<'a> {
                             agent: agent.id,
                             policy: crate::types::IrRoutePolicy::from_ast(&spec.policy),
                             approval: spec.approval.clone(),
+                            assistants: spec.assistants.clone(),
                             span: spec.span,
                         });
                     }

@@ -1926,7 +1926,35 @@ pub struct ActionSpec {
     /// body reaches, and how long the request waits. Required when the
     /// body can reach one, as on a route.
     pub approval: Option<crate::ApprovalSpec>,
+    /// The `assistants:` line: whether an authorized assistant is offered
+    /// the action. Absent, it is not offered to any assistant.
+    pub assistants: Option<AssistantExposure>,
     pub span: Span,
+}
+
+/// An action's `assistants:` line (B10).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantExposure {
+    pub mode: AssistantMode,
+    /// What an assistant reads to decide whether to call the action.
+    pub description: String,
+    pub span: Span,
+}
+
+/// How an assistant may call an action. `Allow` (no confirmation) arrives
+/// with on-behalf-of authority (B11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssistantMode {
+    /// Each call waits for the person the assistant acts for to confirm.
+    Confirm,
+}
+
+impl AssistantMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AssistantMode::Confirm => "confirm",
+        }
+    }
 }
 
 /// ABI marker on an exported agent declaration.

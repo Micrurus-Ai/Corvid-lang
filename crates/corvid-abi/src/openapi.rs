@@ -254,6 +254,10 @@ fn action_operation(action: &ContractAction, contract: &ApplicationContract) -> 
     let mut operation = Map::new();
     operation.insert("operationId".into(), json!(action.callable.name));
     operation.insert("tags".into(), json!(["actions"]));
+    if let Some(assistants) = &action.assistants {
+        operation.insert("description".into(), json!(assistants.description));
+        operation.insert("x-corvid-assistants".into(), json!(assistants.mode));
+    }
     operation.insert(
         "requestBody".into(),
         json!({

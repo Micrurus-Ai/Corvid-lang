@@ -446,6 +446,19 @@ pub struct ContractAction {
     /// `202` with an approval to poll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ContractApprovalPolicy>,
+    /// Whether an authorized assistant is offered the action, and how.
+    /// Absent: people only, and no assistant is told it exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistants: Option<ContractAssistants>,
+}
+
+/// An action's `assistants:` line as the contract carries it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractAssistants {
+    /// `confirm`: each call waits for the person the assistant acts for.
+    pub mode: String,
+    /// What an assistant reads to decide whether to call the action.
+    pub description: String,
 }
 
 impl ContractAction {
@@ -679,6 +692,10 @@ pub fn emit_application_contract(
                     policy: contract_policy(&spec.policy),
                     input_type: whole.then(|| names.name(&params[0].ty)),
                     approval: spec.approval.as_ref().map(ContractApprovalPolicy::of),
+                    assistants: spec.assistants.as_ref().map(|line| ContractAssistants {
+                        mode: line.mode.as_str().into(),
+                        description: line.description.clone(),
+                    }),
                 }
             }),
             _ => None,

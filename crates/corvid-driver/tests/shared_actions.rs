@@ -224,6 +224,37 @@ fn an_action_takes_annotations_as_an_agent_does() {
 }
 
 #[test]
+fn an_action_offered_to_assistants_says_how_and_why() {
+    let source = "action ping() -> String requires anyone:\n    assistants: confirm \"Check that the board answers.\"\n    return \"pong\"\n";
+    let contract = compile_to_application_contract_with_config(source, "app.cor", "test", None)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+    let line = contract.actions[0].assistants.as_ref().expect("the contract carries the assistants line");
+    assert_eq!((line.mode.as_str(), line.description.as_str()), ("confirm", "Check that the board answers."));
+
+    let ir = compile_to_ir(source).unwrap_or_else(|e| panic!("{e:#?}"));
+    let gaps = corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    assert!(
+        gaps.iter().any(|gap| gap.message().contains("action ping") && gap.message().contains("B10-3b")),
+        "serve refuses to start until an assistant can actually call it: {gaps:?}"
+    );
+
+    let unoffered = compile_to_application_contract_with_config(&format!("{IDENTITY}{BOARD}"), "app.cor", "test", None).unwrap();
+    assert!(unoffered.actions.iter().all(|a| a.assistants.is_none()), "no line, no assistant");
+}
+
+#[test]
+fn the_assistants_line_offers_only_what_runs_today() {
+    let found = errors("action ping() -> String requires anyone:\n    assistants: allow \"Ping.\"\n    return \"pong\"\n");
+    assert!(found.iter().any(|m| m.contains("on-behalf-of authority (B11)")), "{found:#?}");
+    let found = errors("action ping() -> String requires anyone:\n    assistants: never \"Ping.\"\n    return \"pong\"\n");
+    assert!(found.iter().any(|m| m.contains("no `assistants:` line")), "{found:#?}");
+    let found = errors("action ping() -> String requires anyone:\n    assistants: confirm \"\"\n    return \"pong\"\n");
+    assert!(found.iter().any(|m| m.contains("a description an assistant reads")), "{found:#?}");
+    let found = errors("agent run(assistants: String) -> String:\n    return assistants\n");
+    assert!(found.is_empty(), "`assistants` stays an ordinary name: {found:#?}");
+}
+
+#[test]
 fn action_stays_an_ordinary_name_elsewhere() {
     let found = errors("agent run(action: String) -> String:\n    return action\n");
     assert!(found.is_empty(), "{found:#?}");

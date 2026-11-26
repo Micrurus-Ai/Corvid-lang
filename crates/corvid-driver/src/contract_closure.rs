@@ -77,6 +77,8 @@ pub struct RuntimeCapabilities {
     pub auth_enforcement: bool,
     /// `live` subscriptions over the WebSocket transport (B14 RT-3).
     pub live_subscriptions: bool,
+    /// Assistant tool calls for actions with an `assistants:` line (B10-3b).
+    pub assistant_tools: bool,
 }
 
 impl RuntimeCapabilities {
@@ -110,6 +112,10 @@ impl RuntimeCapabilities {
             // program that declares one refuses to start rather than
             // advertise a subscription no socket answers.
             live_subscriptions: false,
+            // B10-3a declares assistant exposure; the endpoint an assistant
+            // calls arrives in B10-3b, so until then a program offering an
+            // action to assistants refuses to start.
+            assistant_tools: false,
         }
     }
 }
@@ -120,6 +126,15 @@ impl RuntimeCapabilities {
 /// executable, and the backend may start.
 pub fn check_contract_closure(ir: &IrFile, caps: RuntimeCapabilities) -> Vec<ClosureGap> {
     let mut gaps = Vec::new();
+    for action in &ir.actions {
+        if action.assistants.is_some() && !caps.assistant_tools {
+            gaps.push(ClosureGap {
+                element: format!("action {} (`assistants:`)", action.name),
+                missing_capability: "assistant tool calls (an MCP endpoint and WebMCP tools)".to_string(),
+                provided_by: "B10-3b",
+            });
+        }
+    }
     for server in &ir.servers {
         for route in &server.routes {
             if route.response_kind == corvid_ast::RouteResponseKind::Live {

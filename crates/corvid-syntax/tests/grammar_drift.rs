@@ -730,6 +730,7 @@ action move_card(move: MoveCard) -> Int requires permission("board.edit") and au
     return move.position
 
 action ping() -> String requires anyone:
+    assistants: confirm "Check that the board answers."
     return "pong"
 
 @budget($0.10)
@@ -798,6 +799,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("agent_decl", "agents_annotations_extern"),
     ("action_decl", "shared_actions"),
     ("action_policy", "shared_actions"),
+    ("assistants_line", "shared_actions"),
     ("annotation", "agents_annotations_extern"),
     ("annotation_args", "agents_annotations_extern"),
     ("extern_abi", "agents_annotations_extern"),

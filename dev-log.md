@@ -1627,6 +1627,27 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - The `assistants:` line (B10-3a)
+
+`assistants: confirm "Move a card to another column."` as an action's
+first line offers the action to an authorized assistant; without the
+line no assistant is told the action exists. The parser recognizes the
+word only there, through a new `parse_block_after_indent` that the
+action parser continues into after reading the line. `allow` is
+refused, naming B11, because it needs on-behalf-of authority that does
+not run yet; `never` is refused because leaving the line out says it.
+The description is required, since it is what an assistant reads.
+
+The contract and OpenAPI carry the mode and description, but nothing
+serves assistant calls yet, so contract closure gained
+`assistant_tools: false`: `corvid serve` refuses to start a program
+with the line, naming the action and B10-3b, the way `live` waited for
+its transport. The B10-3b design questions (whose authority an MCP call
+carries, how `confirm` reaches the person, the trace surface) are in
+the proposal's slice list, to settle before its code.
+
+---
+
 ## 2026-11-26 - Every generated call reaches a served endpoint (B10-2b-6)
 
 The generated TypeScript client, the dev console and the React

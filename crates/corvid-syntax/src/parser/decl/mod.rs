@@ -472,9 +472,21 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokKind::Colon, "`:` after the action's signature")?;
         self.expect_newline()?;
-        let body = self.parse_indented_block()?;
+        // `assistants:` is recognized only as an action's first line, so
+        // the word stays an ordinary name everywhere else.
+        let (assistants, body) = if matches!(self.peek(), TokKind::Indent)
+            && matches!(self.peek_ahead(1), TokKind::Ident(word) if word == "assistants")
+            && matches!(self.peek_ahead(2), TokKind::Colon)
+        {
+            let block_start = self.peek_span();
+            self.bump(); // Indent
+            let exposure = self.parse_assistant_exposure()?;
+            (Some(exposure), self.parse_block_after_indent(block_start)?)
+        } else {
+            (None, self.parse_indented_block()?)
+        };
         let end = body.span;
-        let spec = ActionSpec { policy, approval: None, span: start.merge(name_span) };
+        let spec = ActionSpec { policy, approval: None, assistants, span: start.merge(name_span) };
         Ok(AgentDecl {
             name: Ident::new(name, name_span),
             extern_abi: None,
@@ -489,6 +501,60 @@ impl<'a> Parser<'a> {
             action: Some(spec),
             span: start.merge(end),
         })
+    }
+
+    /// `assistants: confirm "description"`: an authorized assistant may
+    /// call the action, and the person it acts for confirms each call.
+    /// `allow` is refused until on-behalf-of authority (B11) can run it;
+    /// an action people alone call leaves the line out, so there is no
+    /// `never`.
+    fn parse_assistant_exposure(&mut self) -> Result<corvid_ast::AssistantExposure, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // assistants
+        self.expect(TokKind::Colon, "`:` after `assistants`")?;
+        let refused = |got: String, expected: &str, span| ParseError {
+            kind: ParseErrorKind::UnexpectedToken { got, expected: expected.into() },
+            span,
+        };
+        let mode_span = self.peek_span();
+        match self.peek().clone() {
+            TokKind::Ident(mode) if mode == "confirm" => {
+                self.bump();
+            }
+            TokKind::Ident(mode) if mode == "allow" => {
+                return Err(refused(
+                    "`assistants: allow`".into(),
+                    "`assistants: confirm \"...\"`; calls without a person's confirmation arrive with on-behalf-of authority (B11)",
+                    mode_span,
+                ));
+            }
+            TokKind::Ident(mode) if mode == "never" => {
+                return Err(refused(
+                    "`assistants: never`".into(),
+                    "no `assistants:` line; an action without one is never offered to an assistant",
+                    mode_span,
+                ));
+            }
+            other => {
+                return Err(refused(describe_token(&other), "`confirm`", mode_span));
+            }
+        }
+        let description = match self.peek().clone() {
+            TokKind::StringLit(text) if !text.trim().is_empty() => {
+                self.bump();
+                text
+            }
+            other => {
+                return Err(refused(
+                    describe_token(&other),
+                    "a description an assistant reads to decide whether to call this action, as in `confirm \"Move a card to another column.\"`",
+                    self.peek_span(),
+                ));
+            }
+        };
+        let span = start.merge(self.prev_span());
+        self.expect_newline()?;
+        Ok(corvid_ast::AssistantExposure { mode: corvid_ast::AssistantMode::Confirm, description, span })
     }
 
     /// `fn name(params) -> Ty:` — pure function declaration
