@@ -8415,3 +8415,7 @@ A program whose entry agent returns a `List`, `Option` or `Result`, or takes a r
 
 `corvid run` prints the entry agent's result the same way on both tiers. A `String` prints as its text, without quotes. Another scalar prints its `to_string()` text (`42`, `2.0`, `true`). A record, variant, list, option, result or map prints its JSON, compact and with sorted keys: the JSON a route returns for the same value, so a renamed key shows its JSON name. `Refund(amount: 42, order_id: "o-1")` became `{"amount":42,"order-id":"o-1"}`. Pipe it into `jq` to read it, or decode it with the generated client. A program returning a list, an option or a result now runs natively.
 
+### Every type error has its own code
+
+Each error the type checker reports prints a code of its own: `[E0516] error: ... has no exact Float value`, where most used to print `E0000`. Codes are grouped by area. `E01` covers effects and approval, `E02` types, `E03` names, `E04` JSON and records, `E05` scalars such as `Decimal` and time, `E06` tables, `E07` actions and routes, `E08` connectors and `E09` streams, prompts, tools and agents. Codes that existed before are unchanged (`E0101`, `E0201` to `E0209`, `E0250`), and a code stays the same when an error's message is reworded. Lexer, parser and name errors get theirs next.
+

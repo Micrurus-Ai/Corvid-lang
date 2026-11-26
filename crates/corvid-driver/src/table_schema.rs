@@ -110,7 +110,8 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
                 span: corvid_ast::Span::new(0, 0),
                 message: format!("two modules of this program each declare a table named `{}`; a database stores one table under each name", table.name().name),
                 hint: Some("rename one of the tables".into()),
-            });
+            code: None,
+        });
         }
     }
     if !problems.is_empty() {
@@ -144,7 +145,7 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
         let columns: Vec<String> = schema.columns.iter().map(|(name, _)| name.clone()).collect();
         match derive_indexes(&schema.name, &schema.keys, &schema.unique, &columns, &own) {
             Ok(indexes) => schema.indexes = indexes,
-            Err(message) => problems.push(Diagnostic { origin: None, span: corvid_ast::Span::new(0, 0), message, hint: None }),
+            Err(message) => problems.push(Diagnostic { origin: None, span: corvid_ast::Span::new(0, 0), message, hint: None , code: None, }),
         }
     }
     if problems.is_empty() { Ok(schemas) } else { Err(problems) }

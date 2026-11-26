@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Diagnostic codes DC-1: type errors declare their codes
+
+[Proposal](docs/proposals/diagnostic-codes.md). A diagnostic's code was
+found by matching phrases in its message, so most of the 135 checker
+errors printed `E0000`, and `YieldTypeMismatch` printed `E0208` only because
+its message contains "type mismatch". `TypeErrorKind::code()` is now an
+exhaustive match. It was generated once from the existing phrase table, so
+the eleven kinds that had codes keep them, and every other kind got a code in
+its area's range, in declaration order. The codes are written literally, so
+inserting a kind renumbers nothing. `Diagnostic` carries the code from the
+source, and the renderer prints it. Only sources without declared codes
+(lexer, parser, resolver) still fall back to the phrase matcher, which DC-2
+removes. A test reads the `code()` match and refuses a duplicate or a
+malformed code.
+
 ### One printed form for a program's result
 
 The same program printed different output depending on its tier. The

@@ -367,7 +367,7 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 **Test infrastructure**
 
 - [ ] A diagnostic's code is found by matching words in its message (`corvid-driver/src/render.rs`), so most newer errors print `E0000`, and rewording a message can change its code. Stronger: each `TypeErrorKind` declares its code, a test refuses a kind without one or two kinds sharing one, and the error reference lists them. [Proposal](proposals/diagnostic-codes.md)
-  - [ ] DC-1. `TypeErrorKind::code()`, every existing code kept, `Diagnostic` carrying its code, a duplicate-code test.
+  - [x] DC-1. `TypeErrorKind::code()`, every existing code kept, `Diagnostic` carrying its code, a duplicate-code test. Done 2026-11-26: all 135 kinds, the eleven that had codes keep them; `YieldTypeMismatch`, which shared `E0208` through its wording, has its own.
   - [ ] DC-2. Lexer, parser, resolver and effect error codes; `detect_error_code` removed.
   - [ ] DC-3. The generated error reference (`docs/reference/errors.md`) and its drift test.
 

@@ -38,7 +38,9 @@ pub fn render_pretty_with_severity(
     let start = char_offset(diag.span.start);
     let span = start..char_offset(diag.span.end).max(start);
 
-    let code = detect_error_code(&diag.message);
+    // A code the error's kind declares; a source that declares none yet
+    // falls back to the message (diagnostic codes DC-2 removes that).
+    let code = diag.code.unwrap_or_else(|| detect_error_code(&diag.message));
     let with_color = std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal();
     let (header, accent) = match severity {
         Severity::Error => ("error", Color::Red),
@@ -138,8 +140,9 @@ pub enum Severity {
     Warning,
 }
 
-/// Best-effort mapping from a diagnostic message to a stable error code.
-/// These codes are documented and searchable.
+/// The code of a diagnostic whose source declares none yet, found from
+/// its message. Type errors declare theirs (`TypeErrorKind::code`);
+/// diagnostic codes DC-2 gives the other sources theirs and removes this.
 fn detect_error_code(msg: &str) -> &'static str {
     if msg.contains("dangerous tool") && msg.contains("without a prior") {
         "E0101"
@@ -288,6 +291,7 @@ mod tests {
             span: Span::new(0, 5),
             message: "type mismatch in agent `main`: Int vs String".to_string(),
             hint: Some("rebind one operand to match the other".to_string()),
+            code: None,
         };
         let source = "agent main() -> Int:\n    return 0\n";
         let rendered = render_pretty(&diag, Path::new("main.cor"), source);

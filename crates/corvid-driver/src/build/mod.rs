@@ -84,7 +84,8 @@ fn build_native_entry(
                         hint: Some(
                             "run it with `corvid run`, serve it with `corvid serve`, or package it with `corvid build --target web`".into(),
                         ),
-                    }],
+            code: None,
+        }],
                 });
             }
             let bin_dir = native_output_dir_for(source_path);

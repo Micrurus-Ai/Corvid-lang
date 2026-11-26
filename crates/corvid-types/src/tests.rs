@@ -8784,3 +8784,29 @@ fn integer_literals_become_floats_by_slot_and_int_values_never_widen() {
     let inexact = errors("agent main() -> Float:\n    return 9007199254740993\n");
     assert!(inexact[0].0.contains("no exact `Float` value"), "{inexact:?}");
 }
+
+/// Every error kind declares its own code, in the `E` + four digits form,
+/// and no two kinds share one, so a code names exactly one error and
+/// rewording a message never changes it. Read from the `code()` match,
+/// which is exhaustive, so a new kind cannot compile without a code.
+#[test]
+fn no_two_error_kinds_share_a_code() {
+    let source = include_str!("errors/error_kind.rs");
+    let start = source.find("pub fn code(&self)").expect("TypeErrorKind::code");
+    let body = &source[start..source[start..].find("\n    }\n").map(|end| start + end).expect("end of code()")];
+    let mut seen = std::collections::BTreeMap::new();
+    for line in body.lines().filter(|line| line.contains("=> \"")) {
+        let kind = line.trim().split_whitespace().next().unwrap().trim_start_matches("Self::").to_string();
+        let code = line.split('"').nth(1).unwrap().to_string();
+        assert!(code.len() == 5 && code.starts_with('E') && code[1..].chars().all(|c| c.is_ascii_digit()), "{kind}: `{code}`");
+        if let Some(other) = seen.insert(code.clone(), kind.clone()) {
+            panic!("`{other}` and `{kind}` share {code}");
+        }
+    }
+    assert!(seen.len() > 100, "read the codes: {}", seen.len());
+    // The codes every message mapped to before they were declared stay.
+    for (code, kind) in [("E0101", "UnapprovedDangerousCall"), ("E0201", "ArityMismatch"), ("E0208", "TypeMismatch"), ("E0209", "UngroundedReturn"), ("E0250", "EffectConstraintViolation")] {
+        assert_eq!(seen.get(code).map(String::as_str), Some(kind), "{code}");
+    }
+}
+

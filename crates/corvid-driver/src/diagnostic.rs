@@ -24,6 +24,10 @@ pub struct Diagnostic {
     pub span: Span,
     pub message: String,
     pub hint: Option<String>,
+    /// The code the error's kind declares (`E0208`), or `None` for a
+    /// source that does not declare codes yet; the renderer then falls
+    /// back to the message (diagnostic codes DC-2 removes that).
+    pub code: Option<&'static str>,
 }
 
 impl Diagnostic {
@@ -56,6 +60,7 @@ impl From<LexError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
+            code: None,
         }
     }
 }
@@ -67,6 +72,7 @@ impl From<ParseError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
+            code: None,
         }
     }
 }
@@ -78,6 +84,7 @@ impl From<ResolveError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
+            code: None,
         }
     }
 }
@@ -91,6 +98,7 @@ impl From<TypeError> for Diagnostic {
             span: e.span,
             message,
             hint,
+            code: Some(e.kind.code()),
         }
     }
 }
@@ -102,6 +110,7 @@ impl From<TypeWarning> for Diagnostic {
             span: w.span,
             message: w.kind.message(),
             hint: w.kind.hint(),
+            code: None,
         }
     }
 }
