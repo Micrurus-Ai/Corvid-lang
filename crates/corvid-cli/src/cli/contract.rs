@@ -17,6 +17,11 @@ pub enum ContractCommand {
         /// `target/contracts/app.corvid.json`.
         #[arg(long, value_name = "FILE")]
         out: Option<String>,
+        /// Instead of writing the contract, compare it with an earlier one
+        /// (a saved `app.corvid.json`) and report each action change and
+        /// the callers it reaches. Exits 1 when a change is breaking.
+        #[arg(long, value_name = "BASE")]
+        diff: Option<std::path::PathBuf>,
     },
     /// Emit a standard OpenAPI 3.1 document for a Corvid source file —
     /// routes, request/response schemas (with field-refinement

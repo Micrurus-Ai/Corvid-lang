@@ -150,7 +150,8 @@ What frontend development owns here: the page script's CSRF fill, the fetch subm
 **Non-scope.** Delegated tokens and `allow` (B11); a durable confirmation store that survives a restart (with B13); the in-page WebMCP registration and the confirmation prompt UI (frontend development, reading `tools/list`).
 - [x] B10-4a. `corvid act <action> --field value ...` (or `--json`), reading flags by the request-text rule through the shared `action_calls` decoders, printing public JSON, traced as `surface: "cli"`. An action that requires a signed-in caller is refused by name until the command line can sign in (B11). Built 2026-11-26.
 - [ ] B10-4b. Workers: `jobs enqueue --task <action>` checks the payload against the action's input type at enqueue time, and `jobs run` runs the action through the same path, traced as `surface: "worker"`. A signed-in action needs the enqueuing person's authority carried with the job, which is B11's on-behalf-of authority.
-- [ ] B10-5. Cross-tier change report: `corvid contract app --diff`, and the project-board example (`move_card`), with a test that renames an input and checks every reported caller. Port the reading list's `apply_reviewed_titles` and `read_page` onto actions, deleting the hand-written form script.
+- [x] B10-5a. Cross-tier change report: `corvid contract app --diff BASE` reports each action change as breaking, additive or a note, with every outside surface it reaches, and exits 1 on a breaking change. A test renames an input and checks each reported caller. Built 2026-11-26.
+- [ ] B10-5b. The project-board example (`move_card`) and the reading list's `apply_reviewed_titles` and `read_page` on actions, deleting the hand-written form script. Waits for the form binding (B10-2b-5).
 
 ## Non-scope
 

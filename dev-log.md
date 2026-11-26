@@ -1793,6 +1793,28 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - What an action change breaks (B10-5a)
+
+`corvid contract app --diff base.json` compares the program's contract
+with a saved one and reports each action change with every outside
+surface it reaches: the HTTP endpoint, the TypeScript client method,
+`corvid act`, and the assistant tool when offered. A Corvid caller of a
+changed action is already a compile error; this is the half the
+compiler cannot see, an app already shipped or an assistant already
+connected. The rules follow from how each surface decodes: undeclared
+fields are refused, so a removed or renamed field breaks a caller that
+still sends it; a new required field breaks one that does not; a new
+optional one is additive; changed bounds, result type, requirements, a
+new `@approval` (a `202` where a result came) or a removed `assistants:`
+line break. The command exits 1 on a breaking change so CI can stop the
+release. The comparison lives in `corvid_abi::action_changes`.
+
+Narrowed, on the roadmap: a change inside a record an input holds is not
+reported yet. B10-5b (the board example, the reading list on actions)
+waits for the form binding.
+
+---
+
 ## 2026-11-26 - `corvid act` (B10-4a)
 
 `corvid act move_card --card 3 --to Done --position 7` calls an action

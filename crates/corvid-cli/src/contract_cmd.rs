@@ -383,6 +383,23 @@ pub fn run_app_contract(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     Ok(0)
 }
 
+/// B10-5 — compare `file`'s contract with a saved one and report each
+/// action change and the callers it reaches. Exits 1 when any change is
+/// breaking, so a CI step can stop a release that would break a deployed
+/// client, script or assistant.
+pub fn run_app_contract_diff(file: Option<&Path>, base: &Path) -> Result<u8> {
+    let Some(head) = build_contract(file)? else {
+        return Ok(1);
+    };
+    let text = std::fs::read_to_string(base).with_context(|| format!("read {}", base.display()))?;
+    let base: corvid_abi::app_contract::ApplicationContract =
+        serde_json::from_str(&text).with_context(|| format!("{} is not an application contract", base.display()))?;
+    let changes = corvid_abi::action_changes::action_changes(&base, &head);
+    print!("{}", corvid_abi::action_changes::render_action_changes(&changes));
+    let breaking = changes.iter().any(|c| c.severity == corvid_abi::action_changes::ChangeSeverity::Breaking);
+    Ok(if breaking { 1 } else { 0 })
+}
+
 /// Slice 51b — emit a standard OpenAPI 3.1 document for `file`.
 pub fn run_openapi(file: Option<&Path>, out: Option<&str>) -> Result<u8> {
     let Some(contract) = build_contract(file)? else {
