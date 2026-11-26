@@ -94,6 +94,54 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Prompts exchange the public JSON form with a model
+
+The grammar says a prompt argument "renders as its JSON form", but a
+prompt had a form of its own. The interpreter wrote arguments with its
+internal `value_to_json`, described the reply with a schema in that form
+and read the reply with `json_to_value`, so an `Option` reached the model
+as `{"tag": "some", "value": …}`, and a variant lacked the `tag` and
+`type` the public form carries. A model handles a value or `null`
+better than an envelope, and the form a model saw differed from the one
+a frontend, `to_json()` and OpenAPI see.
+
+Decided in the [native scalar boundaries](docs/proposals/native-scalar-boundaries.md)
+proposal: a prompt uses the public form everywhere it meets a model.
+One module, `model_json.rs`, holds both directions. Every prompt path
+calls it: single shot, routed, ensemble, adversarial, resumed and
+escalated prompts, the judged guard, citation checks and prompt
+functions. The renderers now take the declared types and fail with the
+parameter's name for a value with no JSON form, rather than falling back
+to the internal form.
+
+`schema_for` describes the same form. The shape of each construct
+(nullable, `Result`, variant, record, list, map) moved into
+`corvid_public_json::schema`, and OpenAPI calls the same functions, so
+the two cannot drift; OpenAPI's output for the orders and storefront
+examples is identical before and after. Native code needed no change.
+It accepts scalars and scalar records, where both forms agree, and its
+schema comes from the same function.
+
+A recording whose prompt arguments or replies hold an `Option` or a
+variant stops replaying, with a divergence that names the prompt,
+because the arguments it recorded are in the old form. Learnings says
+so. Scalar and plain-record prompts replay as before. The knowledge base assistant's committed refund-policy recording (and its
+seed copy) was one: its grounded context had reached the model as the
+whole provenance envelope (`{"sources": [...], "tag": "grounded",
+"value": ...}`). The model now sees just the context text, and the
+recording's prompt call is updated to match. No other committed
+recording holds an old-form prompt argument or reply.
+
+Tests: `corvid-vm/src/tests/prompt_json.rs` covers the rendered text, the
+recorded arguments and the schema for an `Option`, a variant and a
+record. It also covers `null` and absent fields being `None`, and an old
+tagged reply refused with the field named. The schema generator's unit
+tests cover each shape. One stream test expected a grounded wrapper in
+the stream upgrade event; it now expects the partial output as the
+continuation showed it to the model.
+
+---
+
 ## 2026-11-26 - One stream protocol for the server and the generated client
 
 `corvid serve` sent a `Stream<T>` route as bare `data:` events, `event:

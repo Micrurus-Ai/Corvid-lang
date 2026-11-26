@@ -1,9 +1,7 @@
-use crate::conv::json_to_value;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::interp::Interpreter;
 use crate::step::{StepAction, StepEvent};
 use crate::value::Value;
-use crate::value_to_json;
 use corvid_ast::Span;
 use corvid_ir::{IrEnsembleWeighting, IrPrompt};
 use corvid_runtime::{majority_vote, weighted_vote, LlmRequest, TraceEvent};
@@ -38,7 +36,7 @@ impl<'ir> Interpreter<'ir> {
                 .await?;
             if let StepAction::Override(val) = action {
                 let value =
-                    json_to_value(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
+                    super::from_model_json(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::Marshal(format!(
                                 "prompt `{callee_name}` override: {e}"
@@ -51,7 +49,7 @@ impl<'ir> Interpreter<'ir> {
                         prompt, &value,
                     ),
                     tokens: super::super::effect_compose::estimate_tokens(
-                        &value_to_json(&value).to_string(),
+                        &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                     ),
                     cost: prompt.effect_cost,
                     value,
@@ -69,7 +67,7 @@ impl<'ir> Interpreter<'ir> {
             other => other,
         };
         let output_schema = crate::schema::prompt_output_schema(result_ty, &self.types_by_id);
-        let json_args: Vec<serde_json::Value> = arg_values.iter().map(value_to_json).collect();
+        let json_args = self.model_args(prompt, arg_values, span)?;
 
         let mut requests = Vec::with_capacity(spec.models.len());
         for member in &spec.models {
@@ -92,7 +90,7 @@ impl<'ir> Interpreter<'ir> {
                     args: json_args.clone(),
                     output_schema: output_schema.clone(),
                     sampling: self.resolve_sampling(prompt, &selected_model),
-            messages: super::render_messages(prompt, arg_values, &rendered),
+            messages: super::render_messages(prompt, arg_values, &rendered, &self.types_by_id),
                 },
             ));
         }
@@ -198,7 +196,7 @@ impl<'ir> Interpreter<'ir> {
                             args: json_args.clone(),
                             output_schema: output_schema.clone(),
                             sampling: self.resolve_sampling(prompt, &selected_model),
-            messages: super::render_messages(prompt, arg_values, &rendered),
+            messages: super::render_messages(prompt, arg_values, &rendered, &self.types_by_id),
                         },
                         prompt.cacheable,
                     )
@@ -269,7 +267,7 @@ impl<'ir> Interpreter<'ir> {
             let action = self
                 .maybe_yield(StepEvent::AfterPromptCall {
                     prompt_name: callee_name.to_string(),
-                    result: value_to_json(&winner_value),
+                    result: self.model_json(&winner_value, &prompt.return_ty, span)?,
                     result_confidence: final_confidence,
                     elapsed_ms: ensemble_start.elapsed().as_millis() as u64,
                     span,
@@ -277,7 +275,7 @@ impl<'ir> Interpreter<'ir> {
                 .await?;
             if let StepAction::Override(val) = action {
                 let value =
-                    json_to_value(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
+                    super::from_model_json(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::Marshal(format!(
                                 "prompt `{callee_name}` override: {e}"
@@ -290,7 +288,7 @@ impl<'ir> Interpreter<'ir> {
                         prompt, &value,
                     ),
                     tokens: super::super::effect_compose::estimate_tokens(
-                        &value_to_json(&value).to_string(),
+                        &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                     ),
                     cost: total_cost,
                     value,

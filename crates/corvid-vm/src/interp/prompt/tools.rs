@@ -1,5 +1,4 @@
 use super::{journal::ConversationJournal, Interpreter};
-use crate::conv::{json_to_value, value_to_json};
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::value::Value;
 use corvid_ast::Span;
@@ -29,7 +28,7 @@ impl<'ir> Interpreter<'ir> {
         let mut turn = ToolTurn::default();
         let mut functions = std::collections::HashMap::new();
         for (param, value) in prompt.params.iter().zip(values) {
-            let Type::Function { params, .. } = &param.ty else {
+            let Type::Function { params, ret, .. } = &param.ty else {
                 continue;
             };
             let Value::Closure(function) = value else {
@@ -48,7 +47,7 @@ impl<'ir> Interpreter<'ir> {
                 "name":param.name, "parameters":{"type":"object","properties":properties,
                 "required":required,"additionalProperties":false}
             }}));
-            functions.insert(param.name.as_str(), (function, params));
+            functions.insert(param.name.as_str(), (function, (params, ret.as_ref())));
         }
         let mut journal = if let Some(job) = self.runtime.durable_job() {
             // A restored result cannot reproduce writes to a captured outer variable.
@@ -137,7 +136,7 @@ impl<'ir> Interpreter<'ir> {
                     return Err(error(format!("invalid or repeated function call {id}")));
                 }
                 let name = call["function"]["name"].as_str().unwrap_or("");
-                let (function, types) = functions
+                let (function, (types, ret)) = functions
                     .get(name)
                     .ok_or_else(|| error(format!("unknown prompt function {name}")))?;
                 let args: Map<String, serde_json::Value> =
@@ -152,13 +151,13 @@ impl<'ir> Interpreter<'ir> {
                         .get(key)
                         .ok_or_else(|| error(format!("missing argument {name}.{key}")))?;
                     inputs.push(
-                        json_to_value(raw.clone(), ty, &self.types_by_id)
+                        super::from_model_json(raw.clone(), ty, &self.types_by_id)
                             .map_err(|e| error(format!("invalid argument {name}.{key}: {e}")))?,
                     );
                 }
-                pending.push((id, *function, inputs));
+                pending.push((id, *function, *ret, inputs));
             }
-            for (id, function, inputs) in pending {
+            for (id, function, ret, inputs) in pending {
                 if let Some(j) = journal.as_mut() {
                     if let Some(saved) = j.tool_result(&response, id).map_err(error)? {
                         turn.history.push(saved);
@@ -166,7 +165,8 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
                 let value = self.apply_closure(function, inputs, span).await?;
-                let result = json!({"role":"tool","tool_call_id":id,"content":value_to_json(&value).to_string()});
+                let content = super::to_model_text(&value, ret, &self.types_by_id).map_err(error)?;
+                let result = json!({"role":"tool","tool_call_id":id,"content":content});
                 if let Some(j) = journal.as_mut() {
                     j.commit(&response, Some(&result)).map_err(error)?;
                 }

@@ -2845,7 +2845,8 @@ pub(crate) fn prompt_segments_for_test(
     args: &[Value],
 ) -> Result<crate::interp::prompt::MessageSegments, InterpError> {
     let rendered = String::new();
-    prompt::build_message_segments(prompt, args, &rendered, corvid_ast::Span::new(0, 0))
+    let types = std::collections::HashMap::new();
+    prompt::build_message_segments(prompt, args, &rendered, &types, corvid_ast::Span::new(0, 0))
 }
 
 pub(crate) fn pattern_matches(

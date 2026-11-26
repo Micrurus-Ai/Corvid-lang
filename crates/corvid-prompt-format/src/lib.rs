@@ -7,6 +7,16 @@
 //! dialects). The schema is the language's contract with the model:
 //! it tells the model what shape Corvid expects back.
 //!
+//! The schema describes the public JSON form, the one `T.to_json()`
+//! writes and HTTP bodies use (`corvid_public_json`): an `Option` is
+//! its value or `null`, a sum type is
+//! `{"tag": "variant", "type": …, "variant": …, "fields": [...]}`. The
+//! shape of each construct comes from `corvid_public_json::schema`,
+//! which the published OpenAPI document shares, so what a model is
+//! shown and what a frontend is shown cannot drift. Every type is
+//! written inline (no `$ref`s), which providers' structured-output APIs
+//! accept best.
+//!
 //! This logic used to live in `corvid-vm` because the interpreter
 //! happened to need it first. It moved into its own crate so the
 //! native code generator can reuse it without depending on the
@@ -20,6 +30,7 @@
 
 use corvid_ir::IrType;
 use corvid_resolve::DefId;
+use corvid_public_json::schema;
 use corvid_types::Type;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -61,73 +72,21 @@ fn schema_for_inner(
         Type::Nothing => json!({ "type": "null" }),
         Type::Map(key, value) => {
             if matches!(**key, Type::String) {
-                json!({
-                    "type": "object",
-                    "additionalProperties": schema_for_inner(value, types_by_id, visiting),
-                })
+                schema::text_keyed_map(schema_for_inner(value, types_by_id, visiting))
             } else {
-                // Non-String keys can't be a JSON object; render as an
-                // array of [key, value] pairs.
-                json!({
-                    "type": "array",
-                    "items": {
-                        "type": "array",
-                        "prefixItems": [
-                            schema_for_inner(key, types_by_id, visiting),
-                            schema_for_inner(value, types_by_id, visiting),
-                        ],
-                    },
-                })
+                schema::pair_map(
+                    schema_for_inner(key, types_by_id, visiting),
+                    schema_for_inner(value, types_by_id, visiting),
+                )
             }
         }
-        Type::List(elem) => json!({
-            "type": "array",
-            "items": schema_for_inner(elem, types_by_id, visiting),
-        }),
+        Type::List(elem) => schema::list(schema_for_inner(elem, types_by_id, visiting)),
         Type::Stream(inner) => schema_for_inner(inner, types_by_id, visiting),
-        Type::Option(inner) => json!({
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "tag": { "const": "some" },
-                        "value": schema_for_inner(inner, types_by_id, visiting),
-                    },
-                    "required": ["tag", "value"],
-                    "additionalProperties": false,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "tag": { "const": "none" },
-                    },
-                    "required": ["tag"],
-                    "additionalProperties": false,
-                }
-            ]
-        }),
-        Type::Result(ok, err) => json!({
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "tag": { "const": "ok" },
-                        "ok": schema_for_inner(ok, types_by_id, visiting),
-                    },
-                    "required": ["tag", "ok"],
-                    "additionalProperties": false,
-                },
-                {
-                    "type": "object",
-                    "properties": {
-                        "tag": { "const": "err" },
-                        "err": schema_for_inner(err, types_by_id, visiting),
-                    },
-                    "required": ["tag", "err"],
-                    "additionalProperties": false,
-                }
-            ]
-        }),
+        Type::Option(inner) => schema::nullable(schema_for_inner(inner, types_by_id, visiting)),
+        Type::Result(ok, err) => schema::result(
+            schema_for_inner(ok, types_by_id, visiting),
+            schema_for_inner(err, types_by_id, visiting),
+        ),
         Type::Weak(inner, _) => json!({
             "type": "object",
             "properties": {
@@ -153,74 +112,48 @@ fn schema_for_inner(
                 return json!({ "type": "object" });
             };
             visiting.push(*def_id);
-            if !ir_type.variants.is_empty() {
-                let alternatives: Vec<_> = ir_type
-                    .variants
-                    .iter()
-                    .map(|variant| {
-                        let payload: Vec<_> = variant
-                            .fields
-                            .iter()
-                            .map(|field| schema_for_inner(&field.ty, types_by_id, visiting))
-                            .collect();
-                        let mut fields = json!({
-                            "type": "array", "minItems": payload.len(), "maxItems": payload.len()
-                        });
-                        if !payload.is_empty() {
-                            fields["prefixItems"] = Value::Array(payload);
-                        }
-                        json!({
-                            "type": "object",
-                            "properties": {
-                                "variant": { "type": "string", "const": variant.name },
-                                "fields": fields
-                            },
-                            "required": ["variant", "fields"],
-                            "additionalProperties": false
+            let schema = if !ir_type.variants.is_empty() {
+                schema::sum(
+                    ir_type
+                        .variants
+                        .iter()
+                        .map(|variant| {
+                            let payload = variant
+                                .fields
+                                .iter()
+                                .map(|field| schema_for_inner(&field.ty, types_by_id, visiting))
+                                .collect();
+                            schema::variant(&ir_type.name, &variant.name, payload)
                         })
-                    })
-                    .collect();
-                visiting.pop();
-                return json!({ "oneOf": alternatives });
-            }
-            let mut properties = serde_json::Map::new();
-            let mut required = Vec::new();
-            for field in &ir_type.fields {
-                properties.insert(
-                    field.name.clone(),
-                    schema_for_inner(&field.ty, types_by_id, visiting),
-                );
-                required.push(Value::String(field.name.clone()));
-            }
+                        .collect(),
+                )
+            } else {
+                schema::record(
+                    ir_type
+                        .fields
+                        .iter()
+                        .map(|field| schema::RecordField {
+                            name: field.name.clone(),
+                            schema: schema_for_inner(&field.ty, types_by_id, visiting),
+                            optional: matches!(field.ty, Type::Option(_)),
+                        })
+                        .collect(),
+                )
+            };
             visiting.pop();
-            json!({
-                "type": "object",
-                "properties": properties,
-                "required": required,
-                "additionalProperties": false,
-            })
+            schema
         }
         // A conflict has the sum-type shape, one alternative per case it
         // can be.
-        Type::Conflict(row, cases) => {
-            let alternatives: Vec<_> = cases
+        Type::Conflict(row, cases) => schema::sum(
+            cases
                 .cases()
                 .map(|case| {
-                    let payload: Vec<_> = case.field().map(|_| schema_for_inner(row, types_by_id, visiting)).into_iter().collect();
-                    let mut fields = json!({ "type": "array", "minItems": payload.len(), "maxItems": payload.len() });
-                    if !payload.is_empty() {
-                        fields["prefixItems"] = Value::Array(payload);
-                    }
-                    json!({
-                        "type": "object",
-                        "properties": { "variant": { "type": "string", "const": case.name() }, "fields": fields },
-                        "required": ["variant", "fields"],
-                        "additionalProperties": false
-                    })
+                    let payload = case.field().map(|_| schema_for_inner(row, types_by_id, visiting)).into_iter().collect();
+                    schema::variant("Conflict", case.name(), payload)
                 })
-                .collect();
-            json!({ "oneOf": alternatives })
-        }
+                .collect(),
+        ),
         Type::ImportedStruct(_) | Type::RouteParams(_) => json!({ "type": "object" }),
         // `Function` and `Unknown` shouldn't appear as prompt return
         // types in well-typed programs. Emit a permissive schema so the
@@ -281,10 +214,7 @@ fn schema_for_inner(
         // The checker keeps a connector `Response` out of every prompt, so
         // no schema ever describes one; an empty schema keeps this total.
         Type::Response(_) => json!({}),
-        Type::Page(inner) => json!({
-            "type": "array",
-            "items": schema_for_inner(inner, types_by_id, visiting),
-        }),
+        Type::Page(inner) => schema::list(schema_for_inner(inner, types_by_id, visiting)),
         Type::Unknown => json!({}),
     }
 }
@@ -473,6 +403,69 @@ mod tests {
         let order_schema = &s["properties"]["order"];
         assert_eq!(order_schema["type"], "object");
         assert_eq!(order_schema["properties"]["id"], json!({"type": "string"}));
+    }
+
+    /// The schema describes the public form the reply is read in: an
+    /// `Option` is the value or `null` and may be left out of a record, a
+    /// `Result` is `{"tag": "ok", "ok": …}`, and a sum type names its
+    /// variants with `tag`, `type` and positional `fields`.
+    #[test]
+    fn schemas_describe_the_public_json_form() {
+        let by_id = empty();
+        assert_eq!(
+            schema_for(&Type::Option(Box::new(Type::Int)), &by_id),
+            json!({"type": ["integer", "null"]})
+        );
+        let result = schema_for(&Type::Result(Box::new(Type::Int), Box::new(Type::String)), &by_id);
+        assert_eq!(result["oneOf"][0]["properties"]["ok"], json!({"type": "integer"}));
+        assert_eq!(result["oneOf"][0]["required"], json!(["ok"]));
+        assert_eq!(result["oneOf"][1]["properties"]["err"], json!({"type": "string"}));
+
+        let record_id = DefId(41);
+        let sum_id = DefId(42);
+        let sum: &'static IrT = Box::leak(Box::new(IrT {
+            id: sum_id,
+            name: "Severity".into(),
+            fields: Vec::new(),
+            variants: vec![
+                corvid_ir::IrEnumVariant { name: "Low".into(), fields: Vec::new(), span: Span::new(0, 0) },
+                corvid_ir::IrEnumVariant {
+                    name: "High".into(),
+                    fields: vec![IrField { name: "reason".into(), ty: Type::String, refinement: None, span: Span::new(0, 0) }],
+                    span: Span::new(0, 0),
+                },
+            ],
+            span: Span::new(0, 0),
+        }));
+        let record: &'static IrT = Box::leak(Box::new(IrT {
+            id: record_id,
+            name: "Verdict".into(),
+            variants: Vec::new(),
+            fields: vec![
+                IrField { name: "summary".into(), ty: Type::String, refinement: None, span: Span::new(0, 0) },
+                IrField {
+                    name: "assignee".into(),
+                    ty: Type::Option(Box::new(Type::String)),
+                    refinement: None,
+                    span: Span::new(0, 0),
+                },
+                IrField { name: "severity".into(), ty: Type::Struct(sum_id), refinement: None, span: Span::new(0, 0) },
+            ],
+            span: Span::new(0, 0),
+        }));
+        let mut by_id: HashMap<DefId, &IrT> = HashMap::new();
+        by_id.insert(record_id, record);
+        by_id.insert(sum_id, sum);
+        let s = schema_for(&Type::Struct(record_id), &by_id);
+        assert_eq!(s["required"], json!(["summary", "severity"]));
+        assert_eq!(s["properties"]["assignee"], json!({"type": ["string", "null"]}));
+        let high = &s["properties"]["severity"]["oneOf"][1];
+        assert_eq!(high["properties"]["tag"], json!({"const": "variant"}));
+        assert_eq!(high["properties"]["type"], json!({"const": "Severity"}));
+        assert_eq!(high["properties"]["variant"], json!({"const": "High"}));
+        assert_eq!(high["properties"]["fields"]["prefixItems"], json!([{"type": "string"}]));
+        assert_eq!(high["required"], json!(["variant", "fields"]));
+        assert_eq!(s["properties"]["severity"]["oneOf"][0]["required"], json!(["variant"]));
     }
 
     #[test]

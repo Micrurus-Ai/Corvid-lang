@@ -189,6 +189,15 @@ The prompt body is a single template string; parameters interpolate
 with `{param}` inside the string (any typed parameter renders as its
 JSON form) — in the single template and in every role block.
 
+The JSON form is the public one, the form `T.to_json()` writes and HTTP
+bodies carry: a `String` is quoted, an `Option` is its value or `null`,
+a sum type is `{"tag": "variant", "type": …, "variant": …, "fields":
+[...]}`, and a `Grounded<T>` argument shows its `T`. A structured reply
+is described to the model in the same form, and read in it: an `Option`
+field may be `null` or absent, and undeclared fields are ignored. A
+`Stream<Partial<T>>` reply gives each field as `{"tag": "complete",
+"value": …}` or `{"tag": "streaming"}`, with the value in the public form.
+
 ```ebnf
 prompt_decl       ::= 'prompt' IDENT params '->' type_ref uses_clause? ':' INDENT prompt_body DEDENT
 
