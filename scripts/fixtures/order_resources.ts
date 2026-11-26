@@ -7,14 +7,19 @@ function check(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 
-// Inject only the interrupted response. The successful stream uses the live orders route.
+// Inject terminal failures after a valid item. Successful requests use the live orders route.
 async function checkInterruptedActivity(baseUrl: string): Promise<void> {
   const encoder = new TextEncoder();
   const partial = 'data: {"id":"order-1","status":"picked"}\r\n';
-  for (const ending of ["", "event: error\ndata: interrupted\n\n"]) {
+  for (const ending of [
+    "",
+    'event: failed\ndata: {"error":"handler_failed","detail":"stopped"}\n\n',
+    "event: chunk\ndata: {\n\n",
+  ]) {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode(partial + "\r"));
+        controller.enqueue(encoder.encode("event: chunk\r"));
+        controller.enqueue(encoder.encode("\n" + partial + "\r"));
         controller.enqueue(encoder.encode("\n" + ending));
         controller.close();
       },
@@ -28,6 +33,11 @@ async function checkInterruptedActivity(baseUrl: string): Promise<void> {
       throw new Error("Interrupted stream reported success");
     } catch (error) {
       if (!(error instanceof CorvidError)) throw error;
+      if (ending.startsWith("event: failed")) {
+        check(error.status === 200 && error.message === "stopped", "Missing server failure detail");
+      } else {
+        check(error.status === 0, "Missing stream interruption");
+      }
     }
   }
 }
@@ -58,6 +68,16 @@ export async function checkOrders(baseUrl: string): Promise<void> {
     statuses.push(update.status);
   }
   check(statuses.join(",") === "placed,picked,shipped", "Incomplete order activity");
+  const controller = new AbortController();
+  const activity = client.routeStream<OrderEvent>("/orders/activity", controller.signal);
+  check((await activity.next()).value?.status === "placed", "Missing first update before cancellation");
+  controller.abort();
+  try {
+    await activity.next();
+    throw new Error("Cancelled stream delivered another update");
+  } catch (error) {
+    if (error !== controller.signal.reason) throw error;
+  }
   await checkInterruptedActivity(baseUrl);
 
   const cancelled = AbortSignal.abort();

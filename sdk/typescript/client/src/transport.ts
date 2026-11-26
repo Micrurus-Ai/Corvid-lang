@@ -111,47 +111,6 @@ export class CorvidClient {
     });
   }
 
-  /** Read the JSON values yielded by a GET route returning Stream<T>. */
-  async *routeStream<T>(path: string, signal?: AbortSignal): AsyncGenerator<T> {
-    const response = await this.doFetch(this.baseUrl + path, {
-      headers: { ...this.headers, accept: "text/event-stream" }, credentials: "include", signal,
-    });
-    if (!response.ok || !response.body) throw new CorvidError(response.status, await safeJson(response));
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    let event = "message";
-    let data: string[] = [];
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) throw new CorvidError(response.status, null, "Stream ended before completion");
-        buffer += chunk.value;
-        let newline: number;
-        while ((newline = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, newline).replace(/\r$/, "");
-          buffer = buffer.slice(newline + 1);
-          if (line === "") {
-            if (event === "done") return;
-            if (event === "error") throw new CorvidError(response.status, data.join("\n"), "Stream failed");
-            if (event === "message" && data.length) yield JSON.parse(data.join("\n")) as T;
-            event = "message";
-            data = [];
-          } else if (line.startsWith("event:")) {
-            event = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            data.push(line.slice(5).replace(/^ /, ""));
-          }
-        }
-      }
-    } finally {
-      try {
-        await reader.cancel();
-      } finally {
-        reader.releaseLock();
-      }
-    }
-  }
-
   /** Invoke a streaming agent and consume its typed SSE event stream. */
   stream<T>(name: string, input: unknown): AgentStream<T> {
     const url = `${this.baseUrl}/agents/${encodeURIComponent(name)}/stream`;
@@ -187,13 +146,22 @@ export class CorvidClient {
     };
   }
 
+  /** Read the items from a GET stream, with optional cancellation. */
+  routeStream<Item>(path: string, signal?: AbortSignal): AsyncGenerator<Item>;
   /**
    * Call a declared route that returns `Stream<Item>`. `route` is the
    * method and contract path, as in `"GET /boards/{board}/feed"`, and
    * `args` follow `shape`. Generated `Api.route` calls this. A path value
    * that cannot be sent exactly throws here, before any request.
    */
-  routeStream<Item>(route: string, shape: RouteShape, args: readonly unknown[]): RouteStream<Item> {
+  routeStream<Item>(route: string, shape: RouteShape, args: readonly unknown[]): RouteStream<Item>;
+  routeStream<Item>(
+    route: string, ...call: [signal?: AbortSignal] | [shape: RouteShape, args: readonly unknown[]]
+  ): AsyncGenerator<Item> | RouteStream<Item> {
+    if (call.length !== 2) {
+      return routeItems(this.readRouteEvents<Item>(route, { method: "GET", signal: call[0] }));
+    }
+    const [shape, args] = call;
     const space = route.indexOf(" ");
     const method = route.slice(0, space);
     const values: Record<string, unknown> = {};
@@ -204,7 +172,7 @@ export class CorvidClient {
       const query = urlEncodedRecord(args[next++]);
       if (query) path += "?" + query;
     }
-    const headers: Record<string, string> = { accept: "text/event-stream", ...this.headers };
+    const headers: Record<string, string> = {};
     let body: string | undefined;
     if (shape.body === "json") {
       body = JSON.stringify(args[next++]);
@@ -213,52 +181,51 @@ export class CorvidClient {
       body = urlEncodedRecord(args[next++]);
       headers["content-type"] = "application/x-www-form-urlencoded";
     }
-    const url = `${this.baseUrl}${path}`;
-    const doFetch = this.doFetch;
-
-    async function* iterate(): AsyncGenerator<RouteEvent<Item>> {
-      let res: Response;
-      try {
-        res = await doFetch(url, { method, credentials: "include", headers, body });
-      } catch {
-        yield { kind: "interrupted" };
-        return;
-      }
-      if (!res.ok || !res.body) {
-        throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
-      }
-      try {
-        for await (const { event, data } of readSseEvents(res.body)) {
-          if (event === "chunk") {
-            yield { kind: "chunk", value: data as Item };
-          } else if (event === "completed") {
-            yield { kind: "completed", value: null };
-            return;
-          } else if (event === "failed") {
-            yield { kind: "failed", error: routeFailure(data) };
-            return;
-          }
-        }
-      } catch {
-        // The connection failed mid-read; reported as interrupted below.
-      }
-      yield { kind: "interrupted" };
-    }
-
-    const gen = iterate();
+    const gen = this.readRouteEvents<Item>(path, { method, headers, body });
     return {
       [Symbol.asyncIterator]: () => gen,
       async result(): Promise<null> {
         for await (const event of gen) {
           if (event.kind === "completed") return null;
-          if (event.kind === "failed") throw new CorvidError(200, event.error, event.error.detail);
-          if (event.kind === "interrupted") {
-            throw new CorvidError(0, null, "the connection was lost before the stream completed");
-          }
+          throwRouteFailure(event);
         }
         throw new CorvidError(0, null, "the stream ended without a terminal event");
       },
     };
+  }
+
+  private async *readRouteEvents<Item>(path: string, init: RequestInit): AsyncGenerator<RouteEvent<Item>> {
+    let res: Response;
+    try {
+      res = await this.doFetch(this.baseUrl + path, {
+        ...init, credentials: "include", headers: { accept: "text/event-stream", ...this.headers, ...init.headers },
+      });
+    } catch {
+      init.signal?.throwIfAborted();
+      yield { kind: "interrupted" };
+      return;
+    }
+    if (!res.ok || !res.body) {
+      throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
+    }
+    try {
+      for await (const { event, data } of readSseEvents(res.body, true)) {
+        init.signal?.throwIfAborted();
+        if (event === "chunk") {
+          yield { kind: "chunk", value: data as Item };
+        } else if (event === "completed") {
+          yield { kind: "completed", value: null };
+          return;
+        } else if (event === "failed") {
+          yield { kind: "failed", error: routeFailure(data) };
+          return;
+        }
+      }
+    } catch {
+      // A malformed frame or a broken reader interrupts the stream.
+    }
+    init.signal?.throwIfAborted();
+    yield { kind: "interrupted" };
   }
 
   /** Walk a cursor-paginated route to exhaustion. */
@@ -291,6 +258,20 @@ export class CorvidClient {
       throw new CorvidError(res.status, await safeJson(res));
     }
     return (await res.json()) as T;
+  }
+}
+
+async function* routeItems<Item>(events: AsyncIterable<RouteEvent<Item>>): AsyncGenerator<Item> {
+  for await (const event of events) {
+    if (event.kind === "chunk") yield event.value;
+    else throwRouteFailure(event);
+  }
+}
+
+function throwRouteFailure(event: RouteEvent<unknown>): void {
+  if (event.kind === "failed") throw new CorvidError(200, event.error, event.error.detail);
+  if (event.kind === "interrupted") {
+    throw new CorvidError(0, null, "the connection was lost before the stream completed");
   }
 }
 

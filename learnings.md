@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
+
 Write a duration as a number and a unit: `timeout = 30 seconds`, `deadline = now + 2 hours`, `attempts * 30 seconds`, `1.5 minutes`. The units run from `nanoseconds` to `hours`, singular or plural, and the number is read exactly. `30 days` is a compile error that explains why (a day in a time zone is 23, 24 or 25 hours) and suggests `24 hours` or `zoned.add_days(30)`. [Time](docs/reference/stdlib/time.md)
 
 A variant's payload field takes a refinement as a record field does: `| ColumnFull(limit: Int where between(1, 50))`. `ColumnFull(80)` is a compile error, a computed value out of range stops the program where the variant is built, a decoded one is refused at `fields[0]`, and the contract publishes the bounds. [Types](docs/reference/grammar.md#types-and-stores)

@@ -1158,7 +1158,7 @@ const receipt = await client.upload<ImportReceipt>("/orders/import", file, (load
 console.log(receipt.filename, receipt.bytes);
 ```
 
-Call `controller.abort()` when the user cancels. Create a fresh controller for a retry. The upload promise resolves when the server sends its receipt. A search can use the same cancellation mechanism through `client.request<OrderPage>("GET", path, undefined, controller.signal)`. With React, pass the signal from `useCorvidPaginated((cursor, signal) => ...)` to the page request. Its `reset()` discards accumulated items and starts a fresh first page. An older response arriving afterward cannot append items or replace the new error state.
+The loop yields one order update per `chunk` and ends on `completed`. Catch a rejected iteration to show an error alongside any updates already received. To handle terminal events individually, iterate the generated `api.route("GET /orders/activity")` and switch on `event.kind`. Call `controller.abort()` when the user cancels. Create a fresh controller for a retry. The upload promise resolves when the server sends its receipt. A search can use the same cancellation mechanism through `client.request<OrderPage>("GET", path, undefined, controller.signal)`. With React, pass the signal from `useCorvidPaginated((cursor, signal) => ...)` to the page request. Its `reset()` discards accumulated items and starts a fresh first page. An older response arriving afterward cannot append items or replace the new error state.
 
 ## Display a live board in Corvid
 

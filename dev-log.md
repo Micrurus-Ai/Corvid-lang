@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### F08 route stream integration
+
+The GET item loop and generated route call had competing implementations of `routeStream`, which prevented the SDK from compiling. Both call forms now read the existing server protocol through one decoder. The orders check exercises partial delivery followed by truncation, a failed frame or malformed JSON.
+
 ### RT-4 live subscriptions verified over RT-3
 
 Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.
