@@ -1,6 +1,8 @@
 """Check authenticated RT-3 frames through serve on SQLite or two Postgres replicas."""
 import argparse
 from contextlib import ExitStack, contextmanager, nullcontext
+import csv
+import ctypes
 from http.cookies import SimpleCookie
 import json
 import os
@@ -147,6 +149,14 @@ def postgres_environment(directory):
     if not initdb:
         raise RuntimeError("Install PostgreSQL with initdb on PATH or supply " + " and ".join(names))
     binaries = Path(initdb).parent
+    if os.name == "nt" and ctypes.windll.shell32.IsUserAnAdmin():
+        # initdb and pg_ctl drop the Administrators SID. Grant the runner's
+        # user SID access to the cluster files before writing the password.
+        directory = directory / "cluster"
+        directory.mkdir(mode=0o700)
+        identity = subprocess.check_output(["whoami", "/user", "/fo", "csv", "/nh"])
+        _, sid = next(csv.reader(identity.decode("oem").splitlines()))
+        subprocess.run(["icacls", directory, "/grant", f"*{sid}:(OI)(CI)F"], check=True)
     password = secrets.token_hex(24)
     password_file = directory / "test-password"
     password_file.write_text(password, encoding="ascii")

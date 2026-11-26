@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-3 Windows deployment check
+
+The [hosted Edge run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45789832802) passed the SQLite scenario on `e182a19`. Its Postgres check stopped before either replica started because `initdb` could not read the temporary password file. On elevated Windows runners the verifier now gives the runner's user SID inheritable access to a dedicated cluster directory before creating that file. Postgres drops the administrator group when it starts. The two-process Edge check remains open.
+
 ### RT-3 transport integration with the merged runtime
 
 Serve now passes the committed row revisions into the RT-2 diff. A filtered removal carries the revision that moved the row out of view. The connection registers the runtime session watcher during the same cookie validation used to capture the durable authority revision. This wakes idle sockets after local logout and keeps the cross-process check at final enqueue.
