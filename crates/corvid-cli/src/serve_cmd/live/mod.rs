@@ -1,10 +1,12 @@
 //! Browser socket upgrade and the integration point for RT-1 and RT-2.
 mod connection;
+mod feed;
+pub(super) use feed::share_commits;
 mod routes;
 pub(super) use routes::Routes;
 pub(super) mod protocol;
 pub(super) mod source;
-pub(super) use source::Provider;
+pub(super) use source::SessionObserver;
 #[cfg(test)]
 mod tests;
 
@@ -13,7 +15,9 @@ use axum::extract::{ws::WebSocketUpgrade, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures::stream::BoxStream;
-use protocol::{Delivery, Row};
+use protocol::Delivery;
+#[cfg(test)]
+use protocol::Row;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -38,11 +42,9 @@ pub(super) trait AuthorizedSource: Send {
     fn open(&mut self, path: &str) -> Result<Subscription, Failure>;
 }
 
-pub(super) struct Subscription {
-    pub(super) rows: Vec<Row>,
-    pub(super) changes: BoxStream<'static, Result<Delivery, Failure>>,
-}
+pub(super) type Subscription = BoxStream<'static, Result<Delivery, Failure>>;
 
+#[derive(Debug)]
 pub(super) enum Failure {
     Forbidden,
     InvalidSession,
@@ -88,10 +90,10 @@ pub(super) async fn upgrade(
     {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let Some(provider) = &state.live_provider else {
+    let Some(observer) = &state.live_sessions else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match source::connect(state.clone(), provider.clone(), headers) {
+    match source::connect(state.clone(), observer.clone(), headers) {
         Ok(session) => {
             let shutdown = state.live_shutdown.subscribe();
             ws.write_buffer_size(0)

@@ -103,13 +103,13 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     live_routes: live::Routes,
-    live_provider: Option<Arc<dyn live::Provider>>,
+    live_sessions: Option<Arc<dyn live::SessionObserver>>,
     live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
-    ir: IrFile,
+    ir: Arc<IrFile>,
     /// The program's declarations, shared with streamed replies, which
     /// encode chunks after the request handler returns.
     declared_types: Arc<Vec<IrType>>,
@@ -394,15 +394,15 @@ pub(crate) fn cmd_serve(
     }
     let state = Arc::new(ServeState {
         live_routes: live::Routes::new(&ir)?,
-        // RT-2 and session-change notifications are required before enabling upgrades.
-        live_provider: None,
+        // Synchronized session-change notifications are required before enabling upgrades.
+        live_sessions: None,
         live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,
         rag_embedder,
         http_policy,
         declared_types: Arc::new(ir.types.clone()),
-        ir,
+        ir: Arc::new(ir),
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
@@ -602,6 +602,7 @@ pub(crate) fn cmd_serve(
         .build()
         .context("build tokio runtime")?;
     rt.block_on(async move {
+        live::share_commits(&state_for_banner.ir, &state_for_banner.runtime).await?;
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .with_context(|| format!("bind {addr}"))?;

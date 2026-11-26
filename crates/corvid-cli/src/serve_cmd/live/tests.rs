@@ -102,10 +102,11 @@ impl AuthorizedSource for Source {
         }
         let (updates, changes) = mpsc::unbounded();
         self.0.unbounded_send((path.into(), updates)).unwrap();
-        Ok(Subscription {
-            rows: vec![row()],
-            changes: changes.boxed(),
-        })
+        Ok(
+            futures::stream::once(async { Ok(Delivery::Snapshot { rows: vec![row()] }) })
+                .chain(changes)
+                .boxed(),
+        )
     }
 }
 

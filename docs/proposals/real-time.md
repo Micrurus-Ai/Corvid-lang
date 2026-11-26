@@ -121,22 +121,19 @@ RT-1 supplies the contract entry and the runtime open/close handle described abo
 
 ### RT-3 integration boundary
 
-The serve transport owns the page socket, ids, heartbeat and handle lifetimes.
-Serve indexes the compiled RT-1 live paths separately from HTTP routes. RT-2 must
-return the initial ordered rows and a filtered change stream at the same
-commit boundary. Dropping the stream releases the subscription. Session
-invalidation must wake an idle socket, and an authority change must invalidate
-pending rows before delivery. Until serve has those interfaces it refuses the
-upgrade. A synthetic table source would not exercise that boundary.
+Serve resolves the compiled live declaration, converts its path arguments with
+the HTTP route binder and enforces its own GET permission policy. The socket
+owns each subscription's commit receiver. Serve registers the receiver before
+running the ordered query with the verified actor and bound path, so commits
+during the initial read are covered. It forwards RT-2's ordered changes,
+replacing the snapshot on lag. Releasing the id drops the receiver and any
+outstanding query. Several subscriptions share the same socket.
 
-The serve adapter resolves the declared live path, binds its captures with the
-GET handler's path conversion, and checks its declared route policy. It passes
-the declaration, typed path and verified actor to `Provider::open`.
-`Provider::observe_session` must validate the existing session and publish
-role changes, expiry and logout even while the socket is idle. RT-2 owns
-coalescing and replacement snapshots. The transport polls the handles
-directly so a slow socket does not accumulate a second queue of changes.
-[Adapter interface](../../crates/corvid-cli/src/serve_cmd/live/source.rs)
+Serve still requires a session observer that validates the cookie and registers
+for changes atomically. Logout, expiry and authority changes must wake idle
+sockets and invalidate queued data when the change takes effect. Live apps
+remain gated at startup until the auth runtime supplies that interface.
+[Session interface](../../crates/corvid-cli/src/serve_cmd/live/source.rs)
 
 ## Built in RT-1, and two points to agree
 

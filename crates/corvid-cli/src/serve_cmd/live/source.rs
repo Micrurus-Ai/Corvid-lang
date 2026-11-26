@@ -1,20 +1,12 @@
 //! Bind each live query to the same authenticated actor a GET route receives.
 use super::{AuthorizedSource, Failure, ServeState, Session, SessionStatus, Subscription};
-use crate::serve_cmd::{cookie_value, enforce_route_policy, EnforcedRouteActor};
+use crate::serve_cmd::{cookie_value, enforce_route_policy};
 use axum::http::{HeaderMap, StatusCode};
 use corvid_ast::HttpMethod;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-pub(in crate::serve_cmd) trait Provider: Send + Sync {
-    /// Open RT-2's consistent snapshot and feed for the declared handler.
-    fn open(
-        &self,
-        route: &corvid_ir::IrRoute,
-        path: corvid_driver::Value,
-        actor: EnforcedRouteActor,
-    ) -> Result<Subscription, Failure>;
-
+pub(in crate::serve_cmd) trait SessionObserver: Send + Sync {
     /// Validate this serve session and register for changes atomically.
     /// Publish Active on changes to roles or visibility, Invalid on expiry or
     /// logout, synchronized with the change becoming effective.
@@ -23,7 +15,6 @@ pub(in crate::serve_cmd) trait Provider: Send + Sync {
 
 struct RouteSource {
     state: Arc<ServeState>,
-    provider: Arc<dyn Provider>,
     headers: HeaderMap,
 }
 
@@ -51,13 +42,20 @@ impl AuthorizedSource for RouteSource {
             StatusCode::FORBIDDEN => Failure::Forbidden,
             _ => Failure::Unavailable,
         })?;
-        self.provider.open(route, argument, actor)
+        super::feed::subscribe(
+            self.state.ir.clone(),
+            self.state.runtime.clone(),
+            self.state.declared_types.clone(),
+            route,
+            argument,
+            actor.value,
+        )
     }
 }
 
 pub(super) fn connect(
     state: Arc<ServeState>,
-    provider: Arc<dyn Provider>,
+    observer: Arc<dyn SessionObserver>,
     headers: HeaderMap,
 ) -> Result<Session, StatusCode> {
     let auth = state
@@ -65,16 +63,12 @@ pub(super) fn connect(
         .as_ref()
         .ok_or(StatusCode::UNAUTHORIZED)?;
     let token = cookie_value(&headers, &auth.cookie.name).ok_or(StatusCode::UNAUTHORIZED)?;
-    let status = provider.observe_session(&token)?;
+    let status = observer.observe_session(&token)?;
     if matches!(*status.borrow(), SessionStatus::Invalid) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     Ok(Session {
         status,
-        source: Box::new(RouteSource {
-            state,
-            provider,
-            headers,
-        }),
+        source: Box::new(RouteSource { state, headers }),
     })
 }

@@ -34,7 +34,7 @@ impl Page {
         match Request::parse(text).ok_or(1002u16)? {
             Request::Subscribe { id, path } if !self.paths.contains_key(&id) => {
                 self.paths.insert(id.clone(), path);
-                self.open(source, &id).map(Some)
+                self.open(source, &id)
             }
             Request::Unsubscribe { id } if self.paths.contains_key(&id) => {
                 self.remove(&id);
@@ -44,20 +44,19 @@ impl Page {
         }
     }
 
-    fn open(&mut self, source: &mut dyn AuthorizedSource, id: &str) -> Result<Outgoing, u16> {
+    fn open(
+        &mut self,
+        source: &mut dyn AuthorizedSource,
+        id: &str,
+    ) -> Result<Option<Outgoing>, u16> {
         match source.open(&self.paths[id]) {
             Ok(subscription) => {
                 let end = stream::once(async { Err(Failure::Unavailable) });
                 self.streams
-                    .insert(id.to_owned(), subscription.changes.chain(end).boxed());
-                self.reply(
-                    id,
-                    Ok(Delivery::Snapshot {
-                        rows: subscription.rows,
-                    }),
-                )
+                    .insert(id.to_owned(), subscription.chain(end).boxed());
+                Ok(None)
             }
-            Err(failure) => self.reply(id, Err(failure)),
+            Err(failure) => self.reply(id, Err(failure)).map(Some),
         }
     }
 
@@ -148,7 +147,7 @@ where
             heartbeat.expired(Instant::now())?;
             Some(Outgoing::Control(Message::Ping(Vec::new())))
         } else if let Some(id) = refresh.pop() {
-            Some(page.open(session.source.as_mut(), &id)?)
+            page.open(session.source.as_mut(), &id)?
         } else {
             tokio::select! {
                 result = session.status.changed() => {
