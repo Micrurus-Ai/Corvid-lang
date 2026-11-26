@@ -8,7 +8,9 @@ enum TemplateSegment<'a> {
 
 fn prompt_constant_arg_text(expr: &IrExpr) -> Option<String> {
     match &expr.kind {
-        IrExprKind::Literal(IrLiteral::String(s)) => Some(s.clone()),
+        // A parameter renders as its JSON form (the grammar's rule, and
+        // the interpreter's): a String is quoted and escaped.
+        IrExprKind::Literal(IrLiteral::String(s)) => Some(serde_json::Value::String(s.clone()).to_string()),
         IrExprKind::Literal(IrLiteral::Int(n)) => Some(n.to_string()),
         IrExprKind::Literal(IrLiteral::Bool(b)) => Some(if *b {
             "true".to_string()
@@ -347,10 +349,14 @@ pub(super) fn lower_prompt_call(
                 TemplateSegment::Param(idx) => {
                     let av = arg_vals[*idx];
                     let aty = &args[*idx].ty;
-                    (
-                        emit_stringify_arg(builder, module, runtime, av, aty, span)?,
-                        is_string_like_prompt_arg(aty),
-                    )
+                    if is_string_like_prompt_arg(aty) {
+                        // Its JSON form: a fresh string the chain owns.
+                        let quote = module.declare_func_in_func(runtime.string_json_quote, builder.func);
+                        let call = builder.ins().call(quote, &[av]);
+                        (builder.inst_results(call)[0], false)
+                    } else {
+                        (emit_stringify_arg(builder, module, runtime, av, aty, span)?, false)
+                    }
                 }
             };
             parts.push(part);

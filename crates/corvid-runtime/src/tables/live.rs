@@ -14,13 +14,67 @@
 //! an incremental matcher can come later, with this as its reference.
 
 use serde_json::Value as J;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-/// The tables of one database that a committed write changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The tables of one database that a committed write changed, and the
+/// rows it wrote in each.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TableCommit {
     pub database: String,
+    /// Every table written. Empty means any table of the database may
+    /// have changed: a listener that lost its connection says so.
     pub tables: BTreeSet<String>,
+    /// For each table, the rows written and the revision each holds
+    /// after the commit. A table may be missing here though it is in
+    /// `tables` (a write whose key the caller did not give, or a
+    /// notification from another process too large to carry its rows);
+    /// a subscription then cannot name a removal's revision and sends a
+    /// snapshot.
+    pub rows: BTreeMap<String, WrittenRows>,
+}
+
+impl TableCommit {
+    /// A commit of `tables` with no row detail.
+    pub fn of_tables(database: impl Into<String>, tables: impl IntoIterator<Item = String>) -> Self {
+        Self { database: database.into(), tables: tables.into_iter().collect(), rows: BTreeMap::new() }
+    }
+}
+
+/// Rows written in one table, by key (the [`LiveRow::key`] text), with
+/// the revision each holds after the write. An insert gives revision 1,
+/// a save the row's new revision, and a delete the revision after the
+/// row's last one, so every committed write moves a row's revision on.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WrittenRows(BTreeMap<String, i64>);
+
+impl WrittenRows {
+    /// Note a write; a later write of the same row keeps the higher
+    /// revision.
+    pub fn note(&mut self, key: impl Into<String>, revision: i64) {
+        let held = self.0.entry(key.into()).or_insert(revision);
+        *held = (*held).max(revision);
+    }
+
+    /// Fold in the rows of a later commit, for a subscription that
+    /// handles several commits at once.
+    pub fn merge(&mut self, other: &WrittenRows) {
+        for (key, revision) in &other.0 {
+            self.note(key.clone(), *revision);
+        }
+    }
+
+    /// The revision a row holds after the writes, if it was written.
+    pub fn revision(&self, key: &str) -> Option<i64> {
+        self.0.get(key).copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, i64)> {
+        self.0.iter().map(|(key, revision)| (key.as_str(), *revision))
+    }
 }
 
 /// One row of a live result, as the wire carries it: the row in the
@@ -61,6 +115,8 @@ pub enum LiveMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveChange {
     pub kind: LiveChangeKind,
+    /// The revision the change made: an added or updated row's revision,
+    /// or for a removal the revision of the write that removed it.
     pub revision: i64,
     /// The row's zero-based place in the ordered result after this
     /// change; absent for a removal.
@@ -88,12 +144,18 @@ impl LiveChangeKind {
 }
 
 /// The changes that take a subscriber from `previous` to `next`, both
-/// in the query's order. Removals come first; then, walking `next` in
-/// order, each row not already in place is added or updated at its
-/// index. A client that applies them in order holds `next` exactly. When
-/// more changes than `next` has rows would be needed, a snapshot is the
-/// smaller message and is sent instead.
-pub fn live_changes(previous: &[LiveRow], next: &[LiveRow]) -> LiveMessage {
+/// in the query's order, after the commits that wrote `written` (the
+/// live's table's rows from those commits, merged). Removals come first;
+/// then, walking `next` in order, each row not already in place is added
+/// or updated at its index. A client that applies them in order holds
+/// `next` exactly. When more changes than `next` has rows would be
+/// needed, a snapshot is the smaller message and is sent instead.
+///
+/// A removal carries the revision of the write that removed the row,
+/// which only `written` knows: a row saved out of the query is absent
+/// from `next`. When a removed row is not in `written`, its revision
+/// cannot be named, and a snapshot is sent rather than a guess.
+pub fn live_changes(previous: &[LiveRow], next: &[LiveRow], written: &WrittenRows) -> LiveMessage {
     let next_keys: BTreeSet<&str> = next.iter().map(|row| row.key.as_str()).collect();
     let mut changes = Vec::new();
     // The client's list as the changes are applied.
@@ -101,9 +163,12 @@ pub fn live_changes(previous: &[LiveRow], next: &[LiveRow]) -> LiveMessage {
     for row in previous {
         if next_keys.contains(row.key.as_str()) {
             working.push(row);
-        } else {
-            changes.push(LiveChange { kind: LiveChangeKind::Removed, revision: row.revision, index: None, row: row.row.clone() });
+            continue;
         }
+        let Some(revision) = written.revision(&row.key) else {
+            return LiveMessage::Snapshot(next.to_vec());
+        };
+        changes.push(LiveChange { kind: LiveChangeKind::Removed, revision, index: None, row: row.row.clone() });
     }
     for (index, row) in next.iter().enumerate() {
         if working.get(index).is_some_and(|held| held.key == row.key && held.revision == row.revision) {
@@ -142,18 +207,33 @@ pub fn apply_live_changes(rows: &mut Vec<LiveRow>, changes: &[LiveChange], keys:
     }
 }
 
-/// The tables an open `atomic:` block has written, announced when it
-/// commits.
+/// What an open `atomic:` block has written, announced when it commits.
 #[derive(Debug, Default)]
-pub(crate) struct WrittenTables(std::sync::Mutex<BTreeSet<String>>);
+pub(crate) struct WrittenTables(std::sync::Mutex<Written>);
+
+#[derive(Debug, Default)]
+pub(crate) struct Written {
+    pub(crate) tables: BTreeSet<String>,
+    pub(crate) rows: BTreeMap<String, WrittenRows>,
+}
+
+impl Written {
+    /// A write to `table`, with the row's key and revision when known.
+    pub(crate) fn note(&mut self, table: &str, row: Option<(&str, i64)>) {
+        self.tables.insert(table.to_string());
+        if let Some((key, revision)) = row {
+            self.rows.entry(table.to_string()).or_default().note(key, revision);
+        }
+    }
+}
 
 impl WrittenTables {
-    pub(crate) fn note(&self, table: &str) {
-        self.0.lock().expect("written tables").insert(table.to_string());
+    pub(crate) fn note(&self, table: &str, row: Option<(&str, i64)>) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).note(table, row);
     }
 
-    pub(crate) fn take(&self) -> BTreeSet<String> {
-        std::mem::take(&mut *self.0.lock().expect("written tables"))
+    pub(crate) fn take(&self) -> Written {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
 
@@ -170,11 +250,28 @@ mod tests {
         LiveRow::from_json(json!({"card": card, "column": column, "revision": revision}), &keys()).expect("a row")
     }
 
+    /// The commit that took `previous` to `next`: every row whose
+    /// revision moved or that left, removed rows one revision on.
+    fn written(previous: &[LiveRow], next: &[LiveRow]) -> WrittenRows {
+        let mut written = WrittenRows::default();
+        for row in next {
+            if !previous.iter().any(|held| held.key == row.key && held.revision == row.revision) {
+                written.note(row.key.clone(), row.revision);
+            }
+        }
+        for row in previous {
+            if !next.iter().any(|now| now.key == row.key) {
+                written.note(row.key.clone(), row.revision + 1);
+            }
+        }
+        written
+    }
+
     /// Whatever changes [`live_changes`] sends, a client that applies
     /// them in order holds exactly the new result.
     #[track_caller]
     fn round_trip(previous: Vec<LiveRow>, next: Vec<LiveRow>) -> LiveMessage {
-        let message = live_changes(&previous, &next);
+        let message = live_changes(&previous, &next, &written(&previous, &next));
         let mut client = previous.clone();
         match &message {
             LiveMessage::Unchanged => {}
@@ -198,6 +295,45 @@ mod tests {
         let kinds: Vec<(&str, Option<usize>)> = changes.iter().map(|c| (c.kind.wire_name(), c.index)).collect();
         assert_eq!(kinds, [("removed", None), ("updated", Some(0)), ("added", Some(2))]);
         assert_eq!(changes[0].row["card"], 2, "a removal carries the row last seen");
+        assert_eq!(changes[0].revision, 2, "and the revision of the write that removed it");
+    }
+
+    #[test]
+    fn a_row_saved_out_of_the_query_is_removed_at_its_new_revision() {
+        // Card 1 was saved twice and now fails the filter: the subscriber
+        // last saw revision 1, the commits left it at revision 3.
+        let previous = vec![row(1, 1, "todo"), row(2, 1, "todo")];
+        let next = vec![row(2, 1, "todo")];
+        let mut written = WrittenRows::default();
+        written.note(row(1, 2, "doing").key, 2);
+        written.note(row(1, 3, "done").key, 3);
+        let LiveMessage::Changes(changes) = live_changes(&previous, &next, &written) else { panic!("changes") };
+        assert_eq!(changes.len(), 1);
+        assert_eq!((changes[0].kind, changes[0].revision), (LiveChangeKind::Removed, 3));
+        assert_eq!(changes[0].row["column"], "todo", "the row as the subscriber last saw it");
+    }
+
+    #[test]
+    fn a_removal_whose_revision_is_unknown_sends_a_snapshot() {
+        let previous = vec![row(1, 1, "todo"), row(2, 1, "todo")];
+        let next = vec![row(2, 1, "todo")];
+        assert_eq!(
+            live_changes(&previous, &next, &WrittenRows::default()),
+            LiveMessage::Snapshot(next.clone()),
+            "no guessed revision: the snapshot is always right"
+        );
+    }
+
+    #[test]
+    fn merged_commits_keep_each_rows_latest_revision() {
+        let mut first = WrittenRows::default();
+        first.note("[1]", 2);
+        first.note("[2]", 5);
+        let mut second = WrittenRows::default();
+        second.note("[1]", 4);
+        second.note("[2]", 3);
+        first.merge(&second);
+        assert_eq!((first.revision("[1]"), first.revision("[2]"), first.revision("[3]")), (Some(4), Some(5), None));
     }
 
     #[test]

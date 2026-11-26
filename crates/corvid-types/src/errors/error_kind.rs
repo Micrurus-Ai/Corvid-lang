@@ -272,6 +272,13 @@ pub enum TypeErrorKind {
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
+    /// A typed path placeholder, `{board: Int}`, of a type a path
+    /// segment cannot be read as.
+    RoutePathParamType { path: String, param: String, ty: String },
+    /// A route's `query` record with a field the server cannot read
+    /// from a query string; `field` is empty when the query type is not
+    /// a record at all.
+    RouteQueryFieldType { path: String, field: String, ty: String },
     InvalidForm { message: String },
     InvalidLiveBinding { message: String },
 
@@ -847,6 +854,15 @@ impl TypeErrorKind {
             Self::InvalidForm { message } => format!("invalid form: {message}"),
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
+            }
+            Self::RoutePathParamType { path, param, ty } => {
+                format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
+            }
+            Self::RouteQueryFieldType { path, field, ty } if field.is_empty() => {
+                format!("the query of `{path}` is `{ty}`; a query is a record whose fields are the query parameters")
+            }
+            Self::RouteQueryFieldType { path, field, ty } => {
+                format!("query field `{field}` of `{path}` is `{ty}`, which a query string cannot carry")
             }
             Self::ConnectorConfigInvalid { connector, message } => {
                 format!("invalid `connector {connector}`: {message}")
@@ -1576,6 +1592,14 @@ impl TypeErrorKind {
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
             Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
+            Self::RoutePathParamType { .. } => Some(format!(
+                "a path parameter is one of {}",
+                crate::text_parameters::TEXT_TYPES
+            )),
+            Self::RouteQueryFieldType { .. } => Some(format!(
+                "a query field is one of {}, an `Option` of one (left out when absent) or a `List` of one (the name repeated)",
+                crate::text_parameters::TEXT_TYPES
+            )),
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),

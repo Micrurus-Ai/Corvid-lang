@@ -936,6 +936,7 @@ mod expr;
 mod import_call;
 mod json_methods;
 mod regex_methods;
+mod request_text;
 mod signature_types;
 mod tables;
 mod ops;

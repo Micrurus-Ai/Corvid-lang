@@ -9,6 +9,7 @@ mod time_zones;
 mod currency;
 mod json_forms;
 mod json_error_type;
+mod typed_path_parameters;
 mod text_methods;
 mod bytes;
 mod hmac;

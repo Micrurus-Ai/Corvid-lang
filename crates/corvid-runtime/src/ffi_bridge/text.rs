@@ -72,6 +72,64 @@ pub unsafe extern "C" fn corvid_string_contains_regex(value: CorvidString, patte
     checked(corvid_text::regex::contains(text, pattern)) as u8
 }
 
+/// A `RegexMatch` as JSON, its fields named by
+/// `corvid_types::regex_match_fields`, the list the interpreter builds its
+/// record from.
+fn regex_match_json(found: corvid_text::regex::RegexMatch) -> serde_json::Value {
+    let corvid_text::regex::RegexMatch { text, start, end, groups } = found;
+    let mut text = Some(text);
+    let mut groups = Some(groups);
+    let fields = corvid_types::regex_match_fields().map(|(name, _)| {
+        let value = match name {
+            "text" => serde_json::Value::from(text.take().unwrap_or_default()),
+            "start" => serde_json::Value::from(start),
+            "end" => serde_json::Value::from(end),
+            "groups" => serde_json::Value::from(groups.take().unwrap_or_default()),
+            other => unreachable!("RegexMatch field `{other}` has no runtime value"),
+        };
+        (name.to_string(), value)
+    });
+    serde_json::Value::Object(fields.into_iter().collect())
+}
+
+/// `text.find_regex(pattern) -> Option<RegexMatch>`: the first match,
+/// built as the native value of the plan's root type.
+///
+/// # Safety
+/// Each input descriptor must remain live for the duration of the call;
+/// `plan`, `plan_len` and `typeinfos` describe `Option<RegexMatch>`.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_find_regex(
+    value: CorvidString,
+    pattern: CorvidString,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const std::ffi::c_void,
+) -> i64 {
+    let (text, pattern) = unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern)) };
+    let found = checked(corvid_text::regex::find(text, pattern)).map(regex_match_json);
+    let json = found.unwrap_or(serde_json::Value::Null);
+    unsafe { super::typed_json::native_value_from_json(&json, plan, plan_len, typeinfos) }
+}
+
+/// `text.find_all_regex(pattern) -> List<RegexMatch>`.
+///
+/// # Safety
+/// As for [`corvid_string_find_regex`], with a plan for `List<RegexMatch>`.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_string_find_all_regex(
+    value: CorvidString,
+    pattern: CorvidString,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const std::ffi::c_void,
+) -> i64 {
+    let (text, pattern) = unsafe { (borrow_corvid_string(&value), borrow_corvid_string(&pattern)) };
+    let found: Vec<serde_json::Value> =
+        checked(corvid_text::regex::find_all(text, pattern)).into_iter().map(regex_match_json).collect();
+    unsafe { super::typed_json::native_value_from_json(&serde_json::Value::Array(found), plan, plan_len, typeinfos) }
+}
+
 /// `replace_regex` with a literal template the checker validated.
 ///
 /// # Safety

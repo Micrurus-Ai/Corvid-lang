@@ -58,6 +58,39 @@ pub fn decode_public_json(
     corvid_public_json::decode(json, expected, types_by_id, unknown_fields, &mut InterpreterValues)
 }
 
+/// Read request text (a path segment or one query value) as a value of
+/// type `expected`, through the public mapping's decoder. `None` when
+/// the type cannot be written as request text, which the checker
+/// already refuses. The error reads "`raw` is not ...".
+pub fn decode_request_text(
+    raw: &str,
+    expected: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Option<Result<Value, String>> {
+    let shape = corvid_types::text_parameters::text_shape(expected, &|ty| has_plain_variants(ty, types_by_id))?;
+    let json = match corvid_public_json::request_text::request_text_json(raw, shape) {
+        Ok(json) => json,
+        Err(problem) => return Some(Err(problem)),
+    };
+    Some(decode_public_json(&json, expected, types_by_id, UnknownFields::Reject).map_err(|error| {
+        format!("`{raw}` is not {}", error.expected)
+    }))
+}
+
+/// Whether `ty` is a sum type whose variants all have no fields, as
+/// the IR declares it: the server's answer to the question the checker
+/// answers from the source.
+pub fn has_plain_variants(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> bool {
+    let id = match ty {
+        Type::Struct(id) => *id,
+        Type::ImportedStruct(imported) => imported.def_id,
+        _ => return false,
+    };
+    types_by_id
+        .get(&id)
+        .is_some_and(|t| !t.variants.is_empty() && t.variants.iter().all(|v| v.fields.is_empty()))
+}
+
 /// Decode JSON `text` into a value of type `expected`: the
 /// `T.from_json(text)` entry point. Text that is not JSON fails at the
 /// root path.

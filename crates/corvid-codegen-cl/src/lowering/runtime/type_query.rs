@@ -590,6 +590,9 @@ pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
         // Native dispatch N4 — `compile_to_object` rewrites each
         // `Response<Body>` as a record (see `response_record`).
         Type::Response(_) => question == NativeTypeQuestion::Program,
+        // `compile_to_object` rewrites `RegexMatch` as a record (see
+        // `regex_match_record`).
+        Type::RegexMatch => question == NativeTypeQuestion::Program,
         _ => false,
     }
 }
@@ -635,9 +638,9 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // `compile_to_object` rewrites `JsonError` as an ordinary
         // record before lowering, so lowering never sees it.
         Type::JsonError => question == NativeTypeQuestion::Program,
-        // B03 — regular expressions are interpreter-tier until the
-        // native regex slice.
-        Type::RegexMatch => false,
+        // `compile_to_object` rewrites `RegexMatch` as an ordinary record
+        // before lowering (see `regex_match_record`).
+        Type::RegexMatch => question == NativeTypeQuestion::Program,
         // B06 — a native `Decimal`, time, currency or locale value is a
         // String holding its canonical text; every operation calls the
         // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.

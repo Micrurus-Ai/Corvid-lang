@@ -204,7 +204,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 if route.is_live() {
                     // `live "/path" -> Row`, the form it was written in.
                     out.push_str("live ");
-                    out.push_str(&render_string_literal(&route.path));
+                    out.push_str(&render_string_literal(&written_path(route)));
                     out.push_str(" -> ");
                     out.push_str(&route.response.live_row().map(render_type_ref).unwrap_or_default());
                     if let Some(policy) = &route.policy {
@@ -218,7 +218,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 out.push_str("route ");
                 out.push_str(route.method.as_str());
                 out.push(' ');
-                out.push_str(&render_string_literal(&route.path));
+                out.push_str(&render_string_literal(&written_path(route)));
                 if let Some(query_ty) = &route.query_ty {
                     out.push_str(" query ");
                     out.push_str(&render_type_ref(query_ty));
@@ -1114,6 +1114,20 @@ fn render_float(value: f64) -> String {
     } else {
         format!("{text}.0")
     }
+}
+
+/// A route's path as its source writes it: the parsed path holds
+/// `{board}`, and a typed placeholder is written back as `{board: Int}`.
+fn written_path(route: &corvid_ast::HttpRouteDecl) -> String {
+    let mut path = route.path.clone();
+    for param in &route.path_params {
+        let ty = render_type_ref(&param.ty);
+        if ty != "String" {
+            let plain = format!("{{{}}}", param.name.name);
+            path = path.replacen(&plain, &format!("{{{}: {ty}}}", param.name.name), 1);
+        }
+    }
+    path
 }
 
 fn render_string_literal(value: &str) -> String {

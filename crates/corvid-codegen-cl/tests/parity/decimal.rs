@@ -284,3 +284,13 @@ agent main() -> Decimal:
         "a Float that is NaN or infinite has no Decimal value",
     );
 }
+
+/// Compound assignment on a `Decimal` local compiles natively as the
+/// rebinding it means, releasing each old total.
+#[test]
+fn compound_assignment_on_a_decimal_total_matches_the_interpreter() {
+    let out = assert_parity_text(
+        "agent main() -> Decimal:\n    total: Decimal = 0\n    prices: List<Decimal> = [1.50, 2.25, 0.10]\n    for price in prices:\n        total += price\n    total -= 0.05\n    total *= 2\n    return total\n",
+    );
+    assert_eq!(out, "7.60");
+}

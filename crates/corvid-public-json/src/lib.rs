@@ -34,6 +34,7 @@ mod decode;
 mod encode;
 mod error;
 pub mod plan;
+pub mod request_text;
 pub mod text_scalar;
 
 pub use decode::{decode, decode_text, ValueBuilder};

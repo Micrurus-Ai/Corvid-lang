@@ -68,6 +68,23 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     }
 }
 
+/// A native value of the plan's root type built from `json`, for a
+/// runtime export that answers with a compiler-known record (a
+/// `RegexMatch`). The runtime builds the JSON itself, so a decode
+/// failure is a compiler bug.
+///
+/// # Safety
+/// `plan`, `plan_len` and `typeinfos` as for [`corvid_json_decode_typed`].
+pub(crate) unsafe fn native_value_from_json(json: &J, plan: *const u8, plan_len: i64, typeinfos: *const *const c_void) -> i64 {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
+    match corvid_public_json::decode(json, &plan.root, &types_by_id, UnknownFields::Reject, &mut builder) {
+        Ok(value) => value.bits,
+        Err(error) => panic!("internal compiler error: the runtime's own value does not decode as its declared type {}", error.message()),
+    }
+}
+
 /// A runtime-owned call from native code (native dispatch N1, N2): a
 /// connector operation or a tool the runtime implements. Run
 /// `Runtime::call_tool(name, args)`, the path the interpreter takes, and

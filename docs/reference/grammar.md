@@ -307,14 +307,14 @@ server_decl       ::= 'server' IDENT ':' INDENT (route_decl | live_decl)+ DEDENT
 
 route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
                       | approval_annotation NEWLINE (upload_annotation NEWLINE)?)?
-                      'route' http_method STRING_LITERAL
+                      'route' http_method route_path
                       (route_query route_payload? | route_payload route_query?)?
                       '->' ('json' type_ref | 'html') uses_clause? route_policy? ':' INDENT block DEDENT
 
 # B14: a `live` names one table query; a subscriber receives the rows it
 # matches, then each committed change. `live` is contextual: an ordinary
 # name everywhere but the start of a server-block declaration.
-live_decl         ::= 'live' STRING_LITERAL '->' type_ref route_policy? ':' INDENT block DEDENT
+live_decl         ::= 'live' route_path '->' type_ref route_policy? ':' INDENT block DEDENT
 
 # Inside either declaration's path string, {board} binds path.board as
 # String and {board: Int} binds it as Int. An explicit String is also valid.
@@ -333,6 +333,16 @@ approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
                     | 'irreversible' ':' ('true' | 'false')
 
 http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
+
+# A route or live path is a string literal whose `{...}` parts are
+# parameters, read as `path.board`: `{board}` is a String, and
+# `{board: T}` a T, where T is Int, Float, Bool, Decimal, Duration,
+# Instant, TimeZone, ZonedTime, Currency, Locale, Bytes or a type of
+# plain variants (read by the variant's name). The router and the
+# contract see the path as `{board}`; a segment that is not a T is
+# refused with a 400 naming the parameter before the handler runs.
+route_path        ::= '"' (PATH_TEXT | path_placeholder)* '"'
+path_placeholder  ::= '{' IDENT (':' IDENT)? '}'
 
 schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
                       '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE

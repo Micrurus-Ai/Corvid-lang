@@ -477,8 +477,8 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "internal compiler error: `JsonError` reached native lowering; `compile_to_object` represents it as a record first",
             span,
         )),
-        Type::RegexMatch => Err(CodegenError::not_supported(
-            "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
+        Type::RegexMatch => Err(CodegenError::cranelift(
+            "`RegexMatch` reached lowering before `compile_to_object` rewrote it as its record",
             span,
         )),
         // B06, B04 — a native `Decimal`, time, currency, locale or

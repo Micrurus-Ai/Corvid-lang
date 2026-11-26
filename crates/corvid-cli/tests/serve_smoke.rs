@@ -2044,6 +2044,135 @@ server items_api:
     assert_eq!(items[0].get("id").and_then(|v| v.as_str()), Some("i1"));
 }
 
+/// A typed path placeholder, `{board: Int}`: the handler reads
+/// `path.board` as an `Int`, a segment that is not one is refused with a
+/// 400 naming the parameter before the handler runs, and the contract
+/// carries the type for generated clients.
+#[test]
+fn serve_reads_a_typed_path_parameter_and_refuses_a_segment_that_is_not_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Board:
+    id: Int
+    next: Int
+
+server boards_api:
+    route GET "/boards/{board: Int}/summary" -> json Board:
+        return Board(path.board, path.board + 1)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port = free_port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "typed path app did not become ready on :{port}");
+
+    let (status, body) = http_get(port, "/boards/7/summary").expect("GET a board");
+    assert_eq!(status, 200, "{body}");
+    let board: serde_json::Value = serde_json::from_str(&body).expect("valid JSON");
+    assert_eq!((board["id"].as_i64(), board["next"].as_i64()), (Some(7), Some(8)), "path.board is an Int: {body}");
+
+    let (status, body) = http_get(port, "/boards/seven/summary").expect("GET a non-number");
+    assert_eq!(status, 400, "a segment that is not an Int is refused: {body}");
+    assert!(body.contains("board") && body.contains("seven"), "the refusal names the parameter and value: {body}");
+
+    let (status, contract) = http_get(port, "/.well-known/corvid").expect("GET the contract");
+    assert_eq!(status, 200);
+    assert!(contract.contains("/boards/{board}/summary"), "the contract's path is the router's: {contract}");
+    let contract: serde_json::Value = serde_json::from_str(&contract).expect("contract JSON");
+    let param = contract.pointer("/routes/0/path_params/0").expect("the route's path parameter");
+    assert_eq!(param["name"], "board");
+    assert!(param.to_string().contains("Int"), "the contract carries the type: {param}");
+}
+
+/// Request text of every kind reads as its declared type: a `Decimal`
+/// and a plain variant in the path; an absent `Option`, a repeated
+/// `List` and an `Instant` in the query. A value that is not its type
+/// is a 400 naming the parameter, where a query field of these types
+/// used to reach the handler as a `String`.
+#[test]
+fn serve_reads_request_text_of_every_type_through_its_declared_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("main.cor");
+    let source = r#"type Status:
+    | Open
+    | Closed
+
+type Search:
+    status: List<Status>
+    limit: Option<Int>
+    since: Instant
+
+type Found:
+    amount: Decimal
+    open: Bool
+    statuses: Int
+    limited: Bool
+
+server search_api:
+    route GET "/accounts/{amount: Decimal}/{status: Status}" query Search -> json Found:
+        open = match path.status:
+            Open -> true
+            Closed -> false
+        limited = match query.limit:
+            Some(n) -> n > 0
+            None -> false
+        return Found(path.amount, open, query.status.length(), limited)
+"#;
+    std::fs::write(&src_path, source).unwrap();
+
+    let port = free_port();
+    let child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&src_path)
+        .arg("--listen")
+        .arg(format!("127.0.0.1:{port}"))
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let _guard = ServedApp(child);
+    assert!(wait_until_ready(port), "request text app did not become ready on :{port}");
+
+    let since = "since=2026-11-26T08:30:00Z";
+    let (status, body) =
+        http_get(port, &format!("/accounts/19.90/Open?status=Open&status=Closed&{since}")).expect("GET");
+    assert_eq!(status, 200, "{body}");
+    let found: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(found["amount"], "19.90", "the Decimal keeps its digits: {body}");
+    assert_eq!(found["open"], true, "the variant read by name: {body}");
+    assert_eq!(found["statuses"], 2, "a repeated name is the list: {body}");
+    assert_eq!(found["limited"], false, "an absent Option is None: {body}");
+
+    let (status, body) = http_get(port, &format!("/accounts/19.90/Open?limit=5&{since}")).expect("GET");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["limited"], true, "{body}");
+
+    for (path, names) in [
+        (format!("/accounts/19.9.0/Open?{since}"), ["amount", "19.9.0"]),
+        (format!("/accounts/1/Archived?{since}"), ["status", "Archived"]),
+        (format!("/accounts/1/Open?limit=five&{since}"), ["limit", "five"]),
+        ("/accounts/1/Open?since=yesterday".to_string(), ["since", "yesterday"]),
+        (format!("/accounts/1/Open?limit=1&limit=2&{since}"), ["limit", "2 times"]),
+    ] {
+        let (status, body) = http_get(port, &path).expect("GET");
+        assert_eq!(status, 400, "{path} must be refused: {body}");
+        for name in names {
+            assert!(body.contains(name), "{path}: the refusal names `{name}`: {body}");
+        }
+    }
+}
+
 /// Minimal HTTP/1.1 GET returning the FULL raw response (status line +
 /// headers + body), so a test can assert on the `Location` /
 /// `Set-Cookie` headers of a redirect.

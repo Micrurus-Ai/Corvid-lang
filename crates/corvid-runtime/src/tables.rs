@@ -37,7 +37,7 @@ mod transaction;
 pub(crate) use shared_commits::new_instance_id;
 pub use shared_commits::LISTENER_NAME;
 pub use conflict::WriteConflict;
-pub use live::{apply_live_changes, live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit};
+pub use live::{apply_live_changes, live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit, WrittenRows};
 pub use dialect::TableEngine;
 pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_prefix, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
@@ -68,6 +68,12 @@ pub struct TableRef<'a> {
     pub engine: TableEngine,
     /// The `atomic:` block this operation runs inside, if any.
     pub transaction: Option<&'a TableTransaction>,
+    /// For a write, the row's key as live subscriptions identify it
+    /// ([`LiveRow::key`]: the key fields' public JSON as compact array
+    /// text), so the commit can name the row and the revision it
+    /// reached. The interpreter computes it with the encoder the live
+    /// snapshot uses; `None` leaves the row out of the commit's detail.
+    pub row_key: Option<&'a str>,
 }
 
 /// A row's values, in [`TableRef::columns`] order.
