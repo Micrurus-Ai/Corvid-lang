@@ -270,7 +270,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **B11 assistant authority** (proposal posted for frontend review 2026-11-26; built after one working day unless frontend development objects). [Proposal](proposals/assistant-authority.md)
 
 - [ ] B11-1. `delegation: up_to <duration>` in the identity block and `assistants: allow "..."`, carried by the contract. Shared grammar: after the review window.
-- [ ] B11-2. Grants: hashed store and `POST/GET/DELETE /__delegations`, expiry bounded by the declared cap.
+- [x] B11-2a. The grant store in the auth runtime: hashed tokens under their own prefix, actions with `confirm` or `allow`, expiry bounded by a cap, revocation by the granting person only, listing, and resolution that refuses an expired, revoked or tenant-moved grant. Built 2026-11-26.
+- [ ] B11-2b. `POST/GET/DELETE /__delegations` in `corvid serve`, bounded by the declared `delegation: up_to` cap, after B11-1.
 - [ ] B11-3. Bearer authority on `/mcp` and `/actions/<name>`: grant ∩ offered ∩ the person's current authority, `allow` without confirmation, grant in the trace.
 - [ ] B11-4. Revocation and expiry drop pending confirmations (`410`).
 - [ ] B11-5. `corvid act --server --token-file`, and workers carrying the grant (B10-4b).

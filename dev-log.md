@@ -1811,6 +1811,22 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - The delegation grant store (B11-2a)
+
+B11's grammar is in its review window, so the part that does not depend
+on it went first: grants in the auth store beside sessions. A grant
+names its person, tenant, label, actions (each `confirm` or `allow`)
+and expiry; its token is stored as a hash under a prefix of its own, so
+a session token can never pass as a grant. Creation refuses an empty
+grant, an action named twice, a lifetime past the cap it is given, and
+a person or tenant the store does not hold. Resolution refuses an
+unknown, expired or revoked token and one whose person is gone or in
+another tenant; only the granting person revokes. The store authorizes
+nothing on its own: B11-3 intersects a grant with the source's offer
+and the person's current authority on every call.
+
+---
+
 ## 2026-11-26 - The change report looks inside nested types
 
 The action change report now walks every declared type an action's

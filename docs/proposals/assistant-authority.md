@@ -88,7 +88,8 @@ The roadmap's earlier B11 line said omitting the exposure should be a compile er
 ## Slices
 
 - [ ] B11-1. Grammar: `delegation: up_to <duration>` in the identity block (bounds checked) and `assistants: allow "..."`; contract carries both. Shared grammar: built after the review window.
-- [ ] B11-2. Grants: the hashed store, `POST/GET/DELETE /__delegations`, expiry bounded by the cap, traced.
+- [x] B11-2a. The grant store (`SessionAuthRuntime::create_delegation`, `resolve_delegation`, `list_delegations`, `revoke_delegation`), grammar-independent, so built during the review window. Built 2026-11-26.
+- [ ] B11-2b. `POST/GET/DELETE /__delegations`, expiry bounded by the declared cap, traced.
 - [ ] B11-3. Bearer authority on `/mcp` and `/actions/<name>`: the three-way intersection read fresh, `allow` without confirmation through a grant or session, grant id and label in the trace.
 - [ ] B11-4. Revocation: pending confirmations under a revoked or expired grant are dropped and answer `410`; tests revoke mid-flow.
 - [ ] B11-5. `corvid act --server --token-file`, and workers carrying the grant (B10-4b).
