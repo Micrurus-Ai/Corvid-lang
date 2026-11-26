@@ -366,7 +366,10 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 
 **Test infrastructure**
 
-- [ ] A diagnostic's code is found by matching words in its message (`corvid-driver/src/render.rs`), so most newer errors print `E0000`, and rewording a message can change its code. Stronger: each `TypeErrorKind` declares its code, a test refuses a kind without one or two kinds sharing one, and the error reference lists them.
+- [ ] A diagnostic's code is found by matching words in its message (`corvid-driver/src/render.rs`), so most newer errors print `E0000`, and rewording a message can change its code. Stronger: each `TypeErrorKind` declares its code, a test refuses a kind without one or two kinds sharing one, and the error reference lists them. [Proposal](proposals/diagnostic-codes.md)
+  - [ ] DC-1. `TypeErrorKind::code()`, every existing code kept, `Diagnostic` carrying its code, a duplicate-code test.
+  - [ ] DC-2. Lexer, parser, resolver and effect error codes; `detect_error_code` removed.
+  - [ ] DC-3. The generated error reference (`docs/reference/errors.md`) and its drift test.
 
 - [ ] A served test still picks its port by binding port 0 and releasing it before `corvid serve` binds it, so under heavy load another process can take the port in between and the test waits 30 seconds for a server that never started (`a_disconnected_client_closes_the_upstream_stream` failed this way once in the N4 gate and passed in two full reruns). Stronger: `corvid serve` prints the address it actually bound (`listener.local_addr()`, so `--listen 127.0.0.1:0` reports the real port, which users want too), the tests pass port 0 and read the port from that line, and a server that exits before it is ready fails the test at once with its stderr.
 - [x] `serve_smoke.rs` gave each served app a fixed port, and six ports were each used by two tests, so `approval_transition_endpoints_approve_re_executes_and_deny_drops_pending` failed in parallel runs whenever another test answered on its port. Every served test now takes an OS-assigned port from `free_port()`, the form the newer serve tests already used.
