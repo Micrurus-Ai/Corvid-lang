@@ -75,7 +75,9 @@ fn decodable(ty: &Type, rules: &Decodable<'_, '_>, seen: &mut HashSet<DefId>) ->
         ty if crate::text_scalar::is_text_scalar(ty) => true,
         Type::Tainted(inner) | Type::List(inner) => decodable(inner, rules, seen),
         Type::Option(inner) => is_native_option_type(ty) && decodable(inner, rules, seen),
-        Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, rules, seen),
+        // A JSON object's keys are text, so decoding builds String-keyed
+        // maps; a map keyed by another type is an array of pairs.
+        Type::Map(key, value) => **key == Type::String && crate::native_string_map(ty) && decodable(value, rules, seen),
         // The program question, so a `Result` holding a `Response`
         // counts before `compile_to_object` rewrites the `Response` into
         // its record (native dispatch N4); after the rewrite the two

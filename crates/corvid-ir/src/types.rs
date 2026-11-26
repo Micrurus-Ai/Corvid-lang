@@ -53,6 +53,10 @@ pub struct IrAction {
     pub name: String,
     pub agent: DefId,
     pub policy: IrRoutePolicy,
+    /// Who decides an `approve` the action's body reaches.
+    pub approval: Option<corvid_ast::ApprovalSpec>,
+    /// The `assistants:` line, when an assistant is offered the action.
+    pub assistants: Option<corvid_ast::AssistantExposure>,
     pub span: Span,
 }
 

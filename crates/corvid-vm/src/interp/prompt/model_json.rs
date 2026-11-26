@@ -79,6 +79,7 @@ pub(crate) fn to_model_text(value: &Value, ty: &Type, types: &HashMap<DefId, &Ir
 /// ignored, as `T.from_json` ignores them: a model that adds a field has
 /// not produced a wrong value.
 pub(crate) fn from_model_json(json: J, ty: &Type, types: &HashMap<DefId, &IrType>) -> Result<Value, String> {
+    let json = corvid_public_json::model_reply(json, ty);
     match ty {
         Type::Partial(inner) => partial_from_model_json(json, inner, types),
         Type::Grounded(inner) | Type::Tainted(inner) => from_model_json(json, inner, types),

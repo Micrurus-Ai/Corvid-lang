@@ -437,7 +437,38 @@ pub struct ContractAction {
     pub callable: ContractCallable,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<ContractRoutePolicy>,
+    /// The declared type that is the action's whole input, when it takes
+    /// one parameter of a declared type. Otherwise the input is an object
+    /// with one field per parameter. See `corvid_types::action_input`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,
+    /// Who decides an `approve` the action reaches: a call may answer
+    /// `202` with an approval to poll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ContractApprovalPolicy>,
+    /// Whether an authorized assistant is offered the action, and how.
+    /// Absent: people only, and no assistant is told it exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistants: Option<ContractAssistants>,
 }
+
+/// An action's `assistants:` line as the contract carries it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractAssistants {
+    /// `confirm`: each call waits for the person the assistant acts for.
+    pub mode: String,
+    /// What an assistant reads to decide whether to call the action.
+    pub description: String,
+}
+
+impl ContractAction {
+    /// The endpoint every outside caller posts the input to.
+    pub fn path(&self) -> String {
+        format!("{ACTIONS_PATH}{}", self.callable.name)
+    }
+}
+
+pub use corvid_types::action_input::ACTIONS_PATH;
 
 /// A route's authentication/authorization policy (slice 51h).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,6 +488,20 @@ pub struct ContractApprovalPolicy {
     pub expires_ms: u64,
     pub max_cost_usd: f64,
     pub irreversible: bool,
+}
+
+impl ContractApprovalPolicy {
+    /// A route's or an action's `@approval(...)`, as the contract carries it.
+    pub fn of(policy: &corvid_ast::ApprovalSpec) -> Self {
+        Self {
+            role: policy.role.clone(),
+            risk: policy.risk.clone(),
+            data: policy.data.clone(),
+            expires_ms: policy.expires_ms,
+            max_cost_usd: policy.max_cost_usd,
+            irreversible: policy.irreversible,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -632,9 +677,26 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Agent(a) => a.action.as_ref().map(|spec| ContractAction {
-                callable: contract_callable(&a.name.name, &a.params, &a.return_ty, &a.effect_row, registry, &names),
-                policy: contract_policy(&spec.policy),
+            Decl::Agent(a) => a.action.as_ref().map(|spec| {
+                // The caller is filled from the session, so it is not input.
+                let inputs: Vec<(corvid_ast::Param, &corvid_types::Type)> = a
+                    .params
+                    .iter()
+                    .filter_map(|p| checked.type_refs.get(&p.ty.span()).map(|ty| (p.clone(), ty)))
+                    .filter(|(_, ty)| !corvid_types::action_input::is_caller(ty))
+                    .collect();
+                let whole = corvid_types::action_input::whole_input_type(inputs.iter().map(|(_, ty)| *ty)).is_some();
+                let params: Vec<corvid_ast::Param> = inputs.iter().map(|(p, _)| p.clone()).collect();
+                ContractAction {
+                    callable: contract_callable(&a.name.name, &params, &a.return_ty, &a.effect_row, registry, &names),
+                    policy: contract_policy(&spec.policy),
+                    input_type: whole.then(|| names.name(&params[0].ty)),
+                    approval: spec.approval.as_ref().map(ContractApprovalPolicy::of),
+                    assistants: spec.assistants.as_ref().map(|line| ContractAssistants {
+                        mode: line.mode.as_str().into(),
+                        description: line.description.clone(),
+                    }),
+                }
             }),
             _ => None,
         })
@@ -1150,14 +1212,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             .body_ty
             .as_ref()
             .and_then(|ty| names.upload(ty, r.upload.as_ref())),
-        approval: r.approval.as_ref().map(|policy| ContractApprovalPolicy {
-            role: policy.role.clone(),
-            risk: policy.risk.clone(),
-            data: policy.data.clone(),
-            expires_ms: policy.expires_ms,
-            max_cost_usd: policy.max_cost_usd,
-            irreversible: policy.irreversible,
-        }),
+        approval: r.approval.as_ref().map(ContractApprovalPolicy::of),
         response_type: names.name(&r.response.ty),
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),

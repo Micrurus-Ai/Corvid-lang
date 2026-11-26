@@ -150,14 +150,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_from_float: FuncId,
     pub approve_sync: FuncId,
     // Typed prompt bridges, one per return type.
-    pub prompt_call_int: FuncId,
-    pub prompt_call_bool: FuncId,
-    pub prompt_call_float: FuncId,
-    pub prompt_call_string: FuncId,
-    /// The prompt bridge for every non-scalar reply (B1b): the standard
-    /// 7 args plus the schema text, the public JSON decode plan, its
-    /// length and typeinfo table, and the slot the decoded value is
-    /// written to.
+    /// `corvid_prompt_call_typed`, the bridge every native prompt call
+    /// uses: the interpreter's request and repair rule, the reply read
+    /// through the embedded public JSON plan.
     pub prompt_call_typed: FuncId,
     /// Generic JSON parse / build primitives. Used inside codegen-
     /// emitted per-struct decoder and encoder functions. Runtime

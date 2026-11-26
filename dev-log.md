@@ -108,6 +108,84 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native prompts ask and retry as the interpreter does
+
+Filed during B1b: a native prompt with an `Int`, `Bool`, `Float` or
+`String` reply put a system prompt with text instructions in front of
+the user's text and sent no schema. It parsed the answer leniently, and
+retried up to `CORVID_PROMPT_MAX_RETRIES` times. The interpreter sends
+the rendered prompt with `reply_schema`'s schema and retries only under
+`with repair N`. So a real model was asked differently by the two
+tiers, and a recording of a retried call diverged.
+
+Now every native prompt goes through `corvid_prompt_call_typed`. Three
+rules have one definition each, which both tiers call:
+- `corvid_prompt_format::reply_schema`: the schema to send, none for a
+  `String`.
+- `corvid_public_json::model_reply`: a reply that arrives as text for a
+  type whose JSON form is not a string, such as `"42"` for an `Int`, is
+  read as the JSON it holds.
+- `corvid_runtime::prompt_repair_rendered`: the retry text, the previous
+  reply and why it failed.
+
+A prompt without `with repair` makes one call. A reply still unusable
+after the repairs stops a native program with "unusable reply: ...",
+exiting with status 1, the interpreter's wording.
+
+Removed: the four scalar prompt bridges, their text instructions and
+lenient parsers, the system-prompt builder, the retry setting, and the
+env-mock fast path, which skipped the runtime's own env-mock adapter.
+
+Test: `repairs_follow_with_repair_on_both_tiers` answers "very good",
+then 7, for an `Int` prompt with `with repair 1`. Both tiers make the
+same two calls with the same retry text and return 7. Without
+`with repair` a native prompt makes one call and stops.
+
+Found and fixed: the library replay test (`trace_record.rs`) never
+replayed. A loaded library starts its runtime once, from the
+environment of its first call, so setting `CORVID_REPLAY_TRACE_PATH`
+afterwards had no effect. The test passed only because the removed
+env-mock fast path kept answering its cached first reply. The replay
+phase now loads a fresh copy of the library after setting the replay
+environment, with the model answering "negative". The recorded
+"positive" can therefore come only from the recording.
+
+---
+
+## 2026-11-26 - Native maps with text-held keys and values (B3)
+
+Native maps held only `String` keys and a few value types, and compared
+keys by their text. A `Decimal` key needs value comparison: `1.0` and
+`1.00` are one key, by `==` and in the interpreter's map.
+
+Now each native map records its key type's comparison layout. The C map
+compares a `String` key as text and any other key through
+`corvid_map_keys_equal`, the runtime's by-value comparison behind `==`.
+Map equality matches keys the same way. Which types the runtime
+compares as one text slot is now one function,
+`EqualityLayout::of_text_slot`, shared by the comparison layouts and
+the map key kinds. A test holds the C file's `String` key kind in step
+with it. Values held as canonical text are reference-counted slots, as
+`String` values are. JSON decoding still builds `String`-keyed maps
+only, since a JSON object's keys are text.
+
+Found and fixed: a map literal's keys did not take the expected key
+type, though its values did. `{1.0: "one"}` where a
+`Map<Decimal, String>` was meant checked as `Map<Float, String>`, and
+`{"EUR": 1}` as `String`-keyed. Keys now get the same expected-type
+treatment as values.
+
+This completes the [native scalar boundaries](docs/proposals/native-scalar-boundaries.md)
+proposal: prompts, tools and maps all carry the text-held types
+natively, through the one public mapping.
+
+Tests: parity tests cover a `Decimal` key at two scales (one entry, the
+first text kept), keys and values of `Instant`, `Duration`, `Currency`
+and `Bytes`, and by-value equality of `Decimal`-keyed maps. A checker
+test covers map literal keys taking the declared type.
+
+---
+
 ## 2026-11-26 - Native user tools through the runtime call (B2b)
 
 Native code called a tool of the program's own through its typed C
@@ -1552,6 +1630,197 @@ receives an unexpected 500 had nothing to show. The test now prints the
 server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
+
+## 2026-11-26 - The `assistants:` line (B10-3a)
+
+`assistants: confirm "Move a card to another column."` as an action's
+first line offers the action to an authorized assistant; without the
+line no assistant is told the action exists. The parser recognizes the
+word only there, through a new `parse_block_after_indent` that the
+action parser continues into after reading the line. `allow` is
+refused, naming B11, because it needs on-behalf-of authority that does
+not run yet; `never` is refused because leaving the line out says it.
+The description is required, since it is what an assistant reads.
+
+The contract and OpenAPI carry the mode and description, but nothing
+serves assistant calls yet, so contract closure gained
+`assistant_tools: false`: `corvid serve` refuses to start a program
+with the line, naming the action and B10-3b, the way `live` waited for
+its transport. The B10-3b design questions (whose authority an MCP call
+carries, how `confirm` reaches the person, the trace surface) are in
+the proposal's slice list, to settle before its code.
+
+---
+
+## 2026-11-26 - Every generated call reaches a served endpoint (B10-2b-6)
+
+The generated TypeScript client, the dev console and the React
+scaffold called public agents at `/agents/<name>` and
+`/agents/<name>/stream`, which neither server answers. Serving them
+was rejected: it would open every public agent to outside callers with
+no policy the source declared. So the backend's outside surface is its
+actions: `CorvidClient.invoke` and `stream` are gone, the client emits
+methods only for actions (a streaming one returns `RouteStream<T>` via
+the new `actionStream`, sharing the route stream reader), and the
+console and scaffold list actions. A test walks the generated `api.ts`
+and fails if any `this.client.<call>` is not one whose endpoint `corvid
+serve` answers.
+
+Found and fixed while doing it:
+- **The client sent no CSRF token.** Every cookie-authenticated POST
+  from it, action or route stream, would get `403`. Each state-changing
+  request now copies the `corvid_csrf` cookie into `X-CSRF-Token`.
+- **A private type an action used was not published** (its own
+  commit). Types were published for public agents and routes only, so
+  `MoveCard` was undefined in `types.ts` and a dangling `$ref` in
+  OpenAPI. A test now checks the action's types are in the contract,
+  and fails without the fix.
+
+Told the frontend roadmap: `useCorvidStream` reads `AgentStream`, which
+no generated call returns any more; the route-stream hook already
+planned there is now the one a streaming action needs. Not run: the
+Node route-stream script (`scripts/verify_generated_route_stream.py`),
+since this machine has Node only on Windows and `corvid` only in WSL;
+the transport typechecks under the package's strict `tsconfig`.
+
+---
+
+## 2026-11-26 - Action methods in the TypeScript client (B10-2b-4)
+
+`corvid contract ts-client` emits one method per action, posting to
+`POST /actions/<name>` through a new `CorvidClient.action`. The input
+follows the contract's `input_type`: `move_card(move)` sends the record,
+`rename(card, title)` sends `{ card, title }`. An action with
+`@approval` returns `Promise<T | ApprovalPending>`, so code that treats
+a queued call as a result does not compile; `ApprovalPending` carries
+the approval id and the poll URL from the `202`. The transport
+typechecks under the package's strict `tsconfig`.
+
+Found: the client's agent and prompt methods, and the dev console,
+post to `/agents/<name>`, which neither server serves, so every call
+fails. Serving it would open every public agent to outside callers
+without a declared policy. Filed first in B10, ahead of the UI binding:
+outside calls go through actions, the client stops generating agent
+methods, and a test checks each generated call names a served endpoint.
+
+---
+
+## 2026-11-26 - A form posts to any action (B10-2b-3)
+
+A form posted only to an action taking one record; any other answered
+`415`. Now a form posts one field per parameter, read by the
+query-field rule: a text type once, an `Option` left out when absent, a
+`List` by repeating the name. A refactor commit first split the record
+reader into `urlencoded_values` (parse the text) and `urlencoded_value`
+(read one name as a type), so a record's fields and an action's
+parameters read through the same code. A parameter no form field can
+carry, such as a record beside others, answers `415` naming it, before
+the text is read.
+
+---
+
+## 2026-11-26 - An action's approvals queue under its `@approval` (B10-2b-2)
+
+An `approve` inside an action was denied, because the process runtime's
+approver says no and actions took no `@approval`. Now an action takes an
+agent's annotations and an `@approval(...)`, in any order, and the route
+approval rule became one function both use (`check_approval_clause`): a
+body that can reach an `approve` needs a complete `@approval` and a
+signed-in policy, and an `@approval` with no reachable `approve` is
+refused. `@approval` before a plain `agent` is a parse error saying an
+agent's caller decides its approvals. Serve queues under the action's
+policy with the verified caller as requester; the request answers `202`
+and the reviewer's approve runs the action. The contract lists the
+policy. A serve test queues, approves as the declared reviewer, and
+reads the action's result.
+
+Two copies removed: the serve approval-queue setup was inline in the
+route handler and is now `approval_runtime`, which actions call too;
+the contract's approval projection is `ContractApprovalPolicy::of`. The
+error kinds were renamed `ApprovalRequiresAuthentication` and
+`ApprovalPolicyInvalid`, naming the route or the action.
+
+---
+
+## 2026-11-26 - An action reads its caller (B10-2b-1)
+
+`action claim(card: Int, by: Caller) -> Card requires authenticated:`.
+`Caller` is a new type name for the record a signed-in route already
+binds as `actor`. It is not named `Actor` because `std/auth` already
+exports a constructible `Actor` record that describes an actor; a
+`Caller` is a different thing, which only a verified session produces.
+The gate caught the clash: every reference app imports `std/auth`'s
+`Actor`. Serve fills a `Caller` parameter from the verified
+session and leaves it out of the input, the contract and OpenAPI. Code
+passes one along, and the interpreter checks the action's `requires`
+against it before the body runs: a route with `requires authenticated`
+that calls an action with `requires permission("board.edit")` gets
+`403 insufficient_authority` for a caller without the permission.
+Without that check a weaker route could lend its caller to a stronger
+action, so "every caller is checked" would hold only over HTTP.
+
+Considered: an implicit `actor` in a signed-in action's body, as routes
+have. Rejected because an action is also called from code, so the
+caller would have to flow from the calling code unseen; with a
+parameter the signature says the action reads its caller, and the
+compiler sees each place one is passed.
+
+A `Caller` comes only from a session. The checker refuses a `Caller`
+parameter on a `requires anyone` action, and a `Caller` inside an
+action's other inputs, a route's path, query or body, or a prompt's
+result, where the sender could name any caller. The secret-boundary
+walk now takes the type to look for, so both rules follow records the
+same way.
+
+Found and fixed: the checker and the IR lowerer each defined the actor
+record; both now use `Type::actor()` (its own commit). The type also
+displays as `Caller` in errors instead of "route path params".
+
+Narrowed: native builds refuse a `Caller` parameter by name
+(`CallerNotNative`), since native code does not run the caller check
+yet; a `test` cannot build a `Caller`. Both are on the roadmap first in
+B10.
+
+---
+
+## 2026-11-26 - `POST /actions/<name>` (B10-2a)
+
+`corvid serve` answers one endpoint per action. The order is fixed:
+the `requires` policy through the route enforcement path (session,
+CSRF for a cookie session, roles and permissions read fresh), then the
+input decoded through the action's types, then an `action` trace event
+naming the action, the surface and the actor, then the body. A test
+sends an anonymous request with an input that would fail to decode and
+gets `401`, not `400`, so the order is visible from outside.
+
+The input's shape is one rule, in `corvid_types::action_input`: one
+parameter of a declared type is the whole input (a form posts
+`MoveCard`'s fields), anything else is an object with one field per
+parameter. The contract publishes the decision as `input_type`,
+OpenAPI builds the request schema from it, and serve decodes by the
+same function, so a client is never told one shape and sent through
+another. Alternatives considered: always an object of parameters
+(rejected: a form for `move_card(move: MoveCard)` would post
+`move.card`, and the CLI in B10-4 would need `--move.card`), and
+requiring every action to take one record (rejected: `rename(card,
+title)` would need a record declared only to carry two values).
+
+Found and fixed:
+- **An action could hold a `Secret` in its signature.** B10-1 listed
+  every action in the contract, so a form or assistant would have been
+  told to send the secret as JSON. It is now a boundary error like a
+  route's input, with a hint to read the secret inside the action.
+- **A route could be declared at an action's path.** It is now a
+  compile error naming both.
+- **`corvid serve` refused a program with no `server` block,** which an
+  action-only program is. It now serves its actions.
+
+Narrowed, on the roadmap first in B10: an action body cannot read the
+caller yet; an `approve` inside an action is denied because actions
+take no `@approval` yet; a form can post only to an action taking one
+record (`415` otherwise); the TypeScript client has no action methods.
+
+---
 
 ## 2026-11-26 - The `action` declaration (B10-1)
 

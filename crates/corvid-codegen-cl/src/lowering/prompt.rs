@@ -380,13 +380,6 @@ pub(super) fn lower_prompt_call(
     };
 
     let prompt_name_val = emit_string_const(builder, module, runtime, &prompt.name, span)?;
-    let signature_val = emit_string_const(
-        builder,
-        module,
-        runtime,
-        &format_prompt_signature(&prompt),
-        span,
-    )?;
     let model_val = emit_string_const(builder, module, runtime, "", span)?;
     let trace_payload = json_trace_payload(builder, module, runtime, &arg_json, span)?;
 
@@ -400,82 +393,64 @@ pub(super) fn lower_prompt_call(
     // through `corvid_prompt_call_typed`: the model is shown the
     // public-form schema and the reply is read with the public decoder
     // through the embedded plan, as on the interpreter (B1b).
-    let result_value = match bridge_return_ty {
-        Type::Int | Type::Bool | Type::Float | Type::String => {
-            let bridge_id = match bridge_return_ty {
-                Type::Int => runtime.prompt_call_int,
-                Type::Bool => runtime.prompt_call_bool,
-                Type::Float => runtime.prompt_call_float,
-                Type::String => runtime.prompt_call_string,
-                _ => unreachable!("guarded by outer match arm"),
-            };
-            let fref = module.declare_func_in_func(bridge_id, builder.func);
-            let call = builder.ins().call(
-                fref,
-                &[
-                    prompt_name_val,
-                    signature_val,
-                    rendered,
-                    model_val,
-                    trace_payload.type_tags,
-                    trace_payload.count,
-                    trace_payload.values_ptr,
-                ],
-            );
-            builder.inst_results(call)[0]
-        }
-        reply_ty if super::public_json::native_public_json_type(reply_ty, &types) => {
-            let types_by_id: std::collections::HashMap<DefId, &corvid_ir::IrType> =
-                runtime.ir_types.iter().map(|(k, v)| (*k, v)).collect();
-            let schema_value = corvid_prompt_format::schema_for(reply_ty, &types_by_id);
-            let schema_text = serde_json::to_string(&schema_value).map_err(|e| {
-                CodegenError::cranelift(format!("failed to serialise schema for prompt `{callee_name}` return: {e}"), span)
-            })?;
-            // `.rodata`: an immortal string, never released.
-            let schema_val = emit_string_const(builder, module, runtime, &schema_text, span)?;
-            let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, reply_ty, span)?;
-            let plan = module.declare_data_in_func(plan, builder.func);
-            let plan = builder.ins().symbol_value(I64, plan);
-            let plan_len = builder.ins().iconst(I64, plan_len);
-            let table = module.declare_data_in_func(table, builder.func);
-            let table = builder.ins().symbol_value(I64, table);
-            let payload_slot =
-                builder.create_sized_stack_slot(clir::StackSlotData::new(clir::StackSlotKind::ExplicitSlot, 8, 3));
-            let payload = builder.ins().stack_addr(I64, payload_slot, 0);
-            let bridge_ref = module.declare_func_in_func(runtime.prompt_call_typed, builder.func);
-            builder.ins().call(
-                bridge_ref,
-                &[
-                    prompt_name_val,
-                    signature_val,
-                    rendered,
-                    model_val,
-                    trace_payload.type_tags,
-                    trace_payload.count,
-                    trace_payload.values_ptr,
-                    schema_val,
-                    plan,
-                    plan_len,
-                    table,
-                    payload,
-                ],
-            );
-            let bits = builder.ins().stack_load(I64, payload_slot, 0);
-            match cl_type_for(reply_ty, span)? {
-                I8 => builder.ins().ireduce(I8, bits),
-                F64 => builder.ins().bitcast(F64, MemFlags::new(), bits),
-                _ => bits,
-            }
-        }
-        other => {
-            return Err(CodegenError::not_supported(
-                format!(
-                    "prompt `{callee_name}` returns `{}`, which has no native JSON form; use the interpreter tier",
-                    other.display_name()
-                ),
-                span,
-            ));
-        }
+    // Every reply goes through `corvid_prompt_call_typed`, which makes the
+    // interpreter's request (the rendered prompt and `reply_schema`'s
+    // schema, none for a `String`), reads the reply with the public
+    // decoder through the embedded plan, and retries exactly as
+    // `with repair N` says.
+    let reply_ty = bridge_return_ty;
+    if !super::public_json::native_public_json_type(reply_ty, &types) {
+        return Err(CodegenError::not_supported(
+            format!(
+                "prompt `{callee_name}` returns `{}`, which has no native JSON form; use the interpreter tier",
+                reply_ty.display_name()
+            ),
+            span,
+        ));
+    }
+    let types_by_id: std::collections::HashMap<DefId, &corvid_ir::IrType> =
+        runtime.ir_types.iter().map(|(k, v)| (*k, v)).collect();
+    let schema_text = match corvid_prompt_format::reply_schema(reply_ty, &types_by_id) {
+        Some(schema) => serde_json::to_string(&schema).map_err(|e| {
+            CodegenError::cranelift(format!("failed to serialise schema for prompt `{callee_name}` return: {e}"), span)
+        })?,
+        None => String::new(),
+    };
+    // `.rodata`: an immortal string, never released.
+    let schema_val = emit_string_const(builder, module, runtime, &schema_text, span)?;
+    let repair_attempts = builder.ins().iconst(I64, prompt.repair_attempts.unwrap_or(0) as i64);
+    let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, reply_ty, span)?;
+    let plan = module.declare_data_in_func(plan, builder.func);
+    let plan = builder.ins().symbol_value(I64, plan);
+    let plan_len = builder.ins().iconst(I64, plan_len);
+    let table = module.declare_data_in_func(table, builder.func);
+    let table = builder.ins().symbol_value(I64, table);
+    let payload_slot =
+        builder.create_sized_stack_slot(clir::StackSlotData::new(clir::StackSlotKind::ExplicitSlot, 8, 3));
+    let payload = builder.ins().stack_addr(I64, payload_slot, 0);
+    let bridge_ref = module.declare_func_in_func(runtime.prompt_call_typed, builder.func);
+    builder.ins().call(
+        bridge_ref,
+        &[
+            prompt_name_val,
+            rendered,
+            model_val,
+            trace_payload.type_tags,
+            trace_payload.count,
+            trace_payload.values_ptr,
+            schema_val,
+            repair_attempts,
+            plan,
+            plan_len,
+            table,
+            payload,
+        ],
+    );
+    let bits = builder.ins().stack_load(I64, payload_slot, 0);
+    let result_value = match cl_type_for(reply_ty, span)? {
+        I8 => builder.ins().ireduce(I8, bits),
+        F64 => builder.ins().bitcast(F64, MemFlags::new(), bits),
+        _ => bits,
     };
     let result_vals = [result_value];
 
@@ -513,7 +488,6 @@ pub(super) fn lower_prompt_call(
     }
 
     emit_release(builder, module, runtime, prompt_name_val);
-    emit_release(builder, module, runtime, signature_val);
     if !rendered_borrowed {
         emit_release(builder, module, runtime, rendered);
     }
@@ -571,12 +545,3 @@ fn json_trace_payload(
     Ok(TracePayload { type_tags, count, values_ptr, owned_values: Vec::new() })
 }
 
-fn format_prompt_signature(p: &corvid_ir::IrPrompt) -> String {
-    let params = p
-        .params
-        .iter()
-        .map(|param| format!("{}: {}", param.name, param.ty.display_name()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{}({}) -> {}", p.name, params, p.return_ty.display_name())
-}

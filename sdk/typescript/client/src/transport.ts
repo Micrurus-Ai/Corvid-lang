@@ -1,5 +1,10 @@
 // The generic Corvid transport (slice 51l).
 //
+// A client reaches the backend through declared actions
+// (`POST /actions/<name>`), routes, live subscriptions and the sign-in
+// surface. There is no call for a public agent: no server answers one,
+// and serving one would open an agent no source declared callable.
+//
 // One `CorvidClient` instance is shared by all generated methods. It
 // owns every cross-cutting concern the moat depends on — session
 // cookies, typed errors, the SSE event protocol, and cursor pagination
@@ -8,17 +13,10 @@
 
 import { CorvidError } from "./errors.js";
 import { connectionForPage, type LiveConnection, type LiveObserver } from "./live-connection.js";
-import {
-  type AgentEvent,
-  type AgentStream,
-  type ApprovalRequest,
-  type RouteEvent,
-  type RouteFailure,
-  type RouteStream,
-} from "./events.js";
+import { type RouteEvent, type RouteFailure, type RouteStream } from "./events.js";
 import { type Page, paginate } from "./pagination.js";
 import { fillPath, urlEncodedRecord } from "./path.js";
-import { readSseEvents, type SseEvent } from "./sse.js";
+import { readSseEvents } from "./sse.js";
 
 /**
  * How a generated route call lays out its arguments: the path parameters
@@ -29,6 +27,16 @@ export interface RouteShape {
   readonly params: readonly string[];
   readonly query: boolean;
   readonly body: "json" | "form" | null;
+}
+
+/**
+ * An action call a reviewer must approve first. Poll `poll` for the
+ * decision; approving runs the action.
+ */
+export interface ApprovalPending {
+  readonly kind: "approval_pending";
+  readonly approvalId: string;
+  readonly poll: string;
 }
 
 export interface CorvidClientOptions {
@@ -61,14 +69,24 @@ export class CorvidClient {
     return this.live.subscribe(path, keyFields, observer, CorvidError);
   }
 
-  /** Invoke a public agent/prompt and await its single JSON result. */
-  async invoke<T>(name: string, input: unknown): Promise<T> {
-    const res = await this.doFetch(`${this.baseUrl}/agents/${encodeURIComponent(name)}`, {
+  /**
+   * Call a declared `action` at `POST /actions/<name>` with its input:
+   * the record itself when the action takes one, otherwise an object
+   * with one field per parameter. An action that declares `@approval`
+   * answers `202` while a reviewer decides, which resolves to an
+   * `ApprovalPending`; every other non-2xx answer throws `CorvidError`.
+   */
+  async action<T>(name: string, input: unknown): Promise<T | ApprovalPending> {
+    const res = await this.doFetch(`${this.baseUrl}/actions/${encodeURIComponent(name)}`, {
       method: "POST",
       credentials: "include",
-      headers: { "content-type": "application/json", ...this.headers },
+      headers: withCsrf("POST", { "content-type": "application/json", ...this.headers }),
       body: JSON.stringify(input ?? {}),
     });
+    if (res.status === 202) {
+      const queued = (await safeJson(res)) as { approval_id?: string; poll?: string } | null;
+      return { kind: "approval_pending", approvalId: queued?.approval_id ?? "", poll: queued?.poll ?? "" };
+    }
     return this.parse<T>(res);
   }
 
@@ -77,76 +95,20 @@ export class CorvidClient {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method,
       credentials: "include",
-      headers: body === undefined ? this.headers : { "content-type": "application/json", ...this.headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: withCsrf(method, body === undefined ? { ...this.headers } : { "content-type": "application/json", ...this.headers }),
       signal,
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     return this.parse<T>(res);
   }
 
-  /** Send a file to a multipart POST route. Progress counts multipart body bytes. */
-  upload<T>(path: string, file: File, onProgress: (loaded: number, total?: number) => void,
-            signal?: AbortSignal): Promise<T> {
-    return new Promise((resolve, reject) => {
-      signal?.throwIfAborted();
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", this.baseUrl + path);
-      xhr.withCredentials = true;
-      for (const [name, value] of Object.entries(this.headers)) {
-        if (name.toLowerCase() !== "content-type") xhr.setRequestHeader(name, value);
-      }
-      const abort = () => xhr.abort();
-      xhr.upload.onprogress = event => onProgress(event.loaded, event.lengthComputable ? event.total : undefined);
-      xhr.onerror = () => reject(new CorvidError(0, null, "Upload connection failed"));
-      xhr.onabort = () => reject(signal?.reason ?? new DOMException("Upload cancelled", "AbortError"));
-      xhr.onload = () => {
-        const response = new Response(xhr.responseText || null, { status: xhr.status });
-        resolve(this.parse<T>(response));
-      };
-      xhr.onloadend = () => signal?.removeEventListener("abort", abort);
-      const form = new FormData();
-      form.append("file", file);
-      xhr.send(form);
-      signal?.addEventListener("abort", abort, { once: true });
-    });
-  }
 
-  /** Invoke a streaming agent and consume its typed SSE event stream. */
-  stream<T>(name: string, input: unknown): AgentStream<T> {
-    const url = `${this.baseUrl}/agents/${encodeURIComponent(name)}/stream`;
-    const doFetch = this.doFetch;
-    const headers = this.headers;
-
-    async function* iterate(): AsyncGenerator<AgentEvent<T>> {
-      const res = await doFetch(url, {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json", accept: "text/event-stream", ...headers },
-        body: JSON.stringify(input ?? {}),
-      });
-      if (!res.ok || !res.body) {
-        throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
-      }
-      for await (const raw of readSseEvents(res.body)) {
-        const event = agentEvent<T>(raw);
-        if (event) yield event;
-      }
-    }
-
-    const gen = iterate();
-    return {
-      [Symbol.asyncIterator]: () => gen,
-      async result(): Promise<T> {
-        for await (const event of gen) {
-          if (event.kind === "completed") return event.value;
-          if (event.kind === "failed") throw new CorvidError(200, event.error, "agent failed");
-        }
-        throw new CorvidError(200, null, "stream ended without a terminal event");
-      },
-    };
-  }
-
-  /** Read the items from a GET stream, with optional cancellation. */
+  /**
+   * Call a declared route that returns `Stream<Item>`. `route` is the
+   * method and contract path, as in `"GET /boards/{board}/feed"`, and
+   * `args` follow `shape`. Generated `Api.route` calls this. A path value
+   * that cannot be sent exactly throws here, before any request.
+   */
   routeStream<Item>(path: string, signal?: AbortSignal): AsyncGenerator<Item>;
   /**
    * Call a declared route that returns `Stream<Item>`. `route` is the
@@ -181,7 +143,11 @@ export class CorvidClient {
       body = urlEncodedRecord(args[next++]);
       headers["content-type"] = "application/x-www-form-urlencoded";
     }
-    const gen = this.readRouteEvents<Item>(path, { method, headers, body });
+    return this.eventStream<Item>(path, method, headers, body);
+  }
+
+  private eventStream<Item>(path: string, method: string, headers: Record<string, string>, body?: string): RouteStream<Item> {
+    const gen = this.readRouteEvents<Item>(path, {method, headers, body});
     return {
       [Symbol.asyncIterator]: () => gen,
       async result(): Promise<null> {
@@ -194,11 +160,17 @@ export class CorvidClient {
     };
   }
 
+  actionStream<Item>(name: string, input: unknown): RouteStream<Item> {
+    const headers = { accept: "text/event-stream", "content-type": "application/json", ...this.headers };
+    const url = `/actions/${encodeURIComponent(name)}`;
+    return this.eventStream<Item>(url, "POST", headers, JSON.stringify(input ?? {}));
+  }
+
   private async *readRouteEvents<Item>(path: string, init: RequestInit): AsyncGenerator<RouteEvent<Item>> {
     let res: Response;
     try {
       res = await this.doFetch(this.baseUrl + path, {
-        ...init, credentials: "include", headers: { accept: "text/event-stream", ...this.headers, ...init.headers },
+        ...init, credentials: "include", headers: withCsrf(init.method ?? "GET", { accept: "text/event-stream", ...this.headers, ...init.headers } as Record<string,string>),
       });
     } catch {
       init.signal?.throwIfAborted();
@@ -229,6 +201,33 @@ export class CorvidClient {
   }
 
   /** Walk a cursor-paginated route to exhaustion. */
+  /** Send a file to a multipart POST route. Progress counts multipart body bytes. */
+  upload<T>(path: string, file: File, onProgress: (loaded: number, total?: number) => void,
+            signal?: AbortSignal): Promise<T> {
+    return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", this.baseUrl + path);
+      xhr.withCredentials = true;
+      for (const [name, value] of Object.entries(withCsrf("POST", this.headers))) {
+        if (name.toLowerCase() !== "content-type") xhr.setRequestHeader(name, value);
+      }
+      const abort = () => xhr.abort();
+      xhr.upload.onprogress = event => onProgress(event.loaded, event.lengthComputable ? event.total : undefined);
+      xhr.onerror = () => reject(new CorvidError(0, null, "Upload connection failed"));
+      xhr.onabort = () => reject(signal?.reason ?? new DOMException("Upload cancelled", "AbortError"));
+      xhr.onload = () => {
+        const response = new Response(xhr.responseText || null, { status: xhr.status });
+        resolve(this.parse<T>(response));
+      };
+      xhr.onloadend = () => signal?.removeEventListener("abort", abort);
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
   paginate<Item>(path: string): AsyncGenerator<Item> {
     return paginate<Item>((cursor) => {
       const q = cursor ? `${path}${path.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}` : path;
@@ -275,33 +274,27 @@ function throwRouteFailure(event: RouteEvent<unknown>): void {
   }
 }
 
+/**
+ * A state-changing request carries the session's CSRF token: the server
+ * requires the `X-CSRF-Token` header to match the readable `corvid_csrf`
+ * cookie for every cookie-authenticated POST, PUT, PATCH and DELETE.
+ * Outside a browser, or before sign-in, there is no cookie to copy.
+ */
+function withCsrf(method: string, headers: Record<string, string>): Record<string, string> {
+  if (["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) return headers;
+  const cookies = typeof document === "undefined" ? "" : document.cookie;
+  const token = cookies
+    .split("; ")
+    .find((cookie) => cookie.startsWith("corvid_csrf="))
+    ?.slice("corvid_csrf=".length);
+  return token ? { "x-csrf-token": decodeURIComponent(token), ...headers } : headers;
+}
+
 async function safeJson(res: Response): Promise<unknown> {
   try {
     return await res.json();
   } catch {
     return null;
-  }
-}
-
-/** An agent invocation's event, or `null` for one it does not define. */
-function agentEvent<T>({ event, data: payload }: SseEvent): AgentEvent<T> | null {
-  switch (event) {
-    case "started":
-      return { kind: "started", runId: (payload as { run_id?: string })?.run_id ?? "" };
-    case "chunk":
-      return { kind: "chunk", value: payload as T };
-    case "tool_started":
-      return { kind: "tool_started", tool: (payload as { tool?: string })?.tool ?? "" };
-    case "tool_completed":
-      return { kind: "tool_completed", tool: (payload as { tool?: string })?.tool ?? "" };
-    case "approval_required":
-      return { kind: "approval_required", approval: payload as ApprovalRequest };
-    case "completed":
-      return { kind: "completed", value: payload as T };
-    case "failed":
-      return { kind: "failed", error: payload };
-    default:
-      return null;
   }
 }
 

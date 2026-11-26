@@ -31,6 +31,21 @@ impl<'a> Checker<'a> {
         }
         if let Some(spec) = &a.action {
             self.check_action_policy(a, spec);
+            let reaches_approval = block_reaches_approval(
+                &a.body,
+                self.bindings,
+                &self.agents_by_id,
+                self.methods,
+                &self.types,
+                &mut HashSet::new(),
+            );
+            self.check_approval_clause(
+                &format!("action `{}`", a.name.name),
+                reaches_approval,
+                spec.policy.requires_auth(),
+                spec.approval.as_ref(),
+                spec.span,
+            );
         }
 
         let declared_ret = self.type_ref_to_type(&a.return_ty);
@@ -901,56 +916,59 @@ impl<'a> Checker<'a> {
         self.in_agent_body = prev_in_agent;
         self.saw_stream_output = prev_saw_stream_output;
 
-        if reaches_approval
-            && !route
-                .policy
-                .as_ref()
-                .is_some_and(corvid_ast::RoutePolicy::requires_auth)
-        {
+        self.check_approval_clause(
+            &format!("route `{}`", route.path),
+            reaches_approval,
+            route.policy.as_ref().is_some_and(corvid_ast::RoutePolicy::requires_auth),
+            route.approval.as_ref(),
+            route.span,
+        );
+
+        let _ = server;
+    }
+
+    /// The approval rule routes and actions share: one that can reach an
+    /// `approve` requires a signed-in caller and declares a complete
+    /// `@approval(...)` whose reviewer role exists and can decide; one
+    /// that cannot reach an `approve` declares none. `subject` names the
+    /// declaration in errors, as "route `/x`" or "action `x`".
+    pub(super) fn check_approval_clause(
+        &mut self,
+        subject: &str,
+        reaches_approval: bool,
+        signed_in: bool,
+        approval: Option<&corvid_ast::ApprovalSpec>,
+        span: Span,
+    ) {
+        let invalid = |message: String| TypeErrorKind::ApprovalPolicyInvalid { subject: subject.to_string(), message };
+        if reaches_approval && !signed_in {
             self.errors.push(TypeError::new(
-                TypeErrorKind::RouteApprovalRequiresAuthentication {
-                    path: route.path.clone(),
-                },
-                route.span,
+                TypeErrorKind::ApprovalRequiresAuthentication { subject: subject.to_string() },
+                span,
             ));
         }
-        match (reaches_approval, route.approval.as_ref()) {
+        match (reaches_approval, approval) {
             (true, None) => self.errors.push(TypeError::with_guarantee(
-                TypeErrorKind::RouteApprovalPolicyInvalid {
-                    path: route.path.clone(),
-                    message: "an approval-capable route must declare a complete `@approval(...)` policy; serve never invents reviewer authority or expiry".into(),
-                },
-                route.span,
+                invalid(format!("{subject} can reach an `approve`, so it must declare a complete `@approval(...)` policy; serve never invents reviewer authority or expiry")),
+                span,
                 "approval.policy_clause_static_check",
             )),
             (false, Some(spec)) => self.errors.push(TypeError::with_guarantee(
-                TypeErrorKind::RouteApprovalPolicyInvalid {
-                    path: route.path.clone(),
-                    message: "`@approval(...)` is only valid when the route can reach an `approve` boundary".into(),
-                },
+                invalid("`@approval(...)` is only valid when it can reach an `approve` boundary".into()),
                 spec.span,
                 "approval.policy_clause_static_check",
             )),
             (true, Some(spec)) => {
                 if !self.identity_roles.contains(&spec.role) {
                     self.errors.push(TypeError::with_guarantee(
-                        TypeErrorKind::RouteApprovalPolicyInvalid {
-                            path: route.path.clone(),
-                            message: format!(
-                                "reviewer role `{}` is not declared in the identity block",
-                                spec.role
-                            ),
-                        },
+                        invalid(format!("reviewer role `{}` is not declared in the identity block", spec.role)),
                         spec.span,
                         "approval.policy_clause_static_check",
                     ));
                 }
                 if !self.identity_permissions.contains("approvals.decide") {
                     self.errors.push(TypeError::with_guarantee(
-                        TypeErrorKind::RouteApprovalPolicyInvalid {
-                            path: route.path.clone(),
-                            message: "the identity roles grant no `approvals.decide` permission, so this approval could never be decided".into(),
-                        },
+                        invalid("the identity roles grant no `approvals.decide` permission, so this approval could never be decided".into()),
                         spec.span,
                         "approval.policy_clause_static_check",
                     ));
@@ -958,8 +976,6 @@ impl<'a> Checker<'a> {
             }
             (false, None) => {}
         }
-
-        let _ = server;
     }
 
     fn bind_route_local_by_name(&mut self, block: &Block, name: &str, ty: Type) {
@@ -1304,13 +1320,7 @@ fn is_direct_upload_type(ty: &corvid_ast::TypeRef) -> bool {
 /// sets. Provider tokens are deliberately ABSENT — the login actor
 /// never carries connector workspace credentials (slice 51j).
 fn actor_type() -> Type {
-    Type::RouteParams(vec![
-        ("id".to_string(), Type::String),
-        ("tenant".to_string(), Type::String),
-        ("display_name".to_string(), Type::String),
-        ("roles".to_string(), Type::List(Box::new(Type::String))),
-        ("permissions".to_string(), Type::List(Box::new(Type::String))),
-    ])
+    Type::actor()
 }
 
 /// A conservative "looks like a bare registrable domain" check for

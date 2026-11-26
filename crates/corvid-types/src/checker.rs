@@ -363,6 +363,8 @@ fn typecheck_with_everything(
 
     c.record_signature_types(file);
     c.check_secret_boundaries(file);
+    c.check_action_paths(file);
+    c.check_actor_sources(file);
     c.check_response_boundaries(file);
 
     Checked {

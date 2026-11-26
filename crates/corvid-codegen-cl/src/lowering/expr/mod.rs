@@ -145,9 +145,14 @@ pub(super) fn lower_expr(
         IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
             let capacity = builder.ins().iconst(I64, keys.len() as i64);
             let new = module.declare_func_in_func(runtime.map_new, builder.func);
-            let Type::Map(_, element) = &expr.ty else { unreachable!() };
+            let Type::Map(key_ty, element) = &expr.ty else { unreachable!() };
             let owns_values = builder.ins().iconst(I64, i64::from(is_refcounted_type(element)));
-            let call = builder.ins().call(new, &[capacity, owns_values]);
+            // How the map finds a key: a String by its text, a text-held
+            // scalar by value through its own crate, as `==` compares it.
+            let key_kind = corvid_abi::equality::EqualityLayout::of_text_slot(crate::text_scalar::scalar_of(key_ty))
+                .expect("native_string_map admits only keys held as one text slot");
+            let key_kind = builder.ins().iconst(I64, key_kind as i64);
+            let call = builder.ins().call(new, &[capacity, owns_values, key_kind]);
             let map = builder.inst_results(call)[0];
             let set = module.declare_func_in_func(runtime.map_set, builder.func);
             for (key, value) in keys.iter().zip(values) {

@@ -157,7 +157,16 @@ impl<'a> Checker<'a> {
                     _ => (Type::Unknown, Type::Unknown),
                 };
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    let kt = self.check_expr(k);
+                    // A key takes the expected key type, as a value takes
+                    // the expected value type: `{1.0: "one"}` where a
+                    // `Map<Decimal, String>` is meant has `Decimal` keys,
+                    // and `{"EUR": 30 seconds}` a `Currency` key.
+                    let expected_key = match expected {
+                        Some(Type::Map(key, _)) => Some(key.as_ref()),
+                        _ if i > 0 => Some(&key_ty),
+                        _ => None,
+                    };
+                    let kt = self.check_expr_as(k, expected_key);
                     let expected_value = match expected {
                         Some(Type::Map(_, value)) => Some(value.as_ref()),
                         _ if i > 0 => Some(&val_ty),
@@ -334,7 +343,9 @@ impl<'a> Checker<'a> {
                 // B03 — a `RegexMatch` comes only from the regex methods.
                 | BuiltIn::RegexMatch
                 // B01 — a `JsonError` comes only from `from_json`.
-                | BuiltIn::JsonError => {
+                | BuiltIn::JsonError
+                // B10 — a `Caller` comes only from a verified session.
+                | BuiltIn::Caller => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),

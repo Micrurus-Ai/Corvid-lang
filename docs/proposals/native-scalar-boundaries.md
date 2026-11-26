@@ -1,6 +1,6 @@
 # Proposal: text-held scalars at native tool and prompt boundaries, and in native maps
 
-Status: **proposed 2026-11-26.** Owner: backend and AI development, macOS session. No grammar changes.
+Status: **built 2026-11-26** (B1, B1a, B1b, B2a, B2b, B3). Owner: backend and AI development, macOS session. No grammar changes.
 
 ## Problem
 
@@ -43,7 +43,9 @@ Inside a native program a `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTi
 
      *B2b, done 2026-11-26.* `ToolRegistry::call` reaches a tool it holds no handler for through the host registry, where each linked `#[tool]` registers its JSON entry point at startup and an embedding host registers its own; the entry point runs on a blocking thread, because a `#[tool]` waits on the tokio runtime itself. Native code calls every tool through `lower_runtime_call`, a grounded answer grounded after the call. So the binary still links each tool's implementation (and a tool nobody implemented is still a link error), it keeps an exported reference to the tool's `__corvid_tool_json_<name>` entry point. The tier picker refuses a tool of the program's own only when one of its types has no native JSON form, or one returns a `Secret`, which only the runtime's tools produce. Removed: the direct `__corvid_tool_<name>` calls and their per-type replay branches, the typed `corvid_invoke_tool_*` and `corvid_replay_tool_call_*` families, the separate tool trace exports, `corvid_runtime_is_replay`, and the two boundary modules that explained the old refusals. Test: `crates/corvid-driver/tests/native_user_tools.rs` runs a tool taking a record with `None` and a variant and a `Decimal`, answering a record, on both tiers, and compares the value and the recorded arguments.
 
-3. **B3. Native maps with text-held keys and values.** A key compares and hashes by value through the type's crate (`1.0` and `1.00` are one key), as the interpreter's map does. Values are reference-counted slots, as `String` values are.
+3. *B3, done 2026-11-26.* A native map records its key type's comparison layout (`EqualityLayout::of_text_slot`, which the comparison layouts now share), and finds a key held as a text scalar through `corvid_map_keys_equal`, the by-value comparison `==` uses, so `1.0` and `1.00` are one `Decimal` key and the first key's text is kept, as on the interpreter; map equality matches such keys the same way. Values are reference-counted text slots, as `String` values are. JSON decoding still builds `String`-keyed maps only, as a JSON object's keys are text. Found while building: a map literal's keys did not take the expected key type (`{1.0: "one"}` where a `Map<Decimal, String>` was meant checked as `Map<Float, String>`), unlike its values; they do now. Tests: `crates/codegen-cl/tests/parity/text_scalar_maps.rs`.
+
+   **B3. Native maps with text-held keys and values.** A key compares and hashes by value through the type's crate (`1.0` and `1.00` are one key), as the interpreter's map does. Values are reference-counted slots, as `String` values are.
 
 ## Alternatives considered
 

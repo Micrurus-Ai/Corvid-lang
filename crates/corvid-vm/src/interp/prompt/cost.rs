@@ -555,10 +555,7 @@ impl<'ir> Interpreter<'ir> {
             let InterpErrorKind::UnusableReply(feedback) = &last_err.kind else {
                 return Err(last_err);
             };
-            let retry_rendered = format!(
-                "{rendered}\n\nYour previous response was:\n{}\n\nIt failed schema validation: {feedback}\nRespond again, matching the required schema exactly.",
-                failed_value
-            );
+            let retry_rendered = corvid_runtime::prompt_repair_rendered(rendered, &failed_value, feedback);
             let retry_req = LlmRequest {
                 prompt: callee_name.to_string(),
                 model: actual_model.clone(),

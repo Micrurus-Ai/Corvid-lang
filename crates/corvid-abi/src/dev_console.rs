@@ -6,7 +6,7 @@
 //! for every Corvid app — it reads the embedded contract and builds:
 //!
 //! - sign-in buttons per identity provider + a session panel,
-//! - a form per public agent/prompt with typed inputs, capability
+//! - a form per action with typed inputs, capability
 //!   badges (streaming / grounded / approvals / cost / latency /
 //!   pagination), a Run button, and a live result/stream panel,
 //! - a tool-call timeline + approval cards fed by the streamed event
@@ -16,8 +16,8 @@
 //! - a type browser and the auth safeguards list.
 //!
 //! Execution targets a configurable backend base URL (default same
-//! origin), using the exact `/agents/{name}` + SSE conventions the
-//! shipped `@corvid/client` uses — so a running `corvid serve` drives
+//! origin), posting to `/actions/{name}` with the CSRF token as the
+//! shipped `@corvid/client` does — so a running `corvid serve` drives
 //! the console live.
 
 use crate::app_contract::ApplicationContract;
@@ -95,12 +95,17 @@ function callableCard(c, kind){
   const out=h("div",{class:"out muted"},"— run to see output —");
 
   const run=h("button",{onclick:async()=>{
-    const body={}; inputs.forEach(el=>{ let v=el.value; if(el.dataset.ptype&&/Int|Float/.test(el.dataset.ptype))v=Number(v); body[el.dataset.param]=v; });
+    // One record is the whole input, written as JSON; otherwise one
+    // field per parameter.
+    let body={};
+    if(c.input_type){ body=JSON.parse(inputs[0]?.value||"{}"); }
+    else inputs.forEach(el=>{ let v=el.value; if(el.dataset.ptype&&/Int|Float/.test(el.dataset.ptype))v=Number(v); body[el.dataset.param]=v; });
     out.textContent=""; out.className="out";
     try{
       if(caps.streaming){ await runStream(c.name, body, out, meta); }
-      else { const r=await fetch(backend+"/agents/"+encodeURIComponent(c.name),{method:"POST",credentials:"include",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      else { const r=await fetch(backend+"/actions/"+encodeURIComponent(c.name),{method:"POST",credentials:"include",headers:actionHeaders({"content-type":"application/json"}),body:JSON.stringify(body)});
         const txt=await r.text(); let parsed; try{parsed=JSON.parse(txt)}catch{parsed=txt}
+        if(r.status===202){ out.append(h("div",{class:"evt approval_required"},"waiting for approval: "+(parsed.approval_id||""))); return; }
         if(!r.ok){ out.append(h("div",{class:"evt failed"},"HTTP "+r.status)); out.append(h("pre",{},JSON.stringify(parsed,null,2))); return; }
         out.append(h("pre",{},JSON.stringify(parsed,null,2)));
       }
@@ -112,8 +117,16 @@ function callableCard(c, kind){
     badges, form, h("div",{class:"row"},run), out);
 }
 
+// A signed-in action call sends the session's CSRF token, as the
+// shipped client does.
+function actionHeaders(headers){
+  const token=document.cookie.split("; ").find(c=>c.startsWith("corvid_csrf="));
+  if(token) headers["x-csrf-token"]=decodeURIComponent(token.slice("corvid_csrf=".length));
+  return headers;
+}
+
 async function runStream(name, body, out, meta){
-  const r=await fetch(backend+"/agents/"+encodeURIComponent(name)+"/stream",{method:"POST",credentials:"include",headers:{"content-type":"application/json",accept:"text/event-stream"},body:JSON.stringify(body)});
+  const r=await fetch(backend+"/actions/"+encodeURIComponent(name),{method:"POST",credentials:"include",headers:actionHeaders({"content-type":"application/json",accept:"text/event-stream"}),body:JSON.stringify(body)});
   if(!r.ok||!r.body){ out.append(h("div",{class:"evt failed"},"stream failed: HTTP "+r.status)); return; }
   const reader=r.body.getReader(); const dec=new TextDecoder(); let buf="";
   for(;;){ const {value,done}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true}); let i;
@@ -142,11 +155,10 @@ function render(){
     main.append(h("div",{class:"card"}, h("h2",{},"Identity · "+idb.name), provs, h("div",{class:"out muted",id:"session"},"— session —"), h("h3",{},"Guaranteed safe-defaults"), safe));
   }
 
-  // agents + prompts
-  const callables=h("div",{class:"card"}, h("h2",{},"Agents & prompts"));
-  for(const a of contract.agents||[]) callables.append(callableCard(a,"agent"));
-  for(const p of contract.prompts||[]) callables.append(callableCard(p,"prompt"));
-  if((contract.agents||[]).length+(contract.prompts||[]).length===0) callables.append(h("div",{class:"muted"},"No public agents or prompts in this contract."));
+  // actions: what a page, a client or an assistant can call
+  const callables=h("div",{class:"card"}, h("h2",{},"Actions"));
+  for(const a of contract.actions||[]) callables.append(callableCard(a,"action"));
+  if((contract.actions||[]).length===0) callables.append(h("div",{class:"muted"},"No actions in this contract. Declare an `action` to call the backend from here; public agents are not callable over HTTP."));
   main.append(callables);
 
   // types
@@ -218,10 +230,8 @@ mod tests {
         first_login: open
         tenant: fixed(\"public\")
 
-public agent chat(message: String) -> Stream<String>:
-    return stream_answer(message)
-
-tool stream_answer(m: String) -> Stream<String>
+action chat(message: String) -> Stream<String> requires authenticated:
+    yield message
 ",
         );
         // The embedded contract carries the identity providers + the
@@ -230,8 +240,10 @@ tool stream_answer(m: String) -> Stream<String>
         assert!(html.contains("google"));
         assert!(html.contains("no_silent_email_merge") || html.contains("secure_http_only_cookies"));
         assert!(html.contains("\"streaming\":true"));
-        // The renderer wires the SSE + agents conventions.
-        assert!(html.contains("/agents/"));
+        // The renderer posts to served action endpoints, never to `/agents`.
+        assert!(html.contains("/actions/"));
+        assert!(!html.contains("/agents/"));
         assert!(html.contains("text/event-stream"));
+        assert!(html.contains("x-csrf-token"));
     }
 }

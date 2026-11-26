@@ -129,16 +129,10 @@ pub fn synthetic_route_agent_name(method: corvid_ast::HttpMethod, path: &str) ->
 }
 
 /// The synthetic struct type of the `actor` bound in an authenticated
-/// route body (slice 52a) — mirrors the checker's `actor_type()`:
-/// id / tenant / display_name / roles / permissions.
+/// route body (slice 52a): the checker's own definition, so the two
+/// layers cannot disagree about it.
 fn actor_route_params_type() -> Type {
-    Type::RouteParams(vec![
-        ("id".to_string(), Type::String),
-        ("tenant".to_string(), Type::String),
-        ("display_name".to_string(), Type::String),
-        ("roles".to_string(), Type::List(Box::new(Type::String))),
-        ("permissions".to_string(), Type::List(Box::new(Type::String))),
-    ])
+    Type::actor()
 }
 
 struct Lowerer<'a> {
@@ -391,6 +385,8 @@ impl<'a> Lowerer<'a> {
                             name: a.name.name.clone(),
                             agent: agent.id,
                             policy: crate::types::IrRoutePolicy::from_ast(&spec.policy),
+                            approval: spec.approval.clone(),
+                            assistants: spec.assistants.clone(),
                             span: spec.span,
                         });
                     }

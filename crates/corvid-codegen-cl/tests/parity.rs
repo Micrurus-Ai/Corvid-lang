@@ -66,6 +66,8 @@ mod currency;
 mod crypto;
 #[path = "parity/loop_ownership.rs"]
 mod loop_ownership;
+#[path = "parity/text_scalar_maps.rs"]
+mod text_scalar_maps;
 #[path = "parity/refinements.rs"]
 mod refinements;
 #[path = "parity/comparison_literals.rs"]

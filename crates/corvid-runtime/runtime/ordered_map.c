@@ -1,5 +1,9 @@
-/* Ordered string maps own a flat buffer of key/value pairs. The descriptor
- * stays at one address as the buffer grows, so aliases observe each update. */
+/* Ordered maps own a flat buffer of key/value pairs. The descriptor stays at
+ * one address as the buffer grows, so aliases observe each update. A key is a
+ * String or a value held as its canonical text (a Decimal, a time or currency
+ * value, Bytes); `key_kind` is its comparison layout (`EqualityLayout`), so a
+ * Decimal key finds `1.0` and `1.00` as one key, as `==` and the interpreter's
+ * map do. */
 #include "list_layout.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +23,11 @@ extern void* corvid_alloc_typed(long long, const struct corvid_typeinfo*);
 extern void corvid_release(void*);
 extern void corvid_retain(void*);
 extern long long corvid_string_eq(void*, void*);
+/* The runtime's by-value comparison for a non-String key kind. */
+extern int64_t corvid_map_keys_equal(int64_t kind, void* a, void* b);
+
+/* `EqualityLayout::String`: text keys compare as text. */
+#define CORVID_KEY_STRING 3
 
 typedef struct {
     int64_t count;
@@ -29,7 +38,13 @@ typedef struct {
     map_slots* entries;
     int64_t capacity;
     int64_t owns_values;
+    int64_t key_kind;
 } ordered_map;
+
+/* The comparison layout of this map's keys. */
+int64_t corvid_ordered_map_key_kind(const ordered_map* map) {
+    return map->key_kind;
+}
 
 /* Borrowed count followed by alternating key/value slots, valid until mutation. */
 const void* corvid_ordered_map_entries(const ordered_map* map) {
@@ -81,12 +96,18 @@ static map_slots* allocate_entries(int64_t capacity, int64_t owns_values) {
     return entries;
 }
 
-ordered_map* corvid_ordered_map_new_typed(int64_t capacity, int64_t owns_values) {
+ordered_map* corvid_ordered_map_new_keyed(int64_t capacity, int64_t owns_values, int64_t key_kind) {
     ordered_map* map = corvid_alloc_typed(sizeof(ordered_map), &corvid_typeinfo_OrderedMap);
     map->entries = allocate_entries(capacity, owns_values);
     map->owns_values = owns_values;
     map->capacity = capacity;
+    map->key_kind = key_kind;
     return map;
+}
+
+/* A map with String keys. */
+ordered_map* corvid_ordered_map_new_typed(int64_t capacity, int64_t owns_values) {
+    return corvid_ordered_map_new_keyed(capacity, owns_values, CORVID_KEY_STRING);
 }
 
 /* Existing native objects use the original string-value constructor. */
@@ -98,7 +119,11 @@ ordered_map* corvid_ordered_map_new(int64_t capacity) {
 void* corvid_ordered_map_find(ordered_map* map, void* key) {
     map_slots* entries = map->entries;
     for (int64_t i = 0; i < entries->count; ++i) {
-        if (corvid_string_eq(entries->slots[i * 2], key)) return &entries->slots[i * 2 + 1];
+        void* stored = entries->slots[i * 2];
+        int64_t same = map->key_kind == CORVID_KEY_STRING
+            ? corvid_string_eq(stored, key)
+            : corvid_map_keys_equal(map->key_kind, stored, key);
+        if (same) return &entries->slots[i * 2 + 1];
     }
     return NULL;
 }

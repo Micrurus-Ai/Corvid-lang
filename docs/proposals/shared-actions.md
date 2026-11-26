@@ -102,11 +102,40 @@ Changing `MoveCard` (renaming `to`, adding a required field) is a compile error 
 3. One endpoint per action, answering forms with HTML and JSON with JSON, and the page's generated script handling CSRF and WebMCP `agentInvoked` for every action form, replacing the reading list's hand-written script.
 4. The typed refusal shape (`invalid_input` naming the field, the action's own error variants) that the UI renders.
 
+### Amendment for frontend review (2026-11-26): the form binding
+
+Building item 2 found three things the agreed text did not settle. This amendment replaces item 2 and the HTML half of item 3. Under the grammar law it is built one working day after it is posted unless frontend development objects.
+
+**One form primitive, not two.** `form_for("POST /save", initial, "Save")` already renders a typed form from a declared route, checks the initial record at compile time, and is used by the reading list and the book. A second primitive, `ui.form(action)`, would give the same thing two spellings. So `form_for` takes an action by name in the same position:
+
+```corvid
+fn board_page(card: Card) -> String:
+    move = View(form_for(move_card, MoveCard(card.id, Done, 0), "Move"))
+    archive = View(button_for(archive_card, card.id, "Archive"))
+    return ui.page("Board", [move, archive])
+```
+
+- `form_for(action, initial, label)`: the action must take one record of scalar fields (the rule `form_for` already applies to a route's record). The compiler resolves `move_card` and checks `initial` against its input type, so renaming a field of `MoveCard` is an error here. The form posts to `/actions/move_card`.
+- `button_for(action, value, label)` replaces `ui.button(label, action, value)`: one submit button carrying a prepared input as hidden fields, for an action whose input is that value. The argument order matches `form_for`: what to call, with what, under which label.
+- `ui.action(label, "handler")` and `ui.assistant_action` keep their string handlers for browser callbacks only; for server work, examples move to `form_for` and `button_for`, and the string forms are retired for server actions after the reading list moves (B10-5).
+
+**CSRF for a plain form.** A plain HTML form cannot set `X-CSRF-Token`, so a signed-in action form would always get `403`. `form_for` and `button_for` add a hidden `corvid_csrf` field. The page script fills it from the `corvid_csrf` cookie on submit, and the server accepts the token from that field when the header is absent. The double-submit check is the same one; only where the copy travels changes. Without the page script the field stays empty and the post is refused, which fails closed.
+
+**What a browser form gets back.** An action returns data, not a page. A form post (`application/x-www-form-urlencoded` with `Accept: text/html`) that succeeds answers `303 See Other` back to the posting page, taken from `Referer` and accepted only when it has the server's own origin; otherwise `303` to `/`. A refused input or a failure answers an HTML page naming the field or the error, with a link back. A queued approval answers a page with the approval id. With the page script, the form submits by `fetch` and shows the result in its `<output>` without leaving the page, the way `agent_post_form` receipts work today. JSON callers are unchanged.
+
+What frontend development owns here: the page script's CSRF fill, the fetch submission and receipt, and the browser test. The backend owns `form_for` and `button_for` checking, the hidden fields, the form-field CSRF acceptance and the `303` and HTML answers.
+
 ## Slices
 
 - [x] B10-1. The declaration: parse and check `action`, typed calls from Corvid code, the mandatory `requires` checked against the identity block, and `corvid contract app` listing actions with their input, result and caller policy. Built 2026-11-26. The policy is enforced where outside callers arrive, so enforcement and the `action:<name>` trace entry move to B10-2, which adds the first such caller.
-- [ ] B10-2. The endpoint and the UI binding: `POST /actions/<name>` for forms and JSON with boundary validation, the policy enforced before decoding, and the `action:<name>` trace entry with the calling surface; `ui.form(action)` and `ui.button(label, action, value)`. Annotations on an action (`@budget`, `@trust`, ...) are refused by the parser today; B10-2 accepts them as on an agent.
-- [ ] B10-3. Assistant exposure: the `assistants:` line (`confirm` and absence), WebMCP tools in the page and an MCP endpoint from `corvid serve`, both from the declaration.
+- [x] B10-2a. The endpoint: `POST /actions/<name>` in `corvid serve` for JSON and forms, the policy enforced before decoding (with CSRF for cookie sessions), the input decoded through the action's types, the `action` trace event with the calling surface, and each action in OpenAPI. Built 2026-11-26. The input's shape is one rule in `corvid_types::action_input`, which the contract publishes as `input_type`: one parameter of a declared type is the whole input, anything else is an object with one field per parameter. Also: an action's signature may not hold a `Secret`, and a route may not take an action's path.
+- [x] B10-2b-1. The caller, as a parameter: `action claim(card: Int, by: Caller) -> Card requires authenticated`. The server fills `by` from the verified session and leaves it out of the input; Corvid code passes one (`claim(path.card, actor)`), and the interpreter checks the action's `requires` against it, so a route that requires less cannot reach an action that requires more. Considered: binding `actor` implicitly in a signed-in action's body, as a route does. Rejected because an action is also called from code, and an implicit caller would have to flow from the calling code unseen; the parameter says in the signature that the action reads its caller, and the compiler sees every place one is passed. Built 2026-11-26.
+- [x] B10-2b-2. `@approval(...)` and the other annotations on an action, so an `approve` inside one queues for the declared reviewer instead of being denied. Routes and actions share one approval rule. Built 2026-11-26.
+- [x] B10-2b-3. Forms for actions with several parameters, one field per parameter by the query-field rule. Built 2026-11-26.
+- [ ] B10-2b-5. The form binding, as amended above: `form_for(action, initial, label)` and `button_for(action, value, label)`, the hidden CSRF field and its server acceptance, and the `303` and HTML answers to a browser form. Posted for frontend review 2026-11-26; built after one working day unless frontend development objects.
+- [x] B10-2b-4. Action methods in the generated TypeScript client, typed by the contract: the record or one field per parameter, and `T | ApprovalPending` for an action with `@approval`. Built 2026-11-26.
+- [x] B10-3a. The `assistants: confirm "..."` line: parsed only as an action's first line, `allow` and `never` refused with what to write instead, an empty description refused, and the contract and OpenAPI carry the mode and description. Until an assistant can call the action, `corvid serve` refuses to start a program with the line (contract closure gap naming B10-3b), so no surface is advertised that nothing serves. Built 2026-11-26.
+- [ ] B10-3b. The assistant endpoint: an MCP endpoint from `corvid serve` and WebMCP tools in the page, both listing only actions with an `assistants:` line. To settle in this slice's design before code: (1) whose authority an MCP call carries (the person's session only, which B10 can enforce today with the same `requires` check, or a delegated token, which is B11); (2) how `confirm` reaches the person: the call answers with a pending confirmation the person accepts in the page, through the approval queue with the person as their own reviewer, never a reviewer role; (3) the trace entry (`surface: "assistant"`) and the `Caller` an action reads when an assistant calls.
 - [ ] B10-4. The CLI and workers: `corvid act` and `jobs enqueue --task <action>`, decoding through the same type.
 - [ ] B10-5. Cross-tier change report: `corvid contract app --diff`, and the project-board example (`move_card`), with a test that renames an input and checks every reported caller. Port the reading list's `apply_reviewed_titles` and `read_page` onto actions, deleting the hand-written form script.
 

@@ -65,6 +65,7 @@ use corvid_vm::{
 };
 use libloading::{Library, Symbol};
 
+mod actions;
 mod browser_asset;
 mod live_assets;
 mod live;
@@ -164,8 +165,8 @@ pub(crate) fn cmd_serve(
             return Ok(1);
         }
     };
-    if ir.servers.is_empty() {
-        eprintln!("error: no `server` block found in {}", file.display());
+    if ir.servers.is_empty() && ir.actions.is_empty() {
+        eprintln!("error: no `server` block or `action` found in {}", file.display());
         return Ok(1);
     }
 
@@ -578,6 +579,11 @@ pub(crate) fn cmd_serve(
     for (path, mr) in by_path {
         app = app.route(&path, mr);
     }
+    // B10-2: one `POST /actions/<name>` per action. The checker refuses a
+    // route declared at an action's path, so the two never collide.
+    for (path, mr) in actions::endpoints(&state)? {
+        app = app.route(&path, mr);
+    }
 
     // Slice 52e: mount the login surface (`/auth/{provider}/login`,
     // `/callback`, `/logout`, `/session`) when an identity block is
@@ -635,6 +641,9 @@ pub(crate) fn cmd_serve(
                 };
                 println!("  {:<6} {}{tag}", route.method.as_str(), route.path);
             }
+        }
+        for action in &state_for_banner.ir.actions {
+            println!("  POST   {}{}", corvid_types::action_input::ACTIONS_PATH, action.name);
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
@@ -1341,27 +1350,12 @@ async fn run_route(
         }
     }
 
-    let request_runtime = match (&enforced_actor, &meta.approval_policy) {
-        (Some(enforced), Some(policy)) => {
-            state.runtime.with_approver(Arc::new(QueueApprover::new(
-                state.approval_queue.clone(),
-                ApprovalRequester {
-                    actor_id: enforced.actor.id.clone(),
-                    tenant_id: enforced.actor.tenant_id.clone(),
-                },
-                ApprovalQueuePolicy {
-                    route: format!("{} {}", meta.method.as_str(), meta.route_path),
-                    required_role: policy.role.clone(),
-                    risk_level: policy.risk.clone(),
-                    data_class: policy.data.clone(),
-                    expires_in_ms: policy.expires_ms,
-                    max_cost_usd: policy.max_cost_usd,
-                    irreversible: policy.irreversible,
-                },
-            )))
-        }
-        _ => state.runtime.clone(),
-    };
+    let request_runtime = approval_runtime(
+        &state,
+        enforced_actor.as_ref(),
+        meta.approval_policy.as_ref(),
+        format!("{} {}", meta.method.as_str(), meta.route_path),
+    );
     let outcome = run_ir_with_runtime(
         &state.ir,
         Some(&meta.handler_agent),
@@ -1372,6 +1366,37 @@ async fn run_route(
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     let route = format!("{} {}", meta.method.as_str(), meta.route_path);
     finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
+}
+
+/// The runtime one request runs on. A signed-in request to a route or an
+/// action with an `@approval(...)` policy queues each `approve` it
+/// reaches under that policy, with the verified caller as requester; any
+/// other request keeps the process runtime, whose approver says no.
+fn approval_runtime(
+    state: &ServeState,
+    enforced: Option<&EnforcedRouteActor>,
+    policy: Option<&corvid_ast::ApprovalSpec>,
+    label: String,
+) -> Runtime {
+    match (enforced, policy) {
+        (Some(enforced), Some(policy)) => state.runtime.with_approver(Arc::new(QueueApprover::new(
+            state.approval_queue.clone(),
+            ApprovalRequester {
+                actor_id: enforced.actor.id.clone(),
+                tenant_id: enforced.actor.tenant_id.clone(),
+            },
+            ApprovalQueuePolicy {
+                route: label,
+                required_role: policy.role.clone(),
+                risk_level: policy.risk.clone(),
+                data_class: policy.data.clone(),
+                expires_in_ms: policy.expires_ms,
+                max_cost_usd: policy.max_cost_usd,
+                irreversible: policy.irreversible,
+            },
+        ))),
+        _ => state.runtime.clone(),
+    }
 }
 
 enum RouteRequestBody {
@@ -1507,44 +1532,10 @@ fn urlencoded_record(
         .get(def_id)
         .copied()
         .ok_or_else(|| format!("unknown {source} struct type"))?;
-    // Every value under each name, in order: a `List` field reads them
-    // all, and a field of one value refuses a name given twice.
-    let mut given: HashMap<String, Vec<String>> = HashMap::new();
-    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        given.entry(urldecode(key)?).or_default().push(urldecode(value)?);
-    }
-    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
-    let read = |raw: &str, ty: &Type, name: &str| {
-        coerce_str_to_value(raw, ty, types_by_id).map_err(|e| format!("{source} param `{name}`: {e}"))
-    };
+    let given = urlencoded_values(encoded)?;
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
-        let values = given.get(&field.name).map(Vec::as_slice).unwrap_or(&[]);
-        let shape = corvid_types::text_parameters::query_field_shape(&field.ty, &plain)
-            .ok_or_else(|| format!("{source} param `{}` has a type a query string cannot carry", field.name))?;
-        let once = |values: &[String]| -> Result<Option<String>, String> {
-            match values {
-                [] => Ok(None),
-                [one] => Ok(Some(one.clone())),
-                _ => Err(format!("{source} param `{}` is given {} times, but holds one value", field.name, values.len())),
-            }
-        };
-        let value = match (shape, &field.ty) {
-            (corvid_types::text_parameters::QueryFieldShape::One(_), ty) => {
-                let raw = once(values)?.ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
-                read(&raw, ty, &field.name)?
-            }
-            (corvid_types::text_parameters::QueryFieldShape::Optional(_), Type::Option(inner)) => match once(values)? {
-                Some(raw) => Value::OptionSome(corvid_vm::value::BoxedValue::new(read(&raw, inner, &field.name)?)),
-                None => Value::OptionNone,
-            },
-            (corvid_types::text_parameters::QueryFieldShape::Repeated(_), Type::List(inner)) => {
-                let items = values.iter().map(|raw| read(raw, inner, &field.name)).collect::<Result<Vec<_>, _>>()?;
-                Value::List(corvid_driver::ListValue::new(items))
-            }
-            _ => return Err(format!("{source} param `{}` has a type a query string cannot carry", field.name)),
-        };
+        let value = urlencoded_value(&given, &field.name, &field.ty, types_by_id, source)?;
         corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
             .map_err(|err| err.to_string())?;
         fields.push((field.name.clone(), value));
@@ -1554,6 +1545,59 @@ fn urlencoded_record(
         ir_type.name.clone(),
         fields,
     )))
+}
+
+/// Every value under each name of form-encoded text, in order: a `List`
+/// reads them all, and a name of one value refuses being given twice.
+fn urlencoded_values(encoded: &str) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut given: HashMap<String, Vec<String>> = HashMap::new();
+    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        given.entry(urldecode(key)?).or_default().push(urldecode(value)?);
+    }
+    Ok(given)
+}
+
+/// One named value of form-encoded text, read as `ty` by the request
+/// text rule: a text type is required once, an `Option` of one may be
+/// left out, and a `List` of one repeats the name. A record's fields and
+/// an action's parameters both read through it.
+fn urlencoded_value(
+    given: &HashMap<String, Vec<String>>,
+    name: &str,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+    source: &str,
+) -> Result<Value, String> {
+    use corvid_types::text_parameters::QueryFieldShape;
+    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
+    let read = |raw: &str, ty: &Type| {
+        coerce_str_to_value(raw, ty, types_by_id).map_err(|e| format!("{source} param `{name}`: {e}"))
+    };
+    let values = given.get(name).map(Vec::as_slice).unwrap_or(&[]);
+    let once = || -> Result<Option<String>, String> {
+        match values {
+            [] => Ok(None),
+            [one] => Ok(Some(one.clone())),
+            _ => Err(format!("{source} param `{name}` is given {} times, but holds one value", values.len())),
+        }
+    };
+    let cannot = || format!("{source} param `{name}` has a type a query string cannot carry");
+    match (corvid_types::text_parameters::query_field_shape(ty, &plain).ok_or_else(cannot)?, ty) {
+        (QueryFieldShape::One(_), ty) => {
+            let raw = once()?.ok_or_else(|| format!("missing {source} param `{name}`"))?;
+            read(&raw, ty)
+        }
+        (QueryFieldShape::Optional(_), Type::Option(inner)) => Ok(match once()? {
+            Some(raw) => Value::OptionSome(corvid_vm::value::BoxedValue::new(read(&raw, inner)?)),
+            None => Value::OptionNone,
+        }),
+        (QueryFieldShape::Repeated(_), Type::List(inner)) => {
+            let items = values.iter().map(|raw| read(raw, inner)).collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::List(corvid_driver::ListValue::new(items)))
+        }
+        _ => Err(cannot()),
+    }
 }
 
 /// Decode form-encoded query text as UTF-8 after expanding percent escapes.

@@ -104,10 +104,6 @@ pub(in crate::lowering) const STRING_FROM_FLOAT_SYMBOL: &str = "corvid_string_fr
 // template, model) and returns the typed value. Built-in
 // retry-with-validation + function-signature context — see the
 // Rust-side implementations in `corvid-runtime::ffi_bridge`.
-pub(in crate::lowering) const PROMPT_CALL_INT_SYMBOL: &str = "corvid_prompt_call_int";
-pub(in crate::lowering) const PROMPT_CALL_BOOL_SYMBOL: &str = "corvid_prompt_call_bool";
-pub(in crate::lowering) const PROMPT_CALL_FLOAT_SYMBOL: &str = "corvid_prompt_call_float";
-pub(in crate::lowering) const PROMPT_CALL_STRING_SYMBOL: &str = "corvid_prompt_call_string";
 /// Typed prompt-dispatch bridge for `Struct` returns. Two extra
 /// args versus the scalar bridges:
 ///   8: schema_json (CorvidString) — the codegen-built JSON Schema

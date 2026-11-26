@@ -259,15 +259,15 @@ pub enum TypeErrorKind {
         path: String,
     },
 
-    /// Executing a route can reach an `approve` boundary, but the
-    /// route does not require an authenticated caller. Without a
-    /// verified requester there is no honest actor or tenant to put
-    /// on the durable approval record.
-    RouteApprovalRequiresAuthentication { path: String },
+    /// A route or an action can reach an `approve` boundary but does not
+    /// require an authenticated caller. Without a verified requester
+    /// there is no honest actor or tenant to put on the durable approval
+    /// record. `subject` names it: "route `/x`" or "action `x`".
+    ApprovalRequiresAuthentication { subject: String },
 
-    /// An approval-capable route omitted or contradicted its complete
-    /// source-declared queue/reviewer policy.
-    RouteApprovalPolicyInvalid { path: String, message: String },
+    /// An approval-capable route or action omitted or contradicted its
+    /// complete source-declared queue/reviewer policy.
+    ApprovalPolicyInvalid { subject: String, message: String },
 
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
@@ -281,6 +281,13 @@ pub enum TypeErrorKind {
     /// An `action` requiring a role or permission the identity block
     /// does not declare (B10).
     ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
+    /// A route declared at the path an action is served at.
+    ActionPathTaken { action: String, path: String },
+    /// An action reads its caller (a `Caller` parameter) but requires no
+    /// sign-in, so no caller is ever verified.
+    ActionCallerWithoutSignIn { action: String, param: String },
+    /// A `Caller` where a request, a client or a model supplies the value.
+    ActorFromInput { place: String, at: String },
     /// A route's `query` record with a field the server cannot read
     /// from a query string; `field` is empty when the query type is not
     /// a record at all.
@@ -860,13 +867,11 @@ impl TypeErrorKind {
                     "route `{path}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` — the requirement could never be satisfied"
                 )
             }
-            Self::RouteApprovalRequiresAuthentication { path } => {
-                format!(
-                    "route `{path}` can request approval but does not require an authenticated caller"
-                )
+            Self::ApprovalRequiresAuthentication { subject } => {
+                format!("{subject} can request approval but does not require an authenticated caller")
             }
-            Self::RouteApprovalPolicyInvalid { path, message } => {
-                format!("invalid approval policy on route `{path}`: {message}")
+            Self::ApprovalPolicyInvalid { subject, message } => {
+                format!("invalid approval policy on {subject}: {message}")
             }
             Self::InvalidLiveBinding { message } => format!("invalid live binding: {message}"),
             Self::InvalidForm { message } => format!("invalid form: {message}"),
@@ -879,6 +884,15 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, action } => format!(
                 "action `{action}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` - the requirement could never be satisfied"
             ),
+            Self::ActionPathTaken { action, path } => {
+                format!("route `{path}` takes the path action `{action}` is served at")
+            }
+            Self::ActionCallerWithoutSignIn { action, param } => format!(
+                "action `{action}` reads its caller as `{param}`, but `requires anyone` verifies no caller"
+            ),
+            Self::ActorFromInput { place, at } => {
+                format!("a `Caller` cannot be part of {place}{at}: the sender could name any caller")
+            }
             Self::RoutePathParamType { path, param, ty } => {
                 format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
             }
@@ -1623,11 +1637,11 @@ impl TypeErrorKind {
             Self::FirstLoginPolicyRequired { .. } => Some(
                 "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
             ),
-            Self::RouteApprovalRequiresAuthentication { .. } => Some(
-                "add `requires authenticated` to the route; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
+            Self::ApprovalRequiresAuthentication { .. } => Some(
+                "require a signed-in caller, such as `requires authenticated`; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
             ),
-            Self::RouteApprovalPolicyInvalid { .. } => Some(
-                "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
+            Self::ApprovalPolicyInvalid { .. } => Some(
+                "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the declaration; the role must be declared and able to decide approvals".into(),
             ),
             Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
             Self::TryElseFallbackType { .. } => Some(
@@ -1642,6 +1656,15 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
                 "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
+            Self::ActionCallerWithoutSignIn { .. } => Some(
+                "require a signed-in caller, such as `requires authenticated`, or remove the `Caller` parameter".into(),
+            ),
+            Self::ActorFromInput { .. } => Some(
+                "a `Caller` comes only from the verified session: give an action a `Caller` parameter of its own, or read `actor` in a route that requires a sign-in".into(),
+            ),
+            Self::ActionPathTaken { .. } => Some(
+                "every action is served at `POST /actions/<name>`; give the route another path, or call the action from it".into(),
+            ),
             Self::RoutePathParamType { .. } => Some(format!(
                 "a path parameter is one of {}",
                 crate::text_parameters::TEXT_TYPES

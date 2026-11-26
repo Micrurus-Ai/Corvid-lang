@@ -319,6 +319,20 @@ impl Type {
     /// `DbHandle`, `JsonValue`, ...), or `None` for a name that must be
     /// looked up among declarations. The checker, the IR lowerer and
     /// the ABI emitter all resolve names through this one table.
+    /// The signed-in caller a `requires` route binds as `actor`: id,
+    /// tenant, display name, and the roles and permissions it holds.
+    /// The checker, the lowerer and every other layer use this one
+    /// definition.
+    pub fn actor() -> Type {
+        Type::RouteParams(vec![
+            ("id".to_string(), Type::String),
+            ("tenant".to_string(), Type::String),
+            ("display_name".to_string(), Type::String),
+            ("roles".to_string(), Type::List(Box::new(Type::String))),
+            ("permissions".to_string(), Type::List(Box::new(Type::String))),
+        ])
+    }
+
     pub fn compiler_known(name: &str) -> Option<Type> {
         Some(match name {
             "Int" => Type::Int,
@@ -343,6 +357,7 @@ impl Type {
             "JsonBuilder" => Type::JsonBuilder,
             "JsonError" => Type::JsonError,
             "RegexMatch" => Type::RegexMatch,
+            "Caller" => Type::actor(),
             _ => return None,
         })
     }
@@ -416,6 +431,7 @@ impl Type {
             Type::JsonBuilder => "JsonBuilder".into(),
             Type::JsonError => "JsonError".into(),
             Type::RegexMatch => "RegexMatch".into(),
+            Type::RouteParams(_) if *self == Type::actor() => "Caller".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

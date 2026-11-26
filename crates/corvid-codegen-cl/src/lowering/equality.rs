@@ -58,19 +58,9 @@ impl LayoutTable<'_, '_> {
             Type::Int => (Layout::Int, vec![]),
             Type::Float => (Layout::Float, vec![]),
             Type::Bool => (Layout::Bool, vec![]),
-            Type::String => (Layout::String, vec![]),
-            Type::Decimal => (Layout::Decimal, vec![]),
-            // B06 — the time and currency types compare by value in the
-            // runtime, never by their text.
-            Type::Duration => (Layout::Duration, vec![]),
-            Type::Instant => (Layout::Instant, vec![]),
-            Type::TimeZone => (Layout::TimeZone, vec![]),
-            Type::ZonedTime => (Layout::ZonedTime, vec![]),
-            Type::Currency => (Layout::Currency, vec![]),
-            Type::Locale => (Layout::Locale, vec![]),
-            // B04 — byte strings compare in constant time in the
-            // runtime, never bytewise as text.
-            Type::Bytes => (Layout::Bytes, vec![]),
+            // `String` and the types held as canonical text compare by
+            // value in the runtime, never by their text.
+            text if Layout::of_text_slot(text).is_some() => (Layout::of_text_slot(text).expect("matched"), vec![]),
             // Native dispatch N3 — a secret compares in constant time in
             // the runtime, which alone reads the object.
             Type::Secret => (Layout::Secret, vec![]),

@@ -44,6 +44,13 @@ pub fn schema_for(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Value {
     schema_for_inner(ty, types_by_id, &mut Vec::new())
 }
 
+/// The schema a prompt's reply is requested with: none for a `String`,
+/// which a model answers in plain text, and `schema_for` otherwise. Both
+/// tiers ask this, so both send a model the same request.
+pub fn reply_schema(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Option<Value> {
+    (!matches!(ty, Type::String)).then(|| schema_for(ty, types_by_id))
+}
+
 /// JSON Schema for the compiler-known `JsonError` record. Prompt
 /// schemas and the published OpenAPI document both use this one.
 pub fn json_error_schema() -> Value {
