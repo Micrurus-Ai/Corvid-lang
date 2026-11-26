@@ -137,6 +137,15 @@ then 7, for an `Int` prompt with `with repair 1`. Both tiers make the
 same two calls with the same retry text and return 7. Without
 `with repair` a native prompt makes one call and stops.
 
+Found and fixed: the library replay test (`trace_record.rs`) never
+replayed. A loaded library starts its runtime once, from the
+environment of its first call, so setting `CORVID_REPLAY_TRACE_PATH`
+afterwards had no effect. The test passed only because the removed
+env-mock fast path kept answering its cached first reply. The replay
+phase now loads a fresh copy of the library after setting the replay
+environment, with the model answering "negative". The recorded
+"positive" can therefore come only from the recording.
+
 ---
 
 ## 2026-11-26 - Native maps with text-held keys and values (B3)
