@@ -1010,6 +1010,37 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - A removal's revision in the live change feed (B14 RT-2)
+
+The agreed protocol says a `removed` change carries the row as the
+subscriber last saw it and the revision of the change. RT-2 sent the
+row's old revision, which is wrong: the subscriber already holds that
+revision. Codex's transport worked around it by sending a whole
+snapshot whenever a row left the query. The revision a removal needs is
+not in either result: a row saved out of the query is absent from the
+new one. Only the commit knows it.
+
+Each `TableCommit` now carries `rows`: for each table, the key of every
+row written and the revision it reached. A delete counts as the row's
+next revision, so every committed write moves a row's revision on and a
+client can always tell a later change from an earlier one.
+`live_changes` takes those rows and uses them for removals. A removed
+row missing from them cannot have its revision named, and a snapshot
+is sent instead of a guess. That happens after lag, after a reconnect,
+or when a cross-process notification was too large to carry its rows
+(Postgres caps a notification at 8000 bytes, so above about 6000 bytes
+the rows are left out and the tables kept).
+
+The key must match the key `LiveRow::from_json` reads from a snapshot
+row. The runtime's write path holds database values, and converting
+those to public JSON there would be a second copy of the mapping. So
+the interpreter computes the key with the public JSON encoder the
+snapshot uses, and passes it down as `TableRef::row_key`. A test checks
+that the commit's key and the snapshot's key are equal for a text key
+with escaped characters and for a key of two fields.
+
+---
+
 ## 2026-11-26 - Watching a session for live sockets (B14 RT-3)
 
 Codex's RT-3 transport was blocked: a live socket must validate its

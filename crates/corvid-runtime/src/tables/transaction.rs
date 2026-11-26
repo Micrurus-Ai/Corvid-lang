@@ -71,14 +71,15 @@ impl Runtime {
     /// Commit an `atomic:` block's writes.
     pub async fn table_commit(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
         let database = transaction.database.clone();
-        let tables = transaction.written.take();
+        let written = transaction.written.take();
         // Other processes on Postgres hear of the block through a
         // notification sent inside it, which Postgres delivers only if
         // the block commits (RT-6).
-        let notify = (!tables.is_empty()).then(|| super::shared_commits::notify_statement(&self.instance_id, &database, &tables));
+        let notify = (!written.tables.is_empty())
+            .then(|| super::shared_commits::notify_statement(&self.instance_id, &database, &written.tables, &written.rows));
         self.end_transaction(transaction, "commit", "COMMIT", notify).await?;
         // Only now are the block's writes visible, so only now announced.
-        self.announce_commit(&database, tables);
+        self.announce_commit(&database, written);
         Ok(())
     }
 
@@ -121,7 +122,7 @@ impl Runtime {
         transaction: TableTransaction,
         op: &str,
         sql: &str,
-        notify: Option<(&'static str, [DbValue; 4])>,
+        notify: Option<(&'static str, [DbValue; 5])>,
     ) -> Result<(), RuntimeError> {
         let TableTransaction { database, connection, _writer_turn, .. } = transaction;
         self.recorded_table_call(&format!("table:{database}.{op}"), Vec::new(), || async {
