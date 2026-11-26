@@ -113,6 +113,7 @@ impl<'a> Parser<'a> {
             ui: Vec::new(),
             refinement: None,
             upload: None,
+            json_key: None,
             span: name_span,
         });
         let record = TypeDecl {
@@ -120,6 +121,7 @@ impl<'a> Parser<'a> {
             fields,
             variants: Vec::new(),
             alias: None,
+            json_case: None,
             visibility,
             span: start.merge(end),
         };

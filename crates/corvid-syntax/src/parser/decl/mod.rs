@@ -104,6 +104,27 @@ impl<'a> Parser<'a> {
             TokKind::KwExtend => self.parse_extend_decl().map(Decl::Extend),
             TokKind::KwEffect => self.parse_effect_decl(visibility).map(Decl::Effect),
             TokKind::KwModel => self.parse_model_decl(visibility).map(Decl::Model),
+            TokKind::At if matches!(self.peek_ahead(1), TokKind::Ident(w) if w == "json") => {
+                let case = self.parse_type_json_case()?;
+                // `@json(case: ...)` may come before or after `public`.
+                let visibility = match visibility {
+                    Visibility::Private => self.parse_optional_visibility()?,
+                    declared => declared,
+                };
+                let choice = matches!(self.peek(), TokKind::Ident(w) if w == "choice");
+                if !matches!(self.peek(), TokKind::KwType) && !choice {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(self.peek()),
+                            expected: "`type` after `@json(case: ...)`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                let mut decl = self.parse_type_decl(visibility, choice)?;
+                decl.json_case = Some(case);
+                Ok(Decl::Type(decl))
+            }
             TokKind::At => {
                 let (attributes, constraints) = self.parse_agent_annotations()?;
                 let extern_abi = if matches!(self.peek(), TokKind::KwPub) {

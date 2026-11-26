@@ -311,6 +311,30 @@ memory prefs:
 "#,
     ),
     (
+        "duration_literals",
+        r#"agent wait(attempts: Int) -> Duration:
+    return attempts * 30 seconds + 1.5 minutes + 1 hour
+"#,
+    ),
+    (
+        "refinements",
+        r#"type Search:
+    limit: Int where between(1, 50)
+
+type BoardError:
+    | ColumnFull(limit: Int where between(1, 50), note: String where len_between(0, 80))
+"#,
+    ),
+    (
+        "json_keys",
+        r#"@json(case: camel)
+type Order:
+    order_id: Int
+    @json(key: "ID")
+    legacy_id: String
+"#,
+    ),
+    (
         "tables_and_databases",
         r#"database library:
     engine: sqlite
@@ -712,6 +736,11 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("import_item", "imports"),
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
+    ("refinement", "refinements"),
+    ("duration_literal", "duration_literals"),
+    ("duration_unit", "duration_literals"),
+    ("json_case_attr", "json_keys"),
+    ("json_key_attr", "json_keys"),
     ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
     ("table_decl", "tables_and_databases"),

@@ -4430,3 +4430,44 @@ fn parses_provisioning_claim_mapping_with_allowlist() {
 }
 
 
+
+/// B01: `@json(key: "...")` on a field and `@json(case: ...)` before a
+/// type, in either order with `public`; a variant payload field takes no
+/// attribute, because its value travels by position.
+#[test]
+fn json_keys_parse_on_fields_and_types() {
+    let (file, errors) = parse_file_errs(
+        "@json(case: camel)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    legacy_id: String\n\npublic @json(case: kebab)\ntype Tag:\n    created_at: String\n\n@json(case: pascal)\npublic type Note:\n    body: String\n",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let types: Vec<&corvid_ast::TypeDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            corvid_ast::Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(types[0].json_case, Some(corvid_ast::JsonCase::Camel));
+    assert_eq!(types[0].fields[0].json_key, None);
+    assert_eq!(types[0].fields[1].json_key.as_deref(), Some("ID"));
+    assert_eq!(types[1].json_case, Some(corvid_ast::JsonCase::Kebab));
+    assert_eq!(types[1].visibility, corvid_ast::Visibility::Public);
+    assert_eq!(types[2].json_case, Some(corvid_ast::JsonCase::Pascal));
+    assert_eq!(types[2].visibility, corvid_ast::Visibility::Public);
+
+    let first_error = |src: &str| {
+        let (_, errors) = parse_file_errs(src);
+        errors.first().map(|e| format!("{:?}", e.kind)).unwrap_or_default()
+    };
+    let snake = first_error("@json(case: snake)\ntype T:\n    a: Int\n");
+    assert!(snake.contains("`camel`, `pascal` or `kebab`"), "{snake}");
+    let field_case = first_error("type T:\n    @json(case: camel)\n    a: Int\n");
+    assert!(field_case.contains("goes before the `type`"), "{field_case}");
+    let type_key = first_error("@json(key: \"x\")\ntype T:\n    a: Int\n");
+    assert!(type_key.contains("goes on a field"), "{type_key}");
+    let twice = first_error("type T:\n    @json(key: \"a\")\n    @json(key: \"b\")\n    x: Int\n");
+    assert!(twice.contains("one `@json(key:"), "{twice}");
+    let variant = first_error("type T:\n    | Full(@json(key: \"max\") limit: Int)\n");
+    assert!(variant.contains("travels by position"), "{variant}");
+}

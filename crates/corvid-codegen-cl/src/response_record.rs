@@ -46,7 +46,7 @@ fn record_id(index: usize) -> DefId {
 
 fn response_record(id: DefId, body: Type) -> IrType {
     let span = Span::new(0, 0);
-    let field = |name: &str, ty: Type| IrField { name: name.into(), ty, refinement: None, span };
+    let field = |name: &str, ty: Type| IrField { name: name.into(), ty, refinement: None, json_key: None, span };
     let types = [
         Type::Int,
         Type::List(Box::new(Type::List(Box::new(Type::String)))),

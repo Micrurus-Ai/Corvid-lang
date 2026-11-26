@@ -167,7 +167,7 @@ pub fn lower_file(
         let typeinfo_id = emit_struct_typeinfo(module, ty, destroy_id, trace_id, &runtime)?;
         runtime.struct_typeinfos.insert(ty.id, typeinfo_id);
         for (index, variant) in ty.variants.iter().enumerate() {
-            let tag = corvid_ir::IrField { name: "tag".into(), ty: Type::Int, refinement: None, span: variant.span };
+            let tag = corvid_ir::IrField { name: "tag".into(), ty: Type::Int, refinement: None, json_key: None, span: variant.span };
             let layout = corvid_ir::IrType {
                 id: ty.id, name: format!("variant.{}.{}", ty.id.0, index),
                 fields: std::iter::once(tag).chain(variant.fields.iter().cloned()).collect(),

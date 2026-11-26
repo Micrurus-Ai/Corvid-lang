@@ -104,6 +104,93 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - The duration literal
+
+A duration could only come from subtracting instants or from parsing
+ISO text, so a timeout was `"PT30S".parse_duration()` and a match. Now it
+is `30 seconds`, decided in the
+[decimal and time proposal](docs/proposals/decimal-and-time.md) and built
+after the proposal stood a working day without a frontend objection.
+
+The parser reads a number followed by a unit word, singular or plural,
+as a literal that keeps the number's digits and the word as written. One
+function, `corvid_types::duration_literal_value`, reads the exact value
+for both the checker and IR lowering. It takes the digits as a decimal,
+never a float, so `1.5 minutes` is exactly 90 seconds. It refuses a
+fraction of a nanosecond and a value outside the duration range. It also
+refuses `days`, `weeks`, `months` and `years` with the reason and the two
+things a program usually means: `24 hours`, or a `ZonedTime` moved with
+`add_days`, `add_months` or `add_years`. The interpreter holds the
+`Duration`, native code its canonical text, and WebAssembly refuses it by
+name, as it refuses the other B06 literals. A number followed by a word
+was a parse error before, and every construct that reads a unit word
+itself (`within 30 seconds`, `every: 30s`, `retry 3 times`) parses its
+own number, so no program changes meaning.
+
+Found and strengthened: the time reference still said programs calling
+`time_now()` run on the interpreter, though it is native since native
+dispatch N2. Filed: the approver policy simulator has no duration value
+and refuses a duration literal by name.
+
+Tests: a parity test of literals in arithmetic, multiplication and
+comparison on both tiers. Checker tests cover a calendar unit, a
+fractional nanosecond and a type mismatch. Unit tests hold the parser's
+unit words in step with `corvid_time::TimeUnit`. Grammar drift evidence
+covers the new productions.
+
+---
+
+## 2026-11-26 - Refinements on variant payload fields
+
+`| ColumnFull(limit: Int where between(1, 50))` was a parse error,
+because the variant-field parser built each field with `refinement:
+None`. Decoding, the contract, the interpreter's construction check, the
+checker's constant check and native code's constructor check all handled
+a refined payload field already; they had nothing to read. The parser
+now calls `parse_field_refinement` for a payload field, and the checker's
+refinement-form validation visits payload fields too.
+
+Found and strengthened: the published grammar showed no refinement at
+all, on records or variants, though the parser has accepted
+`where between(...)` since slice 50j. `refinement` is now a production
+used by record and payload fields, with drift evidence.
+
+Tests: a parity test builds `ColumnFull(12)` on both tiers and stops
+both at `ColumnFull(80)` with one message. Checker tests cover a
+constant out of range and a `between` on a `String` payload. Decoding
+refuses an out-of-range payload at `fields[0]`, and the contract carries
+the bounds.
+
+---
+
+## 2026-11-26 - JSON keys that differ from field names (B01)
+
+A Corvid program reading a camelCase API had to name its fields
+`userId`, breaking the naming rule, or read one field at a time. Now
+`@json(key: "userId")` names a field's key, and `@json(case: camel)`
+before a type derives every key (`pascal` and `kebab` too). The
+[proposal](docs/proposals/json-field-keys.md) stood a working day
+without a frontend answer, so its own answers to the four questions
+stand, recorded in its "As built" section.
+
+One function, `corvid_ast::json_key`, computes a key. Lowering stores it
+on the IR field, and the native decode plan carries it. So the
+interpreter's and native code's public decoder and encoder, the native
+per-record decoder (prompt replies, the C ABI), prompt schemas and
+replies, the contract, OpenAPI and the four generated clients all read
+the same value; a parity test shows both tiers agree. The checker
+refuses an empty key and two fields with one key. The parser refuses an
+attribute on a variant payload field with the reason: the payload
+travels by position.
+
+The proposal said prompts would keep field names. B1, built earlier
+today, moved prompts to the public form, so they use the key like every
+other public surface, and the proposal says so. Tool arguments keep the
+internal form until B2. Reading a field's name as well as its key
+(serde's `alias`) is filed on the roadmap.
+
+---
+
 ## 2026-11-26 - Prompts exchange the public JSON form with a model
 
 The grammar says a prompt argument "renders as its JSON form", but a

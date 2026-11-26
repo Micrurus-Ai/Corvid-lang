@@ -522,5 +522,6 @@ fn literal_type(lit: &corvid_ast::Literal) -> Type {
         corvid_ast::Literal::String(_) => Type::String,
         corvid_ast::Literal::Bool(_) => Type::Bool,
         corvid_ast::Literal::Nothing => Type::Nothing,
+        corvid_ast::Literal::Duration { .. } => Type::Duration,
     }
 }

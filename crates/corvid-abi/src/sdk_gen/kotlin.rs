@@ -19,15 +19,18 @@ pub(super) fn emit_kotlin(contract: &ApplicationContract) -> String {
     out.push_str(PRELUDE);
     out.push_str(&page_model());
     out.push_str(&conflict_model());
-    let json_error: Vec<(String, TypeName)> = corvid_types::json_error_fields()
+    let json_error: Vec<(String, String, TypeName)> = corvid_types::json_error_fields()
         .iter()
-        .map(|(name, ty)| (name.to_string(), TypeName::parse(&ty.display_name())))
+        .map(|(name, ty)| (name.to_string(), name.to_string(), TypeName::parse(&ty.display_name())))
         .collect();
     out.push_str(&record("JsonError", &json_error));
     for ty in &contract.types {
         if ty.variants.is_empty() {
-            let fields: Vec<(String, TypeName)> =
-                ty.fields.iter().map(|f| (f.name.clone(), TypeName::parse(&f.type_name))).collect();
+            let fields: Vec<(String, String, TypeName)> = ty
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.key().to_string(), TypeName::parse(&f.type_name)))
+                .collect();
             out.push_str(&record(&ty.name, &fields));
         } else {
             out.push_str(&sum(ty));
@@ -36,17 +39,19 @@ pub(super) fn emit_kotlin(contract: &ApplicationContract) -> String {
     out
 }
 
-fn record(name: &str, fields: &[(String, TypeName)]) -> String {
+/// A record's fields are `(property, wire key, type)`; the serializer
+/// reads and writes the key (`@json(key:)`, B01).
+fn record(name: &str, fields: &[(String, String, TypeName)]) -> String {
     let params = fields
         .iter()
-        .map(|(field, ty)| format!("val {}: {}", ident(field), kotlin_type(ty)))
+        .map(|(field, _, ty)| format!("val {}: {}", ident(field), kotlin_type(ty)))
         .collect::<Vec<_>>()
         .join(", ");
     let writes: String = fields
         .iter()
-        .map(|(field, ty)| {
+        .map(|(field, key, ty)| {
             format!(
-                "        put({field:?}, json.encodeToJsonElement({}, value.{}))\n",
+                "        put({key:?}, json.encodeToJsonElement({}, value.{}))\n",
                 serializer(ty),
                 ident(field)
             )
@@ -54,9 +59,9 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         .collect();
     let reads = fields
         .iter()
-        .map(|(field, ty)| {
+        .map(|(field, key, ty)| {
             format!(
-                "            {} = json.decodeFromJsonElement({}, obj[{field:?}] ?: JsonNull)",
+                "            {} = json.decodeFromJsonElement({}, obj[{key:?}] ?: JsonNull)",
                 ident(field),
                 serializer(ty)
             )

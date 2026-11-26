@@ -12,6 +12,7 @@ pub mod builtin_methods;
 pub mod checker;
 pub mod config;
 pub mod determinism;
+pub mod duration_literal;
 pub mod effects;
 pub mod errors;
 pub mod law_check;
@@ -55,6 +56,7 @@ pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp}
 pub use type_receiver::{type_receiver, TypeReceiver};
 pub use builtin_methods::{CONFLICT_TYPE_ID, UNRESOLVED_DEF_ID};
 pub use types::{ConflictCase, ConflictCases, Type};
+pub use duration_literal::duration_literal_value;
 
 #[cfg(test)]
 mod tests;

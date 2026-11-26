@@ -110,12 +110,19 @@ the code the interpreter runs, so both tiers give the same results and
 stop with the same messages. Instants and durations are ordered and
 compared by value, never by their text. Tools and prompts whose
 signature holds one of these types run on the interpreter, which
-checks the text at the boundary; so do programs that call `time_now()`,
-a tool.
+checks the text at the boundary. `time_now()` is one of the runtime's
+own tools and runs natively.
 
-A duration literal, `30 seconds`, is proposed and waits for agreement
-with frontend development. Until it lands, durations come from
-subtracting instants or from `parse_duration`.
+Write a duration as a number and a unit: `timeout = 30 seconds`,
+`deadline = now + 2 hours`, `1.5 seconds`, `attempts * 30 seconds`. The
+units are `nanoseconds`, `microseconds`, `milliseconds`, `seconds`,
+`minutes` and `hours`, singular or plural. The number is read exactly
+from its digits, and must come to a whole number of nanoseconds. There
+is no `days`: in a time zone a day is 23, 24 or 25 hours, so `30 days`
+is a compile error that suggests writing the length in hours (`24
+hours` is exactly one day's worth) or `zoned.add_days(30)` for the same
+local time on another day; `weeks`, `months` and `years` likewise. Durations also come from subtracting
+instants and from `parse_duration`.
 
 `time_parse_iso` and `time_format_iso` keep working; new code uses
 `parse_instant` and `to_string`, which are pure and need no tool call.

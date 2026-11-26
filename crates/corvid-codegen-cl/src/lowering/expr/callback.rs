@@ -100,6 +100,7 @@ pub(super) fn create(
                 name: index.to_string(),
                 ty,
                 refinement: None,
+                json_key: None,
                 span: expr.span,
             })
             .collect();

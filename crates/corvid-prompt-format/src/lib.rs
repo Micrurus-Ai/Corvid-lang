@@ -133,7 +133,7 @@ fn schema_for_inner(
                         .fields
                         .iter()
                         .map(|field| schema::RecordField {
-                            name: field.name.clone(),
+                            name: field.key().to_string(),
                             schema: schema_for_inner(&field.ty, types_by_id, visiting),
                             optional: matches!(field.ty, Type::Option(_)),
                         })
@@ -267,7 +267,7 @@ fn partial_schema(
     for field in &ir_type.fields {
         let field_schema = schema_for_inner(&field.ty, types_by_id, visiting);
         properties.insert(
-            field.name.clone(),
+            field.key().to_string(),
             json!({
                 "oneOf": [
                     {
@@ -338,12 +338,14 @@ mod tests {
                     name: "should_refund".into(),
                     ty: Type::Bool,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "reason".into(),
                     ty: Type::String,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
             ],
@@ -380,6 +382,7 @@ mod tests {
                 name: "id".into(),
                 ty: Type::String,
                 refinement: None,
+                json_key: None,
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -392,6 +395,7 @@ mod tests {
                 name: "order".into(),
                 ty: Type::Struct(inner_id),
                 refinement: None,
+                json_key: None,
                 span: Span::new(0, 0),
             }],
             span: Span::new(0, 0),
@@ -431,7 +435,7 @@ mod tests {
                 corvid_ir::IrEnumVariant { name: "Low".into(), fields: Vec::new(), span: Span::new(0, 0) },
                 corvid_ir::IrEnumVariant {
                     name: "High".into(),
-                    fields: vec![IrField { name: "reason".into(), ty: Type::String, refinement: None, span: Span::new(0, 0) }],
+                    fields: vec![IrField { name: "reason".into(), ty: Type::String, refinement: None, json_key: None, span: Span::new(0, 0) }],
                     span: Span::new(0, 0),
                 },
             ],
@@ -442,14 +446,15 @@ mod tests {
             name: "Verdict".into(),
             variants: Vec::new(),
             fields: vec![
-                IrField { name: "summary".into(), ty: Type::String, refinement: None, span: Span::new(0, 0) },
+                IrField { name: "summary".into(), ty: Type::String, refinement: None, json_key: None, span: Span::new(0, 0) },
                 IrField {
                     name: "assignee".into(),
                     ty: Type::Option(Box::new(Type::String)),
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
-                IrField { name: "severity".into(), ty: Type::Struct(sum_id), refinement: None, span: Span::new(0, 0) },
+                IrField { name: "severity".into(), ty: Type::Struct(sum_id), refinement: None, json_key: None, span: Span::new(0, 0) },
             ],
             span: Span::new(0, 0),
         }));
@@ -480,12 +485,14 @@ mod tests {
                     name: "title".into(),
                     ty: Type::String,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "ready".into(),
                     ty: Type::Bool,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
             ],

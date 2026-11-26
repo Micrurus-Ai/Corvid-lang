@@ -201,7 +201,7 @@ fn emit_struct_decoder(
             builder.seal_block(block);
 
             let name_val =
-                lower_string_literal(&mut builder, module, runtime, &field.name, field.span)?;
+                lower_string_literal(&mut builder, module, runtime, field.key(), field.span)?;
             let present_ref = module.declare_func_in_func(runtime.json_field_present, builder.func);
             let present_call = builder.ins().call(present_ref, &[handle, name_val]);
             let present_i32 = builder.inst_results(present_call)[0];
@@ -234,7 +234,7 @@ fn emit_struct_decoder(
 
         for (i, field) in ir_type.fields.iter().enumerate() {
             let name_val =
-                lower_string_literal(&mut builder, module, runtime, &field.name, field.span)?;
+                lower_string_literal(&mut builder, module, runtime, field.key(), field.span)?;
             let offset = (i as i32) * STRUCT_FIELD_SLOT_BYTES;
 
             // Each branch reads the field via the type-appropriate

@@ -15,11 +15,11 @@ use super::NOTE_SCAFFOLD;
 use crate::app_contract::{ApplicationContract, ContractField};
 use corvid_types::Type;
 
-/// A field's name and contract type name.
-type Field = (String, String);
+/// A field's name, wire key (`@json(key:)`, B01) and contract type name.
+type Field = (String, String, String);
 
 fn fields_of(fields: &[ContractField]) -> Vec<Field> {
-    fields.iter().map(|f| (f.name.clone(), f.type_name.clone())).collect()
+    fields.iter().map(|f| (f.name.clone(), f.key().to_string(), f.type_name.clone())).collect()
 }
 
 pub(super) fn emit_python(contract: &ApplicationContract) -> String {
@@ -65,7 +65,7 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
             sums.push(sum_entry(&ty.name, &ty.variants));
         }
     }
-    out.push_str("_RECORDS: dict[str, tuple[type, list[tuple[str, Any]]]] = {\n");
+    out.push_str("_RECORDS: dict[str, tuple[type, list[tuple[str, str, Any]]]] = {\n");
     for entry in &records {
         out.push_str(entry);
     }
@@ -113,12 +113,15 @@ fn model_methods(name: &str) -> String {
 /// `JsonError`: why the server could not decode a body, or the error a
 /// `T.from_json` route returns. Its fields come from the compiler.
 fn json_error_fields() -> Vec<Field> {
-    corvid_types::json_error_fields().iter().map(|(name, ty)| (name.to_string(), contract_type_name(ty))).collect()
+    corvid_types::json_error_fields()
+        .iter()
+        .map(|(name, ty)| (name.to_string(), name.to_string(), contract_type_name(ty)))
+        .collect()
 }
 
 fn json_error_model() -> String {
     let mut out = String::from("@dataclass\nclass JsonError:\n    \"\"\"Why JSON did not decode: where, what was expected, and what was found.\"\"\"\n");
-    for (name, type_name) in json_error_fields() {
+    for (name, _, type_name) in json_error_fields() {
         out.push_str(&format!("    {name}: {}\n", annotation(&TypeName::parse(&type_name))));
     }
     out.push_str(&model_methods("JsonError"));
@@ -175,7 +178,7 @@ fn contract_type_name(ty: &Type) -> String {
 fn record_entry(name: &str, fields: &[Field]) -> String {
     let fields = fields
         .iter()
-        .map(|(field, type_name)| format!("({field:?}, {})", descriptor(&TypeName::parse(type_name))))
+        .map(|(field, key, type_name)| format!("({field:?}, {key:?}, {})", descriptor(&TypeName::parse(type_name))))
         .collect::<Vec<_>>()
         .join(", ");
     format!("    {name:?}: ({name}, [{fields}]),\n")
@@ -371,13 +374,13 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
         if not isinstance(data, dict):
             raise _fail(path, ty, data)
         values = {}
-        for name, field_ty in fields:
-            if name in data:
-                values[name] = _decode(field_ty, data[name], _key(path, name))
+        for name, key, field_ty in fields:
+            if key in data:
+                values[name] = _decode(field_ty, data[key], _key(path, key))
             elif _optional(field_ty):
                 values[name] = None
             else:
-                raise WireError(f"at `{_key(path, name)}`: expected a value, found no value (the field is missing)")
+                raise WireError(f"at `{_key(path, key)}`: expected a value, found no value (the field is missing)")
         return cls(**values)
     if ty in _SUMS:
         variants = _SUMS[ty]
@@ -437,7 +440,7 @@ def _encode(ty: Any, value: Any) -> Any:
         return value
     if ty in _RECORDS:
         _, fields = _RECORDS[ty]
-        return {name: _encode(field_ty, getattr(value, name)) for name, field_ty in fields}
+        return {key: _encode(field_ty, getattr(value, name)) for name, key, field_ty in fields}
     if ty in _SUMS:
         for name, (cls, field_types) in _SUMS[ty].items():
             if isinstance(value, cls):

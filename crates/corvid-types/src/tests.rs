@@ -8691,3 +8691,54 @@ agent open_demo(path: String) -> DbHandle:
     use crate::types::Type;
     assert_eq!(Type::DbHandle.display_name(), "DbHandle");
 }
+
+/// B01: two fields may not share a JSON key, whether it comes from a
+/// field's `@json(key:)` or the type's `@json(case:)`, and a key is never
+/// empty.
+#[test]
+fn json_keys_name_one_field_each_and_are_not_empty() {
+    let messages = |src: &str| -> Vec<String> {
+        check(src)
+            .errors
+            .iter()
+            .filter(|e| matches!(e.kind, TypeErrorKind::JsonKeyInvalid { .. }))
+            .map(|e| e.kind.message())
+            .collect()
+    };
+    let clash = messages("@json(case: camel)\ntype Order:\n    order_id: Int\n    @json(key: \"orderId\")\n    legacy: Int\n");
+    assert_eq!(clash, vec!["type `Order`: fields `order_id` and `legacy` both have the JSON key `orderId`".to_string()]);
+    let empty = messages("type Order:\n    @json(key: \"\")\n    id: Int\n");
+    assert_eq!(empty, vec!["type `Order`: field `id` has an empty JSON key".to_string()]);
+    assert!(messages("@json(case: kebab)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    id: Int\n").is_empty());
+}
+
+/// A variant payload field takes a refinement as a record field does: a
+/// constant out of range is a compile error at the constructor, and a
+/// refinement that does not fit the field's type is refused at the
+/// declaration.
+#[test]
+fn variant_payload_fields_take_refinements() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    let base = "type BoardError:\n    | ColumnFull(limit: Int where between(1, 50))\n    | Closed\n\n";
+    assert!(errors(&format!("{base}agent ok() -> BoardError:\n    return ColumnFull(12)\n")).is_empty());
+    let out = errors(&format!("{base}agent bad() -> BoardError:\n    return ColumnFull(80)\n"));
+    assert!(out.iter().any(|m| m.contains("ColumnFull") && m.contains("limit") && m.contains("80")), "{out:?}");
+    let wrong = errors("type Problem:\n    | Named(label: String where between(1, 5))\n");
+    assert!(wrong.iter().any(|m| m.contains("requires an Int field")), "{wrong:?}");
+}
+
+/// B06: a duration literal is a `Duration`; a calendar unit and a
+/// fraction of a nanosecond are compile errors with the reason.
+#[test]
+fn duration_literals_check_and_explain_calendar_units() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent wait() -> Duration:\n    return 3 * 30 seconds + 1.5 minutes\n").is_empty());
+    let days = errors("agent wait() -> Duration:\n    return 30 days\n");
+    assert!(days.iter().any(|m| m.contains("`30 days` has no fixed length") && m.contains("add_days")), "{days:?}");
+    let week = errors("agent wait() -> Duration:\n    return 1 week\n");
+    assert!(week.iter().any(|m| m.contains("`1 week` has no fixed length")), "{week:?}");
+    let fraction = errors("agent wait() -> Duration:\n    return 0.5 nanoseconds\n");
+    assert!(fraction.iter().any(|m| m.contains("not a whole number of nanoseconds")), "{fraction:?}");
+    let mismatch = errors("agent wait() -> Int:\n    return 30 seconds\n");
+    assert!(!mismatch.is_empty(), "a duration is not an Int");
+}

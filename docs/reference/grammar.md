@@ -102,7 +102,7 @@ import_item       ::= IDENT ('as' IDENT)?
 ## Types and stores
 
 ```ebnf
-type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
+type_decl         ::= json_case_attr? 'type' IDENT ':' INDENT type_field+ DEDENT
                     | 'choice' IDENT ':' INDENT choice_variant+ DEDENT
                     | 'type' IDENT '=' type_alias_body NEWLINE
 choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
@@ -112,10 +112,26 @@ choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
 # bare values; payload variants construct with `Approved("alice")`.
 # Variant names are file-scope constructors (duplicates across types
 # are duplicate-declaration errors).
-type_field        ::= IDENT ':' type_ref NEWLINE
+type_field        ::= json_key_attr? IDENT ':' type_ref refinement? NEWLINE
                     | '|' IDENT ('(' field_list ')')? NEWLINE       # sum-type variant
 
-field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
+# B01: a field's key in the public JSON form (HTTP bodies, `to_json`,
+# `from_json`, prompts, OpenAPI, generated clients) when it differs from
+# the field name. `@json(case:)` derives every key from the snake_case
+# name (`created_at` is `createdAt`, `CreatedAt` or `created-at`); a
+# field's own `@json(key:)` wins. Code always uses the field name. Two
+# fields with one key, or an empty key, is a compile error. A variant's
+# payload travels by position, so its fields take no `@json`.
+json_case_attr    ::= '@' 'json' '(' 'case' ':' ('camel' | 'pascal' | 'kebab') ')' NEWLINE
+json_key_attr     ::= '@' 'json' '(' 'key' ':' STRING_LITERAL ')' NEWLINE
+
+field_list        ::= IDENT ':' type_ref refinement? (',' IDENT ':' type_ref refinement?)*
+
+# A refinement bounds every value of the field, however it is built or
+# decoded: `between` an `Int` field's value, `len_between` a `String`
+# field's length, both inclusive. It works the same on a record field
+# and a variant's payload field: `ColumnFull(limit: Int where between(1, 50))`.
+refinement        ::= 'where' ('between' | 'len_between') '(' INT ',' INT ')'
 
 # Aliases are TRANSPARENT: `type CustomerId = String` makes
 # `CustomerId` the same type as `String` everywhere (no newtype
@@ -649,7 +665,18 @@ primary_expr      ::= literal
 
 bounded_ask       ::= 'ask' IDENT '(' expr ')' NEWLINE INDENT 'allow' IDENT 'once' NEWLINE 'within' INT 'seconds' NEWLINE DEDENT
 
-literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
+literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing' | duration_literal
+
+# B06: an exact length of time, `30 seconds`, `1.5 hours`,
+# `attempts * 30 seconds`. The count is read from its digits exactly and
+# must be a whole number of nanoseconds. The unit words are contextual,
+# singular or plural. `days`, `weeks`, `months` and `years` parse, and
+# are a compile error that says why: a day in a time zone is 23, 24 or
+# 25 hours, so write `24 hours` for an exact length or move a
+# `ZonedTime` with `add_days`, `add_months` or `add_years`.
+duration_literal  ::= (INT | FLOAT) duration_unit
+duration_unit     ::= 'nanosecond' 's'? | 'microsecond' 's'? | 'millisecond' 's'? | 'second' 's'?
+                    | 'minute' 's'? | 'hour' 's'? | 'day' 's'? | 'week' 's'? | 'month' 's'? | 'year' 's'?
 
 list_literal      ::= '[' (expr (',' expr)*)? ']'
 

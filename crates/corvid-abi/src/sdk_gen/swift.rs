@@ -19,15 +19,18 @@ pub(super) fn emit_swift(contract: &ApplicationContract) -> String {
     out.push_str(PRELUDE);
     out.push_str(&page_model());
     out.push_str(&conflict_model());
-    let json_error: Vec<(String, TypeName)> = corvid_types::json_error_fields()
+    let json_error: Vec<(String, String, TypeName)> = corvid_types::json_error_fields()
         .iter()
-        .map(|(name, ty)| (name.to_string(), TypeName::parse(&ty.display_name())))
+        .map(|(name, ty)| (name.to_string(), name.to_string(), TypeName::parse(&ty.display_name())))
         .collect();
     out.push_str(&record("JsonError", &json_error));
     for ty in &contract.types {
         if ty.variants.is_empty() {
-            let fields: Vec<(String, TypeName)> =
-                ty.fields.iter().map(|f| (f.name.clone(), TypeName::parse(&f.type_name))).collect();
+            let fields: Vec<(String, String, TypeName)> = ty
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.key().to_string(), TypeName::parse(&f.type_name)))
+                .collect();
             out.push_str(&record(&ty.name, &fields));
         } else {
             out.push_str(&sum(ty));
@@ -37,14 +40,16 @@ pub(super) fn emit_swift(contract: &ApplicationContract) -> String {
     out
 }
 
-fn record(name: &str, fields: &[(String, TypeName)]) -> String {
+/// A record's fields are `(property, wire key, type)`; the key is the
+/// field's JSON key (`@json(key:)`, B01), which `CodingKeys` maps.
+fn record(name: &str, fields: &[(String, String, TypeName)]) -> String {
     let mut out = format!("public struct {name}: Codable {{\n");
-    for (field, ty) in fields {
+    for (field, _, ty) in fields {
         out.push_str(&format!("    public var {}: {}\n", ident(field), swift_type(ty)));
     }
-    let params = fields.iter().map(|(f, ty)| format!("{}: {}", ident(f), swift_type(ty))).collect::<Vec<_>>().join(", ");
+    let params = fields.iter().map(|(f, _, ty)| format!("{}: {}", ident(f), swift_type(ty))).collect::<Vec<_>>().join(", ");
     out.push_str(&format!("\n    public init({params}) {{\n"));
-    for (field, _) in fields {
+    for (field, _, _) in fields {
         out.push_str(&format!("        self.{0} = {0}\n", ident(field)));
     }
     out.push_str("    }\n\n");
@@ -53,11 +58,15 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         return out;
     }
     out.push_str("    private enum CodingKeys: String, CodingKey {\n");
-    for (field, _) in fields {
-        out.push_str(&format!("        case {}\n", ident(field)));
+    for (field, key, _) in fields {
+        if key == field {
+            out.push_str(&format!("        case {}\n", ident(field)));
+        } else {
+            out.push_str(&format!("        case {} = {key:?}\n", ident(field)));
+        }
     }
     out.push_str("    }\n\n    public init(from decoder: Decoder) throws {\n        let c = try decoder.container(keyedBy: CodingKeys.self)\n");
-    for (field, ty) in fields {
+    for (field, _, ty) in fields {
         let key = ident(field);
         let read = match optional_payload(ty) {
             Some(inner) => format!("try c.decodeIfPresent({}.self, forKey: .{key})", swift_type(inner)),
@@ -66,7 +75,7 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         out.push_str(&format!("        self.{key} = {read}\n"));
     }
     out.push_str("    }\n\n    public func encode(to encoder: Encoder) throws {\n        var c = encoder.container(keyedBy: CodingKeys.self)\n");
-    for (field, _) in fields {
+    for (field, _, _) in fields {
         // An optional encodes as `null`, as the public mapping writes it.
         out.push_str(&format!("        try c.encode(self.{0}, forKey: .{0})\n", ident(field)));
     }

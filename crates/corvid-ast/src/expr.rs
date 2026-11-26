@@ -195,6 +195,36 @@ pub enum Literal {
     String(String),
     Bool(bool),
     Nothing,
+    /// A duration literal (B06): `30 seconds`, `1.5 hours`. `count` is
+    /// the number's source text and `unit` the unit word as written
+    /// (`second` or `seconds`); [`duration_unit`] names its unit. The checker reads the exact value; a calendar
+    /// unit (`days`) is a compile error there, with its reason.
+    Duration { count: String, unit: String },
+}
+
+/// The units a duration literal is written in, by plural name: the six
+/// fixed-length units first, then the calendar units, which parse so the
+/// checker can say why a day is not a fixed length. The fixed units are
+/// `corvid_time::TimeUnit`'s names, which a test holds in step.
+pub const DURATION_UNITS: [&str; 10] = [
+    "nanoseconds",
+    "microseconds",
+    "milliseconds",
+    "seconds",
+    "minutes",
+    "hours",
+    "days",
+    "weeks",
+    "months",
+    "years",
+];
+
+/// The plural name of a duration unit word, singular or plural
+/// (`second` and `seconds` are both `seconds`).
+pub fn duration_unit(word: &str) -> Option<&'static str> {
+    DURATION_UNITS
+        .into_iter()
+        .find(|plural| *plural == word || plural.strip_suffix('s') == Some(word))
 }
 
 /// One field of a named struct literal (slice 45n). `value: None`

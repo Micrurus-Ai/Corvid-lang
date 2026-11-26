@@ -39,7 +39,7 @@ pub fn regex_match_record() -> IrType {
         name: "RegexMatch".into(),
         fields: corvid_types::regex_match_fields()
             .into_iter()
-            .map(|(name, ty)| IrField { name: name.into(), ty, refinement: None, span })
+            .map(|(name, ty)| IrField { name: name.into(), ty, refinement: None, json_key: None, span })
             .collect(),
         variants: Vec::new(),
         span,

@@ -44,3 +44,20 @@ fn a_string_out_of_length_stops_with_the_value_quoted() {
         "`Search.query` must be len_between(1, 20), but this value is \"a \\\"long\\\" query of many words\"",
     );
 }
+
+const BOARD: &str = "type BoardError:\n    | ColumnFull(limit: Int where between(1, 50))\n    | Closed\n\n";
+
+/// A variant's payload field takes a refinement as a record field does:
+/// in range it builds the same value on both tiers, and out of range it
+/// stops both where the variant is built, naming the variant.
+#[test]
+fn a_variant_payload_holds_its_refinement_on_both_tiers() {
+    let text = assert_parity_text(&format!(
+        "{BOARD}agent limit_of(n: Int) -> Int:\n    e = ColumnFull(n)\n    return match e:\n        ColumnFull(limit) -> limit\n        Closed -> 0\n\nagent main() -> Int:\n    return limit_of(12)\n"
+    ));
+    assert_eq!(text, "12");
+    assert_parity_stop(
+        &format!("{BOARD}agent build(n: Int) -> Int:\n    e = ColumnFull(n)\n    return match e:\n        ColumnFull(limit) -> limit\n        Closed -> 0\n\nagent main() -> Int:\n    return build(80)\n"),
+        "`ColumnFull.limit` must be between(1, 50), but this value is 80",
+    );
+}

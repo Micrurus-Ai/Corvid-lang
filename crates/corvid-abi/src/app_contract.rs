@@ -337,6 +337,19 @@ pub struct ContractField {
     /// explicit `@upload(mime:)`), max size, and retention.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload: Option<ContractUpload>,
+    /// The field's key in the public JSON form when it differs from its
+    /// name (`@json(key:)` or the type's `@json(case:)`, B01). Bodies,
+    /// OpenAPI and the generated clients use the key; Corvid code uses
+    /// `name`. Read it through [`ContractField::key`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_key: Option<String>,
+}
+
+impl ContractField {
+    /// The key this field has on the wire.
+    pub fn key(&self) -> &str {
+        self.json_key.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// The upload surface of an `Upload<Format>` field (slice 51f). A
@@ -955,16 +968,20 @@ fn mandatory_auth_safeguards() -> Vec<String> {
 fn contract_type(t: &corvid_ast::TypeDecl, names: &ContractTypes<'_>) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
-        fields: public_fields(&t.fields, names),
+        fields: public_fields(&t.fields, t.json_case, names),
         variants: t.variants.iter().map(|v| contract_variant(v, names)).collect(),
     }
 }
 
-fn public_fields(fields: &[corvid_ast::Field], names: &ContractTypes<'_>) -> Vec<ContractField> {
+fn public_fields(
+    fields: &[corvid_ast::Field],
+    case: Option<corvid_ast::JsonCase>,
+    names: &ContractTypes<'_>,
+) -> Vec<ContractField> {
     fields
         .iter()
         .filter(|field| !names.checked.secret_type_refs.contains(&field.ty.span()))
-        .map(|field| contract_field(field, names))
+        .map(|field| contract_field(field, case, names))
         .collect()
 }
 
@@ -976,7 +993,8 @@ fn signature_holds_secret(params: &[corvid_ast::Param], return_ty: &TypeRef, che
 fn contract_variant(v: &corvid_ast::SumVariant, names: &ContractTypes<'_>) -> ContractVariant {
     ContractVariant {
         name: v.name.name.clone(),
-        fields: public_fields(&v.fields, names),
+        // A variant's payload travels by position, so it has no keys.
+        fields: public_fields(&v.fields, None, names),
         status: v.status,
         ui: ui_hints_map(&v.ui),
     }
@@ -996,8 +1014,10 @@ fn ui_hints_map(hints: &[corvid_ast::UiHint]) -> std::collections::BTreeMap<Stri
     map
 }
 
-fn contract_field(f: &corvid_ast::Field, names: &ContractTypes<'_>) -> ContractField {
+fn contract_field(f: &corvid_ast::Field, case: Option<corvid_ast::JsonCase>, names: &ContractTypes<'_>) -> ContractField {
+    let key = corvid_ast::json_key(&f.name.name, f.json_key.as_deref(), case);
     let mut field = ContractField {
+        json_key: (key != f.name.name).then_some(key),
         name: f.name.name.clone(),
         type_name: names.name(&f.ty),
         minimum: None,

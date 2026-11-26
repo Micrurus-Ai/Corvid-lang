@@ -892,11 +892,15 @@ impl<'a> Lowerer<'a> {
         let fields = t
             .fields
             .iter()
-            .map(|f| IrField {
-                name: f.name.name.clone(),
-                ty: self.type_ref_to_type(&f.ty),
-                refinement: f.refinement,
-                span: f.span,
+            .map(|f| {
+                let key = corvid_ast::json_key(&f.name.name, f.json_key.as_deref(), t.json_case);
+                IrField {
+                    name: f.name.name.clone(),
+                    ty: self.type_ref_to_type(&f.ty),
+                    refinement: f.refinement,
+                    json_key: (key != f.name.name).then_some(key),
+                    span: f.span,
+                }
             })
             .collect();
         let variants = t
@@ -911,6 +915,7 @@ impl<'a> Lowerer<'a> {
                         name: f.name.name.clone(),
                         ty: self.type_ref_to_type(&f.ty),
                         refinement: f.refinement,
+                        json_key: None,
                         span: f.span,
                     })
                     .collect(),
@@ -1539,6 +1544,11 @@ impl<'a> Lowerer<'a> {
                 Literal::String(s) => IrLiteral::String(s.clone()),
                 Literal::Bool(b) => IrLiteral::Bool(*b),
                 Literal::Nothing => IrLiteral::Nothing,
+                // The checker read the same text with the same function,
+                // so a program that checked always has the value.
+                Literal::Duration { count, unit } => IrLiteral::Duration(
+                    corvid_types::duration_literal_value(count, unit).unwrap_or(corvid_time::Duration::ZERO),
+                ),
             }),
             Expr::Ident { name, .. } => self.lower_ident(name),
             Expr::StructLiteral {
@@ -1831,6 +1841,11 @@ impl<'a> Lowerer<'a> {
                 corvid_ast::Literal::String(s) => IrLiteral::String(s.clone()),
                 corvid_ast::Literal::Bool(b) => IrLiteral::Bool(*b),
                 corvid_ast::Literal::Nothing => IrLiteral::Nothing,
+                // A pattern is parsed by its own grammar, which reads no
+                // duration literal; this keeps the match total.
+                corvid_ast::Literal::Duration { count, unit } => IrLiteral::Duration(
+                    corvid_types::duration_literal_value(count, unit).unwrap_or(corvid_time::Duration::ZERO),
+                ),
             }),
             Pattern::Name { name, .. } => match self.bindings.get(&name.span) {
                 Some(Binding::Decl(def_id)) => {

@@ -41,7 +41,14 @@ impl<'a> Checker<'a> {
             Expr::Literal { value: Literal::String(name), span } if matches!(expected, Some(Type::TimeZone)) => {
                 self.check_time_zone_literal(name, *span)
             }
+            Expr::Literal { value: Literal::Duration { count, unit }, span } => {
+                if let Err(message) = crate::duration_literal_value(count, unit) {
+                    self.errors.push(TypeError::new(TypeErrorKind::DurationLiteralInvalid { message }, *span));
+                }
+                Type::Duration
+            }
             Expr::Literal { value, .. } => match value {
+                Literal::Duration { .. } => Type::Duration,
                 Literal::Int(_) => Type::Int,
                 Literal::Float { value: _, .. } => Type::Float,
                 Literal::String(_) => Type::String,

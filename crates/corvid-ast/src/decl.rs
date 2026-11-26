@@ -1363,6 +1363,10 @@ pub struct TypeDecl {
     /// XOR an alias.
     #[serde(default)]
     pub alias: Option<crate::ty::TypeRef>,
+    /// `@json(case: camel)` (B01): how the fields' JSON keys derive
+    /// from their names. `None` keeps each field's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_case: Option<crate::ty::JsonCase>,
     /// Module-level visibility. Defaults to [`Visibility::Private`]
     /// (file-scoped). Marked `public` to be visible to importers
     /// once cross-file `.cor` imports land in `lang-cor-imports-basic`.
