@@ -105,6 +105,15 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 ### Task progress
 
+**Removing the limits** (decided by the owner 2026-11-26; [the plan](proposals/removing-limits.md)). Amends the order: these come first, because each is a hole or a block that a first real application hits.
+
+- [ ] One typed reader for path segments and query fields (the item under B14 below).
+- [ ] `try ... else`, built under the amended grammar law. [Proposal](proposals/recoverable-failures.md)
+- [ ] B10 shared actions, built under the amended grammar law. [Proposal](proposals/shared-actions.md)
+- [ ] JSON key renaming, built under the amended grammar law. [Proposal](proposals/json-field-keys.md)
+- [ ] Variant payload refinements and the duration literal, built under the amended grammar law.
+- [ ] Proposals, then builds: a per-call credential on connector operations, raw request bodies with a webhook verifier (B16), joins and aggregates in queries and `live`.
+
 **Retire the Python build target** (decided by the owner 2026-11-25; brought forward under "Make what you find stronger", because the default build misled new users)
 
 - [x] `corvid build` defaults to `native`; `--target python` stops with a message naming what it could not express and where to go instead; the `corvid-codegen-py` crate is removed; `compile()` and `compile_with_config()` check without emitting, so the Python-only refusals (stdlib executing tools, typed Python imports) no longer fail `corvid check`-style callers; the book's Python section now builds a shared library and runs `corvid bind python`.
@@ -168,12 +177,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Compound assignment on a `Decimal` (`total += line.price`) in native code. Done 2026-11-26: `scalar_compound` rewrites a compound assignment to a text-held scalar local as the rebinding it means (`total = total + line.price`) before ownership analysis, so it takes the path plain reassignment already takes; the tier picker accepts it through `native_scalar_compound`. Parity test under the leak detector.
 - [ ] The B06 types (`Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`, `Locale`) at native tool and prompt boundaries, and as native map keys and values. These run on the interpreter today: a native tool or prompt bridge would see the text with nothing checking it is the type's text, and native maps hold `String` keys and a few value types only. (`time_now()` runs natively since native dispatch N2, as a runtime tool.) Proposal 2026-11-26: [native scalar boundaries](proposals/native-scalar-boundaries.md), slices B1 (native prompts through the public JSON plan, replacing the second JSON mapping in `struct_decode.rs`), B2 (user tools through the runtime call), B3 (maps).
 - [x] Compound assignment on a native time value (`total += step`), done 2026-11-26 with the `Decimal` case, by the same rewrite. Parity test on a `Duration` and an `Instant`.
-- [ ] A string literal compared with a `TimeZone`, `Currency` or `Locale` (`zoned.time_zone() == "Europe/Berlin"`) is a compile error today, because only slots are typed by context; write `berlin: TimeZone = "Europe/Berlin"` first. Type the literal by the other operand, as decimal literals are. Found during B06 slice 7.
+- [x] A string literal compared with a `TimeZone`, `Currency` or `Locale` (`zoned.time_zone() == "Europe/Berlin"`) is a compile error today, because only slots are typed by context; write `berlin: TimeZone = "Europe/Berlin"` first. Type the literal by the other operand, as decimal literals are. Found during B06 slice 7. Done 2026-11-26 by the comparison-literal rule below.
 - [x] `Int.to_string()` and `Bool.to_string()` run only on the interpreter, so a program that prints a local hour or `minor_digits()` with them runs there. Found during B06 slice 7. Done 2026-11-25 with `Float.to_string()`: one runtime call each, through `corvid_runtime::number_text`, with parity tests (commit dd725c46).
 - [ ] Integer literals beyond `Int`'s range in a `Decimal` slot. Lex integer literals as digits, as float literals now are; until then a larger whole number is written with a point.
 - [ ] A value of type `Int` in a `Float` slot is not converted at run time, so `x: Float = 3` then `x.to_string()` traps with a type mismatch on the interpreter. Found during B06; `Decimal` avoids it by accepting only literals in `Decimal` slots. Insert the conversion at slot sites, as `grounded_coercion_sites` does for grounding, then let `Int` values widen into `Decimal` slots too.
 - [x] The B06 types as B09 table columns, on SQLite (B09 P8a) and Postgres (P8b), each in a column that compares it exactly.
-- [ ] A number literal inside `Some(...)` is not typed by the comparison's other side, so `s.price == Some(10)` against an `Option<Decimal>` is a type error; bind `ten: Decimal = 10` first. Type the literal by the expected option's payload, as a bare literal already is. Found during B09 P8b.
+- [x] A number literal inside `Some(...)` is not typed by the comparison's other side, so `s.price == Some(10)` against an `Option<Decimal>` is a type error; bind `ten: Decimal = 10` first. Type the literal by the expected option's payload, as a bare literal already is. Found during B09 P8b. Done 2026-11-26 by the comparison-literal rule below.
 - [ ] A `Money` type that carries its currency. Decide after a backend example uses `Decimal` for money.
 - [ ] Explicit gap and fold resolution for local times, and plain dates without a zone, when an example needs them.
 

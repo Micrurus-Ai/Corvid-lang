@@ -29,8 +29,8 @@ I surveyed the codebase before writing any code:
 | Type | Meaning | Runtime value |
 | --- | --- | --- |
 | `Decimal` | An exact base-10 number | a coefficient of at most 38 digits and a scale from 0 to 28 |
-| `Duration` | An exact elapsed time | signed 64-bit nanoseconds, about ±292 years |
-| `Instant` | An exact point on the UTC timeline | signed 64-bit nanoseconds since the Unix epoch |
+| `Duration` | An exact elapsed time | signed 128-bit nanoseconds, bounded by the span of the `Instant` range (about ±10,000 years) |
+| `Instant` | An exact point on the UTC timeline | signed 128-bit nanoseconds since the Unix epoch, years 1 to 9999 |
 | `TimeZone` | An IANA time zone | the zone's name, resolved against the bundled database |
 | `ZonedTime` | An instant viewed in a time zone, with its local date, time and offset | an `Instant` and a `TimeZone` |
 
@@ -197,4 +197,4 @@ Recorded under the project's syntax simplicity rule.
 - **A `Money` type that carries its currency**, so that adding USD to EUR is a compile error. This needs either currency as a type parameter or a runtime check, and it is decided after a backend example has used `Decimal` for money.
 - **Explicit gap and fold resolution** (`parse_zoned_time_earlier` and `parse_zoned_time_later`), added when an example needs to accept such times instead of reporting them.
 - **Plain dates and times without a zone** (Temporal's `PlainDate`), such as birthdays. Deferred until an example needs one. A `ZonedTime` in `UTC` covers dates in the meantime.
-- **Byte and binary encodings of these types**, which wait on B04's byte representation.
+- **Byte and binary encodings of these types.** B04's `Bytes` has shipped, so this waits only on an example that needs a binary form.
