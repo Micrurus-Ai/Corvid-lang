@@ -736,8 +736,14 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
                 collect_called_agents_from_expr(item, stack);
             }
         }
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } => {
             collect_called_agents_from_expr(body, stack)
+        }
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            collect_called_agents_from_expr(body, stack);
+            if let Some(fallback) = fallback {
+                collect_called_agents_from_expr(fallback, stack);
+            }
         }
         IrExprKind::Replay {
             trace,
@@ -905,8 +911,14 @@ fn walk_ir_expr_for_prompt(
                 walk_ir_expr_for_prompt(item, prompt_map, found);
             }
         }
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } => {
             walk_ir_expr_for_prompt(body, prompt_map, found)
+        }
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            walk_ir_expr_for_prompt(body, prompt_map, found);
+            if let Some(fallback) = fallback {
+                walk_ir_expr_for_prompt(fallback, prompt_map, found);
+            }
         }
         IrExprKind::Replay {
             trace,

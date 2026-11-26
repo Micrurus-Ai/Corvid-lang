@@ -93,7 +93,7 @@ fn lifecycle(engine: &Engine) {
 
     // Create the table and store a row.
     let first = "    title: String\n    note: Option<String>\n    legacy: String\n    count: Option<Int>";
-    let insert = "    added = match Shelf.insert(Shelf(1, \"Reading\", None, \"old\", Some(3))):\n        Ok(row) -> row.revision\n        Err(row) -> 0 - row.revision\n    return \"stored r\" + added.to_string()";
+    let insert = "    added = match Shelf.insert(Shelf(1, \"Reading\", None, \"old\", Some(3))):\n        Ok(row) -> row.revision\n        Err(Taken(row)) -> 0 - row.revision\n    return \"stored r\" + added.to_string()";
     write(first, insert);
     let planned = ok(&plan());
     assert!(planned.contains("for Shelf"), "on {on}: {planned}");
@@ -250,6 +250,79 @@ fn indexes_follow_the_queries() {
     let third = migration("003");
     assert!(third.contains("DROP INDEX IF EXISTS \"Job_by_owner_budget\";") && !third.contains("CREATE INDEX"), "{third}");
     assert!(plan().contains("already match every declared table"));
+}
+
+/// A program with two databases keeps one migration history each, in
+/// `migrations/<database>/`; `migrate up --program` applies both, and a
+/// flat `migrations/` from the program's one-database days is refused
+/// with the move to make.
+#[test]
+fn each_database_of_a_program_has_its_own_migrations() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "orders.sqlite".into() };
+    std::fs::write(
+        root.join("src/main.cor"),
+        "database orders:\n    engine: sqlite\n    location: \"orders.sqlite\"\n\ndatabase analytics:\n    engine: sqlite\n    location: \"analytics.sqlite\"\n\ntable Order in orders:\n    key id: Int\n    item: String\n\ntable PageView in analytics:\n    key id: Int\n    path: String\n\nagent main() -> Int:\n    a = match Order.insert(Order(1, \"tea\")):\n        Ok(row) -> row.id\n        Err(_) -> 0\n    b = match PageView.insert(PageView(7, \"/\")):\n        Ok(row) -> row.id\n        Err(_) -> 0\n    return a + b\n",
+    )
+    .unwrap();
+
+    // Left over from when the program had one database.
+    std::fs::create_dir_all(root.join("migrations")).unwrap();
+    std::fs::write(root.join("migrations/001_create_order.sql"), "-- old\n").unwrap();
+    let stderr = refused(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(stderr.contains("`migrations/<database>/`") && stderr.contains("`orders`, `analytics`"), "{stderr}");
+    std::fs::remove_file(root.join("migrations/001_create_order.sql")).unwrap();
+
+    let planned = ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(planned.contains("database `orders`") && planned.contains("database `analytics`"), "{planned}");
+    let orders = std::fs::read_to_string(root.join("migrations/orders/001_create_order.sql")).expect("orders migration");
+    let analytics = std::fs::read_to_string(root.join("migrations/analytics/001_create_pageview.sql")).expect("analytics migration");
+    assert!(orders.contains("CREATE TABLE \"Order\"") && !orders.contains("PageView"), "{orders}");
+    assert!(analytics.contains("CREATE TABLE \"PageView\"") && !analytics.contains("\"Order\""), "{analytics}");
+    assert!(ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine)).contains("already match every declared table"));
+
+    ok(&corvid(&["migrate", "up", "--program", "src/main.cor", "--state", "target/state.json"], root, &engine));
+    assert!(root.join("target/state.orders.json").exists() && root.join("target/state.analytics.json").exists());
+    assert_eq!(ok(&corvid(&["run", "--target", "interp", "src/main.cor"], root, &engine)).trim(), "8");
+}
+
+/// One database shared by import (B09 P11): planning the program from
+/// its entry point writes one migration for the tables of every module
+/// that lives in the database, and the program then runs against it.
+#[test]
+fn tables_from_several_modules_are_planned_into_one_database() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let engine = Engine::Sqlite { database: "library.sqlite".into() };
+    std::fs::write(root.join("src/storage.cor"), "public database library:\n    engine: sqlite\n    location: \"library.sqlite\"\n").unwrap();
+    std::fs::write(
+        root.join("src/shelves.cor"),
+        "import \"./storage\" use library\n\ntable Shelf in library:\n    key id: Int\n    title: String\n\npublic agent shelve(id: Int, title: String) -> Int:\n    return match Shelf.insert(Shelf(id, title)):\n        Ok(row) -> row.id\n        Err(_) -> 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/notes.cor"),
+        "import \"./storage\" use library\n\ntable Note in library:\n    key id: Int\n    owner: String\n\npublic agent note(id: Int, owner: String) -> Int:\n    return match Note.insert(Note(id, owner)):\n        Ok(row) -> row.id\n        Err(_) -> 0\n\npublic agent count_for(owner: String) -> Int:\n    count = 0\n    for row in Note.where(fn (n) -> n.owner == owner):\n        count = count + 1\n    return count\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cor"),
+        "import \"./shelves\" use shelve\nimport \"./notes\" use note, count_for\n\nagent main() -> Int:\n    a = shelve(1, \"Novels\")\n    b = note(1, \"ana\")\n    c = note(2, \"ana\")\n    return a + b + c + count_for(\"ana\")\n",
+    )
+    .unwrap();
+    let planned = ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine));
+    assert!(planned.contains("plan: wrote") && planned.contains("Note") && planned.contains("Shelf"), "{planned}");
+    let migration = std::fs::read_dir(root.join("migrations")).unwrap().next().unwrap().unwrap().path();
+    let sql = std::fs::read_to_string(migration).unwrap();
+    assert!(sql.contains("CREATE TABLE \"Shelf\"") && sql.contains("CREATE TABLE \"Note\""), "{sql}");
+    // The query in another module still gets its index.
+    assert!(sql.contains("\"Note_by_owner\""), "{sql}");
+    assert!(ok(&corvid(&["migrate", "plan", "src/main.cor"], root, &engine)).contains("already match every declared table"));
+    ok(&corvid(&["migrate", "up", "--dir", "migrations", "--database", "library.sqlite"], root, &engine));
+    assert_eq!(ok(&corvid(&["run", "--target", "interp", "src/main.cor"], root, &engine)).trim(), "6");
 }
 
 /// A `unique` line is planned as a unique index, and adding one to a

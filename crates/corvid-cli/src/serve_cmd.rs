@@ -66,7 +66,12 @@ use corvid_vm::{
 use libloading::{Library, Symbol};
 
 mod browser_asset;
+mod live_assets;
+mod live;
+mod public_failure;
+mod route_stream;
 use browser_asset::browser_asset;
+use public_failure::{log_failure, public_failure};
 
 use crate::serve_approval::{ApprovalQueuePolicy, ApprovalRequester, QueueApprover};
 
@@ -101,11 +106,13 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    live_routes: live::Routes,
+    live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
     rag_embedder: Option<Arc<dyn corvid_runtime::rag::RagEmbedder>>,
     http_policy: corvid_runtime::http::HttpEgressPolicy,
-    ir: IrFile,
+    ir: Arc<IrFile>,
     /// The program's declarations, shared with streamed replies, which
     /// encode chunks after the request handler returns.
     declared_types: Arc<Vec<IrType>>,
@@ -168,8 +175,10 @@ pub(crate) fn cmd_serve(
     // execute — a streaming/upload/pagination boundary type, or a
     // `requires` policy with no authorization enforcement — is a startup
     // error (E5204) naming the element, never a silent runtime 501.
-    let closure_gaps =
-        corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    let identity = declared_identity(&source);
+    let mut capabilities = corvid_driver::RuntimeCapabilities::interpreter_tier();
+    capabilities.live_subscriptions = identity.is_some();
+    let closure_gaps = corvid_driver::check_contract_closure(&ir, capabilities);
     if !closure_gaps.is_empty() {
         eprintln!(
             "error: {} is not contract-closed — {} route(s) the contract advertises \
@@ -205,7 +214,7 @@ pub(crate) fn cmd_serve(
     // — refuses to start rather than mounting a login route that half
     // works. The identity block is not lowered into IR, so read it from
     // the AST (the source already compiled cleanly above).
-    let auth_context = match declared_identity(&source) {
+    let auth_context = match identity {
         Some(identity) => match crate::serve_auth::context::AuthContext::from_identity(
             &identity,
             data_dir.as_deref(),
@@ -358,10 +367,10 @@ pub(crate) fn cmd_serve(
     let asset_dir = corvid_driver::wasm_output_dir_for(file);
     let quantity_page = asset_dir.join("events.js").is_file()
         && asset_dir.join("events.quantity.js").is_file()
-        && !ir.servers.iter().flat_map(|server| &server.routes).any(|route|
+        && !ir.servers.iter().flat_map(http_routes).any(|route|
             route.path == "/target/wasm/events.quantity.js" && route.method == HttpMethod::Get);
     let mut page_scripts = browser_asset::PageScripts::default();
-    let mut compiled_assets = Vec::new();
+    let mut compiled_assets = live_assets::for_contract(&contract.live)?;
     if asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()? {
         for (name, mime) in [
             ("events.js", "text/javascript; charset=utf-8"),
@@ -381,7 +390,7 @@ pub(crate) fn cmd_serve(
             }
             compiled_assets.push((name, mime, bytes));
         }
-    } else if !ir.servers.iter().flat_map(|s| &s.routes)
+    } else if !ir.servers.iter().flat_map(http_routes)
         .any(|r| r.path == "/target/wasm/events.js" && r.method == HttpMethod::Get) {
         let bytes = Bytes::from_static(corvid_driver::FORM_CONTROLS_JS.as_bytes());
         let mime = "text/javascript; charset=utf-8";
@@ -389,12 +398,14 @@ pub(crate) fn cmd_serve(
         compiled_assets.push(("events.js", mime, bytes));
     }
     let state = Arc::new(ServeState {
+        live_routes: live::Routes::new(&ir)?,
+        live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,
         rag_embedder,
         http_policy,
         declared_types: Arc::new(ir.types.clone()),
-        ir,
+        ir: Arc::new(ir),
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
@@ -437,6 +448,7 @@ pub(crate) fn cmd_serve(
         // (slice 51r): the Application Contract at the well-known path
         // and a standard OpenAPI 3.1 document.
         .route("/.well-known/corvid", on(MethodFilter::GET, serve_contract))
+        .route(live::PATH, on(MethodFilter::GET, live::upgrade))
         .route("/.well-known/corvid/stream.js", on(MethodFilter::GET, || async {
             ([(axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
                 include_str!("serve_cmd/stream.js"))
@@ -446,7 +458,7 @@ pub(crate) fn cmd_serve(
     if let Some(root) = file.parent().filter(|p| p.ends_with("src")).and_then(|src| src.parent()) {
         for (name, mime) in crate::web_assets::list(root)? {
             let route = format!("/assets/{name}");
-            if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+            if state.ir.servers.iter().flat_map(http_routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
                 anyhow::bail!("GET {route} is already declared and cannot serve a public asset");
             }
             let bytes = Bytes::from(std::fs::read(root.join("assets").join(name))?);
@@ -456,7 +468,7 @@ pub(crate) fn cmd_serve(
 
     for (name, mime, bytes) in compiled_assets {
         let route = format!("/target/wasm/{name}");
-        if state.ir.servers.iter().flat_map(|s| &s.routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
+        if state.ir.servers.iter().flat_map(http_routes).any(|r| r.path == route && r.method == HttpMethod::Get) {
             anyhow::bail!("GET {route} is already declared and cannot serve a compiled browser asset");
         }
         app = app.route(&route, browser_asset(bytes, mime, true));
@@ -469,7 +481,7 @@ pub(crate) fn cmd_serve(
     let mut by_path: std::collections::BTreeMap<String, axum::routing::MethodRouter<Arc<ServeState>>> =
         std::collections::BTreeMap::new();
     for server in &state.ir.servers {
-        for route in &server.routes {
+        for route in http_routes(server) {
             let param_names: Vec<String> = state
                 .ir
                 .agents
@@ -480,15 +492,14 @@ pub(crate) fn cmd_serve(
             if route.method == HttpMethod::Get && route.path == "/.well-known/corvid/stream.js" {
                 anyhow::bail!("route path `{}` is reserved for the browser streaming module", route.path);
             }
+            if route.method == HttpMethod::Get && route.path == live::PATH {
+                anyhow::bail!("route path `{}` is reserved for live subscriptions", route.path);
+            }
             let meta = Arc::new(RouteMeta {
                 form_encoded: route.form_encoded,
                 response_kind: route.response_kind,
                 handler_agent: route.handler_agent.clone(),
-                path_params: route
-                    .path_params
-                    .iter()
-                    .map(|p| (p.name.clone(), p.ty.clone()))
-                    .collect(),
+                path_params: route.path_params.clone(),
                 query_ty: route.query_ty.clone(),
                 body_ty: route.body_ty.clone(),
                 upload_format: route.upload_format.clone(),
@@ -594,6 +605,7 @@ pub(crate) fn cmd_serve(
         .build()
         .context("build tokio runtime")?;
     rt.block_on(async move {
+        live::share_commits(&state_for_banner.ir, &state_for_banner.runtime).await?;
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .with_context(|| format!("bind {addr}"))?;
@@ -613,7 +625,7 @@ pub(crate) fn cmd_serve(
         // handler body for a reachable `IrStmt::Approve` (a conservative
         // under-count — no false positives).
         for server in &state_for_banner.ir.servers {
-            for route in &server.routes {
+            for route in http_routes(server) {
                 let approves =
                     agent_body_contains_approve(&state_for_banner.ir, &route.handler_agent);
                 let tag = if approves {
@@ -645,9 +657,15 @@ pub(crate) fn cmd_serve(
             outcome = &mut server => return outcome.context("serve"),
             signal = shutdown_signal() => signal.context("listen for shutdown signal")?,
         }
+        state_for_banner.live_shutdown.send_replace(true);
         let _ = shutdown.send(());
         eprintln!("corvid serve: draining active requests");
-        match tokio::time::timeout(std::time::Duration::from_secs(30), server).await {
+        let drain = async {
+            let result = server.await;
+            state_for_banner.live_shutdown.closed().await;
+            result
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(30), drain).await {
             Ok(outcome) => outcome.context("drain server"),
             Err(_) => {
                 eprintln!("corvid serve: 30-second drain deadline expired");
@@ -737,7 +755,7 @@ struct RouteMeta {
     /// Name of the synthetic per-route handler agent to invoke.
     handler_agent: String,
     /// Declared path params: `(name, type)` in path order.
-    path_params: Vec<(String, Type)>,
+    path_params: Vec<corvid_ir::IrRoutePathParam>,
     query_ty: Option<Type>,
     body_ty: Option<Type>,
     /// The `Upload<Format>` format tag when the body is an upload
@@ -768,6 +786,11 @@ struct RouteUploadPolicy {
     accepted_mime: Vec<String>,
 }
 
+/// Live declarations are reached through SUBSCRIBE frames on the page socket.
+fn http_routes(server: &corvid_ir::IrServer) -> impl Iterator<Item = &corvid_ir::IrRoute> {
+    server.routes.iter().filter(|route| route.response_kind != RouteResponseKind::Live)
+}
+
 /// Convert a Corvid route path (`/orders/{id}`) to axum's colon-capture
 /// syntax (`/orders/:id`) (slice 52a).
 fn corvid_route_to_axum_path(path: &str) -> String {
@@ -789,20 +812,30 @@ fn corvid_route_to_axum_path(path: &str) -> String {
     out
 }
 
-/// Coerce a raw request string (path/query param) into a `Value` of the
-/// declared scalar type (slice 52a).
-fn coerce_str_to_value(raw: &str, ty: &Type) -> Result<Value, String> {
-    Ok(match ty {
-        Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| format!("`{raw}` is not an Int"))?),
-        Type::Float => {
-            Value::Float(raw.parse::<f64>().map_err(|_| format!("`{raw}` is not a Float"))?)
-        }
-        Type::Bool => Value::Bool(
-            raw.parse::<bool>().map_err(|_| format!("`{raw}` is not a Bool"))?,
-        ),
-        // String / TraceId / anything else the boundary carries as text.
-        _ => Value::String(raw.into()),
-    })
+/// Bind decoded route captures to the handler's typed path argument.
+fn bind_path<'a>(
+    params: &[corvid_ir::IrRoutePathParam],
+    types_by_id: &HashMap<DefId, &IrType>,
+    capture: impl Fn(&str) -> Option<std::borrow::Cow<'a, str>>,
+) -> Result<Value, String> {
+    let mut fields = Vec::with_capacity(params.len());
+    for param in params {
+        let name = &param.name;
+        let raw = capture(name).ok_or_else(|| format!("{name}: missing or invalid path parameter"))?;
+        let value = coerce_str_to_value(&raw, &param.ty, types_by_id).map_err(|error| format!("{name}: {error}"))?;
+        fields.push((name.clone(), value));
+    }
+    Ok(Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", fields)))
+}
+
+/// Read request text (a path segment or one query value) as a value of
+/// its declared type, through the public JSON decoder, so a `Decimal`,
+/// time or plain variant reads exactly as in a JSON body. A type that
+/// cannot be request text is refused here as the checker refuses it,
+/// never passed on as text where another type was declared.
+fn coerce_str_to_value(raw: &str, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<Value, String> {
+    corvid_vm::public_json::decode_request_text(raw, ty, types_by_id)
+        .unwrap_or_else(|| Err(format!("`{}` cannot be read from request text", ty.display_name())))
 }
 
 /// The unauthenticated `actor` placeholder bound in a route body when
@@ -1206,15 +1239,10 @@ async fn run_route(
 
     // Path params → a `path` struct value.
     let path_lookup: HashMap<&str, &str> = raw_path.iter().collect();
-    let mut path_fields: Vec<(String, Value)> = Vec::new();
-    for (name, ty) in &meta.path_params {
-        let raw = path_lookup.get(name.as_str()).copied().unwrap_or("");
-        match coerce_str_to_value(raw, ty) {
-            Ok(v) => path_fields.push((name.clone(), v)),
-            Err(e) => return bad_request("invalid_path_param", &format!("{name}: {e}")),
-        }
-    }
-    let path_value = Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", path_fields));
+    let path_value = match bind_path(&meta.path_params, &types_by_id, |name| path_lookup.get(name).copied().map(Into::into)) {
+        Ok(value) => value,
+        Err(error) => return bad_request("invalid_path_param", &error),
+    };
 
     // Query string → the declared query struct value.
     let query_value = match &meta.query_ty {
@@ -1342,7 +1370,8 @@ async fn run_route(
     )
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
-    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent))
+    let route = format!("{} {}", meta.method.as_str(), meta.route_path);
+    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
 }
 
 enum RouteRequestBody {
@@ -1478,18 +1507,44 @@ fn urlencoded_record(
         .get(def_id)
         .copied()
         .ok_or_else(|| format!("unknown {source} struct type"))?;
-    let mut pairs = HashMap::new();
+    // Every value under each name, in order: a `List` field reads them
+    // all, and a field of one value refuses a name given twice.
+    let mut given: HashMap<String, Vec<String>> = HashMap::new();
     for pair in encoded.split('&').filter(|s| !s.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        pairs.insert(urldecode(key)?, urldecode(value)?);
+        given.entry(urldecode(key)?).or_default().push(urldecode(value)?);
     }
+    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
+    let read = |raw: &str, ty: &Type, name: &str| {
+        coerce_str_to_value(raw, ty, types_by_id).map_err(|e| format!("{source} param `{name}`: {e}"))
+    };
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
-        let raw = pairs
-            .get(&field.name)
-            .cloned()
-            .ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
-        let value = coerce_str_to_value(&raw, &field.ty)?;
+        let values = given.get(&field.name).map(Vec::as_slice).unwrap_or(&[]);
+        let shape = corvid_types::text_parameters::query_field_shape(&field.ty, &plain)
+            .ok_or_else(|| format!("{source} param `{}` has a type a query string cannot carry", field.name))?;
+        let once = |values: &[String]| -> Result<Option<String>, String> {
+            match values {
+                [] => Ok(None),
+                [one] => Ok(Some(one.clone())),
+                _ => Err(format!("{source} param `{}` is given {} times, but holds one value", field.name, values.len())),
+            }
+        };
+        let value = match (shape, &field.ty) {
+            (corvid_types::text_parameters::QueryFieldShape::One(_), ty) => {
+                let raw = once(values)?.ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
+                read(&raw, ty, &field.name)?
+            }
+            (corvid_types::text_parameters::QueryFieldShape::Optional(_), Type::Option(inner)) => match once(values)? {
+                Some(raw) => Value::OptionSome(corvid_vm::value::BoxedValue::new(read(&raw, inner, &field.name)?)),
+                None => Value::OptionNone,
+            },
+            (corvid_types::text_parameters::QueryFieldShape::Repeated(_), Type::List(inner)) => {
+                let items = values.iter().map(|raw| read(raw, inner, &field.name)).collect::<Result<Vec<_>, _>>()?;
+                Value::List(corvid_driver::ListValue::new(items))
+            }
+            _ => return Err(format!("{source} param `{}` has a type a query string cannot carry", field.name)),
+        };
         corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
             .map_err(|err| err.to_string())?;
         fields.push((field.name.clone(), value));
@@ -1582,52 +1637,14 @@ fn finish(
     response_kind: RouteResponseKind,
     page_scripts: &browser_asset::PageScripts,
     reply: ReplyEncoding,
+    route: String,
 ) -> Response {
     match outcome {
-        // A Stream-returning handler responds as Server-Sent Events:
-        // each chunk flushes to the client the moment it arrives
-        // (`data: <json>` per chunk, `event: done` terminator) — the
-        // modern AI-app transport, straight from the language's
-        // Stream type with zero glue.
+        // A Stream-returning handler answers with Server-Sent Events in
+        // the one stream protocol (`chunk`, `completed`, `failed`).
         Ok(Value::Stream(stream)) => {
-            let chunk_ty = match &reply.ty {
-                Type::Stream(item) => (**item).clone(),
-                other => other.clone(),
-            };
-            let sse = async_stream::stream! {
-                loop {
-                    match stream.next().await {
-                        Some(Ok(chunk)) => {
-                            let payload = match reply.encode(&chunk, &chunk_ty) {
-                                Ok(payload) => payload,
-                                Err(reason) => {
-                                    yield Ok(axum::response::sse::Event::default()
-                                        .event("error")
-                                        .data(reason));
-                                    break;
-                                }
-                            };
-                            yield Ok::<_, std::convert::Infallible>(
-                                axum::response::sse::Event::default()
-                                    .data(payload.to_string()),
-                            );
-                        }
-                        Some(Err(err)) => {
-                            yield Ok(axum::response::sse::Event::default()
-                                .event("error")
-                                .data(format!("{err:?}")));
-                            break;
-                        }
-                        None => {
-                            yield Ok(axum::response::sse::Event::default()
-                                .event("done")
-                                .data(""));
-                            break;
-                        }
-                    }
-                }
-            };
-            axum::response::Sse::new(sse).into_response()
+            let stream_ty = reply.ty.clone();
+            route_stream::route_stream_response(stream, &stream_ty, reply, route)
         }
         Ok(Value::String(html)) if response_kind == RouteResponseKind::Html => {
             let mut document = html.to_string();
@@ -1638,11 +1655,6 @@ fn finish(
             Ok(body) => (StatusCode::OK, Json(body)).into_response(),
             Err(reason) => internal_error("unencodable_response", &reason),
         },
-        Err(RunError::Interp(e)) if matches!(e.kind, InterpErrorKind::Timeout { .. }) => {
-            (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({
-                "error": "handler_timeout", "detail": e.kind.to_string()
-            }))).into_response()
-        }
         Err(RunError::Interp(e)) => {
             if let Some(approval_id) = approval_queued_id(&e.kind) {
                 let approval_id = approval_id.to_string();
@@ -1671,26 +1683,19 @@ fn finish(
                 )
                     .into_response();
             }
-            // 33Q10: emit user-facing detail (no IR byte-span prefix)
-            // so clients don't see `[1227..1269] ...` they can't act on.
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "handler_failed",
-                    "detail": RunError::Interp(e).user_facing_detail(),
-                })),
-            )
-                .into_response()
+            failure_response(&route, &RunError::Interp(e))
         }
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "handler_failed",
-                "detail": err.user_facing_detail(),
-            })),
-        )
-            .into_response(),
+        Err(err) => failure_response(&route, &err),
     }
+}
+
+/// An ordinary route's failure answer: the public `{error, detail}` body
+/// with its status, and the full error in the server log.
+fn failure_response(route: &str, err: &RunError) -> Response {
+    let failure = public_failure(err);
+    log_failure(route, &failure, &err.user_facing_detail());
+    let status = StatusCode::from_u16(failure.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, Json(failure.body())).into_response()
 }
 
 /// If the interpreter error carries an `ApprovalQueued` from the
@@ -1921,11 +1926,12 @@ async fn approve_approval(
             // the same `ProgrammaticApprover::always_yes` bypass
             // runtime that's local to this handler call.
             //
-            // 33Q10: user_facing_detail strips the IR `[start..end]`
-            // byte-span prefix from interpreter errors so 500 bodies
-            // (and the `last_handler_error` field that surfaces in
-            // GET) don't leak internal compiler artifacts to clients.
-            let detail = err.user_facing_detail();
+            // The 500 body and the `last_handler_error` a reviewer reads
+            // over HTTP carry the public sentence, never the error's own
+            // text, which may hold a URL or a path; the log has it all.
+            let failure = public_failure(&err);
+            log_failure("approved execution", &failure, &err.user_facing_detail());
+            let detail = failure.detail.clone();
             {
                 let mut pending = state.pending_invocations.lock().unwrap();
                 if let Some(stored) = pending.get_mut(&id) {
@@ -2440,7 +2446,12 @@ fn expr_reaches_approve(
         | IrExprKind::TrustBoundary { inner } => expr_reaches_approve(ir, inner, visited),
         IrExprKind::Ask { prompt, .. } => expr_reaches_approve(ir, prompt, visited),
         IrExprKind::Choose { options } => expr_reaches_approve(ir, options, visited),
-        IrExprKind::TryRetry { body, .. } => expr_reaches_approve(ir, body, visited),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            expr_reaches_approve(ir, body, visited)
+                || fallback
+                    .as_ref()
+                    .is_some_and(|f| expr_reaches_approve(ir, f, visited))
+        }
         // Literals, locals, decls, option-none, weak/stream combinators,
         // and replay fall through: no agent call reachable through them
         // in a route handler (conservative under-count, no false positive).
@@ -2474,24 +2485,34 @@ mod tests {
 
     #[test]
     fn coerce_parses_scalar_types() {
-        assert!(matches!(coerce_str_to_value("42", &Type::Int), Ok(Value::Int(42))));
+        let types = HashMap::new();
+        assert!(matches!(coerce_str_to_value("42", &Type::Int, &types), Ok(Value::Int(42))));
         assert!(matches!(
-            coerce_str_to_value("3.5", &Type::Float),
+            coerce_str_to_value("3.5", &Type::Float, &types),
             Ok(Value::Float(f)) if (f - 3.5).abs() < 1e-9
         ));
         assert!(matches!(
-            coerce_str_to_value("true", &Type::Bool),
+            coerce_str_to_value("true", &Type::Bool, &types),
             Ok(Value::Bool(true))
         ));
         assert!(matches!(
-            coerce_str_to_value("hello", &Type::String),
+            coerce_str_to_value("hello", &Type::String, &types),
             Ok(Value::String(s)) if &*s == "hello"
+        ));
+        assert!(matches!(
+            coerce_str_to_value("19.90", &Type::Decimal, &types),
+            Ok(Value::Decimal(d)) if d.to_string() == "19.90"
         ));
     }
 
     #[test]
-    fn coerce_rejects_malformed_int() {
-        assert!(coerce_str_to_value("notanint", &Type::Int).is_err());
+    fn coerce_rejects_malformed_values_and_types_text_cannot_hold() {
+        let types = HashMap::new();
+        assert!(coerce_str_to_value("notanint", &Type::Int, &types).is_err());
+        assert!(coerce_str_to_value("19.9.0", &Type::Decimal, &types).is_err());
+        // Was passed on as a String where a list was declared.
+        let error = coerce_str_to_value("1,2", &Type::List(Box::new(Type::Int)), &types).unwrap_err();
+        assert!(error.contains("cannot be read from request text"), "{error}");
     }
 
     #[test]
@@ -2510,12 +2531,14 @@ mod tests {
                     name: "limit".into(),
                     ty: Type::Int,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
                 IrField {
                     name: "q".into(),
                     ty: Type::String,
                     refinement: None,
+                    json_key: None,
                     span: Span::new(0, 0),
                 },
             ],
@@ -2543,6 +2566,7 @@ mod tests {
                 name: "limit".into(),
                 ty: Type::Int,
                 refinement: None,
+                json_key: None,
                 span: Span::new(0, 0),
             }],
             variants: vec![],

@@ -39,7 +39,7 @@ pub fn define_struct_trace(
     sig.params.push(AbiParam::new(I64)); // marker fn ptr
     sig.params.push(AbiParam::new(I64)); // ctx
 
-    let symbol = format!("corvid_trace_{}", ty.name);
+    let symbol = super::type_query::record_symbol("corvid_trace_", ty);
     let func_id = module
         .declare_function(&symbol, Linkage::Local, &sig)
         .map_err(|e| CodegenError::cranelift(format!("declare trace `{symbol}`: {e}"), ty.span))?;

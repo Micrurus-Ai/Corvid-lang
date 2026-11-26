@@ -42,7 +42,7 @@ impl TableEngine {
         }
     }
 
-    fn is_postgres(self) -> bool {
+    pub(super) fn is_postgres(self) -> bool {
         matches!(self, Self::Postgres { .. })
     }
 

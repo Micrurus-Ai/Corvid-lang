@@ -34,7 +34,7 @@ pub(super) fn revealed_arguments(
     types_by_id: &HashMap<DefId, &IrType>,
     span: Span,
 ) -> Result<Option<RevealedToolArguments>, InterpError> {
-    let takes_secret = tool.params.iter().any(|param| holds_secret(&param.ty, types_by_id, &mut Vec::new()));
+    let takes_secret = tool.params.iter().any(|param| corvid_ir::holds_secret(&param.ty, types_by_id));
     if !takes_secret {
         return Ok(None);
     }
@@ -44,38 +44,6 @@ pub(super) fn revealed_arguments(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(format!("tool `{}`: {problem}", tool.name)), span))?;
     Ok(Some(RevealedToolArguments::new(recorded, revealed)))
-}
-
-/// Whether a value of type `ty` can hold a `Secret`, through type
-/// arguments and the fields of declared records and variants.
-fn holds_secret(ty: &Type, types_by_id: &HashMap<DefId, &IrType>, seen: &mut Vec<DefId>) -> bool {
-    match ty {
-        Type::Struct(id) => {
-            if seen.contains(id) {
-                return false;
-            }
-            let Some(decl) = types_by_id.get(id) else { return false };
-            seen.push(*id);
-            let holds = decl
-                .fields
-                .iter()
-                .chain(decl.variants.iter().flat_map(|variant| &variant.fields))
-                .any(|field| holds_secret(&field.ty, types_by_id, seen));
-            seen.pop();
-            holds
-        }
-        // IR lowering gives imported records local ids; one that kept
-        // its module identity is treated as holding a secret, which
-        // only means its arguments are scanned for one.
-        Type::ImportedStruct(_) => true,
-        Type::List(inner)
-        | Type::Option(inner)
-        | Type::Tainted(inner)
-        | Type::Grounded(inner)
-        | Type::Weak(inner, _) => holds_secret(inner, types_by_id, seen),
-        Type::Map(a, b) | Type::Result(a, b) => holds_secret(a, types_by_id, seen) || holds_secret(b, types_by_id, seen),
-        other => other.mentions_secret(),
-    }
 }
 
 /// `secret(name)` and `random_token(bytes)`: the runtime reads the
@@ -93,5 +61,5 @@ pub(super) async fn dispatch_secret_value_tool(
         .await
         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
     secret_tool_result_to_value(result, return_ty)
-        .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")), span))
+        .map_err(|e| InterpError::new(InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")), span))
 }

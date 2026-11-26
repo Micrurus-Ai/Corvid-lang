@@ -78,3 +78,69 @@ agent main() -> String:
         "office TimeZone: `Europe/Berln`: `Europe/Berln` is not a time zone in the IANA database; did you mean `Europe/Berlin`?"
     );
 }
+
+const ORDER: &str = "\
+@json(case: camel)
+type Order:
+    order_id: Int
+    created_at: String
+    @json(key: \"ID\")
+    legacy_id: String
+    note: Option<String>
+
+";
+
+/// B01: a record reads and writes its JSON keys, code keeps the field
+/// names, and an error path names the key the sender wrote.
+#[tokio::test]
+async fn a_record_reads_and_writes_its_json_keys() {
+    let src = format!(
+        "{ORDER}agent main() -> String:
+    order = match Order.from_json(\"{{\\\"orderId\\\": 7, \\\"createdAt\\\": \\\"today\\\", \\\"ID\\\": \\\"L-1\\\"}}\"):
+        Ok(o) -> o
+        Err(e) -> Order(0, e.path, \"\", None)
+    return order.to_json() + \" \" + order.legacy_id
+"
+    );
+    assert_eq!(
+        text_of(&src).await,
+        r#"{"ID":"L-1","createdAt":"today","note":null,"orderId":7} L-1"#
+    );
+
+    let src = format!(
+        "{ORDER}agent main() -> String:
+    return match Order.from_json(\"{{\\\"orderId\\\": \\\"seven\\\", \\\"createdAt\\\": \\\"t\\\", \\\"ID\\\": \\\"x\\\"}}\"):
+        Ok(o) -> \"decoded\"
+        Err(e) -> e.path
+"
+    );
+    assert_eq!(text_of(&src).await, "orderId");
+
+    // The strict reader refuses the field name where a key is declared.
+    let src = format!(
+        "{ORDER}agent main() -> String:
+    return match Order.from_json_strict(\"{{\\\"order_id\\\": 7, \\\"orderId\\\": 7, \\\"createdAt\\\": \\\"t\\\", \\\"ID\\\": \\\"x\\\"}}\"):
+        Ok(o) -> \"decoded\"
+        Err(e) -> e.path
+"
+    );
+    assert_eq!(text_of(&src).await, "order_id");
+}
+
+/// A variant payload's refinement holds when the variant is decoded: an
+/// out-of-range payload is refused with its position.
+#[tokio::test]
+async fn a_decoded_variant_payload_holds_its_refinement() {
+    let src = "\
+type BoardError:
+    | ColumnFull(limit: Int where between(1, 50))
+    | Closed
+
+agent main() -> String:
+    return match BoardError.from_json(\"{\\\"variant\\\": \\\"ColumnFull\\\", \\\"fields\\\": [80]}\"):
+        Ok(e) -> \"decoded\"
+        Err(e) -> e.path + \": \" + e.expected
+";
+    let out = text_of(src).await;
+    assert!(out.starts_with("fields[0]: ") && out.contains("between(1, 50)"), "{out}");
+}

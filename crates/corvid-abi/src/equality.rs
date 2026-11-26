@@ -31,4 +31,7 @@ pub enum EqualityLayout {
     /// B04 — a `Bytes` value held as its canonical base64url text,
     /// compared in constant time, never bytewise like a `String`.
     Bytes,
+    /// Native dispatch N3 — a `Secret` object, compared in constant time
+    /// by the runtime, which alone can read it.
+    Secret,
 }

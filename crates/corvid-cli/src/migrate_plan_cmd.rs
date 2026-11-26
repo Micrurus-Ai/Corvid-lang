@@ -30,16 +30,34 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch
             return Ok(1);
         }
     };
-    let Some(engine) = schemas.first().map(|t| t.engine) else {
+    if schemas.is_empty() {
         println!("plan: `{}` declares no tables", source.display());
         return Ok(0);
-    };
-    if schemas.iter().any(|t| t.engine != engine) {
-        bail!(
-            "`{}` keeps tables on more than one engine; migrations per database are planned work, so plan each database with its own program for now",
-            source.display()
-        );
     }
+    // One migration history per database: `migrations/` for a program
+    // with one, `migrations/<database>/` for each when it has several.
+    let mut databases: Vec<&str> = Vec::new();
+    for schema in &schemas {
+        if !databases.contains(&schema.database.as_str()) {
+            databases.push(&schema.database);
+        }
+    }
+    if databases.len() == 1 {
+        return plan_database(source, dir, dry_run, scratch, &schemas);
+    }
+    crate::migrate_target::refuse_a_shared_history(dir, &databases)?;
+    let mut status = 0;
+    for database in databases {
+        let tables: Vec<TableSchema> = schemas.iter().filter(|t| t.database == database).cloned().collect();
+        println!("plan: database `{database}`");
+        status = status.max(plan_database(source, &dir.join(database), dry_run, scratch, &tables)?);
+    }
+    Ok(status)
+}
+
+/// Plan one database's tables into `dir`, its migration history.
+fn plan_database(source: &Path, dir: &Path, dry_run: bool, scratch: Option<&str>, schemas: &[TableSchema]) -> Result<u8> {
+    let engine = schemas[0].engine;
     match engine {
         TableEngine::Sqlite => {
             if scratch.is_some() {
@@ -47,7 +65,7 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch
             }
             let connection = Connection::open_in_memory().context("open an in-memory database")?;
             corvid_runtime::tables::register_sqlite_collations(&connection).context("prepare the in-memory database")?;
-            plan(source, dir, dry_run, &schemas, &mut History::Sqlite(connection))
+            plan(source, dir, dry_run, schemas, &mut History::Sqlite(connection))
         }
         TableEngine::Postgres { .. } => {
             let Some(variable) = scratch else {
@@ -73,7 +91,7 @@ pub(crate) fn cmd_migrate_plan(source: &Path, dir: &Path, dry_run: bool, scratch
             }
             // The transaction is never committed: dropping it rolls back
             // everything the planner applied.
-            plan(source, dir, dry_run, &schemas, &mut History::Postgres(&mut tx))
+            plan(source, dir, dry_run, schemas, &mut History::Postgres(&mut tx))
         }
     }
 }
@@ -272,6 +290,7 @@ mod tests {
             renamed: Vec::new(),
             retired: Vec::new(),
             engine: corvid_runtime::tables::TableEngine::Sqlite,
+            database: "library".into(),
             unique: Vec::new(),
             indexes: Vec::new(),
         }

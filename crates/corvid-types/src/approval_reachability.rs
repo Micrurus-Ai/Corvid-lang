@@ -300,8 +300,14 @@ impl<'a> ReachabilityPass<'a> {
                     self.check_expr(entrypoint, item, approvals, visiting);
                 }
             }
-            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+            Expr::TrustBoundary { inner: body, .. } => {
                 self.check_expr(entrypoint, body, approvals, visiting);
+            }
+            Expr::TryRetry { body, fallback, .. } => {
+                self.check_expr(entrypoint, body, approvals, visiting);
+                if let Some(fallback) = fallback {
+                    self.check_expr(entrypoint, fallback, approvals, visiting);
+                }
             }
             Expr::Replay {
                 trace,

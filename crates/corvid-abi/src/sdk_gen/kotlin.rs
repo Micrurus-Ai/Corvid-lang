@@ -18,15 +18,19 @@ pub(super) fn emit_kotlin(contract: &ApplicationContract) -> String {
     let mut out = format!("// {}\n\n", NOTE_SCAFFOLD.replace('\n', "\n// "));
     out.push_str(PRELUDE);
     out.push_str(&page_model());
-    let json_error: Vec<(String, TypeName)> = corvid_types::json_error_fields()
+    out.push_str(&conflict_model());
+    let json_error: Vec<(String, String, TypeName)> = corvid_types::json_error_fields()
         .iter()
-        .map(|(name, ty)| (name.to_string(), TypeName::parse(&ty.display_name())))
+        .map(|(name, ty)| (name.to_string(), name.to_string(), TypeName::parse(&ty.display_name())))
         .collect();
     out.push_str(&record("JsonError", &json_error));
     for ty in &contract.types {
         if ty.variants.is_empty() {
-            let fields: Vec<(String, TypeName)> =
-                ty.fields.iter().map(|f| (f.name.clone(), TypeName::parse(&f.type_name))).collect();
+            let fields: Vec<(String, String, TypeName)> = ty
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.key().to_string(), TypeName::parse(&f.type_name)))
+                .collect();
             out.push_str(&record(&ty.name, &fields));
         } else {
             out.push_str(&sum(ty));
@@ -35,17 +39,19 @@ pub(super) fn emit_kotlin(contract: &ApplicationContract) -> String {
     out
 }
 
-fn record(name: &str, fields: &[(String, TypeName)]) -> String {
+/// A record's fields are `(property, wire key, type)`; the serializer
+/// reads and writes the key (`@json(key:)`, B01).
+fn record(name: &str, fields: &[(String, String, TypeName)]) -> String {
     let params = fields
         .iter()
-        .map(|(field, ty)| format!("val {}: {}", ident(field), kotlin_type(ty)))
+        .map(|(field, _, ty)| format!("val {}: {}", ident(field), kotlin_type(ty)))
         .collect::<Vec<_>>()
         .join(", ");
     let writes: String = fields
         .iter()
-        .map(|(field, ty)| {
+        .map(|(field, key, ty)| {
             format!(
-                "        put({field:?}, json.encodeToJsonElement({}, value.{}))\n",
+                "        put({key:?}, json.encodeToJsonElement({}, value.{}))\n",
                 serializer(ty),
                 ident(field)
             )
@@ -53,9 +59,9 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         .collect();
     let reads = fields
         .iter()
-        .map(|(field, ty)| {
+        .map(|(field, key, ty)| {
             format!(
-                "            {} = json.decodeFromJsonElement({}, obj[{field:?}] ?: JsonNull)",
+                "            {} = json.decodeFromJsonElement({}, obj[{key:?}] ?: JsonNull)",
                 ident(field),
                 serializer(ty)
             )
@@ -144,6 +150,46 @@ class CorvidPageSerializer<T>(private val item: KSerializer<T>) : CorvidJsonSeri
     )
 }
 
+/// A table write's conflict (B09): a sealed interface with one class per
+/// `corvid_types::ConflictCase`, and its serializer.
+fn conflict_model() -> String {
+    let cases = corvid_types::ConflictCase::ALL;
+    let mut out = String::from("/** Why a table write did not happen. */\nsealed interface CorvidConflict<out Row> {\n");
+    for case in cases {
+        match case.field() {
+            Some(field) => out.push_str(&format!("    data class {}<out Row>(val {field}: Row) : CorvidConflict<Row>\n", case.name())),
+            None => out.push_str(&format!("    data object {} : CorvidConflict<Nothing>\n", case.name())),
+        }
+    }
+    out.push_str("}\n\n");
+    let names = cases.iter().map(|case| case.name()).collect::<Vec<_>>().join(", ");
+    let mut writes = String::new();
+    let mut reads = String::new();
+    for case in cases {
+        let name = case.name();
+        match case.field() {
+            Some(field) => {
+                writes.push_str(&format!(
+                    "        is CorvidConflict.{name} -> corvidVariant(\"Conflict\", {name:?}, listOf(json.encodeToJsonElement(row, value.{field})))\n"
+                ));
+                reads.push_str(&format!(
+                    "            {name:?} -> {{\n                corvidArity({name:?}, fields, 1)\n                CorvidConflict.{name}(json.decodeFromJsonElement(row, fields[0]))\n            }}\n"
+                ));
+            }
+            None => {
+                writes.push_str(&format!("        is CorvidConflict.{name} -> corvidVariant(\"Conflict\", {name:?}, emptyList())\n"));
+                reads.push_str(&format!(
+                    "            {name:?} -> {{\n                corvidArity({name:?}, fields, 0)\n                CorvidConflict.{name}\n            }}\n"
+                ));
+            }
+        }
+    }
+    out.push_str(&format!(
+        "class CorvidConflictSerializer<Row>(private val row: KSerializer<Row>) : CorvidJsonSerializer<CorvidConflict<Row>>(\"Conflict\") {{\n    override fun write(json: Json, value: CorvidConflict<Row>): JsonElement = when (value) {{\n{writes}    }}\n\n    override fun read(json: Json, element: JsonElement): CorvidConflict<Row> {{\n        val obj = element.corvidObject(\"Conflict\")\n        val fields = obj[\"fields\"]?.let {{ it as? JsonArray ?: throw SerializationException(\"at `fields`: expected an array\") }} ?: JsonArray(emptyList())\n        return when (val variant = (obj[\"variant\"] as? JsonPrimitive)?.contentOrNull) {{\n{reads}            else -> throw SerializationException(\"at `variant`: expected one of {names}, found $variant\")\n        }}\n    }}\n}}\n\n"
+    ));
+    out
+}
+
 /// The Kotlin type for a contract type.
 fn kotlin_type(ty: &TypeName) -> String {
     match (ty.head.as_str(), ty.args.len()) {
@@ -160,6 +206,7 @@ fn kotlin_type(ty: &TypeName) -> String {
         ("Option", 1) => format!("{}?", kotlin_type(ty.arg(0))),
         ("Stream" | "Tainted" | "Grounded", 1) => kotlin_type(ty.arg(0)),
         ("Page", 1) => format!("CorvidPage<{}>", kotlin_type(ty.arg(0))),
+        ("Conflict", 1) => format!("CorvidConflict<{}>", kotlin_type(ty.arg(0))),
         ("Upload", 1) => "ByteArray".into(),
         ("Map", 2) => format!("Map<{}, {}>", kotlin_type(ty.arg(0)), kotlin_type(ty.arg(1))),
         ("Result", 2) => format!("CorvidResult<{}, {}>", kotlin_type(ty.arg(0)), kotlin_type(ty.arg(1))),
@@ -182,6 +229,7 @@ fn serializer(ty: &TypeName) -> String {
         ("Stream" | "Tainted", 1) => serializer(ty.arg(0)),
         ("Grounded", 1) => format!("CorvidGroundedSerializer({})", serializer(ty.arg(0))),
         ("Page", 1) => format!("CorvidPageSerializer({})", serializer(ty.arg(0))),
+        ("Conflict", 1) => format!("CorvidConflictSerializer({})", serializer(ty.arg(0))),
         ("Upload", 1) => "CorvidUploadSerializer".into(),
         ("Map", 2) if ty.arg(0).head == "String" => {
             format!("MapSerializer(String.serializer(), {})", serializer(ty.arg(1)))

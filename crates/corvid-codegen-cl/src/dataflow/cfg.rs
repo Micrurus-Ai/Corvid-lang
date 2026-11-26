@@ -107,6 +107,9 @@ pub(super) fn build_cfg(agent: &IrAgent) -> BuiltCfg {
     // Native lowering binds parameters before the body, so a `Let` to a
     // parameter's local rebinds it.
     builder.bound.extend(agent.params.iter().map(|p| p.local_id));
+    // So does a `Let` to a loop-carried local, which lowering binds
+    // before the body with no value (see `loop_carried`).
+    builder.bound.extend(super::loop_carried_locals(agent).into_keys());
     let entry = builder.alloc_block();
     builder.lower_block(&agent.body, entry, Vec::new());
     BuiltCfg {

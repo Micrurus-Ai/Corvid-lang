@@ -201,10 +201,24 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                     out.push('\n');
                 }
                 push_indent(indent + 1, out);
+                if route.is_live() {
+                    // `live "/path" -> Row`, the form it was written in.
+                    out.push_str("live ");
+                    out.push_str(&render_string_literal(&written_path(route)));
+                    out.push_str(" -> ");
+                    out.push_str(&route.response.live_row().map(render_type_ref).unwrap_or_default());
+                    if let Some(policy) = &route.policy {
+                        render_route_policy(policy, out);
+                    }
+                    out.push_str(":
+");
+                    render_block(&route.body, indent + 2, out);
+                    continue;
+                }
                 out.push_str("route ");
                 out.push_str(route.method.as_str());
                 out.push(' ');
-                out.push_str(&render_string_literal(&route.path));
+                out.push_str(&render_string_literal(&written_path(route)));
                 if let Some(query_ty) = &route.query_ty {
                     out.push_str(" query ");
                     out.push_str(&render_type_ref(query_ty));
@@ -215,7 +229,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 }
                 match route.response.kind {
                     corvid_ast::RouteResponseKind::Html => out.push_str(" -> html"),
-                    corvid_ast::RouteResponseKind::Json => {
+                    corvid_ast::RouteResponseKind::Json | corvid_ast::RouteResponseKind::Live => {
                         out.push_str(" -> json ");
                         out.push_str(&render_type_ref(&route.response.ty));
                     }
@@ -669,13 +683,28 @@ fn render_expr(expr: &Expr) -> String {
             body,
             attempts,
             backoff,
+            timeout_ms,
+            fallback,
             ..
-        } => format!(
-            "try {} on error retry {} times backoff {}",
-            render_expr(body),
-            attempts,
-            render_backoff(*backoff)
-        ),
+        } => {
+            // Render every clause the parser reads, in its order:
+            // `try X [timeout <ms>] [on error retry ...] [else Y]`.
+            let mut text = format!("try {}", render_expr(body));
+            if let Some(ms) = timeout_ms {
+                text.push_str(&format!(" timeout {ms}"));
+            }
+            if *attempts > 0 {
+                text.push_str(&format!(
+                    " on error retry {} times backoff {}",
+                    attempts,
+                    render_backoff(*backoff)
+                ));
+            }
+            if let Some(fallback) = fallback {
+                text.push_str(&format!(" else {}", render_expr(fallback)));
+            }
+            text
+        }
         Expr::Replay {
             trace,
             arms,
@@ -800,6 +829,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
         push_indent(indent + 1, out);
         out.push_str(&format!("redirects: {}\n", redirects.as_str()));
     }
+    if let Some(published) = connector.published {
+        push_indent(indent + 1, out);
+        out.push_str(if published { "published: yes\n" } else { "published: no\n" });
+    }
     if let Some(retry) = connector.retry {
         push_indent(indent + 1, out);
         out.push_str(&format!("retry: {retry}\n"));
@@ -856,6 +889,7 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             match body.encoding {
                 BodyEncoding::Json => out.push_str(&format!(" body {}", body.param.name)),
                 BodyEncoding::Form => out.push_str(&format!(" form {}", body.param.name)),
+                BodyEncoding::Multipart => out.push_str(&format!(" multipart {}", body.param.name)),
             }
         }
         out.push('\n');
@@ -1014,6 +1048,7 @@ fn render_literal(literal: &Literal) -> String {
         Literal::String(value) => render_string_literal(value),
         Literal::Bool(value) => value.to_string(),
         Literal::Nothing => "nothing".into(),
+        Literal::Duration { count, unit } => format!("{count} {unit}"),
     }
 }
 
@@ -1099,6 +1134,20 @@ fn render_float(value: f64) -> String {
     } else {
         format!("{text}.0")
     }
+}
+
+/// A route's path as its source writes it: the parsed path holds
+/// `{board}`, and a typed placeholder is written back as `{board: Int}`.
+fn written_path(route: &corvid_ast::HttpRouteDecl) -> String {
+    let mut path = route.path.clone();
+    for param in &route.path_params {
+        let ty = render_type_ref(&param.ty);
+        if ty != "String" {
+            let plain = format!("{{{}}}", param.name.name);
+            path = path.replacen(&plain, &format!("{{{}: {ty}}}", param.name.name), 1);
+        }
+    }
+    path
 }
 
 fn render_string_literal(value: &str) -> String {

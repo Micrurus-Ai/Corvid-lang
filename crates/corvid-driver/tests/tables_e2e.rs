@@ -1,7 +1,7 @@
 //! B09 P1 and P4 — typed table operations run end to end through the
 //! interpreter on SQLite and, when `CORVID_TEST_POSTGRES_URL` is set, on
 //! Postgres: insert, get, save and delete, with revision-checked writes
-//! whose conflicts come back as typed `Result` values.
+//! whose conflicts come back as typed `Conflict` values.
 
 use corvid_driver::{compile_to_ir, run_ir_with_runtime};
 use corvid_runtime::Runtime;
@@ -27,22 +27,23 @@ table Shelf:
 agent inserted(row: Shelf) -> String:
     return match Shelf.insert(row):
         Ok(stored) -> "inserted r" + stored.revision.to_string()
-        Err(existing) -> "taken by " + existing.title
+        Err(Taken(holder)) -> "taken by " + holder.title
 
 agent saved(row: Shelf) -> String:
     return match Shelf.save(row):
         Ok(stored) -> "saved r" + stored.revision.to_string()
-        Err(current) -> describe(current)
+        Err(conflict) -> describe(conflict)
 
 agent deleted(row: Shelf) -> String:
     return match Shelf.delete(row):
         Ok(gone) -> "deleted " + gone.title
-        Err(current) -> describe(current)
+        Err(conflict) -> describe(conflict)
 
-agent describe(current: Option<Shelf>) -> String:
-    return match current:
-        Some(row) -> "conflict with r" + row.revision.to_string() + " " + row.title
-        None -> "conflict with nothing"
+agent describe(conflict: Conflict<Shelf>) -> String:
+    return match conflict:
+        Changed(row) -> "conflict with r" + row.revision.to_string() + " " + row.title
+        Deleted -> "conflict with nothing"
+        Taken(holder) -> "taken by " + holder.title
 
 agent read(id: Int) -> String:
     return match Shelf.get(id):

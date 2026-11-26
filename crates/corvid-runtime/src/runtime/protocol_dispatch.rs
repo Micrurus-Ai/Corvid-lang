@@ -421,9 +421,7 @@ impl Runtime {
                         ts_ms: now_ms(),
                         run_id: self.tracer.run_id().to_string(),
                         tool: label.to_string(),
-                        result: serde_json::json!({
-                            crate::replay::CORVID_TOOL_ERROR_KEY: err.to_string(),
-                        }),
+                        result: crate::replay::recorded_failure(&err),
                     });
                 }
                 return Err(err);
@@ -544,6 +542,7 @@ impl Runtime {
     ) -> ConnectorHttpSpec {
         ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),
@@ -594,6 +593,7 @@ impl Runtime {
         })?;
         Ok(ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),

@@ -28,6 +28,7 @@ impl<'a> Parser<'a> {
                 fields: Vec::new(),
                 variants: Vec::new(),
                 alias: Some(target),
+                json_case: None,
                 visibility,
                 span: start.merge(end),
             });
@@ -95,6 +96,7 @@ impl<'a> Parser<'a> {
             fields,
             variants,
             alias: None,
+            json_case: None,
             visibility,
             span: start.merge(end),
         })
@@ -222,16 +224,29 @@ impl<'a> Parser<'a> {
             self.bump();
             loop {
                 let fstart = self.peek_span();
+                if matches!(self.peek(), TokKind::At) {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "an attribute on a variant payload field".into(),
+                            expected: "a plain `name: Type` field: a variant's payload travels by position in `\"fields\": [...]`, so a JSON key or hint would have no effect".into(),
+                        },
+                        span: fstart,
+                    });
+                }
                 let (fname, fname_span) = self.expect_ident()?;
                 self.expect(TokKind::Colon, "`:` between variant field name and type")?;
                 let ty = self.parse_type_ref()?;
-                let fend = ty.span();
+                // A payload field takes a refinement as a record field
+                // does: `ColumnFull(limit: Int where between(1, 50))`.
+                let refinement = self.parse_field_refinement()?;
+                let fend = self.prev_span();
                 fields.push(Field {
                     name: Ident::new(fname, fname_span),
                     ty,
-                    refinement: None,
+                    refinement,
                     ui: Vec::new(),
                     upload: None,
+                    json_key: None,
                     span: fstart.merge(fend),
                 });
                 if !matches!(self.peek(), TokKind::Comma) {
@@ -267,8 +282,21 @@ impl<'a> Parser<'a> {
         // 51d; `@upload(...)` constraints, slice 51f) in any order.
         let mut ui = Vec::new();
         let mut upload = None;
+        let mut json_key = None;
         loop {
             match self.peek_ahead(1) {
+                TokKind::Ident(w) if w == "json" && matches!(self.peek(), TokKind::At) => {
+                    if json_key.is_some() {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: "a second `@json(...)` on one field".into(),
+                                expected: "one `@json(key: \"...\")` per field".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                    json_key = Some(self.parse_field_json_key()?);
+                }
                 TokKind::Ident(w) if w == "ui" && matches!(self.peek(), TokKind::At) => {
                     ui.extend(self.parse_field_ui_hints()?);
                 }
@@ -289,8 +317,61 @@ impl<'a> Parser<'a> {
             refinement,
             ui,
             upload,
+            json_key,
             span: start.merge(end),
         })
+    }
+
+    /// `@json(key: "userId")` on a field (B01): the field's key in the
+    /// public JSON form.
+    fn parse_field_json_key(&mut self) -> Result<String, ParseError> {
+        self.bump(); // @
+        self.bump(); // json
+        self.expect(TokKind::LParen, "`(` after `@json`")?;
+        let (option, option_span) = self.expect_ident()?;
+        if option != "key" {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("`@json({option}: ...)` on a field"),
+                    expected: "`@json(key: \"...\")` on a field; `@json(case: ...)` goes before the `type`".into(),
+                },
+                span: option_span,
+            });
+        }
+        self.expect(TokKind::Colon, "`:` after `key`")?;
+        let (key, _) = self.expect_string_literal("the JSON key")?;
+        self.expect(TokKind::RParen, "`)` after `@json(key: ...)`")?;
+        self.skip_newlines();
+        Ok(key)
+    }
+
+    /// `@json(case: camel | pascal | kebab)` before a `type` (B01).
+    pub(super) fn parse_type_json_case(&mut self) -> Result<corvid_ast::JsonCase, ParseError> {
+        self.bump(); // @
+        self.bump(); // json
+        self.expect(TokKind::LParen, "`(` after `@json`")?;
+        let (option, option_span) = self.expect_ident()?;
+        if option != "case" {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("`@json({option}: ...)` on a type"),
+                    expected: "`@json(case: camel)`, `pascal` or `kebab` on a type; `@json(key: ...)` goes on a field".into(),
+                },
+                span: option_span,
+            });
+        }
+        self.expect(TokKind::Colon, "`:` after `case`")?;
+        let (name, name_span) = self.expect_ident()?;
+        let case = corvid_ast::JsonCase::from_name(&name).ok_or_else(|| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: format!("`case: {name}`"),
+                expected: "`camel`, `pascal` or `kebab`".into(),
+            },
+            span: name_span,
+        })?;
+        self.expect(TokKind::RParen, "`)` after `@json(case: ...)`")?;
+        self.skip_newlines();
+        Ok(case)
     }
 
     /// `@upload(max_mb: N, retention_days: N, mime: "a/b, c/d")` — the

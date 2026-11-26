@@ -498,6 +498,8 @@ impl<'a> Checker<'a> {
                 Type::Option(Box::new(final_inner_ty))
             }
             BuiltIn::BrowserFieldKey => self.check_browser_field_key(name, args, false),
+            BuiltIn::LiveArguments => self.check_live_arguments(name, args),
+            BuiltIn::LiveField => self.check_live_field(name, args),
             BuiltIn::BrowserRowKey => self.check_browser_field_key(name, args, true),
             BuiltIn::BrowserFields => self.check_browser_fields(name, args),
             BuiltIn::FormFor => self.check_form_for(name, args),
@@ -655,6 +657,36 @@ impl<'a> Checker<'a> {
                 Type::Unknown
             }
             BuiltIn::Page => self.check_page_call(name, args),
+            // `Changed(current)` and `Taken(holder)` build a conflict
+            // that can be any case, as a written `Conflict<Row>` can.
+            BuiltIn::Changed | BuiltIn::Taken => {
+                if args.len() != 1 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ArityMismatch { callee: name.name.clone(), expected: 1, got: args.len() },
+                        name.span,
+                    ));
+                    for arg in args {
+                        let _ = self.check_expr(arg);
+                    }
+                    return Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL);
+                }
+                let row_hint = match expected {
+                    Some(Type::Conflict(row, _)) => Some(&**row),
+                    _ => None,
+                };
+                let row = self.check_expr_as(&args[0], row_hint);
+                Type::Conflict(Box::new(row), crate::types::ConflictCases::ALL)
+            }
+            BuiltIn::Deleted => {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::NotCallable { got: "the conflict case `Deleted`, which carries no row".into() },
+                    name.span,
+                ));
+                for arg in args {
+                    let _ = self.check_expr(arg);
+                }
+                Type::Unknown
+            }
             _ => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::NotCallable {
@@ -1199,6 +1231,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = variant.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {
@@ -1262,6 +1295,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = ty_decl.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {

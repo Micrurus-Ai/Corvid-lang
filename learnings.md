@@ -1,8 +1,86 @@
 # Corvid — learnings
 
+<<<<<<< HEAD
 Entering zero for both products in the storefront returns an empty-cart page
 with a link back to the quantity fields. The packaged checkout accepts up to
 99 of each product. [F18 checkout and editor trials](docs/proposals/frontend-application-acceptance.md)
+=======
+A prompt that takes or returns a record, a list, an `Option`, a `Result`, a sum type, a `Decimal` or a time value now runs in native code; such a program used to run on the interpreter. Both tiers show the model the same text and schema, and record the same call. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)
+
+Write a duration as a number and a unit: `timeout = 30 seconds`, `deadline = now + 2 hours`, `attempts * 30 seconds`, `1.5 minutes`. The units run from `nanoseconds` to `hours`, singular or plural, and the number is read exactly. `30 days` is a compile error that explains why (a day in a time zone is 23, 24 or 25 hours) and suggests `24 hours` or `zoned.add_days(30)`. [Time](docs/reference/stdlib/time.md)
+
+A variant's payload field takes a refinement as a record field does: `| ColumnFull(limit: Int where between(1, 50))`. `ColumnFull(80)` is a compile error, a computed value out of range stops the program where the variant is built, a decoded one is refused at `fields[0]`, and the contract publishes the bounds. [Types](docs/reference/grammar.md#types-and-stores)
+
+A field can have a different JSON key from its name: `@json(key: "userId")` on the field, or `@json(case: camel)` (also `pascal`, `kebab`) before the `type` to derive every key from the snake_case names, `order_id` becoming `orderId`. HTTP bodies, `to_json`, `from_json`, prompts, OpenAPI and the generated clients use the key, an error path names it (`at orderId`), and code still writes `order.order_id`. Two fields with one key is a compile error. [Types](docs/reference/grammar.md#types-and-stores)
+
+A prompt now shows the model its arguments, and reads its reply, in the same JSON form `to_json()` writes: an `Option` is its value or `null` (not `{"tag": "some", "value": …}`), and a variant is `{"tag": "variant", "type": "Severity", "variant": "High", "fields": ["outage"]}`. The reply schema the model is given describes that form, an `Option` field may be `null` or left out, and extra fields in a reply are ignored. A recording made earlier whose prompt arguments or replies hold an `Option` or a variant no longer replays; record it again. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)
+
+Write `results = try find_titles(term) else []` to answer an outage with a value: when the call fails because a tool, model, database or provider failed or answered with something that does not fit its type, or its `timeout` expired, the form gives the fallback instead. It combines with the other clauses, as in `try summarize(text) timeout 5000 on error retry 2 times backoff linear 100 else "Summary unavailable."`, and works for any type. A bug (a division by zero) and a decision (a denied approval, a budget) are never caught. The fallback must have the expression's type. `try ... else` is refused inside `atomic:` (wrap the agent that holds the block instead) and around a connector operation that declares `on failure`, whose outages already arrive as `Err`. Programs using it run on the interpreter; native builds refuse it by name for now. `@budget` now counts a retried call once per attempt. [Recoverable failures](docs/proposals/recoverable-failures.md)
+
+A route that returns `Stream<T>` now sends one event per item named `chunk`, then `completed` with `null`, or `failed` with `{"error": code, "detail": sentence}`. The generated TypeScript client reads it: `for await (const event of api.route("GET /boards/{board}/feed", 7))` gives typed `chunk`, `completed`, `failed` and `interrupted` events (a typed `Err` item is a `chunk`), and `.result()` resolves to `null` when the route completes. A failure's `detail`, in a stream and in an ordinary route's `500` body, is a fixed sentence that never carries the error's own text; the full error is in the server's log. A client that read `data:`, `done` or `error` events must read the new names.
+
+Every `connector` now declares `published: yes` or `published: no`, and leaving it out is a compile error naming the connector. `published: no` keeps the connector (its name, URL, paths and protocol) out of the contract `corvid serve` publishes at `/.well-known/corvid` and out of the generated TypeScript client; `published: yes` lists it as before. To upgrade, add `published: no` under each connector's `redirects:` line, or `published: yes` for one whose protocol types a frontend imports.
+
+`try ... on error retry N times` now retries only outages: a tool, model, database or provider that failed or answered with something that does not fit the declared type, and a `timeout` that expired. A bug (a division by zero, an index out of range, a broken refinement) and a decision (a denied approval, an exceeded budget) are raised at once. Before, every error was retried, so a denied approval asked the person again and a division by zero ran three times. A table operation's failure now names its database (``database `board`: ...``). [Recoverable failures](docs/proposals/recoverable-failures.md#one-rule-decides-what-an-outage-is)
+
+A connector's `query` record takes the same field types as a route's: a type of plain variants goes out by the variant's name (`?status=Paid&status=Refunded`), and `Bytes` as its base64url text, written exactly as a Corvid route reads them in. Both were compile errors in a connector query before. [Connector grammar](docs/reference/grammar.md#connector-declarations)
+
+Give a path parameter a type: `route GET "/boards/{board: Int}" -> json Board:` reads `path.board` as an `Int`, and a request for `/boards/seven` is answered with a 400 naming `board` before the handler runs. `Float`, `Bool`, `Decimal`, `Instant`, `Duration`, zones, currencies, locales, `Bytes` and types of plain variants (`{status: Status}`, by variant name) work too; `{board}` alone is a `String`. A `query` record's fields take the same types plus `Option` (absent is `None`) and `List` (the name repeated). A query field of a `Decimal`, time, `Option` or `List` type used to reach the handler as a `String`; it now has its declared type, and a type a query cannot carry is a compile error. `live` paths read parameters the same way, and the contract and generated clients carry the types. [Routes](docs/guides/backend.md#declaring-a-server)
+
+`JsonError` can now be written in a signature: `agent explain(problem: JsonError) -> String` takes the error `from_json` returns, and `agent read(text: String) -> Result<Reading, JsonError>` passes it to the caller. Before, naming it was an undefined-name error, though `from_json` returned it. [Typed decoding](docs/reference/stdlib/json.md#typed-decoding-and-encoding)
+
+The `corvid_runtime` Python package now holds only `@tool`, the decorator a project's `tools.py` uses to supply tool implementations to `corvid serve` and `corvid run`. `tool_call`, `approve_gate`, `llm_call`, `run_sync`, `register_adapter` and the `testing` helpers served the retired Python build target and are gone; model calls, approvals and traces belong to the Corvid runtime. A `tools.py` that imports only `tool` works unchanged. [Python tools](runtime/python/README.md)
+
+A native program now writes a text argument into a prompt as its JSON form, quoted and escaped (`Greet "Ann"`), as the interpreter always has and the grammar says. It used to insert the raw text, so a native recording made before this change, of a prompt with a text argument, no longer replays: replay compares the prompt text exactly and stops with a divergence naming the prompt; record it again.
+
+`total += price` on a `Decimal`, and `+=` or `-=` on a `Duration` or `Instant`, now run in native code; they used to keep a program on the interpreter.
+
+`find_regex` and `find_all_regex` now run in native code, so every regex method does; the matches have the same text, byte positions and groups as on the interpreter. [Text and encoding](docs/reference/text-and-encoding.md)
+
+A native program that binds a text, list or record value inside a loop and uses it after the loop no longer keeps every iteration's value in memory; only the last one survives the loop, as on the interpreter.
+
+A `match` arm can now call a tool or a prompt in native code (`Err(problem) -> random_token(16)`, `Some(v) -> score(v)`); such a program used to run on the interpreter, or needed a helper agent around the call.
+
+A streamed connector call can now fail as a value: declare `-> Stream<Result<Delta, ModelError>>` with `on failure -> Unreachable`, and each event arrives as `Ok(delta)` while an outage (the provider not answering, a stalled or broken stream, an event that does not decode, an open circuit breaker) arrives as one final `Err(Unreachable(reason))`. A `for` loop over the stream then never crashes for an outage. [Connector grammar](docs/reference/grammar.md#connector-declarations)
+
+A literal in a comparison now takes the type of the other side: `s.price == Some(10)` works when `price` is an `Option<Decimal>`, and `home == "Europe/Berlin"` when `home` is a `TimeZone` (an unknown zone is still a compile error). Only literals are read this way; a `String` variable still never compares with a `TimeZone`. [Decimal](docs/reference/decimal.md)
+
+A run recorded by a native binary now replays on the interpreter, and an interpreter recording replays in a native binary: tool and connector calls, prompts, approvals, clock reads, IDs and draws come back exactly as recorded. If the two tiers would have recorded the run differently, replay stops at the first event that differs, as it does on one tier. The shadow daemon replays either tier's traces with either executor. [Replay](docs/internals/effect-spec/14-replay.md)
+
+A connector operation that returns `Response<Charge>` now runs as native code: `r.status()`, `r.body()` and `r.header("ETag")` give the same answers in a native binary, and `Set-Cookie` still never reaches the program. [Response](docs/reference/functions.md#response)
+
+A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.
+
+A Corvid child loop can read `for card in ui.live(board_app.cards, board):`.
+Display the title with `ui.value(bind card.title)`. The compiler checks the
+path argument and row field. Its `ui.live_rows` template helper carries the
+subscription into the browser, where the shared SDK's `livePath` encodes the
+arguments. Real delivery requires an RT-3 server.
+[Live board example](docs/book/19-browser-views.md#display-a-live-board-in-corvid)
+
+The TypeScript SDK's low-level `client.subscribe(path, keyFields, observer)`
+shares a WebSocket across a client's subscriptions. Use `observer.rows` to
+display the ordered result, clear it on `observer.error`, and call the
+returned unsubscribe function on unmount. With `live "/boards/{board: Int}/cards" -> Card`,
+`path.board` is an Int in Corvid. The generated TypeScript call is
+`const stop = api.live.board_app.cards(7, observer)`. Its observer receives
+the typed rows in query order. The table declaration supplies every key field,
+including both parts of a composite key. [Live client transport](docs/reference/cli.md#live-client-transport)
+
+Hashing and checking passwords now runs as native code: `hash_password(password, owasp_2023())` records the password as `<redacted>` and reveals it only to the hashing, exactly as on the interpreter, so a sign-up and log-in service builds into a native binary. The only secret use that still needs the interpreter is passing a secret to a tool you declared yourself. [Native code](docs/reference/cryptography.md#native-code)
+
+Verifying a webhook with a key read as a `Secret` now runs as native code: `hmac_sha256` and `hmac_sha512` keyed by a secret, `verify_password` and `decode_base64_after("whsec_")` give the same answers in a native binary as on the interpreter. Passing a secret to a tool of your own or to `hash_password` still runs on the interpreter. [Native code](docs/reference/cryptography.md#native-code)
+
+A program that holds a `Secret` now runs as native code: it can read one with `secret(name)`, draw one with `random_token(bytes)`, keep it in records, lists and options, and compare secrets with `==` in constant time, and the trace holds `<redacted>` as on the interpreter. Passing a secret to a tool of your own, `hash_password`, and HMAC, `verify_password` or `decode_base64_after` keyed by a secret still run on the interpreter, and `corvid run` says so. [Native code](docs/reference/cryptography.md#native-code)
+
+A page can share one authenticated WebSocket across its live lists. Subscribe again after reconnecting to read a fresh snapshot, including commits made while offline. When a role changes, serve checks each list's permission again. Logout and expiry close even an idle connection. A removed row carries the revision of the write that removed it from the filter. For Rust hosts inside Tokio, `watch_session_cookie` returns a durable observation and a receiver that wakes on local authority changes. For synchronous hosts, `observe_session_cookie` captures the session's authority, `remaining_ms` schedules the expiry check, `is_current` detects changes, and `while_current` guards the final enqueue. [Live transport reference](docs/reference/cli.md#live-subscriptions)
+
+A program that reads the clock (`time_now`, `time_now_utc`, `time_monotonic_ms`), parses or formats times (`time_parse_iso`, `time_format_iso`), draws random numbers (`random_int`, `random_float`), makes UUIDs (`uuid_v4`, `uuid_v7`) or reads a secret envelope (`secret_read`) now runs as native code, and records and replays those values exactly as the interpreter does. Importing `std/secrets` for `secret_read` no longer keeps a program on the interpreter; calling `secret`, `random_token` or `hash_password` still does, until native `Secret` lands. A replayed `Float` is now read back exactly: before, a recorded `random_float` could come back one digit off and replay reported a divergence. [Native dispatch](docs/proposals/native-dispatch.md)
+
+A program that calls a connector now runs as native code in `real` and `replay` modes: `corvid run` picks native code for it, and `corvid build` builds it. The binary records, replays and applies `[http] allow` exactly as the interpreter does, and writes the same trace. Run it on its own with `CORVID_CONNECTOR_MODE=real` (or `replay`) and `CORVID_HTTP_ALLOW=api.example.com`; without a mode it refuses to start. A connector with `circuit_breaker`, a streamed, file or provider-protocol operation, and `--mode mock` still run on the interpreter (`Response` operations joined native code in N4), and `corvid run` says why. A trace recorded natively replays natively, and an interpreter trace on the interpreter. [Native dispatch](docs/proposals/native-dispatch.md)
+
+Send a file to a provider with `POST "/files" body file`, where `file` is an `Upload` (sent with its own content type) or `Bytes` (sent as `application/octet-stream`), or send a form with files with `multipart receipt`, where `receipt` is a record: text fields become text parts, a `List` repeats its part, a `None` field is left out, and `Upload` or `Bytes` fields become file parts. The trace keeps a file's name, type, size and SHA-256, never its content, so an uploaded document stays out of every recording, and replay matches the same file by digest. [Connector grammar](docs/reference/grammar.md#connector-declarations)
+>>>>>>> origin/main
 
 Stream a provider's answer by declaring `-> Stream<Delta>` and how its events arrive: `streams: server_sent_events` or `streams: json_lines`; add `until "[DONE]"` for providers that end a server-sent stream with that sentinel. Then `for delta in complete(prompt):` gets one typed `Delta` at a time as it arrives. The connector's `timeout` bounds the wait for each event, a stream that breaks ends with an error, and leaving the loop early closes the connection to the provider; a route that returns the stream relays it to the browser and closes the provider's connection when the browser leaves. Replay plays the recorded events back without a connection. In mock mode, the `mock:` is the list of events. [Connector grammar](docs/reference/grammar.md#connector-declarations)
 
@@ -8219,11 +8297,13 @@ A public type from another module decodes the way it is imported: `Customer.from
 
 ### Aliases from other modules
 
+The Application Contract, and every SDK generated from it, names the type an alias stands for: a field typed `Orders` with `type Orders = List<Order>` is advertised as `List<Order>`, and an agent returning an alias of a `Stream` is advertised as streaming.
+
 A `public` alias in another module is as transparent as a local one. After `import "./models" use Customers`, a parameter typed `Customers` is a `List<Customer>`, so `customers.length()` works, and a record field typed `m.Customers` after `import "./models" as m` holds the list. Before this, the compiler treated an alias from another module as a record with no fields, and a record field typed with any alias decoded as an empty record. [Type aliases](docs/book/05-types.md#type-aliases)
 
 ### Storing records in tables
 
-A `table` is a record type stored in a database: `table Shelf:` with one field marked `key`, in a module whose `database` block names its `engine: sqlite` and its `location:` (a path or `env("NAME")`). A module's tables live in its database; when a module declares several, write `table Shelf in library:`. Leaving out a setting or a key is a compile error that names it. `Shelf.get(key)` returns `Option<Shelf>`. `Shelf.insert(row)`, `Shelf.save(row)` and `Shelf.delete(row)` return a `Result` whose `Err` holds the row stored now, because every row carries a `revision` and a write succeeds only if the stored row still has the revision the row was read at. Build a new row without `revision`, as `Shelf(1, "ana", "Reading")`; edit a stored one with `Shelf { title: t, ..shelf }`. `corvid migrate plan src/main.cor` writes the migration that creates declared tables, and `corvid migrate up --database <location>` applies it. A recorded run replays its table reads and writes from the trace without opening the database. Tables run on the interpreter. [Tables](docs/reference/tables.md)
+A `table` is a record type stored in a database: `table Shelf:` with one field marked `key`, in a module whose `database` block names its `engine: sqlite` and its `location:` (a path or `env("NAME")`). A module's tables live in its database; when a module declares several, write `table Shelf in library:`. To share one database across modules, declare it once as `public database library:` and write `import "./storage" use library` and `table Shelf in library:` where the table lives; an `atomic:` block can then call agents in several modules in one transaction. Leaving out a setting or a key is a compile error that names it. `Shelf.get(key)` returns `Option<Shelf>`. `Shelf.insert(row)`, `Shelf.save(row)` and `Shelf.delete(row)` return a `Result` whose `Err` holds the row stored now, because every row carries a `revision` and a write succeeds only if the stored row still has the revision the row was read at. Build a new row without `revision`, as `Shelf(1, "ana", "Reading")`; edit a stored one with `Shelf { title: t, ..shelf }`. `corvid migrate plan src/main.cor` writes the migration that creates declared tables, and `corvid migrate up --database <location>` applies it. A recorded run replays its table reads and writes from the trace without opening the database. Tables run on the interpreter. [Tables](docs/reference/tables.md)
 
 A query reads many rows: `Shelf.where(fn (s) -> s.owner == owner and s.note != None).order_by(fn (s) -> s.title).descending().take(10)` is a `List<Shelf>`, run as one database query. `Shelf.all()` starts a query with no condition. A condition compares columns with values the agent computes, tests for `None`, uses `contains`, `starts_with` or `ends_with` on a text column, and combines these with `and`, `or` and `not`; anything the database cannot run, such as comparing two columns, is a compile error naming the part. Rows come back in key order unless `order_by` says otherwise. [Queries](docs/reference/tables.md#queries)
 
@@ -8249,7 +8329,23 @@ You never declare a table index: `corvid migrate plan` reads every query the tab
 
 A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a table can keep a token's hash and find its row with `ApiKey.where(fn (k) -> k.token_hash == token.utf8().sha256())`. `Bytes` has no order, so `order_by` on one is a compile error. Store and compare a hash, never the secret: the database's lookup is not constant-time as `==` in Corvid is. A raw `std.db` query still shows a binary cell as `<blob:redacted>`. [Binary values](docs/reference/tables.md#binary-values)
 
-`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. Name the module that declares the tables: the planner plans that module's tables, not those of modules it imports.
+`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. `corvid build src/main.cor` builds a native binary in `target/bin/`. The Python build target is retired; call a Corvid agent from Python with `corvid build --target cdylib --abi-descriptor` and `corvid bind python`, or over HTTP with the generated Python client. [Building](docs/book/16-building.md)
+
+Declare a live list with `live "/boards/{board}/cards" -> Card` in a `server` block, its body one query: `return Card.where(fn (c) -> c.board == path.board)`. The declaration appears in the contract and supplies the snapshot query for the authenticated WebSocket. [Real-time connections](docs/proposals/real-time.md)
+
+`@budget` bounds a loop over `Member.all().take(search.limit)` by `limit`'s `between` maximum, so a refined count is as good as a literal one. [Tables](docs/reference/tables.md)
+
+Refined values are checked in native code too, with the interpreter's message, so a program that builds refined records from computed values compiles with `corvid build`.
+
+A field refinement holds for every value: `Person(969, "Ada")` against `age: Int where between(0, 150)` is a compile error, and a computed out-of-range age stops the run where the record is built or the field assigned, naming the field, the refinement and the value. Check an untrusted number before building the record. [Field refinements](docs/book/05-types.md#field-refinements)
+
+A table write returns its conflict by name: `Shelf.insert(row)` fails only with `Taken(holder)`, `Shelf.save(row)` with `Changed(current)` or `Deleted`, and `Taken(holder)` when the table declares `unique` values, and `Shelf.delete(row)` with `Changed(current)` or `Deleted`, so a match covers exactly what can happen. [Operations](docs/reference/tables.md#operations)
+
+`Conflict<Row>` says why a table write did not happen: `Changed(current)`, `Deleted` or `Taken(holder)`. Match on the cases by name; a match on a written `Conflict<Row>` needs all three, and a conflict crosses JSON as a sum type. Generated clients read it as a union in TypeScript, `Conflict.Taken(holder)` in Python and `CorvidConflict<Row>` in Swift and Kotlin. [Conflicts](docs/reference/tables.md#conflicts)
+
+A program with several databases keeps one migration history each, in `migrations/<database>/`, and `corvid migrate plan` and `migrate up --program` handle every database in one command. A program with one database keeps `migrations/` as before.
+
+Plan the program from its entry point: the planner covers the tables of every module it imports, so a database shared by several modules gets one migration history.
 
 ### Encoding text and parsing UUIDs
 

@@ -18,15 +18,19 @@ pub(super) fn emit_swift(contract: &ApplicationContract) -> String {
     let mut out = format!("// {}\n\n", NOTE_SCAFFOLD.replace('\n', "\n// "));
     out.push_str(PRELUDE);
     out.push_str(&page_model());
-    let json_error: Vec<(String, TypeName)> = corvid_types::json_error_fields()
+    out.push_str(&conflict_model());
+    let json_error: Vec<(String, String, TypeName)> = corvid_types::json_error_fields()
         .iter()
-        .map(|(name, ty)| (name.to_string(), TypeName::parse(&ty.display_name())))
+        .map(|(name, ty)| (name.to_string(), name.to_string(), TypeName::parse(&ty.display_name())))
         .collect();
     out.push_str(&record("JsonError", &json_error));
     for ty in &contract.types {
         if ty.variants.is_empty() {
-            let fields: Vec<(String, TypeName)> =
-                ty.fields.iter().map(|f| (f.name.clone(), TypeName::parse(&f.type_name))).collect();
+            let fields: Vec<(String, String, TypeName)> = ty
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.key().to_string(), TypeName::parse(&f.type_name)))
+                .collect();
             out.push_str(&record(&ty.name, &fields));
         } else {
             out.push_str(&sum(ty));
@@ -36,14 +40,16 @@ pub(super) fn emit_swift(contract: &ApplicationContract) -> String {
     out
 }
 
-fn record(name: &str, fields: &[(String, TypeName)]) -> String {
+/// A record's fields are `(property, wire key, type)`; the key is the
+/// field's JSON key (`@json(key:)`, B01), which `CodingKeys` maps.
+fn record(name: &str, fields: &[(String, String, TypeName)]) -> String {
     let mut out = format!("public struct {name}: Codable {{\n");
-    for (field, ty) in fields {
+    for (field, _, ty) in fields {
         out.push_str(&format!("    public var {}: {}\n", ident(field), swift_type(ty)));
     }
-    let params = fields.iter().map(|(f, ty)| format!("{}: {}", ident(f), swift_type(ty))).collect::<Vec<_>>().join(", ");
+    let params = fields.iter().map(|(f, _, ty)| format!("{}: {}", ident(f), swift_type(ty))).collect::<Vec<_>>().join(", ");
     out.push_str(&format!("\n    public init({params}) {{\n"));
-    for (field, _) in fields {
+    for (field, _, _) in fields {
         out.push_str(&format!("        self.{0} = {0}\n", ident(field)));
     }
     out.push_str("    }\n\n");
@@ -52,11 +58,15 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         return out;
     }
     out.push_str("    private enum CodingKeys: String, CodingKey {\n");
-    for (field, _) in fields {
-        out.push_str(&format!("        case {}\n", ident(field)));
+    for (field, key, _) in fields {
+        if key == field {
+            out.push_str(&format!("        case {}\n", ident(field)));
+        } else {
+            out.push_str(&format!("        case {} = {key:?}\n", ident(field)));
+        }
     }
     out.push_str("    }\n\n    public init(from decoder: Decoder) throws {\n        let c = try decoder.container(keyedBy: CodingKeys.self)\n");
-    for (field, ty) in fields {
+    for (field, _, ty) in fields {
         let key = ident(field);
         let read = match optional_payload(ty) {
             Some(inner) => format!("try c.decodeIfPresent({}.self, forKey: .{key})", swift_type(inner)),
@@ -65,7 +75,7 @@ fn record(name: &str, fields: &[(String, TypeName)]) -> String {
         out.push_str(&format!("        self.{key} = {read}\n"));
     }
     out.push_str("    }\n\n    public func encode(to encoder: Encoder) throws {\n        var c = encoder.container(keyedBy: CodingKeys.self)\n");
-    for (field, _) in fields {
+    for (field, _, _) in fields {
         // An optional encodes as `null`, as the public mapping writes it.
         out.push_str(&format!("        try c.encode(self.{0}, forKey: .{0})\n", ident(field)));
     }
@@ -150,6 +160,52 @@ fn page_model() -> String {
     )
 }
 
+/// A table write's conflict (B09): a generic enum with one case per
+/// `corvid_types::ConflictCase`, travelling as the sum type it is.
+fn conflict_model() -> String {
+    let cases = corvid_types::ConflictCase::ALL;
+    let mut out = String::from("/// Why a table write did not happen.\npublic enum CorvidConflict<Row: Codable>: Codable {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        match case.field() {
+            Some(field) => out.push_str(&format!("    case {name}({field}: Row)\n")),
+            None => out.push_str(&format!("    case {name}\n")),
+        }
+    }
+    let names = cases.iter().map(|case| case.name()).collect::<Vec<_>>().join(", ");
+    out.push_str("\n    public init(from decoder: Decoder) throws {\n        let c = try decoder.container(keyedBy: CorvidVariantKeys.self)\n        let variant = try c.decode(String.self, forKey: .variant)\n        switch variant {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        out.push_str(&format!("        case {:?}:\n", case.name()));
+        match case.field() {
+            Some(field) => out.push_str(&format!(
+                "            var fields = try c.nestedUnkeyedContainer(forKey: .fields)\n            try corvidArity(fields, 1, {:?}, c)\n            self = .{name}({field}: try fields.decode(Row.self))\n",
+                case.name()
+            )),
+            None => out.push_str(&format!("            self = .{name}\n")),
+        }
+    }
+    out.push_str(&format!(
+        "        default:\n            throw DecodingError.dataCorruptedError(forKey: .variant, in: c, debugDescription: \"expected one of {names}, found \\(variant)\")\n        }}\n    }}\n\n"
+    ));
+    out.push_str("    public func encode(to encoder: Encoder) throws {\n        var c = encoder.container(keyedBy: CorvidVariantKeys.self)\n        try c.encode(\"variant\", forKey: .tag)\n        try c.encode(\"Conflict\", forKey: .type)\n        switch self {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        match case.field() {
+            Some(field) => out.push_str(&format!(
+                "        case let .{name}({field}):\n            try c.encode({:?}, forKey: .variant)\n            var fields = c.nestedUnkeyedContainer(forKey: .fields)\n            try fields.encode({field})\n",
+                case.name()
+            )),
+            None => out.push_str(&format!(
+                "        case .{name}:\n            try c.encode({:?}, forKey: .variant)\n            _ = c.nestedUnkeyedContainer(forKey: .fields)\n",
+                case.name()
+            )),
+        }
+    }
+    out.push_str("        }\n    }\n}\n\n");
+    out
+}
+
 /// The payload of an `Option` field, which decodes when present.
 fn optional_payload(ty: &TypeName) -> Option<&TypeName> {
     match (ty.head.as_str(), ty.args.len()) {
@@ -176,6 +232,7 @@ fn swift_type(ty: &TypeName) -> String {
         ("Stream" | "Tainted", 1) => swift_type(ty.arg(0)),
         ("Grounded", 1) => format!("CorvidGrounded<{}>", swift_type(ty.arg(0))),
         ("Page", 1) => format!("CorvidPage<{}>", swift_type(ty.arg(0))),
+        ("Conflict", 1) => format!("CorvidConflict<{}>", swift_type(ty.arg(0))),
         ("Upload", 1) => "Data".into(),
         ("Map", 2) if ty.arg(0).head == "String" => format!("[String: {}]", swift_type(ty.arg(1))),
         ("Map", 2) => format!("CorvidPairs<{}, {}>", swift_type(ty.arg(0)), swift_type(ty.arg(1))),

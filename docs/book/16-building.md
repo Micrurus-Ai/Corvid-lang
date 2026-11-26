@@ -28,8 +28,7 @@ program. `corvid build` prints the paths it writes.
 
 | Target | Command | Output for the example |
 |---|---|---|
-| Python | `corvid build src/main.cor` | `target/py/main.py` |
-| Native executable | `corvid build src/main.cor --target native` | `target/bin/main` (`main.exe` on Windows) |
+| Native executable (the default) | `corvid build src/main.cor` | `target/bin/main` (`main.exe` on Windows) |
 | WebAssembly | `corvid build src/main.cor --target wasm` | `target/wasm/main.wasm`, JavaScript loader, TypeScript declarations and a manifest |
 | HTTP wrapper for a native entry agent | `corvid build src/main.cor --target server` | Server executable under `target/server/` and handler under `target/bin/` |
 | Portable web application | `corvid build src/main.cor --target web` | `target/web.tar` |
@@ -50,31 +49,25 @@ Run `corvid verify --corpus PATH` to compare the checker, interpreter, native ex
 
 ## Calling a compiled agent from Python
 
-Save this agent in `src/main.cor` and run `corvid build src/main.cor --target python` from the project root.
+A Python program calls a Corvid agent through native code. Build the agent as
+a shared library with its ABI descriptor, then generate a typed Python package
+from the descriptor:
 
-```corvid
-agent twice(value: Int) -> Int:
-    return value * 2
+```bash
+corvid build src/api.cor --target cdylib --abi-descriptor
+corvid bind python <descriptor> --out bindings
 ```
 
-The build creates an importable Python module. To call it, save the following as `call_agent.py` in the project root. Set `CORVID_HOME` to your Corvid installation directory so Python can find the bundled runtime.
+The package calls the compiled agent directly, with the types its signature
+declares. A Python service that calls a served Corvid application over HTTP
+uses the generated Python client instead (`corvid contract sdk`). A program
+native code cannot build yet runs with `corvid run` or `corvid serve`; the
+native build names the part it cannot compile.
 
-```python
-import os
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(os.environ["CORVID_HOME"]) / "runtime-py"))
-
-from corvid_runtime import run_sync
-from target.py.main import twice
-
-print(run_sync(twice, 21))
-```
-
-Run `python call_agent.py` with Python 3.11 or later. It prints `42`. In an existing async function, import `run` from `corvid_runtime` and use `await run(twice, 21)`.
-
-When choosing the Python target, exercise the generated agent from a Python host. Some Corvid expressions raise `NotImplementedError` when execution reaches them. For example, an agent returning `Ok(42)` passes `corvid check` and builds an importable Python module, but calling that agent raises the error. Use `corvid run src/main.cor --target interp` to execute agents that construct `Result` values.
+Corvid once built a Python translation of a program (`--target python`). That
+target was retired: it could not express tables, decimals, time, conflicts or
+most of the standard library, so a build that looked successful was a partial
+translation.
 
 ## Libraries and host calls
 

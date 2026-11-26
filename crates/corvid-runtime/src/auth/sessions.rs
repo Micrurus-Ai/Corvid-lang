@@ -182,6 +182,7 @@ impl SessionAuthRuntime {
                 params![actor_id, at_ms as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to revoke actor sessions: {err}")))?;
+        self.watchers.actor_changed(actor_id, super::SessionState::Invalid);
         Ok(revoked)
     }
 
@@ -322,6 +323,8 @@ impl SessionAuthRuntime {
                 params![session_id, token_hash, new_expires_ms as i64, now as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to rotate session: {err}")))?;
+        // The old token no longer works, so what it authorized ends.
+        self.watchers.session_changed(session_id, super::SessionState::Invalid);
         self.get_session(session_id)?
             .ok_or_else(|| RuntimeError::Other(format!("auth session `{session_id}` not found")))
     }
@@ -379,6 +382,7 @@ impl SessionAuthRuntime {
                 params![session_id, at_ms as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to revoke session: {err}")))?;
+        self.watchers.session_changed(session_id, super::SessionState::Invalid);
         self.get_session(session_id)?
             .ok_or_else(|| RuntimeError::Other(format!("auth session `{session_id}` not found")))
     }
@@ -419,6 +423,47 @@ mod tests {
             created_ms: 1,
             updated_ms: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn observed_authority_serializes_enqueue_with_another_stores_writes() {
+        use std::{sync::Arc, time::Duration};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.sqlite");
+        let reader = Arc::new(SessionAuthRuntime::open(&path).unwrap());
+        let writer = SessionAuthRuntime::open(&path).unwrap();
+        writer.conn.lock().unwrap().busy_timeout(Duration::ZERO).unwrap();
+        reader.upsert_actor(actor("member", "public")).unwrap();
+        reader.create_session(SessionCreate {
+            id: "login".into(),
+            actor_id: "member".into(),
+            tenant_id: "public".into(),
+            raw_token: "cookie".into(),
+            issued_ms: 1,
+            expires_ms: 1000,
+            csrf_binding_id: "binding".into(),
+        }).unwrap();
+
+        let observe = |trace| reader.observe_session_cookie("cookie", trace, || 100);
+        // Commit an authority change inside the canonical resolution audit,
+        // after its reads and before observation registration can finish.
+        writer.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER change_during_validation AFTER INSERT ON auth_audit_events
+             WHEN new.trace_id = 'during-connect' BEGIN
+             INSERT INTO auth_actor_roles VALUES ('member', 'editor', 100); END"
+        ).unwrap();
+        assert!(reader.watch_session_cookie("cookie", "during-connect", || 100).is_err());
+        let observation = observe("connect").unwrap();
+        assert_eq!(observation.while_current(|| {
+            assert!(writer.revoke_session("login", 100).is_err());
+        }).unwrap(), Some(()));
+        writer.grant_actor_role("member", "reader", 100).unwrap();
+        assert!(!observation.is_current().unwrap());
+        assert_eq!(observation.while_current(|| panic!("stale frame")).unwrap(), None::<()>);
+        let refreshed = observe("refresh").unwrap();
+        writer.revoke_session("login", 100).unwrap();
+        assert!(!refreshed.is_current().unwrap());
+        assert!(observe("revoked").is_err());
     }
 
     #[test]

@@ -311,6 +311,30 @@ memory prefs:
 "#,
     ),
     (
+        "duration_literals",
+        r#"agent wait(attempts: Int) -> Duration:
+    return attempts * 30 seconds + 1.5 minutes + 1 hour
+"#,
+    ),
+    (
+        "refinements",
+        r#"type Search:
+    limit: Int where between(1, 50)
+
+type BoardError:
+    | ColumnFull(limit: Int where between(1, 50), note: String where len_between(0, 80))
+"#,
+    ),
+    (
+        "json_keys",
+        r#"@json(case: camel)
+type Order:
+    order_id: Int
+    @json(key: "ID")
+    legacy_id: String
+"#,
+    ),
+    (
         "tables_and_databases",
         r#"database library:
     engine: sqlite
@@ -422,9 +446,12 @@ extend Customer:
         r#"connector reports:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
+    operation attach(file: Upload<Pdf>) -> String:
+        POST "/files" multipart file
     operation deltas(input: String) -> Stream<String>:
         POST "/stream" body input
         streams: server_sent_events until "[DONE]"
@@ -483,6 +510,10 @@ server api:
         return body
     @upload(max_mb: 2, retention_days: 1, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json HealthStatus:
+        return HealthStatus(true)
+    live "/boards/{board: Int}/cards" -> HealthStatus requires permission("status.read"):
+        return HealthStatus.all()
+    route GET "/boards/{board}" -> json HealthStatus:
         return HealthStatus(true)
 
 schedule "0 9 * * *" zone "UTC" -> daily_summary()
@@ -677,6 +708,7 @@ agent calc(a: Int, b: Float, name: String) -> Bool:
 
 agent postfixes(w: Wallet) -> Result<Float, String>:
     v = try compute() on error retry 3 times backoff exponential 250
+    u = try compute() timeout 2000 on error retry 2 times backoff linear 10 else 0
     x = helper()?
     total = w.balance + x
     return Ok(total)
@@ -705,6 +737,11 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("import_item", "imports"),
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
+    ("refinement", "refinements"),
+    ("duration_literal", "duration_literals"),
+    ("duration_unit", "duration_literals"),
+    ("json_case_attr", "json_keys"),
+    ("json_key_attr", "json_keys"),
     ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
     ("table_decl", "tables_and_databases"),
@@ -750,12 +787,15 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("server_decl", "server_and_schedule"),
     ("route_decl", "server_and_schedule"),
     ("route_query", "server_and_schedule"),
+    ("live_decl", "server_and_schedule"),
     ("approval_arg", "server_and_schedule"),
     ("approval_annotation", "server_and_schedule"),
     ("upload_arg", "server_and_schedule"),
     ("upload_annotation", "server_and_schedule"),
     ("route_payload", "server_and_schedule"),
     ("route_policy", "server_and_schedule"),
+    ("route_path", "server_and_schedule"),
+    ("path_placeholder", "server_and_schedule"),
     ("identity_decl", "identity_settings"),
     ("connector_decl", "connector_settings"),
     ("connector_item", "connector_settings"),

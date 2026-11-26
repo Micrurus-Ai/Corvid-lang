@@ -268,19 +268,27 @@ server stream_api:
                 assert!(
                     content.contains("caf\u{e9}")
                         && content.contains("!")
-                        && content.contains("event: done"),
+                        && content.contains("event: completed\ndata: null"),
                     "{mode}: {content}"
                 );
             }
             "cancel" => tokio::time::timeout(Duration::from_secs(12), probe.cancelled.notified())
                 .await
                 .expect("upstream stream stayed open after client disconnected"),
+            // A crossed bound ends the stream with `failed`, naming the
+            // bound the program declared.
             "budget" => assert!(
-                content.contains("21") && content.contains("error"),
+                content.contains("event: failed")
+                    && content.contains("\"error\":\"token_limit_exceeded\"")
+                    && content.contains("limit of 20 tokens"),
                 "{content}"
             ),
+            // A provider that breaks off ends the stream with `failed`,
+            // and the provider's own message stays in the server log.
             "broken" => assert!(
-                content.contains("before [DONE]") && content.contains("error"),
+                content.contains("event: failed")
+                    && content.contains("\"error\":\"handler_failed\"")
+                    && !content.contains("[DONE]"),
                 "{content}"
             ),
             "slow" => assert!(

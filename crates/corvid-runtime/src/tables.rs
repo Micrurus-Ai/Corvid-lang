@@ -21,7 +21,9 @@ use corvid_ast::DatabaseLocation;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod conflict;
 mod dialect;
+mod live;
 pub mod exact_columns;
 mod indexes;
 mod migration;
@@ -30,7 +32,12 @@ mod postgres;
 mod query;
 mod recorded;
 mod schema;
+mod shared_commits;
 mod transaction;
+pub(crate) use shared_commits::new_instance_id;
+pub use shared_commits::LISTENER_NAME;
+pub use conflict::WriteConflict;
+pub use live::{apply_live_changes, live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit, WrittenRows};
 pub use dialect::TableEngine;
 pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_prefix, QueryShape, TableIndex};
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
@@ -46,6 +53,8 @@ use schema::{create_table_named, quote};
 #[derive(Debug, Clone, Copy)]
 pub struct TableRef<'a> {
     pub name: &'a str,
+    /// The name of the database it lives in, which a commit announces.
+    pub database: &'a str,
     /// The key's columns, in declaration order: one, or several that
     /// identify a row together.
     pub keys: &'a [String],
@@ -59,6 +68,12 @@ pub struct TableRef<'a> {
     pub engine: TableEngine,
     /// The `atomic:` block this operation runs inside, if any.
     pub transaction: Option<&'a TableTransaction>,
+    /// For a write, the row's key as live subscriptions identify it
+    /// ([`LiveRow::key`]: the key fields' public JSON as compact array
+    /// text), so the commit can name the row and the revision it
+    /// reached. The interpreter computes it with the encoder the live
+    /// snapshot uses; `None` leaves the row out of the commit's detail.
+    pub row_key: Option<&'a str>,
 }
 
 /// A row's values, in [`TableRef::columns`] order.
@@ -131,7 +146,7 @@ impl Runtime {
 
     /// Run a write; the number of rows it changed.
     async fn table_execute(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<u64, RuntimeError> {
-        let changed = match self.table_connection(table).await? {
+        let changed = match self.table_connection(table).await.map_err(|e| named(table, e))? {
             TableConnection::Sqlite(handle) => {
                 self.db_registry().execute_queued(&handle, sql, params).await.map(|r| r.rows_affected)
             }
@@ -143,7 +158,7 @@ impl Runtime {
 
     /// Run a read; its rows in [`TableRef::columns`] order.
     async fn table_select(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<Vec<Row>, RuntimeError> {
-        let rows = match self.table_connection(table).await? {
+        let rows = match self.table_connection(table).await.map_err(|e| named(table, e))? {
             TableConnection::Sqlite(handle) => self
                 .db_registry()
                 .query_table_rows(handle.handle_id, sql, params)
@@ -160,8 +175,8 @@ impl Runtime {
     }
 
     /// `Shelf.insert(row)`: `Ok` with the stored row (revision 1), or
-    /// `Err` with the row already stored under that key.
-    async fn table_insert_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Row>, RuntimeError> {
+    /// `Taken` with the row that holds its key or a `unique` value.
+    async fn table_insert_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let (columns, mut values) = split_revision(table, row)?;
         let names = columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
         let marks = values
@@ -182,18 +197,19 @@ impl Runtime {
             return Ok(Ok(values));
         }
         if let Some(existing) = self.select_row(table, key.clone()).await? {
-            return Ok(Err(existing));
+            return Ok(Err(WriteConflict::Taken(existing)));
         }
         // Not the key: another row holds a `unique` value.
         match self.unique_holder(table, &values).await? {
-            Some(holder) => Ok(Err(holder)),
+            Some(holder) => Ok(Err(WriteConflict::Taken(holder))),
             None => Err(RuntimeError::Other(format!("table `{}`: an insert conflicted with a row that is gone", table.name))),
         }
     }
 
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
-    /// or `Err` with the row stored now (`None` if it was deleted).
-    async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// or why not: `Changed` with the row stored now, `Deleted`, or
+    /// `Taken` with the row that holds one of its `unique` values.
+    async fn table_save_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let revision = revision_of(table, &row)?;
         let (columns, mut values) = split_revision(table, row)?;
         let key = key_values(table, &values)?;
@@ -238,11 +254,11 @@ impl Runtime {
         if let Some(stored) = &current {
             if revision_of(table, stored)? == revision {
                 if let Some(holder) = self.unique_holder(table, &values).await? {
-                    return Ok(Err(Some(holder)));
+                    return Ok(Err(WriteConflict::Taken(holder)));
                 }
             }
         }
-        Ok(Err(current))
+        Ok(Err(WriteConflict::stale(current)))
     }
 
     /// Another row (not the one with `key`) holding all of some `unique`
@@ -263,9 +279,9 @@ impl Runtime {
         Ok(None)
     }
 
-    /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Err` with
-    /// the row stored now (`None` if it is already gone).
-    async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, Option<Row>>, RuntimeError> {
+    /// `Shelf.delete(row)`: `Ok` with the deleted row, or `Changed` with
+    /// the row stored now, or `Deleted` if it is already gone.
+    async fn table_delete_live(&self, table: &TableRef<'_>, row: Row) -> Result<Result<Row, WriteConflict>, RuntimeError> {
         let revision = revision_of(table, &row)?;
         let key = key_values(table, &row)?;
         let sql = format!(
@@ -281,7 +297,7 @@ impl Runtime {
         if deleted == 1 {
             return Ok(Ok(row));
         }
-        Ok(Err(self.select_row(table, key).await?))
+        Ok(Err(WriteConflict::stale(self.select_row(table, key).await?)))
     }
 
     async fn select_row(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {
@@ -395,19 +411,29 @@ fn key_condition(table: &TableRef<'_>, key: &[DbValue], first: usize) -> Result<
         .join(" AND "))
 }
 
-/// A failure ending a database's transaction, with the database named.
+/// A failure of a database's connection or transaction, with the
+/// database named: an outage `try` can retry or catch.
 fn named_database(database: &str, error: RuntimeError) -> RuntimeError {
-    RuntimeError::Other(format!("database `{database}`: {error}"))
+    match error {
+        already @ RuntimeError::DatabaseFailed { .. } => already,
+        other => RuntimeError::DatabaseFailed { database: database.to_string(), message: other.to_string() },
+    }
 }
 
-/// Name the missing table and the commands that create it.
+/// A table operation's failure, with its database named, and a missing
+/// table told the commands that create it.
 fn named(table: &TableRef<'_>, error: RuntimeError) -> RuntimeError {
+    if let RuntimeError::DatabaseFailed { .. } = error {
+        return error;
+    }
     let text = error.to_string();
-    if text.contains("no such table") {
-        return RuntimeError::Other(format!(
+    let message = if text.contains("no such table") {
+        format!(
             "table `{}` does not exist in its database yet; run `corvid migrate plan`, review the migration it writes, then `corvid migrate up`",
             table.name
-        ));
-    }
-    error
+        )
+    } else {
+        text
+    };
+    RuntimeError::DatabaseFailed { database: table.database.to_string(), message }
 }

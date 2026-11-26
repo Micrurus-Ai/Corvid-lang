@@ -347,10 +347,17 @@ impl<'ir> Interpreter<'ir> {
                 // as completion.
                 // The provider sees public JSON: an `Option` is its value
                 // or `null`, as `T.to_json()` writes it.
+                let payload_param = op.body.as_ref().and_then(|b| {
+                    let file = tool.params.iter().any(|p| {
+                        p.name == b.param_name && matches!(p.ty, Type::Bytes | Type::Upload(_))
+                    });
+                    (file || b.encoding == corvid_ast::BodyEncoding::Multipart).then_some(b.param_name.as_str())
+                });
                 let wire_args = connector_json::connector_arguments(
                     &tool.params,
                     &arg_values,
                     &self.types_by_id,
+                    payload_param,
                 )
                 .map_err(|e| {
                     InterpError::new(
@@ -359,8 +366,12 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 if let (Some(_), Type::Stream(event_ty)) = (op.streams, result_decode_ty) {
-                    return self.open_connector_stream(callee_name, wire_args, event_ty, span).await;
+                    return self
+                        .open_connector_stream(callee_name, wire_args, event_ty, op.on_failure.as_deref(), tool.breaker.is_some(), span)
+                        .await;
                 }
+                let revealed = wire_args.revealed();
+                let wire_args = wire_args.recorded;
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
@@ -375,6 +386,7 @@ impl<'ir> Interpreter<'ir> {
                         callee_name,
                         op.on_failure.as_deref(),
                         wire_args,
+                        revealed,
                         result_decode_ty,
                         span,
                     )
@@ -387,16 +399,12 @@ impl<'ir> Interpreter<'ir> {
         // effects / outcome — NEVER the arguments or the response
         // payload. Emitted as a host event, which replay classifies as
         // dispatch metadata and skips, so it never perturbs replay.
-        let outcome = if outcome_result.is_ok() { "ok" } else { "error" };
-        self.runtime.emit_host_event(
-            "connector.invocation",
-            serde_json::json!({
-                "connector": connector.name,
-                "operation": op.name,
-                "mode": mode.as_str(),
-                "effects": tool.effect_names,
-                "outcome": outcome,
-            }),
+        self.runtime.record_connector_invocation(
+            &connector.name,
+            &op.name,
+            mode,
+            &tool.effect_names,
+            outcome_result.is_ok(),
         );
         outcome_result
     }
@@ -509,13 +517,16 @@ impl<'ir> Interpreter<'ir> {
         callee_name: &str,
         on_failure: Option<&str>,
         wire_args: Vec<serde_json::Value>,
+        revealed: Option<corvid_runtime::RevealedToolArguments>,
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
-        let result = self
-            .runtime
-            .call_tool(callee_name, wire_args)
-            .await
+        // A file body is recorded by digest and sent by its bytes.
+        let result = match revealed {
+            Some(revealed) => self.runtime.call_tool_revealing_secrets(callee_name, wire_args, revealed).await,
+            None => self.runtime.call_tool(callee_name, wire_args).await,
+        };
+        let result = result
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         self.decode_connector_result(callee_name, on_failure, result, result_decode_ty, span)
     }
@@ -524,35 +535,64 @@ impl<'ir> Interpreter<'ir> {
     /// decode each event into `T` as it arrives, through the public JSON
     /// mapping. Dropping the returned stream aborts the producer, which
     /// drops the HTTP response and closes the upstream connection.
+    /// With `on failure` over `Result` events (decision 7), an event that
+    /// does not decode becomes the stream's final `Err` event, as the
+    /// runtime makes an outage one. With a circuit breaker, a stream that
+    /// ends with an `Err` event counts as one consecutive failure and a
+    /// stream that ends cleanly resets the count, the rule a request
+    /// follows.
     async fn open_connector_stream(
         &self,
         callee_name: &str,
-        wire_args: Vec<serde_json::Value>,
+        wire_args: connector_json::ConnectorArguments,
         event_ty: &Type,
+        on_failure: Option<&str>,
+        counts_for_breaker: bool,
         span: Span,
     ) -> Result<Value, InterpError> {
         let events = self
             .runtime
-            .call_connector_stream(callee_name, wire_args)
+            .call_connector_stream(callee_name, wire_args.recorded, wire_args.implementation)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         let (sender, stream) = crate::value::StreamValue::channel(effect_compose::default_stream_backpressure());
         let types: std::sync::Arc<Vec<IrType>> = std::sync::Arc::new(self.ir.types.clone());
         let event_ty = event_ty.clone();
         let name = callee_name.to_string();
+        let on_failure = on_failure.map(str::to_string);
+        let breaker = counts_for_breaker.then(|| self.breaker_state.clone());
         stream.spawn_producer(async move {
             let types_by_id: HashMap<DefId, &IrType> = types.iter().map(|t| (t.id, t)).collect();
             let mut events = events;
+            let mut ended_in_failure = false;
             while let Some(item) = futures::StreamExt::next(&mut events).await {
                 let next = match item {
-                    Ok(json) => connector_json::connector_result(json, &event_ty, &types_by_id).map_err(|e| {
-                        InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)
-                    }),
+                    Ok(json) => match connector_json::connector_result(json, &event_ty, &types_by_id) {
+                        Ok(value) => Ok(value),
+                        Err(problem) => match &on_failure {
+                            Some(variant) => connector_json::failure_value(variant, &problem, &event_ty, &types_by_id)
+                                .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)),
+                            None => Err(InterpError::new(InterpErrorKind::UnusableReply(format!("connector `{name}`: {problem}")), span)),
+                        },
+                    },
                     Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
                 };
-                let failed = next.is_err();
-                if !sender.send(next).await || failed {
+                // An `Err` event ends the stream: the runtime yields an
+                // outage last, and an undecodable event ends it here.
+                let final_err = matches!(next, Ok(Value::ResultErr(_)));
+                ended_in_failure = final_err || next.is_err();
+                let stop = next.is_err() || (on_failure.is_some() && final_err);
+                if !sender.send(next).await || stop {
                     break;
+                }
+            }
+            if let Some(state) = breaker {
+                let mut state = state.lock().expect("breaker state poisoned");
+                let count = state.entry(name.clone()).or_insert(0);
+                if ended_in_failure {
+                    *count += 1;
+                } else {
+                    *count = 0;
                 }
             }
         });
@@ -577,7 +617,7 @@ impl<'ir> Interpreter<'ir> {
                 Some(variant) => connector_json::failure_value(variant, &problem, result_decode_ty, &self.types_by_id)
                     .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span)),
                 None => Err(InterpError::new(
-                    InterpErrorKind::Marshal(format!("connector `{callee_name}`: {problem}")),
+                    InterpErrorKind::UnusableReply(format!("connector `{callee_name}`: {problem}")),
                     span,
                 )),
             },
@@ -739,6 +779,13 @@ impl<'ir> Interpreter<'ir> {
                         slot.1 = v;
                     } else {
                         out.push((fname.clone(), v));
+                    }
+                }
+                if let Some(record) = self.types_by_id.get(def_id).copied() {
+                    for (name, value) in &out {
+                        if let Some(field) = record.fields.iter().find(|f| f.name == *name) {
+                            hold_refinement(type_name, field, value, expr.span)?;
+                        }
                     }
                 }
                 Ok(ExprFlow::Value(Value::new_struct(
@@ -1334,6 +1381,7 @@ impl<'ir> Interpreter<'ir> {
                 attempts,
                 backoff: _,
                 timeout_ms,
+                fallback,
             } => {
                 let total = (*attempts).max(1);
                 let timeout_ms = *timeout_ms;
@@ -1390,6 +1438,10 @@ impl<'ir> Interpreter<'ir> {
                         }
                         Ok((ExprFlow::Value(v), _)) => return Ok(ExprFlow::Value(v)),
                         Ok((ExprFlow::Propagate(v), _)) => return Ok(ExprFlow::Propagate(v)),
+                        // Only an outage is worth another attempt: a bug
+                        // fails the same way again, and a denied approval
+                        // or an exceeded budget is a decision to respect.
+                        Err(err) if !err.is_outage() => return Err(err),
                         Err(err) => last_runtime_error = Some(err),
                     }
                 }
@@ -1408,7 +1460,14 @@ impl<'ir> Interpreter<'ir> {
                             .await?,
                     ))
                 } else if let Some(err) = last_runtime_error {
-                    Err(err)
+                    // Only an outage reaches here (anything else was
+                    // raised at once), so `else` answers it. A replay
+                    // serves the recorded outage, so it takes the same
+                    // fallback.
+                    match fallback {
+                        Some(fallback) => self.eval_expr(fallback).await,
+                        None => Err(err),
+                    }
                 } else {
                     Ok(ExprFlow::Value(Value::Nothing))
                 }
@@ -1909,7 +1968,9 @@ impl<'ir> Interpreter<'ir> {
                     // rule other tools follow: an error, or an `Err`
                     // result (a mapped status or an `on failure`
                     // variant), counts as one consecutive failure.
-                    if tool.breaker.is_some() {
+                    // A stream counts when it ends, in its producer
+                    // (`open_connector_stream`), not when it opens.
+                    if tool.breaker.is_some() && !matches!(&outcome, Ok(Value::Stream(_))) {
                         let failed = matches!(&outcome, Err(_) | Ok(Value::ResultErr(_)));
                         let mut state = self.breaker_state.lock().expect("breaker state poisoned");
                         let count = state.entry(callee_name.to_string()).or_insert(0);
@@ -2001,7 +2062,7 @@ impl<'ir> Interpreter<'ir> {
                     let result = outcome?;
                     json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
-                            InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                            InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                             span,
                         )
                     })?
@@ -2148,6 +2209,17 @@ impl<'ir> Interpreter<'ir> {
             }
             // Sum-variant construction (45h): positional payload,
             // variant metadata from the owning IrType.
+            // A table write's conflict (B09): compiler-known, so its
+            // cases come from `ConflictCase` rather than a declaration.
+            IrCallKind::EnumConstructor { def_id, variant_index } if *def_id == corvid_types::CONFLICT_TYPE_ID => {
+                let case = corvid_types::ConflictCase::ALL.get(*variant_index as usize).copied().ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!("conflict case {variant_index} does not exist")),
+                        span,
+                    )
+                })?;
+                Ok(ExprFlow::Value(Value::conflict(case, arg_values.into_iter().next())))
+            }
             IrCallKind::EnumConstructor {
                 def_id,
                 variant_index,
@@ -2182,6 +2254,9 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     ));
                 }
+                for (field, value) in variant.fields.iter().zip(&arg_values) {
+                    hold_refinement(&variant.name, field, value, span)?;
+                }
                 Ok(ExprFlow::Value(Value::Enum(crate::value::EnumValue::new(
                     ir_type.id,
                     ir_type.name.clone(),
@@ -2211,6 +2286,9 @@ impl<'ir> Interpreter<'ir> {
                         )),
                         span,
                     ));
+                }
+                for (field, value) in ir_type.fields.iter().zip(&arg_values) {
+                    hold_refinement(&ir_type.name, field, value, span)?;
                 }
                 let fields: Vec<(String, Value)> = ir_type
                     .fields
@@ -2351,7 +2429,7 @@ async fn dispatch_stdlib_db_tool(
                     let ok_value =
                         json_to_value(json, ok_decode_ty, types_by_id).map_err(|e| {
                             InterpError::new(
-                                InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                                InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                                 span,
                             )
                         })?;
@@ -2775,7 +2853,8 @@ pub(crate) fn prompt_segments_for_test(
     args: &[Value],
 ) -> Result<crate::interp::prompt::MessageSegments, InterpError> {
     let rendered = String::new();
-    prompt::build_message_segments(prompt, args, &rendered, corvid_ast::Span::new(0, 0))
+    let types = std::collections::HashMap::new();
+    prompt::build_message_segments(prompt, args, &rendered, &types, corvid_ast::Span::new(0, 0))
 }
 
 pub(crate) fn pattern_matches(
@@ -2858,5 +2937,28 @@ pub(crate) fn pattern_matches(
             }
             true
         }
+    }
+}
+
+/// Stop the run when a value built or assigned in code breaks its
+/// field's refinement (B09): every value of a refined field holds it.
+/// The rule is `conv::refinement_breach`, the one decoding uses.
+pub(crate) fn hold_refinement(
+    type_name: &str,
+    field: &corvid_ir::IrField,
+    value: &Value,
+    span: corvid_ast::Span,
+) -> Result<(), InterpError> {
+    match crate::conv::refinement_breach(field, value) {
+        Some(shown) => Err(InterpError::new(
+            InterpErrorKind::RefinementViolated {
+                type_name: type_name.to_string(),
+                field: field.name.clone(),
+                refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+                value: shown,
+            },
+            span,
+        )),
+        None => Ok(()),
     }
 }

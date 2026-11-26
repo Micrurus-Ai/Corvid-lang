@@ -106,14 +106,16 @@ pub enum Command {
     /// MCP maintenance: regenerate a server's typed module.
     #[command(subcommand)]
     Mcp(McpCommand),
-    /// Compile a Corvid source file. Default target is Python (target/py/);
-    /// `--target=native` emits target/bin/, and `--target=wasm`
-    /// emits target/wasm/ with `.wasm`, JS loader, and TypeScript types.
+    /// Compile a Corvid source file. The default target is a native
+    /// binary in target/bin/; `--target=wasm` emits target/wasm/ with
+    /// `.wasm`, JS loader, and TypeScript types. A program that native
+    /// code cannot compile yet is refused by name; run it with
+    /// `corvid run` or `corvid serve`.
     Build {
         /// Source file. Defaults to `src/main.cor` when run from a Corvid project directory.
         file: Option<PathBuf>,
-        /// Output target. `python` (default), `native`, `server`, `web`, `wasm`, `cdylib`, or `staticlib`.
-        #[arg(long, default_value = "python")]
+        /// Output target. `native` (default), `server`, `web`, `wasm`, `cdylib`, or `staticlib`.
+        #[arg(long, default_value = "native")]
         target: String,
         /// Path to a compiled `#[tool]` staticlib. When provided,
         /// tool-using native/library builds link `__corvid_tool_<name>`

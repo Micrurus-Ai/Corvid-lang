@@ -189,6 +189,12 @@ pub fn emit_type_description(
         // The checker keeps a connector `Response` off every exported
         // signature; were one described, its body is the data it carries.
         Type::Response(inner) => emit_type_description(inner, resolved, names),
+        // B09 — a table write's conflict is named, like `JsonError`;
+        // tables and their conflicts run on the interpreter, so no
+        // native signature carries one.
+        Type::Conflict(_, _) => TypeDescription::Struct {
+            name: "Conflict".to_string(),
+        },
         Type::Page(inner) => TypeDescription::List {
             list: AbiListType {
                 element: Box::new(emit_type_description(inner, resolved, names)),

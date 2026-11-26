@@ -35,6 +35,20 @@ pub enum NotNativeReason {
     ToolCall {
         name: String,
     },
+    /// `--mode mock` on a program with connectors: a mock payload is a
+    /// Corvid expression the interpreter evaluates.
+    ConnectorMockMode,
+    /// A connector operation that native code cannot call yet; the
+    /// reason names what (native dispatch N1 covers JSON-shaped calls).
+    ConnectorNotNative {
+        operation: String,
+        reason: &'static str,
+    },
+    /// A tool the runtime implements whose declared types have no
+    /// native JSON form.
+    RuntimeToolNotNative {
+        name: String,
+    },
     /// Wider tagged unions and retry bodies outside the supported
     /// native `Result` / `Option` subset still route to the
     /// interpreter. Nullable-pointer `Option<T>` with a
@@ -42,6 +56,9 @@ pub enum NotNativeReason {
     /// the compositional native `Result<T, E>` subset are the
     /// supported native forms today.
     TaggedUnionRetryNotNative,
+    /// `try ... else` (recoverable failures TE-2) runs on the interpreter
+    /// until native code catches outages (TE-3).
+    TryElseNotNative,
     StreamLoweringNotImplemented,
     TestFixtureNotNative {
         name: String,
@@ -72,8 +89,14 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
-    /// B04 — a program that mentions `Secret` anywhere: a declared
-    /// field, a signature or an expression. See
+    /// A prompt whose argument or reply type has no native JSON form
+    /// (a function, a stream, a map with non-text keys, `JsonValue`).
+    PromptTypeNotNative {
+        name: String,
+        type_name: String,
+    },
+    /// A secret passed to or returned by a tool other than the runtime's
+    /// own, where native code cannot keep it out of the record. See
     /// `corvid_codegen_cl::secret_boundary`.
     SecretNotNative,
 }
@@ -85,9 +108,25 @@ impl std::fmt::Display for NotNativeReason {
                 f,
                 "program imports Python module `{module}` - native Python FFI is not implemented yet"
             ),
+            Self::ConnectorMockMode => write!(
+                f,
+                "connectors run in `mock` mode, whose payloads are Corvid expressions the interpreter evaluates"
+            ),
+            Self::RuntimeToolNotNative { name } => write!(
+                f,
+                "program calls `{name}`, a tool the runtime implements, with a type that has no native JSON form - it runs on the interpreter"
+            ),
+            Self::ConnectorNotNative { operation, reason } => write!(
+                f,
+                "program calls connector operation `{operation}`, which {reason} - it runs on the interpreter until native dispatch covers it"
+            ),
             Self::ToolCall { name } => write!(
                 f,
                 "program calls tool `{name}` - pass `--with-tools-lib <path>` pointing at your compiled `#[tool]` staticlib, or let auto-dispatch fall back to the interpreter"
+            ),
+            Self::TryElseNotNative => write!(
+                f,
+                "program uses `try ... else`, which runs on the interpreter until native code can catch outages (recoverable failures TE-3, on the roadmap)"
             ),
             Self::TaggedUnionRetryNotNative => write!(
                 f,
@@ -120,7 +159,7 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::SecretNotNative => write!(
                 f,
-                "program uses `Secret` - {}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
+                "{}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
                 corvid_codegen_cl::secret_boundary::SECRET_REQUIREMENT
             ),
             Self::TextScalarAtBoundary { name, type_name } => write!(
@@ -131,6 +170,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
             Self::PromptToolsRequireInterpreter => write!(f, "prompt function arguments require the interpreter"),
+            Self::PromptTypeNotNative { name, type_name } => write!(
+                f,
+                "prompt `{name}` sends or reads a `{type_name}`, which has no native JSON form; the auto-dispatcher runs the interpreter tier"
+            ),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
                 write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
@@ -170,13 +213,53 @@ pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
 struct ScanContext<'a> {
     types: &'a [corvid_ir::IrType],
     has_tools_lib: bool,
+    connectors: &'a [corvid_ir::IrConnector],
+    tools: &'a [corvid_ir::IrTool],
+}
+
+/// Why native code cannot call connector operation `tool_id` yet, or
+/// `Ok` when it can: through `corvid_runtime_call` (native dispatch N1),
+/// for an operation whose arguments and answer have a native JSON form.
+/// `None` when `tool_id` is not a connector operation.
+fn connector_native_problem(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> Option<Result<(), &'static str>> {
+    let (connector, op) = context
+        .connectors
+        .iter()
+        .find_map(|c| c.operations.iter().find(|op| op.tool_id == tool_id).map(|op| (c, op)))?;
+    let tool = context.tools.iter().find(|t| t.id == tool_id)?;
+    let problem = if connector.circuit_breaker.is_some() {
+        Some("belongs to a connector with a `circuit_breaker`, whose count spans one interpreter run")
+    } else if op.protocol.is_some() {
+        Some("runs a provider protocol, whose durable lifecycle the interpreter drives")
+    } else if op.streams.is_some() {
+        Some("streams its response")
+    } else if tool.params.iter().any(|p| matches!(p.ty, Type::Bytes | Type::Upload(_)))
+        || op.body.as_ref().is_some_and(|b| b.encoding == corvid_ast::BodyEncoding::Multipart)
+    {
+        Some("sends a file or multipart body")
+    } else if !corvid_codegen_cl::native_runtime_call_types(tool, context.types) {
+        Some("sends or reads a type with no native JSON form")
+    } else {
+        None
+    };
+    Some(match problem {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    })
+}
+
+/// `None` when the tool is not one the runtime implements; otherwise
+/// whether its declared types have a native JSON form.
+fn runtime_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> Option<bool> {
+    let tool = context.tools.iter().find(|t| t.id == tool_id)?;
+    if !corvid_runtime::runtime::is_native_runtime_tool(&tool.name) {
+        return None;
+    }
+    Some(corvid_codegen_cl::native_runtime_call_types(tool, context.types))
 }
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
-    let context = ScanContext { types: &ir.types, has_tools_lib };
-    if declared_types(ir).any(Type::mentions_secret) {
-        return Err(NotNativeReason::SecretNotNative);
-    }
+    let context = ScanContext { types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
         return Err(NotNativeReason::PythonImport { module: module.clone() });
     }
@@ -219,7 +302,13 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
     match stmt {
         IrStmt::Let { value, .. } => scan_expr(value, current_return_ty, context),
-        IrStmt::Assign { value, .. } if corvid_codegen_cl::native_record_assignment(stmt) || corvid_codegen_cl::native_local_compound(stmt) => scan_expr(value, current_return_ty, context),
+        IrStmt::Assign { value, .. }
+            if corvid_codegen_cl::native_record_assignment(stmt)
+                || corvid_codegen_cl::native_local_compound(stmt)
+                || corvid_codegen_cl::native_scalar_compound(stmt) =>
+        {
+            scan_expr(value, current_return_ty, context)
+        }
         IrStmt::Assign { .. } => Err(NotNativeReason::PlaceAssignmentNotNative),
         IrStmt::Yield { .. } => Err(NotNativeReason::StreamLoweringNotImplemented),
         IrStmt::Return { value: Some(v), .. } => scan_expr(v, current_return_ty, context),
@@ -253,9 +342,10 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
             scan_block(body, current_return_ty, context)
         }
         IrStmt::Approve { args, .. } => {
-            // `approve` compiles to a no-op in generated native code.
-            // Still walk the arg expressions so any tool/prompt call
-            // buried in an approve arg is reported.
+            // Native `approve` calls the runtime's approval gate
+            // (`corvid_approve_sync`), as the interpreter does. Walk the
+            // arg expressions so any tool/prompt call buried in an
+            // approve arg is reported.
             for a in args {
                 scan_expr(a, current_return_ty, context)?;
             }
@@ -279,22 +369,16 @@ fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Ty
         .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
 }
 
-/// Every type a declared record field, tool, prompt or agent signature names.
-fn declared_types(ir: &IrFile) -> impl Iterator<Item = &Type> {
-    let fields = ir.types.iter().flat_map(|decl| {
-        decl.fields.iter().chain(decl.variants.iter().flat_map(|variant| &variant.fields)).map(|field| &field.ty)
-    });
-    let tools = ir.tools.iter().flat_map(|tool| tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)));
-    let prompts =
-        ir.prompts.iter().flat_map(|prompt| prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty)));
-    let agents = ir.agents.iter().flat_map(|agent| agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty)));
-    fields.chain(tools).chain(prompts).chain(agents)
+/// Whether a tool's declared signature holds a `Secret`, in a record
+/// field too.
+fn tool_takes_or_returns_secret(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> bool {
+    let types_by_id: std::collections::HashMap<_, _> = context.types.iter().map(|ty| (ty.id, ty)).collect();
+    context.tools.iter().find(|t| t.id == tool_id).is_some_and(|tool| {
+        tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)).any(|ty| corvid_ir::holds_secret(ty, &types_by_id))
+    })
 }
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
-    if expr.ty.mentions_secret() {
-        return Err(NotNativeReason::SecretNotNative);
-    }
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
         scan_expr(receiver, current_return_ty, context)?;
         return scan_expr(key, current_return_ty, context);
@@ -343,6 +427,18 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         IrExprKind::BuiltinMethod {
             kind: corvid_types::BuiltinMethodKind::ListLength, receiver, ..
         } => scan_expr(receiver, current_return_ty, context),
+        // Native dispatch N4 — a `Response`'s accessors.
+        IrExprKind::BuiltinMethod {
+            kind:
+                corvid_types::BuiltinMethodKind::ResponseStatus
+                | corvid_types::BuiltinMethodKind::ResponseBody
+                | corvid_types::BuiltinMethodKind::ResponseHeader,
+            receiver,
+            args,
+        } => {
+            scan_expr(receiver, current_return_ty, context)?;
+            args.iter().try_for_each(|arg| scan_expr(arg, current_return_ty, context))
+        }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_string_map(&receiver.ty) && matches!(kind,
                 corvid_types::BuiltinMethodKind::MapKeys | corvid_types::BuiltinMethodKind::MapValues |
@@ -357,6 +453,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         }
         IrExprKind::BuiltinMethod { kind, receiver, args }
             if corvid_codegen_cl::native_integer_list_transform(*kind, &receiver.ty, args) || corvid_codegen_cl::native_numeric_conversion(*kind)
+                || corvid_codegen_cl::native_scalar_to_string(*kind)
                 || corvid_codegen_cl::native_string_method(*kind)
                 || corvid_codegen_cl::native_text_method(*kind)
                 || corvid_codegen_cl::is_native_decimal_method(*kind)
@@ -379,9 +476,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         {
             scan_expr(receiver, current_return_ty, context)
         }
-        // `secret.verify_password(hash)` returns a `Bool`, so the secret
-        // it reads shows only in the method.
-        IrExprKind::BuiltinMethod { kind, .. } if kind.is_crypto() => Err(NotNativeReason::SecretNotNative),
         IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
@@ -395,6 +489,36 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 IrCallKind::ClosureLocal { .. } => {
                     return Err(NotNativeReason::CallbackNotNative)
                 }
+                // A connector operation is a runtime-owned call; it needs
+                // no tools library, only a native JSON shape.
+                IrCallKind::Tool { def_id, .. } if connector_native_problem(*def_id, context).is_some() => {
+                    if let Some(Err(reason)) = connector_native_problem(*def_id, context) {
+                        return Err(NotNativeReason::ConnectorNotNative { operation: callee_name.clone(), reason });
+                    }
+                    for a in args {
+                        scan_expr(a, current_return_ty, context)?;
+                    }
+                    return Ok(());
+                }
+                // A tool the runtime implements is a runtime-owned call
+                // too (N2): no tools library, and its text-scalar types
+                // (an `Instant`) cross as public JSON.
+                IrCallKind::Tool { def_id, .. } if runtime_tool_is_native(*def_id, context).is_some() => {
+                    if runtime_tool_is_native(*def_id, context) == Some(false) {
+                        return Err(NotNativeReason::RuntimeToolNotNative { name: callee_name.clone() });
+                    }
+                    for a in args {
+                        scan_expr(a, current_return_ty, context)?;
+                    }
+                    return Ok(());
+                }
+                // A tool of the program's own whose signature holds a
+                // secret: native code would record its arguments without
+                // redaction. The runtime's tools (`hash_password`) passed
+                // the arm above.
+                IrCallKind::Tool { def_id, .. } if tool_takes_or_returns_secret(*def_id, context) => {
+                    return Err(NotNativeReason::SecretNotNative)
+                }
                 IrCallKind::Tool { .. } if !context.has_tools_lib => {
                     return Err(NotNativeReason::ToolCall {
                         name: callee_name.clone(),
@@ -404,10 +528,23 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                     return Err(NotNativeReason::PromptToolsRequireInterpreter);
                 }
                 IrCallKind::Prompt { .. } => {
-                    // Prompt calls compile and run natively. No extra
-                    // user-provided lib is needed because corvid-runtime
-                    // ships the LLM adapters built in. Runtime errors
-                    // surface if no provider is configured.
+                    // Prompt calls compile and run natively: arguments and
+                    // replies cross in the public JSON form through the
+                    // embedded plan (B1b), so any type with a native JSON
+                    // form may cross. The runtime ships the LLM adapters.
+                    let shown = |ty: &Type| match ty {
+                        Type::Grounded(inner) => (**inner).clone(),
+                        other => other.clone(),
+                    };
+                    let crossing = std::iter::once(shown(&expr.ty)).chain(args.iter().map(|arg| shown(&arg.ty)));
+                    for ty in crossing {
+                        if !corvid_codegen_cl::native_public_json_type(&ty, context.types) {
+                            return Err(NotNativeReason::PromptTypeNotNative {
+                                name: callee_name.clone(),
+                                type_name: ty.display_name(),
+                            });
+                        }
+                    }
                 }
                 IrCallKind::Tool { .. }
                 | IrCallKind::Agent { .. }
@@ -415,7 +552,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 | IrCallKind::StructConstructor { .. }
                 | IrCallKind::Unknown => {}
             }
-            if matches!(kind, IrCallKind::Tool { .. } | IrCallKind::Prompt { .. }) {
+            if matches!(kind, IrCallKind::Tool { .. }) {
                 if let Some(held) = text_scalar_at_boundary(expr, context) {
                     return Err(NotNativeReason::TextScalarAtBoundary {
                         name: callee_name.clone(),
@@ -534,6 +671,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             }
         }
         IrExprKind::TrustBoundary { inner } => scan_expr(inner, current_return_ty, context),
+        IrExprKind::TryRetry { fallback: Some(_), .. } => Err(NotNativeReason::TryElseNotNative),
         IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, current_return_ty, context)?;
             if &body.ty == &expr.ty
@@ -613,7 +751,9 @@ agent main() -> Decimal:
     total += 0.10
     return total
 "#).expect("valid compound decimal assignment");
-        assert!(matches!(native_ability(&ir), Err(NotNativeReason::PlaceAssignmentNotNative)));
+        // Compound assignment on a `Decimal` local is the rebinding it
+        // means, which is native (`scalar_compound`).
+        assert!(native_ability(&ir).is_ok(), "{:?}", native_ability(&ir));
     }
 
     #[test]
@@ -635,27 +775,38 @@ agent main() -> Decimal:
     }
 
     #[test]
-    fn secret_programs_run_on_the_interpreter() {
+    fn secrets_are_native_except_at_tool_boundaries() {
+        // Native dispatch N3: reading a secret through the runtime,
+        // holding one in a record and comparing two compile natively.
         for src in [
             "effect secrets_read:\n    reversible: true\n\ntool secret(name: String) -> Result<Secret, String> uses secrets_read\n\nagent main() -> Bool:\n    return match secret(\"KEY\"):\n        Ok(key) -> true\n        Err(problem) -> false\n",
             "agent same(a: Secret, b: Secret) -> Bool:\n    return a == b\n\nagent main() -> Int:\n    return 1\n",
             "type Credentials:\n    user: String\n    password: Secret\n\nagent main() -> Int:\n    return 1\n",
+            // A tool that is never called produces nothing.
             "tool sign(key: Secret, body: String) -> String\nagent main() -> Int:\n    return 1\n",
+        ] {
+            let ir = crate::compile_to_ir(src).expect("valid secret program");
+            assert_eq!(native_ability_with_tools(&ir, true), Ok(()), "{src}");
+        }
+        // A tool of the program's own that takes or returns a secret
+        // would record it without redaction; an HMAC keyed by a secret and
+        // the secret methods wait for native secret cryptography.
+        for src in [
+            "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
         }
-        // An HMAC keyed by a secret, and the secret methods, are
-        // refused even though their results are `Bytes` and `Bool`.
+        // N3b: the cryptography a secret keys runs natively.
         for src in [
             "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
             "agent check(password: Secret) -> Bool:\n    return password.verify_password(\"x\")\n\nagent main() -> Int:\n    return 1\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
-            assert_eq!(native_ability(&ir), Err(NotNativeReason::SecretNotNative), "{src}");
+            assert_eq!(native_ability(&ir), Ok(()), "{src}");
         }
         let reason = NotNativeReason::SecretNotNative.to_string();
-        assert!(reason.contains("do not dispatch the standard library's tools") || reason.contains("neither dispatch"), "{reason}");
+        assert!(reason.contains("tool of the program's own") && reason.contains("records its arguments without redaction"), "{reason}");
     }
 
     #[test]
@@ -683,6 +834,45 @@ agent main() -> String:
         assert_eq!(
             native_ability_with_tools(&ir, true),
             Err(NotNativeReason::TextScalarAtBoundary { name: "now".into(), type_name: "Instant".into() })
+        );
+    }
+
+    /// B1b: a prompt whose arguments and reply have a native JSON form
+    /// runs natively, records, lists, `Option`, sum types and text-held
+    /// scalars included; one with a type that has none stays on the
+    /// interpreter and says which.
+    #[test]
+    fn prompts_are_native_when_their_types_have_a_native_json_form() {
+        let ir = crate::compile_to_ir(r#"
+type Severity:
+    | Low
+    | High(reason: String)
+
+type Verdict:
+    summary: String
+    owner: Option<String>
+    severity: Severity
+    refund: Decimal
+
+prompt triage(tags: List<String>, budget: Decimal, wait: Duration) -> Verdict:
+    "Triage {tags} within {budget} and {wait}"
+
+agent main() -> String:
+    return triage(["login"], 12.50, 30 seconds).summary
+"#).expect("valid prompt program");
+        assert_eq!(native_ability(&ir), Ok(()));
+
+        let ir = crate::compile_to_ir(r#"
+prompt read(n: Int) -> JsonValue:
+    "Read {n}"
+
+agent main() -> Int:
+    raw = read(1)
+    return 1
+"#).expect("valid prompt program");
+        assert_eq!(
+            native_ability(&ir),
+            Err(NotNativeReason::PromptTypeNotNative { name: "read".into(), type_name: "JsonValue".into() })
         );
     }
 

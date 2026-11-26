@@ -233,8 +233,12 @@ impl<'a> Checker<'a> {
             }
             Expr::Lambda { body, .. } => self.walk_fn_purity_expr(fn_name, body),
             Expr::TryPropagate { inner, .. } => self.walk_fn_purity_expr(fn_name, inner),
-            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
-                self.walk_fn_purity_expr(fn_name, body)
+            Expr::TrustBoundary { inner: body, .. } => self.walk_fn_purity_expr(fn_name, body),
+            Expr::TryRetry { body, fallback, .. } => {
+                self.walk_fn_purity_expr(fn_name, body);
+                if let Some(fallback) = fallback {
+                    self.walk_fn_purity_expr(fn_name, fallback);
+                }
             }
             Expr::Literal { .. } | Expr::Ident { .. } => {}
         }

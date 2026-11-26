@@ -37,6 +37,8 @@ impl SessionAuthRuntime {
                 params![actor_id, role, at_ms as i64],
             )
             .map_err(|err| RuntimeError::Other(format!("failed to grant role: {err}")))?;
+        // More authority without a new session: watchers re-check.
+        self.watchers.actor_changed(actor_id, super::SessionState::Active);
         Ok(())
     }
 

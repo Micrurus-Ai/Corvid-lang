@@ -2,7 +2,7 @@ use super::*;
 use crate::{decode, UnknownFields, ValueBuilder};
 
 fn field(name: &str, ty: Type) -> IrField {
-    IrField { name: name.into(), ty, refinement: None, span: Span::new(0, 0) }
+    IrField { name: name.into(), ty, refinement: None, json_key: None, span: Span::new(0, 0) }
 }
 
 /// `Line { sku: Tainted<String>, quantity: Int where between(1, 99) }`,

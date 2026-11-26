@@ -18,6 +18,7 @@ connector upstream:
     hosts: allowed_hosts
     timeout: 30s
     redirects: never
+    published: no
     modes: [real]
     operation deliver(url: String, message: Message) -> Result<Receipt, RelayError> uses upstream_write:
         POST url body message

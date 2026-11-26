@@ -1,6 +1,6 @@
 # Recoverable failures: `try ... else`
 
-Status: proposed, awaiting frontend agreement (shared grammar).
+Status: TE-1 and TE-2 built (interpreter); TE-3 (native) next. Proposed to frontend development before 2026-11-25 with no objection, so it is built under the amended grammar law (AGENTS.md, 2026-11-26) and revised on both sides if an objection comes later.
 
 ## The problem
 
@@ -91,10 +91,35 @@ same form when loading data for a screen. An agent's tool call gets a
 typed fallback instead of an aborted run. One rule, the same in all
 three, decides what counts as an outage.
 
+## Building it
+
+### One rule decides what an outage is
+
+The table above becomes one function that `try ... retry` and `try ... else` both use: `RuntimeError::is_outage` in `corvid-runtime-core`, with `InterpError::is_outage` adding the interpreter's own kinds. Building it found three weaknesses, each fixed in the first slice:
+
+1. **`try ... retry` retried every error.** That included a division by zero, which fails the same way every time, and a denied approval, which re-asks a person who already said no. Retry now retries outages only and re-raises anything else at once. Programs that retried a bug or a decision now fail at the first attempt, which is the behavior the table above promises.
+2. **A table failure was untyped.** It arrived as `RuntimeError::Other(text)` and could not be told apart from an internal error, and a connection failure skipped the path that names the database. Table and database failures become `RuntimeError::DatabaseFailed { database, message }`, built where the runtime already names them, connection errors included.
+3. **A replayed failure lost its kind.** The trace kept a failed call as text, and replay rebuilt every one as `RuntimeError::Other`. So a failure that was an outage live would not be one in replay, and replay would take a different branch. Every recorded failure now also records whether it was an outage, through one helper that every recording site uses. Replay rebuilds it as `RuntimeError::Recorded { message, outage }`, so the same rule gives the same answer in both runs.
+
+A reply that does not fit the declared type is separated from a value that cannot be converted on the way out. Today both are `Marshal`. A model's reply, a tool's result or a provider's body that does not decode becomes `UnusableReply`, which is an outage. Converting the program's own arguments stays `Marshal`, which is a bug and is never caught.
+
+### Slices
+
+- **TE-1.** The outage rule, `DatabaseFailed`, `UnusableReply`, failures recorded with their kind, and `retry` using the rule. Tests: retry stops at once on a division by zero and on a denied approval; a table outage, a failing tool and an unusable model reply are outages; a recorded outage is still one in replay.
+- **TE-2.** `try <expr> [timeout] [on error retry ...] [else <fallback>]` through the parser, checker, IR, cost analysis and interpreter:
+  - the fallback must be assignable to the expression's type;
+  - `else` is refused inside `atomic:`;
+  - `else` around an operation with `on failure` is refused;
+  - `@budget` counts the worse of the two paths;
+  - a replay of a caught failure takes the same fallback.
+- **TE-3.** Native code. Until it lands, a native build refuses `try ... else` by name, under "Narrowing is temporary". This is scheduled on the roadmap, not left for later.
+
 ## Not in this proposal
 
 - Seeing which failure happened in the fallback (`else (error) -> ...`).
-  It can follow once a failure type is agreed.
+  It follows TE-2 as its own slice, once the failure value's type is
+  proposed. The outage rule TE-1 builds is what that type will carry.
+  Scheduled on the roadmap under "Narrowing is temporary".
 - A failure in the middle of a stream is settled by B05, not here: a
   streamed operation that declares `on failure` returns
   `Stream<Result<T, E>>`, its events arrive as `Ok(T)`, and an outage

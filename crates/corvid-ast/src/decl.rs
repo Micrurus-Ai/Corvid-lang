@@ -495,6 +495,13 @@ pub struct ConnectorDecl {
     /// be sent next is a security decision, never a default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redirects: Option<RedirectPolicy>,
+    /// `published: yes | no` — whether the published Application
+    /// Contract (`/.well-known/corvid`) lists this connector: its name,
+    /// URL, paths and protocol. Required: which outside services an app
+    /// calls, and where, is a security decision, never a default.
+    /// `None` only while the checker reports the missing line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<bool>,
     /// `modes: [mock, replay, real]` — the execution modes this
     /// connector is ALLOWED to run in (slice 52g-3b). There is no
     /// default: a connector must declare its allowed modes, and the
@@ -586,6 +593,11 @@ pub enum ConnectorMode {
 }
 
 impl ConnectorMode {
+    /// The mode a `--mode` flag or `CORVID_CONNECTOR_MODE` names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Mock, Self::Replay, Self::Real].into_iter().find(|m| m.as_str() == name)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Mock => "mock",
@@ -1064,6 +1076,9 @@ pub enum BodyEncoding {
     Json,
     /// `form <param>` — `application/x-www-form-urlencoded`.
     Form,
+    /// `multipart <param>` — `multipart/form-data`: a record whose
+    /// fields become parts, `Upload` and `Bytes` fields as file parts.
+    Multipart,
 }
 
 /// `on status <code> -> Variant` (slice 52g) — a response-status →
@@ -1107,6 +1122,38 @@ pub struct RouteResponse {
 pub enum RouteResponseKind {
     Json,
     Html,
+    /// A `live` declaration (B14): `live "/boards/{board}/cards" -> Card`.
+    /// Its body returns one table query; a subscriber receives the
+    /// matching rows, then each committed change. The response type is
+    /// `List<Row>`, the snapshot, so the body is checked as a route's
+    /// is, and [`RouteResponse::live_row`] gives the declared `Row`.
+    Live,
+}
+
+impl RouteResponse {
+    /// The row type a `live` declaration delivers: `Card` in `-> Card`.
+    pub fn live_row(&self) -> Option<&TypeRef> {
+        match (&self.kind, &self.ty) {
+            (RouteResponseKind::Live, TypeRef::Generic { args, .. }) => args.first(),
+            _ => None,
+        }
+    }
+}
+
+impl HttpRouteDecl {
+    pub fn is_live(&self) -> bool {
+        self.response.kind == RouteResponseKind::Live
+    }
+
+    /// The name a `live` declaration is reached by, from the client and
+    /// the contract: its path's last fixed segment, `cards` in
+    /// `/boards/{board}/cards`.
+    pub fn live_name(&self) -> Option<&str> {
+        if !self.is_live() {
+            return None;
+        }
+        self.path.split('/').rev().find(|segment| !segment.is_empty() && !segment.starts_with('{'))
+    }
 }
 
 /// Visibility modifier on a method declared inside an `extend` block.
@@ -1316,6 +1363,10 @@ pub struct TypeDecl {
     /// XOR an alias.
     #[serde(default)]
     pub alias: Option<crate::ty::TypeRef>,
+    /// `@json(case: camel)` (B01): how the fields' JSON keys derive
+    /// from their names. `None` keeps each field's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_case: Option<crate::ty::JsonCase>,
     /// Module-level visibility. Defaults to [`Visibility::Private`]
     /// (file-scoped). Marked `public` to be visible to importers
     /// once cross-file `.cor` imports land in `lang-cor-imports-basic`.
@@ -1482,6 +1533,10 @@ pub struct DatabaseDecl {
     /// holds at most, with the span of the count. Required for Postgres,
     /// refused for SQLite.
     pub connections: Option<(i64, Span)>,
+    /// `public database library:` lets other modules import it and put
+    /// their tables in it with `table Shelf in library:` (B09 P11).
+    #[serde(default)]
+    pub visibility: Visibility,
     pub span: Span,
 }
 

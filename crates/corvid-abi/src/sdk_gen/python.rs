@@ -15,11 +15,11 @@ use super::NOTE_SCAFFOLD;
 use crate::app_contract::{ApplicationContract, ContractField};
 use corvid_types::Type;
 
-/// A field's name and contract type name.
-type Field = (String, String);
+/// A field's name, wire key (`@json(key:)`, B01) and contract type name.
+type Field = (String, String, String);
 
 fn fields_of(fields: &[ContractField]) -> Vec<Field> {
-    fields.iter().map(|f| (f.name.clone(), f.type_name.clone())).collect()
+    fields.iter().map(|f| (f.name.clone(), f.key().to_string(), f.type_name.clone())).collect()
 }
 
 pub(super) fn emit_python(contract: &ApplicationContract) -> String {
@@ -29,6 +29,7 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
     out.push_str(BUILTIN_MODELS);
     out.push_str(&json_error_model());
     out.push_str(&page_model());
+    out.push_str(&conflict_model());
 
     let mut records = vec![record_entry("JsonError", &json_error_fields())];
     let mut sums = Vec::new();
@@ -64,7 +65,7 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
             sums.push(sum_entry(&ty.name, &ty.variants));
         }
     }
-    out.push_str("_RECORDS: dict[str, tuple[type, list[tuple[str, Any]]]] = {\n");
+    out.push_str("_RECORDS: dict[str, tuple[type, list[tuple[str, str, Any]]]] = {\n");
     for entry in &records {
         out.push_str(entry);
     }
@@ -112,12 +113,15 @@ fn model_methods(name: &str) -> String {
 /// `JsonError`: why the server could not decode a body, or the error a
 /// `T.from_json` route returns. Its fields come from the compiler.
 fn json_error_fields() -> Vec<Field> {
-    corvid_types::json_error_fields().iter().map(|(name, ty)| (name.to_string(), contract_type_name(ty))).collect()
+    corvid_types::json_error_fields()
+        .iter()
+        .map(|(name, ty)| (name.to_string(), name.to_string(), contract_type_name(ty)))
+        .collect()
 }
 
 fn json_error_model() -> String {
     let mut out = String::from("@dataclass\nclass JsonError:\n    \"\"\"Why JSON did not decode: where, what was expected, and what was found.\"\"\"\n");
-    for (name, type_name) in json_error_fields() {
+    for (name, _, type_name) in json_error_fields() {
         out.push_str(&format!("    {name}: {}\n", annotation(&TypeName::parse(&type_name))));
     }
     out.push_str(&model_methods("JsonError"));
@@ -138,6 +142,28 @@ fn page_model() -> String {
     out
 }
 
+/// A table write's conflict (B09): a generic base class with one
+/// dataclass per case, from `corvid_types::ConflictCase`, and the
+/// codec's table of them. `Conflict.Taken(holder)` builds one.
+fn conflict_model() -> String {
+    let cases = corvid_types::ConflictCase::ALL;
+    let names = cases.iter().map(|case| case.name()).collect::<Vec<_>>().join(", ");
+    let mut out = format!("class Conflict(Generic[T]):\n    \"\"\"Why a table write did not happen: one of {names}.\"\"\"\n\n\n");
+    let mut table = Vec::new();
+    for case in cases {
+        let class = format!("Conflict{}", case.name());
+        out.push_str(&format!("@dataclass\nclass {class}(Conflict[T]):\n"));
+        match case.field() {
+            Some(field) => out.push_str(&format!("    {field}: T\n")),
+            None => out.push_str("    pass\n"),
+        }
+        out.push_str(&format!("\n\nConflict.{} = {class}\n\n\n", case.name()));
+        table.push(format!("{:?}: ({class}, {})", case.name(), usize::from(case.field().is_some())));
+    }
+    out.push_str(&format!("_CONFLICT_CASES = {{{}}}\n\n\n", table.join(", ")));
+    out
+}
+
 /// The contract spelling of a compiler-known type. `Unknown` stands for
 /// a page's item type, which the codec fills in per use.
 fn contract_type_name(ty: &Type) -> String {
@@ -152,7 +178,7 @@ fn contract_type_name(ty: &Type) -> String {
 fn record_entry(name: &str, fields: &[Field]) -> String {
     let fields = fields
         .iter()
-        .map(|(field, type_name)| format!("({field:?}, {})", descriptor(&TypeName::parse(type_name))))
+        .map(|(field, key, type_name)| format!("({field:?}, {key:?}, {})", descriptor(&TypeName::parse(type_name))))
         .collect::<Vec<_>>()
         .join(", ");
     format!("    {name:?}: ({name}, [{fields}]),\n")
@@ -199,6 +225,7 @@ fn annotation(ty: &TypeName) -> String {
         ("Option", 1) => format!("Optional[{}]", annotation(ty.arg(0))),
         ("Stream" | "Tainted" | "Grounded", 1) => annotation(ty.arg(0)),
         ("Page", 1) => format!("Page[{}]", annotation(ty.arg(0))),
+        ("Conflict", 1) => format!("Conflict[{}]", annotation(ty.arg(0))),
         ("Upload", 1) => "bytes".into(),
         ("Map", 2) => format!("dict[{}, {}]", annotation(ty.arg(0)), annotation(ty.arg(1))),
         ("Result", 2) => format!("Union[Ok[{}], Err[{}]]", annotation(ty.arg(0)), annotation(ty.arg(1))),
@@ -304,6 +331,17 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
                 else:
                     raise _fail(_key(path, name), "a value", None)
             return Page(**values)
+        if head == "Conflict":
+            if not isinstance(data, dict):
+                raise _fail(path, "a conflict", data)
+            name = data.get("variant")
+            if name not in _CONFLICT_CASES:
+                raise WireError(f"at `{_key(path, 'variant')}`: expected one of {', '.join(_CONFLICT_CASES)}, found {name!r}")
+            cls, count = _CONFLICT_CASES[name]
+            payload = data.get("fields", [])
+            if not isinstance(payload, list) or len(payload) != count:
+                raise WireError(f"at `{_key(path, 'fields')}`: expected {count} fields for `{name}`")
+            return cls(*[_decode(args[0], v, f"{_key(path, 'fields')}[{i}]") for i, v in enumerate(payload)])
         raise WireError(f"`{head}` has no JSON form")
     if ty == "Int":
         if isinstance(data, bool) or not isinstance(data, int):
@@ -336,13 +374,13 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
         if not isinstance(data, dict):
             raise _fail(path, ty, data)
         values = {}
-        for name, field_ty in fields:
-            if name in data:
-                values[name] = _decode(field_ty, data[name], _key(path, name))
+        for name, key, field_ty in fields:
+            if key in data:
+                values[name] = _decode(field_ty, data[key], _key(path, key))
             elif _optional(field_ty):
                 values[name] = None
             else:
-                raise WireError(f"at `{_key(path, name)}`: expected a value, found no value (the field is missing)")
+                raise WireError(f"at `{_key(path, key)}`: expected a value, found no value (the field is missing)")
         return cls(**values)
     if ty in _SUMS:
         variants = _SUMS[ty]
@@ -386,6 +424,13 @@ def _encode(ty: Any, value: Any) -> Any:
             return {"tag": "err", "err": _encode(args[1], value.error)}
         if head == "Page":
             return {name: _encode(_fill_item(field_ty, args[0]), getattr(value, name)) for name, field_ty in _PAGE_FIELDS}
+        if head == "Conflict":
+            for name, (cls, _) in _CONFLICT_CASES.items():
+                if isinstance(value, cls):
+                    values = [getattr(value, f) for f in cls.__dataclass_fields__]
+                    return {"tag": "variant", "type": "Conflict", "variant": name,
+                            "fields": [_encode(args[0], v) for v in values]}
+            raise WireError(f"{value!r} is not a `Conflict` case")
         raise WireError(f"`{head}` values are not sent as JSON")
     if ty == "Float":
         if not math.isfinite(value):
@@ -395,7 +440,7 @@ def _encode(ty: Any, value: Any) -> Any:
         return value
     if ty in _RECORDS:
         _, fields = _RECORDS[ty]
-        return {name: _encode(field_ty, getattr(value, name)) for name, field_ty in fields}
+        return {key: _encode(field_ty, getattr(value, name)) for name, key, field_ty in fields}
     if ty in _SUMS:
         for name, (cls, field_types) in _SUMS[ty].items():
             if isinstance(value, cls):

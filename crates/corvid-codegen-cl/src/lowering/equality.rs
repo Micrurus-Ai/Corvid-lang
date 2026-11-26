@@ -71,6 +71,9 @@ impl LayoutTable<'_, '_> {
             // B04 — byte strings compare in constant time in the
             // runtime, never bytewise as text.
             Type::Bytes => (Layout::Bytes, vec![]),
+            // Native dispatch N3 — a secret compares in constant time in
+            // the runtime, which alone reads the object.
+            Type::Secret => (Layout::Secret, vec![]),
             Type::List(item) => (Layout::List, vec![item.as_ref().clone()]),
             Type::Option(item) => (
                 if option_uses_wrapper(ty) {

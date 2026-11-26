@@ -26,7 +26,7 @@ table Edit:
 agent put(row: Edit) -> String:
     return match Edit.insert(row):
         Ok(stored) -> "added " + stored.proposal + "/" + stored.shelf.to_string()
-        Err(existing) -> "taken by " + existing.title
+        Err(Taken(holder)) -> "taken by " + holder.title
 
 agent find(proposal: String, shelf: Int) -> String:
     return match Edit.get(proposal, shelf):

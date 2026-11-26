@@ -23,8 +23,8 @@
 //! the right introspection target: when a user writes
 //! `from corvid_runtime import tool` and decorates their async
 //! function with `@tool("send_message")`, the decorator stores the
-//! function in that module-level dict (per
-//! `runtime/python/corvid_runtime/registry.py:36-43`). Importing
+//! function in that module-level dict (`tool` in
+//! `runtime/python/corvid_runtime/registry.py`). Importing
 //! `tools.py` runs its top-level code and populates the dict; we
 //! then iterate the dict to materialize Rust `ToolHandler`s.
 //!

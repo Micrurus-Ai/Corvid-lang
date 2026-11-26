@@ -407,8 +407,11 @@ fn collect_expr_effects(
         corvid_ast::Expr::TryPropagate { inner, .. } => {
             collect_expr_effects(inner, file, resolved, effects);
         }
-        corvid_ast::Expr::TryRetry { body, .. } => {
+        corvid_ast::Expr::TryRetry { body, fallback, .. } => {
             collect_expr_effects(body, file, resolved, effects);
+            if let Some(fallback) = fallback {
+                collect_expr_effects(fallback, file, resolved, effects);
+            }
         }
         corvid_ast::Expr::MapLiteral { entries, .. } => {
             for (key, value) in entries {

@@ -992,6 +992,7 @@ mod tests {
         use crate::connectors::{ConnectorAuthSpec, ConnectorHttpSpec};
         let base = ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: "ups".to_string(),
             operation: "ship".to_string(),
             base_url: Some("https://api.ups.com".to_string()),

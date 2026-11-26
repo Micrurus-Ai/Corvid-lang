@@ -34,15 +34,17 @@ public type Order:
     outcome: Result<Int, String>
     weight: Float
     gift: Bool
+    conflict: Conflict<Line>
+    gone: Conflict<Line>
 
 public agent echo(order: Order) -> Order:
     return order
 "#;
 
 /// The wire JSON the programs decode and must encode back.
-const ORDER: &str = r#"{"id": 7, "lines": [{"sku": "a", "quantity": 2, "note": null}, {"sku": "b", "quantity": 3, "note": "gift"}], "tags": {"x": 1}, "codes": [[2, "two"]], "shipment": {"tag": "variant", "type": "Shipment", "variant": "Shipped", "fields": ["post", 3]}, "outcome": {"tag": "ok", "ok": 40}, "weight": 2.5, "gift": true}"#;
+const ORDER: &str = r#"{"id": 7, "lines": [{"sku": "a", "quantity": 2, "note": null}, {"sku": "b", "quantity": 3, "note": "gift"}], "tags": {"x": 1}, "codes": [[2, "two"]], "shipment": {"tag": "variant", "type": "Shipment", "variant": "Shipped", "fields": ["post", 3]}, "outcome": {"tag": "ok", "ok": 40}, "weight": 2.5, "gift": true, "conflict": {"tag": "variant", "type": "Conflict", "variant": "Taken", "fields": [{"sku": "c", "quantity": 1, "note": null}]}, "gone": {"tag": "variant", "type": "Conflict", "variant": "Deleted", "fields": []}}"#;
 const PENDING: &str = r#"{"tag": "variant", "type": "Shipment", "variant": "Pending", "fields": []}"#;
-const BROKEN: &str = r#"{"id": 7, "lines": [{"sku": "a", "quantity": "two"}], "tags": {}, "codes": [], "shipment": {"variant": "Pending"}, "outcome": {"ok": 1}, "weight": 1.0, "gift": false}"#;
+const BROKEN: &str = r#"{"id": 7, "lines": [{"sku": "a", "quantity": "two"}], "tags": {}, "codes": [], "shipment": {"variant": "Pending"}, "outcome": {"ok": 1}, "weight": 1.0, "gift": false, "conflict": {"tag": "variant", "type": "Conflict", "variant": "Taken", "fields": [{"sku": "c", "quantity": 1, "note": null}]}, "gone": {"tag": "variant", "type": "Conflict", "variant": "Deleted", "fields": []}}"#;
 
 fn models(language: SdkLanguage) -> String {
     let tokens = corvid_syntax::lex(SRC).expect("lex");
@@ -102,6 +104,9 @@ fun main() {{
     val order = Order.fromJson("""{ORDER}""")
     val shipment = order.shipment
     check(shipment is Shipment.Shipped && shipment.days == 3L) {{ "shipment: $shipment" }}
+    val conflict = order.conflict
+    check(conflict is CorvidConflict.Taken && conflict.holder.sku == "c") {{ "conflict: $conflict" }}
+    check(order.gone == CorvidConflict.Deleted) {{ "gone: ${{order.gone}}" }}
     check(order.codes[2L] == "two" && order.outcome is CorvidResult.Ok) {{ "order: $order" }}
     check(Json.parseToJsonElement(order.toJson()) == Json.parseToJsonElement("""{ORDER}""")) {{ "round trip: ${{order.toJson()}}" }}
     check(Json.parseToJsonElement(Shipment.fromJson("""{{"variant": "Pending"}}""").toJson()) == Json.parseToJsonElement("""{PENDING}"""))
@@ -156,6 +161,8 @@ func same(_ a: Data, _ b: Data) throws -> Bool {{
 
 let order = try JSONDecoder().decode(Order.self, from: json(#"{ORDER}"#))
 guard case let .shipped(_, days) = order.shipment, days == 3 else {{ fatalError("shipment: \(order.shipment)") }}
+guard case let .taken(holder) = order.conflict, holder.sku == "c" else {{ fatalError("conflict: \(order.conflict)") }}
+guard case .deleted = order.gone else {{ fatalError("gone: \(order.gone)") }}
 guard order.codes.value[2] == "two", case .ok(40) = order.outcome else {{ fatalError("order") }}
 let encoded = try JSONEncoder().encode(order)
 guard try same(encoded, json(#"{ORDER}"#)) else {{ fatalError("round trip: \(String(data: encoded, encoding: .utf8)!)") }}

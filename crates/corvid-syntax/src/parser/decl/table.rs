@@ -113,6 +113,7 @@ impl<'a> Parser<'a> {
             ui: Vec::new(),
             refinement: None,
             upload: None,
+            json_key: None,
             span: name_span,
         });
         let record = TypeDecl {
@@ -120,6 +121,7 @@ impl<'a> Parser<'a> {
             fields,
             variants: Vec::new(),
             alias: None,
+            json_case: None,
             visibility,
             span: start.merge(end),
         };
@@ -165,7 +167,7 @@ impl<'a> Parser<'a> {
         self.expect_newline()
     }
 
-    pub(super) fn parse_database_decl(&mut self) -> Result<DatabaseDecl, ParseError> {
+    pub(super) fn parse_database_decl(&mut self, visibility: Visibility) -> Result<DatabaseDecl, ParseError> {
         let start = self.peek_span();
         self.bump(); // database
         let (name, name_span) = self.expect_ident()?;
@@ -191,7 +193,7 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), TokKind::Dedent) {
             self.bump();
         }
-        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, span: start.merge(end) })
+        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, visibility, span: start.merge(end) })
     }
 
     fn parse_database_setting(

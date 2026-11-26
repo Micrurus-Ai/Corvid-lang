@@ -112,8 +112,8 @@ pub enum Expr {
     TrustBoundary { inner: Box<Expr>, span: Span },
 
     /// Resilience wrapper (slice 50k widened the grammar):
-    /// `try expr [timeout <ms>] [on error retry N times backoff linear 100]`
-    /// — at least one of the two clauses must be present. `timeout`
+    /// `try expr [timeout <ms>] [on error retry N times backoff linear 100] [else <fallback>]`
+    /// — at least one of the clauses must be present. `timeout`
     /// bounds EACH attempt; expiry counts as a retryable error.
     TryRetry {
         body: Box<Expr>,
@@ -123,6 +123,11 @@ pub enum Expr {
         /// Per-attempt wall-clock bound in milliseconds.
         #[serde(default)]
         timeout_ms: Option<u64>,
+        /// `else <fallback>`: the value when the last attempt failed with
+        /// an outage (a tool, model, database or provider failure, or the
+        /// timeout). A bug or a decision is never caught.
+        #[serde(default)]
+        fallback: Option<Box<Expr>>,
         span: Span,
     },
 
@@ -195,6 +200,36 @@ pub enum Literal {
     String(String),
     Bool(bool),
     Nothing,
+    /// A duration literal (B06): `30 seconds`, `1.5 hours`. `count` is
+    /// the number's source text and `unit` the unit word as written
+    /// (`second` or `seconds`); [`duration_unit`] names its unit. The checker reads the exact value; a calendar
+    /// unit (`days`) is a compile error there, with its reason.
+    Duration { count: String, unit: String },
+}
+
+/// The units a duration literal is written in, by plural name: the six
+/// fixed-length units first, then the calendar units, which parse so the
+/// checker can say why a day is not a fixed length. The fixed units are
+/// `corvid_time::TimeUnit`'s names, which a test holds in step.
+pub const DURATION_UNITS: [&str; 10] = [
+    "nanoseconds",
+    "microseconds",
+    "milliseconds",
+    "seconds",
+    "minutes",
+    "hours",
+    "days",
+    "weeks",
+    "months",
+    "years",
+];
+
+/// The plural name of a duration unit word, singular or plural
+/// (`second` and `seconds` are both `seconds`).
+pub fn duration_unit(word: &str) -> Option<&'static str> {
+    DURATION_UNITS
+        .into_iter()
+        .find(|plural| *plural == word || plural.strip_suffix('s') == Some(word))
 }
 
 /// One field of a named struct literal (slice 45n). `value: None`

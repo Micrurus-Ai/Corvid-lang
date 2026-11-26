@@ -146,6 +146,7 @@ pub(super) fn emit_entry_main(
     // keeps compiled binaries as small + fast-starting as they were in
     // startup benchmark baseline.
     uses_runtime: bool,
+    connector_specs: Option<&str>,
 ) -> Result<(), CodegenError> {
     // I32 is imported at file scope since runtime setup needs it in
     // `declare_runtime_funcs` too.
@@ -198,6 +199,11 @@ pub(super) fn emit_entry_main(
         // exit. Shutdown runs BEFORE the leak-counter atexit (atexit
         // is LIFO), so any refcount activity from the runtime settles
         // before the counter prints ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â that's the intended ordering.
+        if let Some(specs) = connector_specs {
+            let text = super::prompt::emit_string_const(&mut builder, module, runtime, specs, entry_agent.span)?;
+            let register_ref = module.declare_func_in_func(runtime.register_connectors, builder.func);
+            builder.ins().call(register_ref, &[text]);
+        }
         if uses_runtime {
             let rt_init_ref = module.declare_func_in_func(runtime.runtime_init, builder.func);
             builder.ins().call(rt_init_ref, &[]);
@@ -497,8 +503,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
         )),
         Type::Secret => Err(CodegenError::not_supported(
             format!(
-                "entry agent {role} of type `Secret` - {}; use the interpreter tier (`corvid run --tier interp`).",
-                crate::secret_boundary::SECRET_REQUIREMENT
+                "entry agent {role} of type `Secret` - the command line prints a result and passes arguments as text, so a secret can neither enter nor leave through it; read one with `secret(name)` inside the program"
             ),
             span,
         )),
@@ -528,6 +533,13 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
                 span,
             ))
         }
+        Type::Conflict(_, _) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - a table write's conflict runs on the interpreter until tables compile natively (B09 P6)",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Response(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - a connector response never crosses the command-line boundary; return its `body()` or `status()`",

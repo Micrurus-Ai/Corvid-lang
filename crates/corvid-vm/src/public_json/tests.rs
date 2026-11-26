@@ -4,7 +4,7 @@ use corvid_ir::{IrEnumVariant, IrField};
 use serde_json::json;
 
 fn field(name: &str, ty: Type) -> IrField {
-    IrField { name: name.into(), ty, refinement: None, span: Span::new(0, 0) }
+    IrField { name: name.into(), ty, refinement: None, json_key: None, span: Span::new(0, 0) }
 }
 
 fn record(id: u32, name: &str, fields: Vec<IrField>) -> IrType {

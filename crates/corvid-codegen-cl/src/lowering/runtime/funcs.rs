@@ -59,6 +59,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.
     pub json_encode_typed: FuncId,
+    /// `corvid_json_encode_tool_argument`: one argument of a runtime call
+    /// whose tool takes a secret, recorded (`<redacted>`) or revealed.
+    pub json_encode_tool_argument: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
@@ -80,6 +83,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// static string literals and List<String>'s elem_typeinfo slot.
     pub map_typeinfo: cranelift_module::DataId,
     pub string_typeinfo: cranelift_module::DataId,
+    /// Runtime-provided `corvid_typeinfo_Secret` (native dispatch N3).
+    pub secret_typeinfo: cranelift_module::DataId,
     pub weak_box_typeinfo: cranelift_module::DataId,
     // Entry helpers used by the codegen-emitted `main`.
     pub entry_init: FuncId,
@@ -112,6 +117,20 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub invoke_tool_string: FuncId,
     pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
+    /// `corvid_register_connectors(specs)`: install the embedded
+    /// connector specs before `corvid_runtime_init`.
+    pub register_connectors: FuncId,
+    /// `corvid_secret_eq(a, b) -> 1 | 0`: `==` on two secrets, in
+    /// constant time (native dispatch N3).
+    pub secret_eq: FuncId,
+    /// `corvid_int_to_string`, `corvid_float_to_string`,
+    /// `corvid_bool_to_string`: `to_string()` on the scalars.
+    pub int_to_string: FuncId,
+    pub float_to_string: FuncId,
+    pub bool_to_string: FuncId,
+    /// `corvid_response_header(headers, name) -> Option<String>`:
+    /// `response.header(name)` (native dispatch N4).
+    pub response_header: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,
@@ -147,13 +166,11 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub prompt_call_bool: FuncId,
     pub prompt_call_float: FuncId,
     pub prompt_call_string: FuncId,
-    /// Typed prompt-dispatch bridge for `Struct` returns. Takes 9
-    /// args (the standard 7 plus `schema_json: CorvidString` and
-    /// `decoder: extern "C" fn(CorvidString) -> i64`); returns
-    /// `i64` (the heap struct pointer). Codegen emits one decoder
-    /// function per `Type::Struct(def_id)` referenced as a prompt
-    /// return and threads its address through this bridge.
-    pub prompt_call_struct: FuncId,
+    /// The prompt bridge for every non-scalar reply (B1b): the standard
+    /// 7 args plus the schema text, the public JSON decode plan, its
+    /// length and typeinfo table, and the slot the decoded value is
+    /// written to.
+    pub prompt_call_typed: FuncId,
     /// Generic JSON parse / build primitives. Used inside codegen-
     /// emitted per-struct decoder and encoder functions. Runtime
     /// stays type-agnostic; the language-aware decoding logic lives
@@ -263,6 +280,15 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// offsets, constructor arity checks, destructor lookup) without
     /// threading `&IrFile` through every call site.
     pub ir_types: HashMap<DefId, corvid_ir::IrType>,
+    /// The runtime-owned tools, by id: connector operations and the
+    /// tools the runtime implements (`is_native_runtime_tool`). Native code
+    /// calls them through `corvid_runtime_call`, which runs
+    /// `Runtime::call_tool` and so records, replays, redacts and applies
+    /// the HTTP policy exactly as the interpreter does.
+    pub runtime_call_ops: std::collections::HashSet<DefId>,
+    /// `corvid_runtime_call(name, args, arg_count, plan, plan_len,
+    /// typeinfos, payload) -> tag`: a runtime-owned call.
+    pub runtime_call: FuncId,
     /// Tool declarations, keyed by `DefId`. The codegen
     /// needs to know the declared signature (param types, return type)
     /// to emit a correctly-typed direct call to the `#[tool]` wrapper

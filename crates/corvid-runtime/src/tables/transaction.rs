@@ -14,6 +14,7 @@
 //! serves them from the trace and never opens the database.
 
 use super::{named_database, resolve_location, TableConnection, TableEngine};
+use crate::db::DbValue;
 use crate::errors::RuntimeError;
 use crate::Runtime;
 use corvid_ast::DatabaseLocation;
@@ -28,6 +29,8 @@ pub struct TableTransaction {
     /// `None` during a replay, which never opens the database.
     pub(super) connection: Option<TableConnection>,
     _writer_turn: Option<tokio::sync::OwnedMutexGuard<()>>,
+    /// The tables written inside the block, announced at commit (B14).
+    pub(super) written: super::live::WrittenTables,
 }
 
 impl std::fmt::Debug for TableTransaction {
@@ -48,7 +51,7 @@ impl Runtime {
         let id = format!("{}:{resolved}", engine.name());
         let mut opened = None;
         self.recorded_table_call(&format!("table:{database}.begin"), Vec::new(), || async {
-            opened = Some(self.open_transaction(&resolved, engine).await?);
+            opened = Some(self.open_transaction(&resolved, engine).await.map_err(|e| named_database(database, e))?);
             Ok(J::Null)
         })
         .await?;
@@ -56,17 +59,33 @@ impl Runtime {
             Some((connection, turn)) => (Some(connection), turn),
             None => (None, None),
         };
-        Ok(TableTransaction { id, database: database.to_string(), connection, _writer_turn: writer_turn })
+        Ok(TableTransaction {
+            id,
+            database: database.to_string(),
+            connection,
+            _writer_turn: writer_turn,
+            written: Default::default(),
+        })
     }
 
     /// Commit an `atomic:` block's writes.
     pub async fn table_commit(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
-        self.end_transaction(transaction, "commit", "COMMIT").await
+        let database = transaction.database.clone();
+        let written = transaction.written.take();
+        // Other processes on Postgres hear of the block through a
+        // notification sent inside it, which Postgres delivers only if
+        // the block commits (RT-6).
+        let notify = (!written.tables.is_empty())
+            .then(|| super::shared_commits::notify_statement(&self.instance_id, &database, &written.tables, &written.rows));
+        self.end_transaction(transaction, "commit", "COMMIT", notify).await?;
+        // Only now are the block's writes visible, so only now announced.
+        self.announce_commit(&database, written);
+        Ok(())
     }
 
     /// Undo an `atomic:` block's writes.
     pub async fn table_rollback(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
-        self.end_transaction(transaction, "rollback", "ROLLBACK").await
+        self.end_transaction(transaction, "rollback", "ROLLBACK", None).await
     }
 
     async fn open_transaction(
@@ -98,7 +117,13 @@ impl Runtime {
         }
     }
 
-    async fn end_transaction(&self, transaction: TableTransaction, op: &str, sql: &str) -> Result<(), RuntimeError> {
+    async fn end_transaction(
+        &self,
+        transaction: TableTransaction,
+        op: &str,
+        sql: &str,
+        notify: Option<(&'static str, [DbValue; 5])>,
+    ) -> Result<(), RuntimeError> {
         let TableTransaction { database, connection, _writer_turn, .. } = transaction;
         self.recorded_table_call(&format!("table:{database}.{op}"), Vec::new(), || async {
             match &connection {
@@ -107,6 +132,14 @@ impl Runtime {
                 }
                 Some(TableConnection::PostgresHeld(held)) => {
                     let mut borrowed = held.lock().await;
+                    if let Some((notify, params)) = &notify {
+                        if let Err(error) = borrowed.connection().execute(notify, params).await {
+                            // Nothing is committed: the block fails whole.
+                            let _ = borrowed.connection().execute("ROLLBACK", &[]).await;
+                            borrowed.discard();
+                            return Err(named_database(&database, error));
+                        }
+                    }
                     if let Err(error) = borrowed.connection().execute(sql, &[]).await {
                         // The transaction may still be open on it.
                         borrowed.discard();

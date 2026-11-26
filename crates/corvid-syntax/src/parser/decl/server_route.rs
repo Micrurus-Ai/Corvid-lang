@@ -155,7 +155,12 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            match self.parse_http_route_decl(upload, approval) {
+            let parsed = if self.peek_ident_is("live") {
+                self.parse_live_decl()
+            } else {
+                self.parse_http_route_decl(upload, approval)
+            };
+            match parsed {
                 Ok(route) => routes.push(route),
                 Err(e) => {
                     self.errors.push(e);
@@ -172,6 +177,58 @@ impl<'a> Parser<'a> {
         Ok(ServerDecl {
             name: Ident::new(name, name_span),
             routes,
+            span: start.merge(end),
+        })
+    }
+
+    /// `live "/boards/{board}/cards" -> Card requires permission("board.view"):`
+    /// (B14). `live` is contextual, so it stays an ordinary name
+    /// elsewhere. It is held as a GET route whose response is the
+    /// snapshot, `List<Card>`, so path parameters, `actor` and the
+    /// `requires` policy work as a route's do.
+    fn parse_live_decl(&mut self) -> Result<HttpRouteDecl, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // live
+        let path_span = self.peek_span();
+        let path = match self.peek().clone() {
+            TokKind::StringLit(path) => {
+                self.bump();
+                path
+            }
+            other => {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(&other),
+                        expected: "a live path string literal".into(),
+                    },
+                    span: path_span,
+                });
+            }
+        };
+        let (path, path_params, placeholder_errors) = parse_route_path_params(&path, path_span);
+        self.errors.extend(placeholder_errors);
+        self.expect(TokKind::Arrow, "`->` before the row type a `live` declaration delivers")?;
+        let row = self.parse_type_ref()?;
+        let row_span = row.span();
+        let snapshot = TypeRef::Generic { name: Ident::new("List", row_span), args: vec![row], span: row_span };
+        let policy = self.parse_route_policy()?;
+        self.expect(TokKind::Colon, "`:` after a `live` declaration")?;
+        self.expect_newline()?;
+        let body = self.parse_indented_block()?;
+        let end = body.span;
+        Ok(HttpRouteDecl {
+            method: HttpMethod::Get,
+            path,
+            path_params,
+            query_ty: None,
+            body_ty: None,
+            form_encoded: false,
+            upload: None,
+            approval: None,
+            response: RouteResponse { kind: RouteResponseKind::Live, span: row_span, ty: snapshot },
+            effect_row: Default::default(),
+            policy,
+            body,
             span: start.merge(end),
         })
     }
@@ -201,7 +258,8 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let path_params = parse_route_path_params(&path, path_span);
+        let (path, path_params, placeholder_errors) = parse_route_path_params(&path, path_span);
+        self.errors.extend(placeholder_errors);
         let mut query_ty = None;
         let mut body_ty = None;
         let mut form_encoded = false;
@@ -499,32 +557,94 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn parse_route_path_params(path: &str, path_span: Span) -> Vec<RoutePathParam> {
+/// A route or live path's placeholders, and the path as the router and
+/// the contract carry it: `"/boards/{board: Int}/cards"` declares
+/// `board` an `Int` and is served as `"/boards/{board}/cards"`. A
+/// placeholder without a type, `{board}`, is a `String`. Anything else
+/// between braces is an error naming the two forms, rather than text the
+/// router would treat as a parameter of a name no handler reads.
+fn parse_route_path_params(
+    path: &str,
+    path_span: Span,
+) -> (String, Vec<RoutePathParam>, Vec<ParseError>) {
+    // The path text starts one past the literal's opening quote.
+    let text_start = path_span.start + 1;
+    let mut canonical = String::with_capacity(path.len());
     let mut params = Vec::new();
+    let mut errors = Vec::new();
     let mut offset = 0usize;
     while let Some(open_rel) = path[offset..].find('{') {
         let open = offset + open_rel;
+        canonical.push_str(&path[offset..open]);
         let Some(close_rel) = path[open + 1..].find('}') else {
+            errors.push(placeholder_error(
+                &path[open..],
+                Span::new(text_start + open, text_start + path.len()),
+            ));
+            canonical.push_str(&path[open..]);
+            offset = path.len();
             break;
         };
         let close = open + 1 + close_rel;
-        let name = path[open + 1..close].trim();
-        if !name.is_empty() && name.chars().all(is_route_param_char) {
-            let span = Span::new(path_span.start + open + 1, path_span.start + close);
-            params.push(RoutePathParam {
-                name: Ident::new(name.to_string(), span),
-                ty: TypeRef::Named {
-                    name: Ident::new("String", span),
-                    span,
+        let inside = &path[open + 1..close];
+        let span = Span::new(text_start + open, text_start + close + 1);
+        let (name, ty) = match inside.split_once(':') {
+            Some((name, ty)) => (name.trim(), Some(ty.trim())),
+            None => (inside.trim(), None),
+        };
+        let name_ok = is_route_param_name(name);
+        let ty_ok = ty.map_or(true, is_route_param_name);
+        if name_ok && ty == Some("String") {
+            // One way to say it: an untyped placeholder is a String.
+            errors.push(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("path placeholder `{{{name}: String}}`"),
+                    expected: format!("`{{{name}}}`: a placeholder without a type is already a `String`"),
                 },
                 span,
             });
+            canonical.push('{');
+            canonical.push_str(name);
+            canonical.push('}');
+        } else if name_ok && ty_ok {
+            let name_at = text_start + open + 1 + inside.find(name).unwrap_or(0);
+            let name_span = Span::new(name_at, name_at + name.len());
+            let ty = match ty {
+                Some(ty) => {
+                    let ty_at = text_start + open + 1 + inside.rfind(ty).unwrap_or(0);
+                    let ty_span = Span::new(ty_at, ty_at + ty.len());
+                    TypeRef::Named { name: Ident::new(ty.to_string(), ty_span), span: ty_span }
+                }
+                None => TypeRef::Named { name: Ident::new("String", name_span), span: name_span },
+            };
+            params.push(RoutePathParam { name: Ident::new(name.to_string(), name_span), ty, span });
+            canonical.push('{');
+            canonical.push_str(name);
+            canonical.push('}');
+        } else {
+            errors.push(placeholder_error(&path[open..=close], span));
+            canonical.push_str(&path[open..=close]);
         }
         offset = close + 1;
     }
-    params
+    canonical.push_str(&path[offset..]);
+    (canonical, params, errors)
 }
 
-fn is_route_param_char(ch: char) -> bool {
-    ch == '_' || ch.is_ascii_alphanumeric()
+fn placeholder_error(found: &str, span: Span) -> ParseError {
+    ParseError {
+        kind: ParseErrorKind::UnexpectedToken {
+            got: format!("path placeholder `{found}`"),
+            expected: "`{name}` or `{name: Type}`, such as `{board}` or `{board: Int}`".into(),
+        },
+        span,
+    }
+}
+
+/// A placeholder's name or type: letters, digits and `_`, not starting
+/// with a digit.
+fn is_route_param_name(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }

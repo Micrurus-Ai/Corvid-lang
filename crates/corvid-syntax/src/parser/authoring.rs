@@ -333,6 +333,7 @@ agent {helper}_after(input: String, request: Int) -> Result<String, String>:
                 attempts: 0,
                 backoff: Backoff::Linear(0),
                 timeout_ms: Some(millis),
+                fallback: None,
                 span,
             }),
             span,

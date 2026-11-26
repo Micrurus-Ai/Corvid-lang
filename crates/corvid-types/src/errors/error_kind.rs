@@ -6,6 +6,18 @@ pub enum TypeErrorKind {
     /// (slice 45i).
     NonExhaustiveMatch { missing: String },
 
+    /// A `live` declaration (B14) that is not one table query of the
+    /// row type it delivers, or whose name is unusable.
+    LiveDeclarationInvalid { path: String, problem: String },
+
+    /// A constant given to a refined field breaks its refinement:
+    /// `Search("dune", 500)` where `limit: Int where between(1, 50)`.
+    RefinementOutOfRange { type_name: String, field: String, refinement: String, value: String },
+
+    /// A pattern names a conflict case the matched value can never be:
+    /// `Err(Changed(_))` on an `insert`, which only returns `Taken`.
+    ImpossibleConflictCase { case: String, possible: String },
+
     /// The target of a place assignment (`x.field = v`, `xs[i] = v`,
     /// compound `+=`) is not assignable — e.g. its root is not a
     /// local variable (slice 45b).
@@ -260,7 +272,21 @@ pub enum TypeErrorKind {
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
     RouteUploadPolicyInvalid { path: String, message: String },
+    /// A typed path placeholder, `{board: Int}`, of a type a path
+    /// segment cannot be read as.
+    RoutePathParamType { path: String, param: String, ty: String },
+    /// A route's `query` record with a field the server cannot read
+    /// from a query string; `field` is empty when the query type is not
+    /// a record at all.
+    RouteQueryFieldType { path: String, field: String, ty: String },
+    /// `try ... else <fallback>` where the fallback's type is not the
+    /// body's.
+    TryElseFallbackType { expected: String, got: String },
+    /// `try ... else` around a connector operation that declares
+    /// `on failure`: its outages already arrive as a value.
+    TryElseAroundOnFailure { operation: String, variant: String },
     InvalidForm { message: String },
+    InvalidLiveBinding { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
     /// 52g): a non-absolute `base_url`, a malformed reliability value, a
@@ -436,6 +462,12 @@ pub enum TypeErrorKind {
         field: String,
         message: String,
     },
+    /// B06 — a duration literal that names no exact length: a calendar
+    /// unit, a fraction of a nanosecond, or a value out of range.
+    DurationLiteralInvalid { message: String },
+    /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
+    /// empty or name one key twice.
+    JsonKeyInvalid { type_name: String, message: String },
     /// B09 P2 — a query part the database cannot run.
     TableQueryNotTranslatable { message: String },
     /// B09 P3 — `renamed from` or `retired` contradicts the table's
@@ -607,6 +639,15 @@ impl TypeErrorKind {
         match self {
             Self::NonExhaustiveMatch { missing } => {
                 format!("non-exhaustive match: missing {missing}")
+            }
+            Self::LiveDeclarationInvalid { path, problem } => {
+                format!("`live \"{path}\"` {problem}")
+            }
+            Self::RefinementOutOfRange { type_name, field, refinement, value } => {
+                format!("`{type_name}.{field}` must be {refinement}, but this value is {value}")
+            }
+            Self::ImpossibleConflictCase { case, possible } => {
+                format!("this conflict is never `{case}`: it can only be {possible}")
             }
             Self::InvalidAssignTarget { reason } => {
                 format!("invalid assignment target: {reason}")
@@ -821,9 +862,25 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { path, message } => {
                 format!("invalid approval policy on route `{path}`: {message}")
             }
+            Self::InvalidLiveBinding { message } => format!("invalid live binding: {message}"),
             Self::InvalidForm { message } => format!("invalid form: {message}"),
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
+            }
+            Self::RoutePathParamType { path, param, ty } => {
+                format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
+            }
+            Self::TryElseFallbackType { expected, got } => {
+                format!("the `else` fallback is `{got}`, but the `try` expression is `{expected}`")
+            }
+            Self::TryElseAroundOnFailure { operation, variant } => format!(
+                "`try ... else` around `{operation}`, which declares `on failure -> {variant}`: its outages already arrive as `Err({variant}(...))`, so there is nothing to catch"
+            ),
+            Self::RouteQueryFieldType { path, field, ty } if field.is_empty() => {
+                format!("the query of `{path}` is `{ty}`; a query is a record whose fields are the query parameters")
+            }
+            Self::RouteQueryFieldType { path, field, ty } => {
+                format!("query field `{field}` of `{path}` is `{ty}`, which a query string cannot carry")
             }
             Self::ConnectorConfigInvalid { connector, message } => {
                 format!("invalid `connector {connector}`: {message}")
@@ -949,6 +1006,8 @@ impl TypeErrorKind {
             } => {
                 format!("field `{field}` on `{type_name}`: {message}")
             }
+            Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
+            Self::DurationLiteralInvalid { message } => message.clone(),
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
             Self::AtomicBlockRefused { message } => message.clone(),
@@ -1137,6 +1196,15 @@ impl TypeErrorKind {
         match self {
             Self::NonExhaustiveMatch { .. } => Some(
                 "add the missing arm(s), or a final `_ -> ...` catch-all".into(),
+            ),
+            Self::LiveDeclarationInvalid { .. } => Some(
+                "a `live` body is one `return` of a query on the table it delivers, such as `return Card.where(fn (c) -> c.board == board)`; a subscriber gets those rows, then each committed change to them".into(),
+            ),
+            Self::RefinementOutOfRange { .. } => Some(
+                "use a value the refinement admits; every value of a refined field holds its refinement, however it is built".into(),
+            ),
+            Self::ImpossibleConflictCase { .. } => Some(
+                "remove the arm: each table write returns only the conflicts it can produce".into(),
             ),
             Self::InvalidAssignTarget { .. } => Some(
                 "assign through a path rooted at a local variable, e.g. `x.field = v` or `xs[i] = v`".into(),
@@ -1437,6 +1505,12 @@ impl TypeErrorKind {
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
             ),
+            Self::DurationLiteralInvalid { .. } => Some(
+                "a duration is a number and one of nanoseconds, microseconds, milliseconds, seconds, minutes or hours, such as `30 seconds` or `1.5 hours`".into(),
+            ),
+            Self::JsonKeyInvalid { .. } => Some(
+                "give each field its own non-empty key with `@json(key: \"...\")`; a field's key replaces the one its type's `@json(case:)` derives".into(),
+            ),
             Self::RefinementInvalid { .. } => Some(
                 "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"
                     .into(),
@@ -1543,7 +1617,21 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { .. } => Some(
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
-            Self::InvalidForm { .. } => None,
+            Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
+            Self::TryElseFallbackType { .. } => Some(
+                "give the fallback the expression's type: the form evaluates to one or the other".into(),
+            ),
+            Self::TryElseAroundOnFailure { variant, .. } => Some(format!(
+                "drop the `try` and match the result: `Err({variant}(reason)) -> ...`"
+            )),
+            Self::RoutePathParamType { .. } => Some(format!(
+                "a path parameter is one of {}",
+                crate::text_parameters::TEXT_TYPES
+            )),
+            Self::RouteQueryFieldType { .. } => Some(format!(
+                "a query field is one of {}, an `Option` of one (left out when absent) or a `List` of one (the name repeated)",
+                crate::text_parameters::TEXT_TYPES
+            )),
             Self::RouteUploadPolicyInvalid { .. } => Some(
                 "put `@upload(max_mb: N)` immediately before a route whose body is `Upload<Format>`; the runtime enforces that exact declared limit and never supplies a hidden default".into(),
             ),

@@ -21,22 +21,26 @@ use base64::Engine;
 use std::collections::BTreeMap;
 
 /// How an operation encodes its request body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorBodyEncoding {
     Json,
     Form,
+    /// A `Bytes` or `Upload` parameter sent as the body itself.
+    Raw,
+    /// `multipart/form-data` built from a record's fields.
+    Multipart,
 }
 
 /// The request body binding of an operation: which parameter supplies
 /// the body, and how it is encoded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConnectorBodySpec {
     pub param: String,
     pub encoding: ConnectorBodyEncoding,
 }
 
 /// Where an operation header's value comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorHeaderValue {
     /// The named `String` parameter's value on this call.
     Param(String),
@@ -46,7 +50,7 @@ pub enum ConnectorHeaderValue {
 
 /// How a connector authenticates — every credential is the NAME of a
 /// secret, resolved to a value only at dispatch and never held here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConnectorAuthSpec {
     Bearer {
         secret: String,
@@ -63,7 +67,7 @@ pub enum ConnectorAuthSpec {
 
 /// One connector operation's real-mode HTTP dispatch spec, derived from
 /// the IR at runtime-build time and keyed by the operation's tool name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConnectorHttpSpec {
     pub connector: String,
     pub operation: String,
@@ -138,6 +142,9 @@ pub struct ConnectorHttpSpec {
     /// the protocol declared, so the request builder stays the single
     /// place a connector request is assembled.
     pub extra_headers: Vec<(String, String)>,
+    /// The operation's declared effects, named in the
+    /// `connector.invocation` record of each call.
+    pub effects: Vec<String>,
 }
 
 /// A recoverable failure while building a connector request — surfaced
@@ -183,6 +190,30 @@ impl ConnectorRequestError {
     }
 }
 
+/// The specs [`connector_calls_from_ir`] derives, as the JSON a native
+/// binary embeds and installs at startup; `None` when the program
+/// declares no connectors. One projection serves both tiers.
+pub fn connector_calls_json(ir: &corvid_ir::IrFile) -> Option<String> {
+    let specs = connector_calls_from_ir(ir);
+    if specs.is_empty() {
+        return None;
+    }
+    let ordered: std::collections::BTreeMap<_, _> = specs.into_iter().collect();
+    Some(serde_json::to_string(&ordered).expect("connector specs serialize"))
+}
+
+/// Read back [`connector_calls_json`].
+pub fn connector_calls_from_json(text: &str) -> Result<std::collections::HashMap<String, ConnectorHttpSpec>, String> {
+    serde_json::from_str(text).map_err(|e| format!("the embedded connector specs do not read back: {e}"))
+}
+
+/// `response.header(name)`: the value of the first response header
+/// called `name`, compared without regard to case, as HTTP names are.
+/// The interpreter and native code both answer through this.
+pub fn response_header<'a>(headers: impl IntoIterator<Item = (&'a str, &'a str)>, wanted: &str) -> Option<&'a str> {
+    headers.into_iter().find(|(name, _)| name.eq_ignore_ascii_case(wanted)).map(|(_, value)| value)
+}
+
 /// Derive the real-mode dispatch specs for every connector operation in
 /// a lowered file, keyed by the operation's tool name. This is the
 /// single projection from IR to dispatch spec — the driver installs the
@@ -206,6 +237,7 @@ pub fn connector_calls_from_ir(
                 op.name.clone(),
                 ConnectorHttpSpec {
                     extra_headers: Vec::new(),
+                    effects: tool.effect_names.clone(),
                     connector: connector.name.clone(),
                     operation: op.name.clone(),
                     base_url: connector.base_url.clone(),
@@ -215,8 +247,17 @@ pub fn connector_calls_from_ir(
                     body: op.body.as_ref().map(|b| ConnectorBodySpec {
                         param: b.param_name.clone(),
                         encoding: match b.encoding {
-                            corvid_ast::BodyEncoding::Json => ConnectorBodyEncoding::Json,
+                            // A `Bytes` or `Upload` body is sent as itself;
+                            // any other `body` is JSON.
+                            corvid_ast::BodyEncoding::Json => {
+                                let raw = tool.params.iter().any(|p| {
+                                    p.name == b.param_name
+                                        && matches!(p.ty, corvid_types::Type::Bytes | corvid_types::Type::Upload(_))
+                                });
+                                if raw { ConnectorBodyEncoding::Raw } else { ConnectorBodyEncoding::Json }
+                            }
                             corvid_ast::BodyEncoding::Form => ConnectorBodyEncoding::Form,
+                            corvid_ast::BodyEncoding::Multipart => ConnectorBodyEncoding::Multipart,
                         },
                     }),
                     query: op.query.clone(),
@@ -270,7 +311,12 @@ pub fn connector_calls_from_ir(
 /// Whether the `on failure` variant of an operation's error type has a
 /// field for the reason (the checker allows none or one `String`).
 fn failure_variant_takes_reason(ir: &corvid_ir::IrFile, return_ty: &corvid_types::Type, variant: &str) -> bool {
-    let corvid_types::Type::Result(_, err) = return_ty else { return false };
+    // A streamed operation maps failures into its `Result` events.
+    let mapped = match return_ty {
+        corvid_types::Type::Stream(item) => item.as_ref(),
+        other => other,
+    };
+    let corvid_types::Type::Result(_, err) = mapped else { return false };
     let corvid_types::Type::Struct(id) = err.as_ref() else { return false };
     ir.types
         .iter()
@@ -395,13 +441,25 @@ pub fn build_connector_request(
                 operation: spec.operation.clone(),
                 param: body.param.clone(),
             })?;
+        let bad = || ConnectorRequestError::BadArgument {
+            operation: spec.operation.clone(),
+            param: body.param.clone(),
+        };
         request = match body.encoding {
             ConnectorBodyEncoding::Json => {
                 let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
                 request.json_body(json)
             }
             ConnectorBodyEncoding::Form => {
-                request.body("application/x-www-form-urlencoded", encode_form(value))
+                request.body("application/x-www-form-urlencoded", encode_form(value).into_bytes())
+            }
+            ConnectorBodyEncoding::Raw => {
+                let payload = payload_of(value).ok_or_else(bad)?;
+                request.body(&payload.content_type, payload.bytes)
+            }
+            ConnectorBodyEncoding::Multipart => {
+                let (content_type, bytes) = encode_multipart(value).ok_or_else(bad)?;
+                request.body(&content_type, bytes)
             }
         };
     }
@@ -504,11 +562,126 @@ fn scalar_to_path_segment(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// A file-like value the interpreter hands the request builder: an
+/// `Upload` as `{"filename", "content_type", "bytes"}`, or `Bytes` as its
+/// base64url text. The bytes are base64url in both.
+struct Payload {
+    filename: Option<String>,
+    content_type: String,
+    bytes: Vec<u8>,
+}
+
+fn payload_of(value: &serde_json::Value) -> Option<Payload> {
+    match value {
+        serde_json::Value::String(encoded) => Some(Payload {
+            filename: None,
+            content_type: "application/octet-stream".to_string(),
+            bytes: corvid_text::encoding::decode_base64_url_bytes(encoded).ok()?,
+        }),
+        serde_json::Value::Object(upload) => Some(Payload {
+            filename: upload.get("filename").and_then(|f| f.as_str()).map(str::to_string),
+            content_type: upload
+                .get("content_type")
+                .and_then(|c| c.as_str())
+                .filter(|c| !c.is_empty())
+                .unwrap_or("application/octet-stream")
+                .to_string(),
+            bytes: corvid_text::encoding::decode_base64_url_bytes(upload.get("bytes")?.as_str()?).ok()?,
+        }),
+        _ => None,
+    }
+}
+
+/// A `multipart/form-data` body for a record argument: a text part per
+/// scalar field (an absent `Option` is left out, a `List` repeats the
+/// part) and a file part per `Upload` or `Bytes` field. The boundary is
+/// derived from the content, so the same request has the same bytes and
+/// the same recorded digest, and it is checked not to occur in any part.
+fn encode_multipart(value: &serde_json::Value) -> Option<(String, Vec<u8>)> {
+    use sha2::Digest;
+    let serde_json::Value::Object(fields) = value else { return None };
+    enum Part {
+        Text(String, String),
+        File(String, Payload),
+    }
+    let mut parts = Vec::new();
+    for (name, field) in fields {
+        let items: Vec<&serde_json::Value> = match field {
+            serde_json::Value::Null => continue,
+            serde_json::Value::Array(items) => items.iter().collect(),
+            single => vec![single],
+        };
+        for item in items {
+            match item {
+                serde_json::Value::Object(o) if o.contains_key("bytes") => {
+                    parts.push(Part::File(name.clone(), payload_of(item)?))
+                }
+                serde_json::Value::Object(_) | serde_json::Value::Array(_) => return None,
+                serde_json::Value::String(s) => parts.push(Part::Text(name.clone(), s.clone())),
+                other => parts.push(Part::Text(name.clone(), other.to_string())),
+            }
+        }
+    }
+    let mut digest = sha2::Sha256::new();
+    for part in &parts {
+        match part {
+            Part::Text(name, text) => {
+                digest.update(name.as_bytes());
+                digest.update(text.as_bytes());
+            }
+            Part::File(name, payload) => {
+                digest.update(name.as_bytes());
+                digest.update(&payload.bytes);
+            }
+        }
+    }
+    let seed = corvid_text::encoding::encode_hex_bytes(&digest.finalize());
+    let mut boundary = format!("corvid-{}", &seed[..32]);
+    let occurs = |boundary: &str| {
+        parts.iter().any(|part| match part {
+            Part::Text(_, text) => text.contains(boundary),
+            Part::File(_, payload) => payload.bytes.windows(boundary.len()).any(|w| w == boundary.as_bytes()),
+        })
+    };
+    while occurs(&boundary) {
+        boundary.push('x');
+    }
+    let quote = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"").replace(['\r', '\n'], " ");
+    let mut body = Vec::new();
+    for part in &parts {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        match part {
+            Part::Text(name, text) => {
+                body.extend_from_slice(format!("Content-Disposition: form-data; name=\"{}\"\r\n\r\n", quote(name)).as_bytes());
+                body.extend_from_slice(text.as_bytes());
+            }
+            Part::File(name, payload) => {
+                let filename = payload.filename.clone().unwrap_or_else(|| name.clone());
+                body.extend_from_slice(
+                    format!(
+                        "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+                        quote(name),
+                        quote(&filename),
+                        payload.content_type
+                    )
+                    .as_bytes(),
+                );
+                body.extend_from_slice(&payload.bytes);
+            }
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Some((format!("multipart/form-data; boundary={boundary}"), body))
+}
+
 /// The query string for a record argument in its public JSON form: one
 /// `name=value` pair per field, in field-name order. An absent `Option`
 /// (`null`) is left out and a `List` repeats the name, the forms most
-/// APIs read. `None` when the value is not a flat record, which the
-/// checker already refuses.
+/// APIs read. Each value is written as a route reads request text
+/// (`corvid_public_json::request_text`), so a plain variant goes out by
+/// its name and `Bytes` as base64url. `None` when the value is not a
+/// flat record, which the checker already refuses.
 fn encode_query(value: &serde_json::Value) -> Option<String> {
     let serde_json::Value::Object(fields) = value else {
         return None;
@@ -521,12 +694,7 @@ fn encode_query(value: &serde_json::Value) -> Option<String> {
             single => vec![single],
         };
         for item in items {
-            let text = match item {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Number(n) => n.to_string(),
-                serde_json::Value::Bool(b) => b.to_string(),
-                _ => return None,
-            };
+            let text = corvid_public_json::request_text::json_request_text(item)?;
             pairs.push(format!("{}={}", urlencode(name), urlencode(&text)));
         }
     }
@@ -606,9 +774,30 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A query goes out as a route reads one in: a plain variant by its
+    /// name, `Bytes` as its base64url text, an absent `Option` left out
+    /// and a `List` as the name repeated.
+    #[test]
+    fn a_query_writes_variants_by_name_and_bytes_as_text() {
+        let record = json!({
+            "status": [{ "tag": "variant", "type": "Status", "variant": "Open", "fields": [] },
+                       { "tag": "variant", "type": "Status", "variant": "Closed", "fields": [] }],
+            "digest": "3q2-7w",
+            "limit": null,
+            "total": "19.90",
+        });
+        assert_eq!(
+            encode_query(&record).as_deref(),
+            Some("digest=3q2-7w&status=Open&status=Closed&total=19.90")
+        );
+        let with_fields = json!({ "outcome": { "variant": "Done", "fields": [3] } });
+        assert_eq!(encode_query(&with_fields), None, "a variant with fields is not query text");
+    }
+
     fn spec() -> ConnectorHttpSpec {
         ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: "github".to_string(),
             operation: "get_repo".to_string(),
             base_url: Some("https://api.github.com".to_string()),
@@ -798,7 +987,7 @@ mod tests {
         .expect("build");
         assert_eq!(req.method, "POST");
         assert_eq!(req.url, "https://api.github.com/repos/micrurus/issues");
-        assert_eq!(req.body.as_deref(), Some(r#"{"title":"bug"}"#));
+        assert_eq!(req.body.as_deref(), Some(r#"{"title":"bug"}"#.as_bytes()));
     }
 
     #[test]

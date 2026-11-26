@@ -256,6 +256,10 @@ pub fn collect_public_exports(file: &File, resolved: &Resolved) -> HashMap<Strin
             corvid_ast::Decl::Model(m) => {
                 (m.name.name.as_str(), m.visibility, DeclKind::Model, None)
             }
+            // B09 P11: a database other modules put their tables in.
+            corvid_ast::Decl::Database(d) => {
+                (d.name.name.as_str(), d.visibility, DeclKind::Database, None)
+            }
             // Imports, evals, extends don't carry module-level
             // visibility. `extend` methods do, but those ride on the
             // underlying type's visibility and aren't top-level

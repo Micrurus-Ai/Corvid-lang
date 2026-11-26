@@ -65,11 +65,8 @@ pub(super) fn replayed_json_result(
             // result and replay diverges. `RuntimeError::Other` displays
             // the recorded string verbatim, so the reconstructed error
             // matches the recorded run error exactly.
-            if let Some(msg) = result
-                .get(crate::replay::CORVID_TOOL_ERROR_KEY)
-                .and_then(|v| v.as_str())
-            {
-                return Err(RuntimeError::Other(msg.to_string()));
+            if let Some(failure) = crate::replay::replayed_failure(&result) {
+                return Err(failure);
             }
             Ok(result)
         }

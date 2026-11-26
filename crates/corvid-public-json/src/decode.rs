@@ -40,6 +40,15 @@ pub trait ValueBuilder {
     /// B06 — a `Decimal`, time or currency value, already parsed from
     /// its canonical text (see [`crate::text_scalar`]).
     fn text_scalar(&mut self, value: crate::text_scalar::TextScalar) -> Self::Value;
+    /// A `Secret` holding `text`, or `None` to refuse it. A secret has no
+    /// JSON form, so every builder refuses by default and `T.from_json`
+    /// can never make one. Only the native runtime call accepts one, for
+    /// the answer of a tool the runtime implements whose declared result
+    /// is a secret, such as `secret(name)` (native dispatch N3).
+    fn secret(&mut self, text: &str) -> Option<Self::Value> {
+        let _ = text;
+        None
+    }
     /// Release a value built for a decode that then failed.
     fn discard(&mut self, value: Self::Value) {
         drop(value);
@@ -159,7 +168,18 @@ impl<B: ValueBuilder> Decoder<'_, B> {
                     self.decode_variant(json, ir_type, path)
                 }
             }
+            Type::Conflict(row, _) => self.decode_variant(json, &crate::conflict_decl(row), path),
             Type::JsonValue => Ok(self.builder.json(json)),
+            // A builder that accepts secrets gets the text; every other
+            // decode is refused as before. The message never quotes the
+            // JSON, which may be the secret.
+            Type::Secret => match json {
+                J::String(text) => self.builder.secret(text),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                JsonDecodeError::new(path, "a type with a JSON form (`Secret` has none)", json_kind(json))
+            }),
             Type::Grounded(_) => Err(JsonDecodeError::new(
                 path,
                 "a grounded value produced by a retrieval",
@@ -296,7 +316,7 @@ impl<B: ValueBuilder> Decoder<'_, B> {
             return Err(mismatch(path, &ir_type.name, json));
         };
         if self.unknown_fields == UnknownFields::Reject {
-            if let Some(extra) = object.keys().find(|k| !ir_type.fields.iter().any(|f| &f.name == *k)) {
+            if let Some(extra) = object.keys().find(|k| !ir_type.fields.iter().any(|f| f.key() == k.as_str())) {
                 let mark = path.len();
                 push_key(path, extra);
                 let error = JsonDecodeError::new(path, format!("no field (`{}` declares no `{extra}`)", ir_type.name), "a value");
@@ -307,8 +327,10 @@ impl<B: ValueBuilder> Decoder<'_, B> {
         let mut fields = Vec::with_capacity(ir_type.fields.len());
         for field in &ir_type.fields {
             let mark = path.len();
-            push_key(path, &field.name);
-            let value = match object.get(&field.name) {
+            // The JSON key (`@json(key:)`, B01), which is also what the
+            // error path names: the sender wrote the key, not the field.
+            push_key(path, field.key());
+            let value = match object.get(field.key()) {
                 Some(raw) => match self.decode(raw, &field.ty, path) {
                     Ok(value) => {
                         if let Some(error) = refinement_violation(path, field, raw) {

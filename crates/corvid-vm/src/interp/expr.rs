@@ -11,6 +11,7 @@ pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
         IrLiteral::Int(n) => Value::Int(*n),
         IrLiteral::Float(f) => Value::Float(*f),
         IrLiteral::Decimal(d) => Value::Decimal(*d),
+        IrLiteral::Duration(d) => Value::Duration(*d),
         IrLiteral::TimeZone(z) => Value::TimeZone(*z),
         IrLiteral::Currency(c) => Value::Currency(*c),
         IrLiteral::Locale(l) => Value::Locale(Arc::new(l.clone())),
@@ -439,17 +440,7 @@ mod tests {
 /// Python-style float rendering: always shows a decimal point
 /// or exponent so string output round-trips visibly typed.
 fn render_float(f: f64) -> String {
-    let rendered = format!("{f}");
-    if rendered.contains('.')
-        || rendered.contains('e')
-        || rendered.contains('E')
-        || rendered.contains("inf")
-        || rendered.contains("NaN")
-    {
-        rendered
-    } else {
-        format!("{rendered}.0")
-    }
+    corvid_runtime::number_text::float_to_string(f)
 }
 
 /// Checked Float->Int conversion shared by `floor`/`ceil`/`round`
@@ -785,18 +776,26 @@ pub(super) fn eval_builtin_method(
                 }
             };
             let headers = response_field(&recv, "headers", span)?;
-            let found = match &headers {
-                Value::List(pairs) => pairs.iter_cloned().into_iter().find_map(|pair| match pair {
-                    Value::List(pair) => match pair.iter_cloned().as_slice() {
-                        [Value::String(name), value @ Value::String(_)] if name.as_ref() == wanted => {
-                            Some(value.clone())
-                        }
+            // The lookup native code answers with too.
+            let pairs: Vec<(std::sync::Arc<str>, std::sync::Arc<str>)> = match &headers {
+                Value::List(pairs) => pairs
+                    .iter_cloned()
+                    .into_iter()
+                    .filter_map(|pair| match pair {
+                        Value::List(pair) => match pair.iter_cloned().as_slice() {
+                            [Value::String(name), Value::String(value)] => Some((name.clone(), value.clone())),
+                            _ => None,
+                        },
                         _ => None,
-                    },
-                    _ => None,
-                }),
-                _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
             };
+            let found = corvid_runtime::connectors::response_header(
+                pairs.iter().map(|(name, value)| (name.as_ref(), value.as_ref())),
+                &wanted,
+            )
+            .map(|value| Value::String(std::sync::Arc::from(value)));
             Ok(match found {
                 Some(value) => Value::OptionSome(crate::value::BoxedValue::new(value)),
                 None => Value::OptionNone,

@@ -374,16 +374,11 @@ impl RuntimeBuilder {
         let recorder = Recorder::for_tracer(&tracer, self.trace_schema_writer).map(Arc::new);
         let (mode, replay_error, rollout_seed) = if let Some(path) = self.replay_trace {
             let replay_load = if let Some((step_1based, replacement)) = self.replay_mutation {
-                ReplaySource::from_path_for_writer_with_mutation(
-                    path,
-                    self.trace_schema_writer,
-                    step_1based,
-                    replacement,
-                )
+                ReplaySource::from_path_with_mutation(path, step_1based, replacement)
             } else if let Some(model) = self.replay_model_swap {
-                ReplaySource::from_path_for_writer_with_model(path, self.trace_schema_writer, model)
+                ReplaySource::from_path_with_model(path, model)
             } else {
-                ReplaySource::from_path_for_writer(path, self.trace_schema_writer)
+                ReplaySource::from_path(path)
             };
             match replay_load {
                 Ok(source) => (
@@ -499,6 +494,10 @@ impl RuntimeBuilder {
             // ordinary run has no durable job, which is exactly what
             // makes protocol execution refuse outside one.
             durable_job: None,
+            // A slow subscriber that falls this far behind is told it
+            // lagged and takes a fresh snapshot (B14).
+            table_commits: tokio::sync::broadcast::channel(1024).0,
+            instance_id: crate::tables::new_instance_id(),
         }
     }
 }

@@ -181,7 +181,7 @@ agent failed() -> Result<String, String>:
     }
     assert!(trace.contains(r#""result":{"__corvid_secret_scrubbed__":"you sent <redacted>"}"#), "{trace}");
     assert!(
-        trace.contains(r#""result":{"__corvid_secret_scrubbed__":true,"__corvid_tool_error__":"tool `fail` failed: bad key <redacted>"}"#),
+        trace.contains(r#""result":{"__corvid_outage__":true,"__corvid_secret_scrubbed__":true,"__corvid_tool_error__":"tool `fail` failed: bad key <redacted>"}"#),
         "{trace}"
     );
 }

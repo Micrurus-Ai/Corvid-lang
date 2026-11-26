@@ -115,6 +115,7 @@ async fn run_no_args(src: &str, entry: &str, runtime: &Runtime) -> Result<Value,
     run_agent(&ir, entry, vec![], runtime).await
 }
 
+/// The 1-based step of `prompt`'s result, as replay reports steps.
 fn llm_result_step(trace_path: &Path, prompt: &str) -> usize {
     read_events_from_path(trace_path)
         .unwrap()
@@ -129,6 +130,7 @@ fn llm_result_step(trace_path: &Path, prompt: &str) -> usize {
             )
         })
         .unwrap()
+        + 1
 }
 
 fn tool_call_step(trace_path: &Path, tool: &str) -> usize {

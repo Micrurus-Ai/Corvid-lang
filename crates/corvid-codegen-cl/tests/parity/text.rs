@@ -143,3 +143,31 @@ agent main() -> String:
     ));
     assert_eq!(out, "ok:ada|err:not URL-safe base64: unexpected character `!` at position 0");
 }
+
+/// `find_regex` and `find_all_regex` build `RegexMatch` records in native
+/// code: the text, byte positions and groups (group 0 is the whole match,
+/// and an absent group is `None`),
+/// the same on both tiers, with every match released.
+#[test]
+fn find_regex_and_find_all_regex_build_matches_alike() {
+    let out = assert_parity_text(
+        r#"
+agent group_or(groups: List<Option<String>>, index: Int, fallback: String) -> String:
+    return match groups[index]:
+        Some(text) -> text
+        None -> fallback
+
+agent first(text: String) -> String:
+    return match text.find_regex("(\\w+)@(\\w+)?\\.example"):
+        Some(found) -> found.text + " " + found.start.to_string() + "-" + found.end.to_string() + " " + group_or(found.groups, 1, "-") + " " + group_or(found.groups, 2, "none")
+        None -> "no match"
+
+agent main() -> String:
+    words = ""
+    for found in "id=7, id=42, id=1000".find_all_regex("id=(\\d+)"):
+        words = words + group_or(found.groups, 1, "?") + ";"
+    return first("mail ann@.example now") + " | " + first("nothing here") + " | " + words + " | " + "x".find_all_regex("y").length().to_string()
+"#,
+    );
+    assert_eq!(out, "ann@.example 5-17 ann none | no match | 7;42;1000; | 0");
+}

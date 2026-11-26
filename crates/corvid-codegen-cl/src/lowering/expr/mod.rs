@@ -7,6 +7,7 @@ mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
+mod refinement;
 mod scalar_call;
 mod try_propagate;
 mod try_retry;
@@ -23,6 +24,7 @@ pub(super) use operand::{
     lower_string_operand_maybe_borrowed,
 };
 pub(super) use overflow::{trap_if, with_overflow_trap};
+pub(super) use refinement::hold_refinement;
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
@@ -157,6 +159,20 @@ pub(super) fn lower_expr(
             }
             Ok(map)
         }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_scalar_to_string(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let (func, input) = match kind {
+                corvid_types::BuiltinMethodKind::FloatToString => (runtime.float_to_string, input),
+                corvid_types::BuiltinMethodKind::BoolToString => {
+                    let widened = if builder.func.dfg.value_type(input) == I8 { builder.ins().uextend(I64, input) } else { input };
+                    (runtime.bool_to_string, widened)
+                }
+                _ => (runtime.int_to_string, input),
+            };
+            let call = module.declare_func_in_func(func, builder.func);
+            let call = builder.ins().call(call, &[input]);
+            Ok(builder.inst_results(call)[0])
+        }
         IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
             let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             overflow::convert_number(builder, module, *kind, input, expr.span)
@@ -285,13 +301,53 @@ pub(super) fn lower_expr(
                 receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
         }
-        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
-            // B04 — a native `Secret` does not exist, so an HMAC keyed by
-            // one never reaches here; refuse it by name if it does.
-            if let Some(key) = args.iter().find(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret)) {
-                return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, key.span));
+        // Native dispatch N4 — a `Response` is a record (see
+        // `response_record`): `status()` and `body()` are field reads,
+        // lowered as one so they own and release exactly as a field
+        // read does, and `header(name)` asks the runtime.
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ResponseStatus | corvid_types::BuiltinMethodKind::ResponseBody),
+            receiver,
+            ..
+        } => {
+            let field = if *kind == corvid_types::BuiltinMethodKind::ResponseStatus { "status" } else { "body" };
+            let read = IrExpr {
+                kind: IrExprKind::FieldAccess { target: receiver.clone(), field: field.to_string() },
+                ty: expr.ty.clone(),
+                span: expr.span,
+            };
+            lower_expr(builder, &read, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ResponseHeader, receiver, args } => {
+            let (offset, _) = record_field(runtime, &receiver.ty, "headers", expr.span)?;
+            let (record, record_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let headers = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+            let (name, name_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let lookup = module.declare_func_in_func(runtime.response_header, builder.func);
+            let call = builder.ins().call(lookup, &[headers, name]);
+            let found = builder.inst_results(call)[0];
+            if !name_borrowed {
+                emit_release(builder, module, runtime, name);
             }
-            let method = crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard");
+            if !record_borrowed {
+                emit_release(builder, module, runtime, record);
+            }
+            Ok(found)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
+            // An HMAC keyed by a `Secret` calls the entry point that opens
+            // the runtime's secret object (N3b).
+            let keyed_by_secret = args.iter().any(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret));
+            let method = match crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard") {
+                crate::text_scalar::NativeScalarMethod::Call(operation) if keyed_by_secret => {
+                    crate::text_scalar::NativeScalarMethod::Call(operation.keyed_by_secret())
+                }
+                other => other,
+            };
             scalar_call::lower_scalar_method(
                 builder, expr, method,
                 |operation| runtime.bytes_operations.get(&operation).copied(),
@@ -304,6 +360,44 @@ pub(super) fn lower_expr(
             decimal::lower_decimal_method(
                 builder, expr, method, receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
+        }
+        // `find_regex` and `find_all_regex`: the runtime runs the match and
+        // builds the `Option<RegexMatch>` or `List<RegexMatch>` from the
+        // decode plan of the result type (`RegexMatch` is a record here,
+        // see `regex_match_record`).
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::StringFindRegex | corvid_types::BuiltinMethodKind::StringFindAllRegex),
+            receiver,
+            args,
+        } => {
+            let (text, text_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let (pattern, pattern_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let method = runtime
+                .text_methods
+                .iter()
+                .find(|(declared, _)| declared == kind)
+                .map(|(_, id)| *id)
+                .ok_or_else(|| CodegenError::cranelift(format!("text method {kind:?} was not declared"), expr.span))?;
+            let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, &expr.ty, expr.span)?;
+            let plan = module.declare_data_in_func(plan, builder.func);
+            let plan = builder.ins().symbol_value(I64, plan);
+            let plan_len = builder.ins().iconst(I64, plan_len);
+            let table = module.declare_data_in_func(table, builder.func);
+            let table = builder.ins().symbol_value(I64, table);
+            let func = module.declare_func_in_func(method, builder.func);
+            let call = builder.ins().call(func, &[text, pattern, plan, plan_len, table]);
+            let value = builder.inst_results(call)[0];
+            if !pattern_borrowed {
+                emit_release(builder, module, runtime, pattern);
+            }
+            if !text_borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(value)
         }
         IrExprKind::BuiltinMethod { kind, receiver, .. }
             if crate::native_text_method(*kind) && !crate::text_methods::native_regex_method(*kind) => {
@@ -500,6 +594,10 @@ pub(super) fn lower_expr(
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
         // B06 — a native zone, currency or locale is its canonical
         // text: the IANA name, the ISO 4217 code, the BCP 47 tag.
+        // B06 — a native `Duration` is its canonical ISO 8601 text.
+        IrExprKind::Literal(IrLiteral::Duration(duration)) => {
+            lower_string_literal(builder, module, runtime, &duration.to_string(), expr.span)
+        }
         IrExprKind::Literal(IrLiteral::TimeZone(zone)) => {
             lower_string_literal(builder, module, runtime, &zone.to_string(), expr.span)
         }
@@ -576,6 +674,20 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // Native dispatch N3 — `==` and `!=` on secrets are the runtime's
+        // constant-time comparison; the checker refuses every other
+        // operator on a secret.
+        IrExprKind::BinOp { op, left, right }
+            if matches!(op, BinaryOp::Eq | BinaryOp::NotEq)
+                && matches!(crate::text_scalar::scalar_of(&left.ty), Type::Secret) =>
+        {
+            scalar_call::lower_scalar_binop(
+                builder,
+                runtime.secret_eq,
+                crate::text_scalar::ScalarBinary { operation: (), swapped: false, reading: crate::text_scalar::BinaryReading::Equality },
+                *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
         // B06, B04 — time, currency, locale and `Bytes` operators are
         // runtime calls; `@wrapping` does not apply to them, and `==` on
         // `Bytes` is the runtime's constant-time comparison.
@@ -838,6 +950,14 @@ pub(super) fn lower_expr(
                         ),
                         expr.span,
                     ));
+                }
+                // A connector operation is a runtime-owned call: the
+                // runtime sends it, records it and replays it.
+                if runtime.runtime_call_ops.contains(def_id) {
+                    return super::runtime_call::lower_runtime_call(
+                        builder, &tool, args, expr, current_return_ty, env, scope_stack,
+                        func_ids_by_def, module, runtime,
+                    );
                 }
                 let types = |id: DefId| runtime.ir_types.get(&id).cloned();
                 if let Some(held) = tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
@@ -1232,20 +1352,10 @@ pub(super) fn lower_expr(
                     Ok(builder.block_params(join_b)[0])
                 }
             }
+            // A prompt's arguments and reply cross in the public JSON form
+            // through the embedded plan (B1b), text-held scalars included;
+            // `lower_prompt_call` refuses a type with no native JSON form.
             IrCallKind::Prompt { def_id, .. } => {
-                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
-                if let Some(prompt) = runtime.ir_prompts.get(def_id) {
-                    if let Some(held) = prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
-                        .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
-                        return Err(CodegenError::not_supported(
-                            format!(
-                                "prompt `{callee_name}`: {}",
-                                crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
-                            ),
-                            expr.span,
-                        ));
-                    }
-                }
                 lower_prompt_call(
                     builder,
                     module,
@@ -1264,16 +1374,18 @@ pub(super) fn lower_expr(
             IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
                 let ty = runtime.ir_types.get(def_id).ok_or_else(||
                     CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
-                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                // A refinement message names the record, or the variant as the
+                // interpreter does.
+                let (fields, info, tag, owner) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
                     let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
                         CodegenError::cranelift("unknown constructor tag", expr.span))?;
-                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index), variant.name.as_str())
                 } else {
-                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None, ty.name.as_str())
                 };
                 let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder, module, runtime, fields, *info, tag,
+                    builder, module, runtime, owner, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,
@@ -1571,7 +1683,15 @@ pub(super) fn lower_expr(
             attempts,
             backoff,
             timeout_ms,
+            fallback,
         } => {
+            if fallback.is_some() {
+                // The tier picker routes these to the interpreter first.
+                return Err(CodegenError::not_supported(
+                    "`try ... else` runs on the interpreter until native code can catch outages (recoverable failures TE-3)".to_string(),
+                    expr.span,
+                ));
+            }
             if timeout_ms.is_some() {
                 return Err(CodegenError::not_supported(
                     "`try ... timeout <ms>` is interpreter-only today — the native tier's                      synchronous call lowering has no cancellation point; run through                      `corvid run --target=interpreter` (the default for effectful programs)"

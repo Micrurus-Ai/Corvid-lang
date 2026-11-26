@@ -22,13 +22,13 @@ createServer(async (req, res) => {
     for await (const line of createInterface({input:Readable.fromWeb(upstream.body)})) {
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
-      if (data === "[DONE]") { res.write("event: done\ndata: complete\n\n"); break; }
+      if (data === "[DONE]") { res.write("event: completed\ndata: null\n\n"); break; }
       const text = JSON.parse(data).choices[0]?.delta?.content;
-      if (typeof text === "string") res.write("data: " + JSON.stringify(text) + "\n\n");
+      if (typeof text === "string") res.write("event: chunk\ndata: " + JSON.stringify(text) + "\n\n");
     }
   } catch {
     if (!abort.signal.aborted) {
-      if (res.headersSent) res.write("event: error\ndata: provider unavailable\n\n");
+      if (res.headersSent) res.write("event: failed\ndata: " + JSON.stringify({error: "handler_failed", detail: "provider unavailable"}) + "\n\n");
       else res.writeHead(502);
     }
   } finally { if (!res.destroyed) res.end(); }

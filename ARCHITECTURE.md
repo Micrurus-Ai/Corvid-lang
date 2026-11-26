@@ -58,10 +58,7 @@ my_project/
 ├── tests/
 │   └── refund_bot_test.cor
 └── target/                  # generated, gitignored
-    ├── py/                  # Python transpile output (v0.1)
-    │   ├── main.py
-    │   ├── refund_bot.py
-    │   └── tools.py
+    ├── bin/                 # native executables
     ├── wasm/                # WASM output (v0.2+)
     └── trace/               # run traces (.jsonl)
 ```
@@ -276,28 +273,13 @@ It exposes:
 - **Memory primitives** — `session`, `memory` backed by SQLite (v0.3+).
 - **Python FFI** — an optional PyO3 bridge is compiled in. Cold on startup; lazy-loads CPython only if the program contains `import python "..."`. Users without Python imports never pay for Python.
 
-### Legacy Python runtime
+### Python tools
 
-For users building on `--target=python`, a parallel `corvid-runtime` Python package lives under `runtime/python/`. It mirrors the Rust runtime's public surface but implements everything in Python. Kept in sync with the Rust runtime's public API.
+`runtime/python/` is the `corvid_runtime` Python package, which holds only the `@tool` decorator. A project's `tools.py` uses it to supply tool implementations; `corvid serve` and `corvid run` load the file and register each function with the Rust runtime, which traces, approves and replays its calls like any other tool. The Python build target and the parallel Python runtime it called were retired on 2026-11-25.
 
 ### Generated native structure
 
 Native codegen via Cranelift produces a statically-linked binary under `target/bin/<name>`. The binary embeds the runtime library; no dynamic linking required for the runtime.
-
-### Generated Python structure (opt-in)
-
-```python
-# target/py/refund_bot.py — only produced when `corvid build --target=python`
-from corvid_runtime import tool_call, approve_gate, llm_call, register_tools, register_prompts
-
-async def refund_bot(ticket):
-    order = await tool_call("get_order", [ticket.order_id])
-    ...
-    await approve_gate("IssueRefund", [order.id, order.amount])
-    await tool_call("issue_refund", [order.id, order.amount])
-```
-
-Generated files are plain Python. Pytest, mypy, ruff, and IDEs treat them as regular modules.
 
 ---
 

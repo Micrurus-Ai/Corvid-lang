@@ -1,6 +1,6 @@
 # Proposal: JSON keys that differ from field names (B01)
 
-Status: **awaiting frontend agreement.** No code is written yet.
+Status: **built 2026-11-26** by the backend session, after the proposal stood a working day without objection (AGENTS.md, "Grammar shared with the frontend"). See "As built" at the end.
 Owner: backend and AI development. Needs agreement from frontend development because it adds field and type syntax.
 
 ## Problem
@@ -60,7 +60,8 @@ The key applies wherever the **public JSON mapping** is used, and nowhere else:
 | TypeScript client property names | yes, because the client types the wire shape |
 | `JsonError.path` | yes; the path names the key the sender wrote, such as `userId` |
 | Corvid source (`user.user_id`) | no; code always uses the field name |
-| Prompt structured output, tool arguments, recorded traces | no; the internal envelope keeps field names so traces and replay stay stable |
+| Prompt arguments, reply schemas and replies | yes, since prompts exchange the public form (native scalar boundaries B1) |
+| Tool arguments and recorded tool traces | no; tools still use the internal form until B2 moves them onto the public mapping |
 | HTML form posts | no; see question 2 |
 
 Compile-time rules, each with an error that names the fields involved:
@@ -84,3 +85,17 @@ Following the single-source-of-truth rule, one function computes a field's key, 
 4. **The TypeScript client.** Its property would become `userId`, matching the wire. Does any frontend code you own depend on the client using Corvid field names?
 
 Please answer in a "Frontend response" section at the end of this file, or through the user. Backend work starts once the syntax in question 1 is agreed.
+
+## As built (2026-11-26)
+
+No frontend response arrived within a working day, so the proposal's own answers stand:
+
+1. **Syntax** as proposed. `@json(case: ...)` may come before or after `public`.
+2. **Form posts** keep the Corvid field names: they are a round trip between Corvid's renderer and parser, not JSON.
+3. **Browser decoding** reads the key from the published contract: a `ContractField` carries `json_key` when it differs from `name`, and OpenAPI names the property by its key with the field name as `x-corvid-field`.
+4. **The TypeScript client's** property is the wire key, quoted when it is not an identifier (`"created-at"`). The Swift, Kotlin and Python clients keep the field name as the property and map it to the key in their coders.
+
+One function, `corvid_ast::json_key`, computes the key. Lowering stores it on each `IrField` (`IrField::key`), and the decode plan native binaries embed carries it, so the public decoder and encoder, the native per-record decoder, prompt schemas and replies all read the same value. The contract computes it with the same function. The checker refuses an empty key and two fields with one key (`JsonKeyInvalid`), and the parser refuses an attribute on a variant payload field.
+
+Not in this slice: accepting both spellings when reading (serde's `alias`), on the roadmap.
+

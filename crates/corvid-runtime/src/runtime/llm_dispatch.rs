@@ -191,10 +191,8 @@ impl Runtime {
                     // A tool that echoed a secret it was given in its
                     // error has the text replaced in the record only.
                     let recorded = match &revealed {
-                        Some(revealed) => revealed.recorded_error(&e.to_string()),
-                        None => serde_json::json!({
-                            crate::replay::CORVID_TOOL_ERROR_KEY: e.to_string(),
-                        }),
+                        Some(revealed) => revealed.recorded_error(&e),
+                        None => crate::replay::recorded_failure(&e),
                     };
                     self.tracer.emit(TraceEvent::ToolResult {
                         ts_ms: now_ms(),
@@ -1926,6 +1924,28 @@ fn dispatch_stdlib_random_tool(
             message: "unknown stdlib random tool (gate/dispatch mismatch)".to_string(),
         }),
     }
+}
+
+/// The tools the runtime implements that native code calls through
+/// `corvid_runtime_call` (native dispatch N2): the time tools, the
+/// random draws, the UUID tools and `secret_read`. Built from the gates
+/// `dispatch_tool` routes by, so the tier picker, the code generator and
+/// the runtime name the same tools. Every one takes and returns types
+/// whose internal and public JSON forms agree (no `Option`), which is
+/// why native code may decode their answers with the public decoder; a
+/// tool added here must pass the parity test in
+/// `corvid-driver/tests/native_runtime_tools.rs`. `secret(name)` and
+/// `random_token(bytes)` are on the list too (N3): their result is a
+/// `Secret`, which only the runtime call's decoder can build. So is
+/// `hash_password(secret, cost)`, whose secret argument the runtime call
+/// records as `<redacted>` and reveals only to the implementation.
+pub fn is_native_runtime_tool(name: &str) -> bool {
+    is_stdlib_time_tool(name)
+        || is_stdlib_random_tool(name)
+        || super::uuid::is_uuid_tool(name)
+        || name == "secret_read"
+        || is_stdlib_secret_value_tool(name)
+        || super::crypto_tools::is_password_hash_tool(name)
 }
 
 /// Exact-name gate for the executing secrets surface.

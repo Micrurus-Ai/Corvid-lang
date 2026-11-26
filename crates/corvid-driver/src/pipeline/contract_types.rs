@@ -49,9 +49,18 @@ pub(super) fn include_exchange_types(
         .chain(graph.into_iter().flat_map(|g| g.all_modules.iter().map(|(p, m)| (p, m.file.as_ref()))))
     {
         for decl in &file.decls {
-            if let Decl::Type(t) = decl {
-                types.insert((path.clone(), t.name.name.clone()), t.clone());
-            }
+            let record = match decl {
+                Decl::Type(t) => t.clone(),
+                Decl::Table(table) => {
+                    // Reachable rows need a synthetic public schema even if
+                    // the table itself was exported for other Corvid modules.
+                    let mut record = table.record.clone();
+                    record.visibility = Visibility::Private;
+                    record
+                }
+                _ => continue,
+            };
+            types.insert((path.clone(), record.name.name.clone()), record);
         }
     }
     let mut schemas = Schemas {
@@ -62,6 +71,7 @@ pub(super) fn include_exchange_types(
             .iter()
             .filter_map(|decl| match decl {
                 Decl::Type(t) => Some(t.name.name.clone()),
+                Decl::Table(table) => Some(table.name().name.clone()),
                 _ => None,
             })
             .collect(),

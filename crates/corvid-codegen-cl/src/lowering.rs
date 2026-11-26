@@ -53,7 +53,8 @@ use agent::*;
 mod entry;
 use entry::*;
 mod public_json;
-pub use public_json::native_public_json_type;
+mod runtime_call;
+pub use public_json::{native_public_json_type, native_runtime_call_types};
 use public_json::{lower_json_decode, lower_json_encode};
 
 pub fn lower_file(
@@ -61,6 +62,7 @@ pub fn lower_file(
     module: &mut ObjectModule,
     entry_agent_name: Option<&str>,
     tools_via_registry: bool,
+    connector_specs: Option<&str>,
 ) -> Result<HashMap<String, FuncId>, CodegenError> {
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut func_ids_by_def: HashMap<DefId, FuncId> = HashMap::new();
@@ -94,6 +96,15 @@ pub fn lower_file(
     // declare the matching `__corvid_tool_<name>` wrapper import.
     for tool in &ir.tools {
         runtime.ir_tools.insert(tool.id, tool.clone());
+        // A tool the runtime implements is a runtime-owned call (N2).
+        if corvid_runtime::runtime::is_native_runtime_tool(&tool.name) {
+            runtime.runtime_call_ops.insert(tool.id);
+        }
+    }
+    for connector in &ir.connectors {
+        for op in &connector.operations {
+            runtime.runtime_call_ops.insert(op.tool_id);
+        }
     }
 
     // Same pattern for prompt declarations. `IrCallKind::Prompt`
@@ -156,7 +167,7 @@ pub fn lower_file(
         let typeinfo_id = emit_struct_typeinfo(module, ty, destroy_id, trace_id, &runtime)?;
         runtime.struct_typeinfos.insert(ty.id, typeinfo_id);
         for (index, variant) in ty.variants.iter().enumerate() {
-            let tag = corvid_ir::IrField { name: "tag".into(), ty: Type::Int, refinement: None, span: variant.span };
+            let tag = corvid_ir::IrField { name: "tag".into(), ty: Type::Int, refinement: None, json_key: None, span: variant.span };
             let layout = corvid_ir::IrType {
                 id: ty.id, name: format!("variant.{}.{}", ty.id.0, index),
                 fields: std::iter::once(tag).chain(variant.fields.iter().cloned()).collect(),
@@ -315,12 +326,15 @@ pub fn lower_file(
         // Windows, which would otherwise regress every tool-free
         // `corvid run` invocation.
         let uses_runtime = ir_uses_runtime(ir);
+        // The connector specs `compile_to_object` projected from the
+        // program as checked; installed before the runtime is built.
         emit_entry_main(
             module,
             entry_agent,
             entry_func_id,
             &runtime,
-            uses_runtime,
+            uses_runtime || connector_specs.is_some(),
+            connector_specs,
         )?;
     }
 

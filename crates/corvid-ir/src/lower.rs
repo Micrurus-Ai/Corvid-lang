@@ -69,6 +69,37 @@ pub fn lower_with_modules(
     ir
 }
 
+/// The conflict case a built-in names, for `Changed`, `Deleted` and
+/// `Taken` (B09). A case is a sum-type variant of the reserved
+/// [`corvid_types::CONFLICT_TYPE_ID`] at run time.
+fn conflict_case(builtin: BuiltIn) -> Option<corvid_types::ConflictCase> {
+    Some(match builtin {
+        BuiltIn::Changed => corvid_types::ConflictCase::Changed,
+        BuiltIn::Deleted => corvid_types::ConflictCase::Deleted,
+        BuiltIn::Taken => corvid_types::ConflictCase::Taken,
+        _ => return None,
+    })
+}
+
+/// The pattern for one conflict case.
+fn conflict_pattern(case: corvid_types::ConflictCase, args: Vec<IrPattern>) -> IrPattern {
+    IrPattern::Variant {
+        owner: corvid_types::CONFLICT_TYPE_ID,
+        variant_index: case.index(),
+        variant_name: case.name().to_string(),
+        args,
+    }
+}
+
+/// Building one conflict case.
+fn conflict_constructor(case: corvid_types::ConflictCase, args: Vec<IrExpr>) -> IrExprKind {
+    IrExprKind::Call {
+        kind: IrCallKind::EnumConstructor { def_id: corvid_types::CONFLICT_TYPE_ID, variant_index: case.index() },
+        callee_name: case.name().to_string(),
+        args,
+    }
+}
+
 /// The revision of a table row that has never been stored (B09).
 fn zero_revision(span: Span) -> IrExpr {
     IrExpr { kind: IrExprKind::Literal(IrLiteral::Int(0)), ty: Type::Int, span }
@@ -82,6 +113,13 @@ const SYNTHETIC_ROUTE_AGENT_DEF_ID_BASE: u32 = 0x4000_0000;
 /// The stable name of the synthetic handler agent for a route (slice
 /// 52a): `__route__<METHOD>__<mangled-path>`. Deterministic so the
 /// route and its handler agent agree without threading extra state.
+/// The stable name of the synthetic agent that computes a `live`
+/// declaration's snapshot (B14): `__live__<mangled-path>`.
+pub fn synthetic_live_agent_name(path: &str) -> String {
+    let mangled: String = path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    format!("__live__{mangled}")
+}
+
 pub fn synthetic_route_agent_name(method: corvid_ast::HttpMethod, path: &str) -> String {
     let mangled: String = path
         .chars()
@@ -630,7 +668,13 @@ impl<'a> Lowerer<'a> {
                 .map(|e| e.name.name.clone())
                 .collect(),
             body: self.lower_block(&r.body),
-            handler_agent: synthetic_route_agent_name(r.method, &r.path),
+            // A `live` declaration's handler computes its snapshot. It is
+            // named apart from a GET route, which may share its path.
+            handler_agent: if r.is_live() {
+                synthetic_live_agent_name(&r.path)
+            } else {
+                synthetic_route_agent_name(r.method, &r.path)
+            },
             upload_policy: r.upload.clone(),
             approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
@@ -848,11 +892,15 @@ impl<'a> Lowerer<'a> {
         let fields = t
             .fields
             .iter()
-            .map(|f| IrField {
-                name: f.name.name.clone(),
-                ty: self.type_ref_to_type(&f.ty),
-                refinement: f.refinement,
-                span: f.span,
+            .map(|f| {
+                let key = corvid_ast::json_key(&f.name.name, f.json_key.as_deref(), t.json_case);
+                IrField {
+                    name: f.name.name.clone(),
+                    ty: self.type_ref_to_type(&f.ty),
+                    refinement: f.refinement,
+                    json_key: (key != f.name.name).then_some(key),
+                    span: f.span,
+                }
             })
             .collect();
         let variants = t
@@ -867,6 +915,7 @@ impl<'a> Lowerer<'a> {
                         name: f.name.name.clone(),
                         ty: self.type_ref_to_type(&f.ty),
                         refinement: f.refinement,
+                        json_key: None,
                         span: f.span,
                     })
                     .collect(),
@@ -1341,12 +1390,17 @@ impl<'a> Lowerer<'a> {
                 span: *span,
             },
             Stmt::Atomic { body, span } => {
-                // The checker proved every table here lives in one database.
-                let tables = corvid_types::table_ops::atomic_tables(body, self.file, self.symbols, self.bindings);
-                let database = tables
+                // The checker proved every table here, in this module or in
+                // the agents it calls in others, lives in one database.
+                let view = corvid_types::table_ops::ModuleView {
+                    file: self.file,
+                    symbols: self.symbols,
+                    bindings: self.bindings,
+                    module: self.current_module,
+                };
+                let database = corvid_types::table_ops::atomic_databases(body, view, self.module_resolution)
                     .first()
-                    .and_then(|table| corvid_types::table_ops::table_database(self.file, &table.name().name))
-                    .and_then(ir_database);
+                    .and_then(|database| ir_database(database));
                 IrStmt::Atomic { database, body: self.lower_block(body), span: *span }
             }
             Stmt::Break { span } => IrStmt::Break { span: *span },
@@ -1490,6 +1544,11 @@ impl<'a> Lowerer<'a> {
                 Literal::String(s) => IrLiteral::String(s.clone()),
                 Literal::Bool(b) => IrLiteral::Bool(*b),
                 Literal::Nothing => IrLiteral::Nothing,
+                // The checker read the same text with the same function,
+                // so a program that checked always has the value.
+                Literal::Duration { count, unit } => IrLiteral::Duration(
+                    corvid_types::duration_literal_value(count, unit).unwrap_or(corvid_time::Duration::ZERO),
+                ),
             }),
             Expr::Ident { name, .. } => self.lower_ident(name),
             Expr::StructLiteral {
@@ -1502,7 +1561,7 @@ impl<'a> Lowerer<'a> {
                 // type on this expression's span.
                 let def_id = match self.types.get(&e.span()) {
                     Some(Type::Struct(id)) => self.remap_def_id(*id),
-                    _ => DefId(u32::MAX),
+                    _ => corvid_types::UNRESOLVED_DEF_ID,
                 };
                 IrExprKind::StructLiteral {
                     def_id,
@@ -1640,12 +1699,14 @@ impl<'a> Lowerer<'a> {
                 attempts,
                 backoff,
                 timeout_ms,
+                fallback,
                 ..
             } => IrExprKind::TryRetry {
                 body: Box::new(self.lower_expr(body)),
                 attempts: *attempts,
                 backoff: *backoff,
                 timeout_ms: *timeout_ms,
+                fallback: fallback.as_ref().map(|f| Box::new(self.lower_expr(f))),
             },
             Expr::Replay {
                 trace,
@@ -1782,6 +1843,11 @@ impl<'a> Lowerer<'a> {
                 corvid_ast::Literal::String(s) => IrLiteral::String(s.clone()),
                 corvid_ast::Literal::Bool(b) => IrLiteral::Bool(*b),
                 corvid_ast::Literal::Nothing => IrLiteral::Nothing,
+                // A pattern is parsed by its own grammar, which reads no
+                // duration literal; this keeps the match total.
+                corvid_ast::Literal::Duration { count, unit } => IrLiteral::Duration(
+                    corvid_types::duration_literal_value(count, unit).unwrap_or(corvid_time::Duration::ZERO),
+                ),
             }),
             Pattern::Name { name, .. } => match self.bindings.get(&name.span) {
                 Some(Binding::Decl(def_id)) => {
@@ -1789,7 +1855,7 @@ impl<'a> Lowerer<'a> {
                         .variant_owners
                         .get(def_id)
                         .copied()
-                        .unwrap_or((DefId(u32::MAX), 0));
+                        .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                     IrPattern::Variant {
                         owner: self.remap_def_id(owner),
                         variant_index: idx,
@@ -1797,7 +1863,10 @@ impl<'a> Lowerer<'a> {
                         args: Vec::new(),
                     }
                 }
-                Some(Binding::BuiltIn(_)) => IrPattern::None_,
+                Some(Binding::BuiltIn(b)) => match conflict_case(*b) {
+                    Some(case) => conflict_pattern(case, Vec::new()),
+                    None => IrPattern::None_,
+                },
                 Some(Binding::Local(local_id)) => IrPattern::Bind {
                     local_id: *local_id,
                     name: name.name.clone(),
@@ -1824,13 +1893,16 @@ impl<'a> Lowerer<'a> {
                             .variant_owners
                             .get(def_id)
                             .copied()
-                            .unwrap_or((DefId(u32::MAX), 0));
+                            .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                         IrPattern::Variant {
                             owner: self.remap_def_id(owner),
                             variant_index: idx,
                             variant_name: name.name.clone(),
                             args: lowered_args,
                         }
+                    }
+                    Some(Binding::BuiltIn(b)) if conflict_case(*b).is_some() => {
+                        conflict_pattern(conflict_case(*b).expect("a conflict case"), lowered_args)
                     }
                     Some(Binding::BuiltIn(b)) => {
                         let first = Box::new(
@@ -1883,7 +1955,7 @@ impl<'a> Lowerer<'a> {
                     .variant_owners
                     .get(def_id)
                     .copied()
-                    .unwrap_or((DefId(u32::MAX), 0));
+                    .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                 IrExprKind::Call {
                     kind: IrCallKind::EnumConstructor {
                         def_id: self.remap_def_id(owner),
@@ -1898,6 +1970,7 @@ impl<'a> Lowerer<'a> {
                 name: id.name.clone(),
             },
             Some(Binding::BuiltIn(BuiltIn::None)) => IrExprKind::OptionNone,
+            Some(Binding::BuiltIn(BuiltIn::Deleted)) => conflict_constructor(corvid_types::ConflictCase::Deleted, Vec::new()),
             Some(Binding::BuiltIn(_)) => IrExprKind::Local {
                 local_id: LocalId(u32::MAX),
                 name: id.name.clone(),
@@ -2005,6 +2078,10 @@ impl<'a> Lowerer<'a> {
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::None)) => return IrExprKind::OptionNone,
+                Some(Binding::BuiltIn(b @ (BuiltIn::Changed | BuiltIn::Taken))) => {
+                    let case = conflict_case(*b).expect("a conflict case");
+                    return conflict_constructor(case, args.iter().map(|arg| self.lower_expr(arg)).collect());
+                }
                 Some(Binding::BuiltIn(BuiltIn::Page)) => {
                     // `Page(items, next_cursor)` (slice 52c-2).
                     let mut lowered = args.iter().map(|a| self.lower_expr(a));
@@ -2022,6 +2099,21 @@ impl<'a> Lowerer<'a> {
                         items: Box::new(items),
                         next_cursor: Box::new(next_cursor),
                     };
+                }
+                Some(Binding::BuiltIn(BuiltIn::LiveField)) => return self.lower_expr(&args[2]).kind,
+                Some(Binding::BuiltIn(BuiltIn::LiveArguments)) => {
+                    let items = args[2..].iter().map(|arg| {
+                        let value = self.lower_expr(arg);
+                        if value.ty != Type::Int { return value; }
+                        IrExpr {
+                            ty: Type::String, span: arg.span(),
+                            kind: IrExprKind::BuiltinMethod {
+                                kind: corvid_types::BuiltinMethodKind::IntToString,
+                                receiver: Box::new(value), args: Vec::new(),
+                            },
+                        }
+                    }).collect();
+                    return IrExprKind::List { items };
                 }
                 Some(Binding::BuiltIn(BuiltIn::BrowserFieldKey | BuiltIn::BrowserRowKey)) if matches!(args.len(), 2 | 3) => {
                     return self.lower_expr(&args[1]).kind;
@@ -2195,7 +2287,7 @@ impl<'a> Lowerer<'a> {
                                 .variant_owners
                                 .get(def_id)
                                 .copied()
-                                .unwrap_or((DefId(u32::MAX), 0));
+                                .unwrap_or((corvid_types::UNRESOLVED_DEF_ID, 0));
                             IrCallKind::EnumConstructor {
                                 def_id: self.remap_def_id(owner),
                                 variant_index: idx,
@@ -2360,10 +2452,18 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// The database a table of this module lives in, following an `in`
+    /// that names a database imported from another module (B09 P11).
+    fn table_database(&self, table: &str) -> Option<&'a corvid_ast::DatabaseDecl> {
+        let (modules, current) = (self.module_resolution, self.current_module);
+        let imported = |database: &str| modules.and_then(|m| corvid_types::table_ops::imported_database(m, current, database));
+        corvid_types::table_ops::table_database_with(self.file, table, &imported)
+    }
+
     /// What a table's operations need: its row type, key, columns and database.
     fn ir_table(&self, table: &corvid_ast::TableDecl) -> Option<crate::types::IrTable> {
         let def_id = self.remap_def_id(self.symbols.lookup_def(&table.name().name)?);
-        let database = corvid_types::table_ops::table_database(self.file, &table.name().name)?;
+        let database = self.table_database(&table.name().name)?;
         Some(crate::types::IrTable {
             def_id,
             name: table.name().name.clone(),
@@ -2432,7 +2532,7 @@ impl<'a> Lowerer<'a> {
         let id = self
             .symbols
             .lookup_def(&t.name.name)
-            .unwrap_or(DefId(u32::MAX));
+            .unwrap_or(corvid_types::UNRESOLVED_DEF_ID);
         IrTest {
             id,
             name: t.name.name.clone(),
@@ -2451,7 +2551,7 @@ impl<'a> Lowerer<'a> {
         let id = self
             .symbols
             .lookup_def(&f.name.name)
-            .unwrap_or(DefId(u32::MAX));
+            .unwrap_or(corvid_types::UNRESOLVED_DEF_ID);
         IrFixture {
             id,
             name: f.name.name.clone(),
@@ -2465,7 +2565,7 @@ impl<'a> Lowerer<'a> {
     fn lower_mock(&self, m: &MockDecl) -> IrMock {
         let target_id = match self.bindings.get(&m.target.span) {
             Some(Binding::Decl(def_id)) => self.remap_def_id(*def_id),
-            _ => DefId(u32::MAX),
+            _ => corvid_types::UNRESOLVED_DEF_ID,
         };
         IrMock {
             target_id,

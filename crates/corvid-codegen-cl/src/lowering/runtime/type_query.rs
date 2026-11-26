@@ -24,6 +24,15 @@ pub fn option_uses_wrapper(option_ty: &Type) -> bool {
 
 
 
+/// The symbol of a record's typeinfo, trace or destructor function:
+/// `prefix`, then the record's name and id. The id makes it unique, so
+/// two records that share a name (the record native code holds each
+/// `Response<Body>` as, one per body type, or same-named records from
+/// different modules) never define the same symbol.
+pub(crate) fn record_symbol(prefix: &str, record: &corvid_ir::IrType) -> String {
+    format!("{prefix}{}_{}", record.name, record.id.0)
+}
+
 /// Stable, link-safe string from a Corvid `Type` for use in typeinfo
 /// symbol names. `List<List<String>>` → `List_List_String`, etc.
 pub fn mangle_type_name(ty: &Type) -> String {
@@ -111,6 +120,7 @@ pub fn mangle_type_name(ty: &Type) -> String {
         Type::Upload(inner) => format!("Upload_{}", mangle_type_name(inner)),
         Type::Page(inner) => format!("Page_{}", mangle_type_name(inner)),
         Type::Response(inner) => format!("Response_{}", mangle_type_name(inner)),
+        Type::Conflict(row, _) => format!("Conflict_{}", mangle_type_name(row)),
         Type::RouteParams(_) => "RouteParams".into(),
         Type::Unknown => "Unknown".into(),
     }
@@ -562,6 +572,8 @@ pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
         // B04 — a native `Bytes` value is a String holding its
         // canonical base64url text.
         | Type::Bytes
+        // Native dispatch N3 — the runtime's reference-counted secret.
+        | Type::Secret
         | Type::Struct(_)
         | Type::ImportedStruct(_)
         | Type::List(_)
@@ -575,6 +587,12 @@ pub fn is_refcounted_type_for(ty: &Type, question: NativeTypeQuestion) -> bool {
         Type::Tainted(inner) => is_refcounted_type_for(inner, question),
         // Native code represents JsonError as a record of strings.
         Type::JsonError => question == NativeTypeQuestion::Program,
+        // Native dispatch N4 — `compile_to_object` rewrites each
+        // `Response<Body>` as a record (see `response_record`).
+        Type::Response(_) => question == NativeTypeQuestion::Program,
+        // `compile_to_object` rewrites `RegexMatch` as a record (see
+        // `regex_match_record`).
+        Type::RegexMatch => question == NativeTypeQuestion::Program,
         _ => false,
     }
 }
@@ -614,12 +632,15 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // mentioning these types to the interpreter.
         Type::JsonValue => false,
         Type::JsonBuilder => false,
+        // Native dispatch N4 — rewritten as a record before lowering,
+        // native wherever its body is.
+        Type::Response(body) => question == NativeTypeQuestion::Program && is_native_value_type_for(body, question),
         // `compile_to_object` rewrites `JsonError` as an ordinary
         // record before lowering, so lowering never sees it.
         Type::JsonError => question == NativeTypeQuestion::Program,
-        // B03 — regular expressions are interpreter-tier until the
-        // native regex slice.
-        Type::RegexMatch => false,
+        // `compile_to_object` rewrites `RegexMatch` as an ordinary record
+        // before lowering (see `regex_match_record`).
+        Type::RegexMatch => question == NativeTypeQuestion::Program,
         // B06 — a native `Decimal`, time, currency or locale value is a
         // String holding its canonical text; every operation calls the
         // runtime's `corvid-decimal`, `corvid-time` or `corvid-currency`.
@@ -629,19 +650,18 @@ pub fn is_native_value_type_for(ty: &Type, question: NativeTypeQuestion) -> bool
         // calls the runtime's `corvid-crypto`, so equality stays
         // constant-time.
         Type::Bytes => true,
-        // `Secret` has no native form: every secret comes from a tool
-        // native binaries do not dispatch (see the driver's
-        // `NotNativeReason::SecretNotNative`).
-        Type::Secret => false,
+        // Native dispatch N3 — a secret is the runtime's opaque object,
+        // made by `secret(name)` or `random_token(bytes)` through the
+        // runtime call; only the runtime's exports read it.
+        Type::Secret => true,
         // Slice 51f — `Upload` / `Page` are HTTP-boundary types with
         // no native representation; the interpreter/serve tier handles
         // them. False routes any program mentioning them away from the
         // native backend, mirroring `DbHandle`.
         Type::Upload(_) | Type::Page(_) => false,
-        // B05 — a connector `Response` comes from a connector call, which
-        // runs on the interpreter until native dispatch of runtime-owned
-        // calls lands.
-        Type::Response(_) => false,
+        // A conflict comes from a table write, which runs on the
+        // interpreter until tables compile natively (B09 P6).
+        Type::Conflict(_, _) => false,
         Type::Function { .. } => crate::native_callback_type(ty),
         Type::Nothing
         | Type::RouteParams(_)
@@ -683,7 +703,8 @@ mod tests {
 
     /// The two questions answer alike except where a type changes
     /// between the checked program and lowering: `JsonError` becomes a
-    /// record, and `TraceId` waits on native replay. A new difference has
+    /// record, so does `Response<Body>`, and `TraceId` waits on native
+    /// replay. A new difference has
     /// to be added here on purpose.
     #[test]
     fn the_two_native_type_questions_differ_only_where_they_must() {
@@ -716,6 +737,10 @@ mod tests {
         assert!(is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Program));
         assert!(!is_native_value_type_for(&Type::JsonError, NativeTypeQuestion::Lowering));
         assert!(is_refcounted_type_for(&Type::JsonError, NativeTypeQuestion::Program));
+        let response = Type::Response(Box::new(Type::String));
+        assert!(is_native_value_type_for(&response, NativeTypeQuestion::Program));
+        assert!(!is_native_value_type_for(&response, NativeTypeQuestion::Lowering));
+        assert!(is_refcounted_type_for(&response, NativeTypeQuestion::Program));
         assert!(!is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Program));
         assert!(is_native_value_type_for(&Type::TraceId, NativeTypeQuestion::Lowering));
         // The differences reach inside containers too.

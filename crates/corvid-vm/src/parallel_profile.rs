@@ -171,7 +171,12 @@ fn expr_profile(ir: &IrFile, expr: &IrExpr, visited: &mut HashSet<String>) -> Ar
             acc = acc.combine(expr_profile(ir, value, visited));
         }
         IrExprKind::Ask { prompt, .. } => acc = acc.combine(expr_profile(ir, prompt, visited)),
-        IrExprKind::TryRetry { body, .. } => acc = acc.combine(expr_profile(ir, body, visited)),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            acc = acc.combine(expr_profile(ir, body, visited));
+            if let Some(fallback) = fallback {
+                acc = acc.combine(expr_profile(ir, fallback, visited));
+            }
+        }
         // Literals, locals, decls, weak/stream combinators, replay:
         // no tool/prompt reachable through them in a parallel arm.
         _ => {}

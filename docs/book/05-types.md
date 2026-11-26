@@ -471,6 +471,37 @@ feeds back to the model, so refined prompt outputs heal until they
 are structurally AND semantically valid — with every repair attempt
 still counted against `@budget`.
 
+A refinement holds for every value, however it is built, so anything
+that reads a `Person` can rely on `0 <= age <= 150`. A constant out of
+range is a compile error:
+
+```text
+`Person.age` must be between(0, 150), but this value is 969
+```
+
+A value computed at run time is checked where the record is built, by
+a constructor, a record literal or a `{ ..base }` update, or where a
+field is assigned. A value that breaks the refinement stops the run
+with the same message, as an overflowing `+` does: it came from the
+program, so the line that built it is the bug. A program that builds a
+refined value from a number it does not trust checks it first:
+
+```corvid
+type Person:
+    age: Int where between(0, 150)
+    name: String where len_between(1, 80)
+
+agent aged(years: Int) -> Person:
+    if years < 0 or years > 150:
+        return Person(0, "unknown")
+    return Person(years, "Ada")
+```
+
+A table row read from the database is checked too, so a row written
+outside the program cannot hand on a value its column forbids. Native
+code checks refinements the same way and stops with the same message,
+so a refined program compiles with `corvid build`.
+
 ## Sum types (enums)
 
 Sum types declare "one of N shapes" — unit variants are bare

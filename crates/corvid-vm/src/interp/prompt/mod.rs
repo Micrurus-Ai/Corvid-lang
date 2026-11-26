@@ -3,6 +3,7 @@ use super::{ExprFlow, Interpreter};
 mod adversarial;
 mod cost;
 mod journal;
+mod model_json;
 mod tools;
 mod route_dispatch;
 mod voting;
@@ -14,6 +15,10 @@ use corvid_ast::Span;
 use corvid_ir::IrPrompt;
 use corvid_runtime::{trace_text, TraceEvent};
 use corvid_types::Type;
+pub(crate) use model_json::{from_model_json, to_model_json, to_model_text};
+
+/// The program's declared types, by id, as the prompt renderers need them.
+pub(crate) type TypesById<'a> = std::collections::HashMap<corvid_resolve::DefId, &'a corvid_ir::IrType>;
 
 pub(super) const DEFAULT_COMPLETION_TOKEN_ESTIMATE: u64 = 256;
 
@@ -26,6 +31,58 @@ struct PromptCallResult {
 }
 
 impl<'ir> Interpreter<'ir> {
+    /// The prompt's rendered text, with each argument in its JSON form.
+    pub(super) fn render_prompt_text(&self, prompt: &IrPrompt, args: &[Value], span: Span) -> Result<String, InterpError> {
+        render_prompt(prompt, args, &self.types_by_id)
+            .map_err(|message| InterpError::new(InterpErrorKind::Marshal(message), span))
+    }
+
+    /// Each argument as the model is shown it, for the request and its
+    /// trace.
+    pub(super) fn model_args(&self, prompt: &IrPrompt, args: &[Value], span: Span) -> Result<Vec<serde_json::Value>, InterpError> {
+        prompt
+            .params
+            .iter()
+            .zip(args)
+            .map(|(param, value)| {
+                // An image travels as an attachment and a function as a
+                // tool definition, not as argument data; the recorded
+                // argument keeps the placeholder the trace has always shown.
+                if is_prompt_image(value) || matches!(param.ty, Type::Function { .. }) {
+                    return Ok(value_to_json(value));
+                }
+                to_model_json(value, &param.ty, &self.types_by_id).map_err(|e| {
+                    InterpError::new(InterpErrorKind::Marshal(format!("prompt argument `{}`: {e}", param.name)), span)
+                })
+            })
+            .collect()
+    }
+
+    /// The text a citation check compares: a `String`'s own words, and any
+    /// other value's JSON form. Quoting a string would make a short
+    /// context fail to match a longer reply that contains it; native code
+    /// compares the same texts.
+    pub(super) fn citation_text(&self, value: &Value, ty: &Type, span: Span) -> Result<String, InterpError> {
+        let value = match value {
+            Value::Grounded(grounded) => grounded.inner.get(),
+            other => other.clone(),
+        };
+        match value {
+            Value::String(text) => Ok(text.to_string()),
+            other => Ok(self.model_json(&other, ty, span)?.to_string()),
+        }
+    }
+
+    /// A value of type `ty` as a model is shown it.
+    pub(super) fn model_json(&self, value: &Value, ty: &Type, span: Span) -> Result<serde_json::Value, InterpError> {
+        let ty = match ty {
+            Type::Stream(inner) => inner.as_ref(),
+            other => other,
+        };
+        to_model_json(value, ty, &self.types_by_id)
+            .map_err(|e| InterpError::new(InterpErrorKind::Marshal(e), span))
+    }
+
     async fn finalize_prompt_result(
         &self,
         prompt: &'ir IrPrompt,
@@ -128,8 +185,8 @@ impl<'ir> Interpreter<'ir> {
             return Ok(result);
         };
 
-        let rendered = render_prompt(prompt, arg_values);
-        let partial = value_to_json(&result.value);
+        let rendered = self.render_prompt_text(prompt, arg_values, span)?;
+        let partial = self.model_json(&result.value, &prompt.return_ty, span)?;
         let continuation_rendered = format!(
             "{rendered}\n\nContinue from partial output:\n{}",
             trace_text(&partial)
@@ -180,7 +237,7 @@ impl<'ir> Interpreter<'ir> {
         arg_values: &[Value],
         span: Span,
     ) -> Result<PromptCallResult, InterpError> {
-        let rendered = render_prompt(prompt, arg_values);
+        let rendered = self.render_prompt_text(prompt, arg_values, span)?;
         if prompt.ensemble.is_some() {
             self.dispatch_ensemble_prompt(prompt, callee_name, arg_values, rendered.clone(), span)
                 .await
@@ -332,7 +389,7 @@ fn value_text(v: &Value) -> String {
     }
 }
 
-fn render_prompt(prompt: &IrPrompt, args: &[Value]) -> String {
+fn render_prompt(prompt: &IrPrompt, args: &[Value], types: &TypesById) -> Result<String, String> {
     // Conversation history (46c): with a history param, the
     // canonical rendered form is ALWAYS the role-labeled concat —
     // history in splice order between the declaration's system
@@ -344,14 +401,14 @@ fn render_prompt(prompt: &IrPrompt, args: &[Value]) -> String {
         let turn: Vec<(String, String)> = if prompt.messages.is_empty() {
             vec![(
                 "user".to_string(),
-                render_template(&prompt.template, prompt, args),
+                render_template(&prompt.template, prompt, args, types)?,
             )]
         } else {
             prompt
                 .messages
                 .iter()
-                .map(|m| (m.role.clone(), render_template(&m.template, prompt, args)))
-                .collect()
+                .map(|m| Ok((m.role.clone(), render_template(&m.template, prompt, args, types)?)))
+                .collect::<Result<_, String>>()?
         };
         for (role, content) in turn.iter().filter(|(r, _)| r == "system") {
             parts.push(format!("[{role}] {content}"));
@@ -374,9 +431,9 @@ fn render_prompt(prompt: &IrPrompt, args: &[Value]) -> String {
         for (role, content) in turn.iter().filter(|(r, _)| r != "system") {
             parts.push(format!("[{role}] {content}"));
         }
-        return parts.join("\n");
+        return Ok(parts.join("\n"));
     }
-    render_template(&prompt.template, prompt, args)
+    render_template(&prompt.template, prompt, args, types)
 }
 
 /// The three segments of a prompt request (slice 46c): declaration
@@ -419,8 +476,10 @@ pub(crate) fn build_message_segments(
     prompt: &IrPrompt,
     args: &[Value],
     rendered: &str,
+    types: &TypesById,
     span: Span,
 ) -> Result<MessageSegments, InterpError> {
+    let render_error = |message: String| InterpError::new(InterpErrorKind::Marshal(message), span);
     use corvid_runtime::llm::LlmMessage;
     let has_roles = !prompt.messages.is_empty();
     let has_history = prompt.history_param.is_some();
@@ -450,7 +509,7 @@ pub(crate) fn build_message_segments(
             let msg = LlmMessage {
                 images: Vec::new(),
                 role: m.role.clone(),
-                content: render_template(&m.template, prompt, args),
+                content: render_template(&m.template, prompt, args, types).map_err(render_error)?,
             };
             if m.role == "system" {
                 system.push(msg);
@@ -462,7 +521,7 @@ pub(crate) fn build_message_segments(
         turn.push(LlmMessage {
             images: Vec::new(),
             role: "user".to_string(),
-            content: render_template(&prompt.template, prompt, args),
+            content: render_template(&prompt.template, prompt, args, types).map_err(render_error)?,
         });
     }
 
@@ -512,7 +571,7 @@ pub(crate) fn build_message_segments(
     // The escalation path appends continuation text to `rendered`;
     // the canonical-prefix rule turns the suffix into a final user
     // message (46b) — applies to the history form too.
-    let canonical = render_prompt(prompt, args);
+    let canonical = render_prompt(prompt, args, types).map_err(render_error)?;
     if let Some(suffix) = rendered.strip_prefix(&canonical) {
         let suffix = suffix.trim();
         if !suffix.is_empty() {
@@ -535,16 +594,23 @@ fn is_prompt_image(value: &Value) -> bool {
     matches!(value, Value::Struct(s) if s.type_name().rsplit('.').next() == Some("PromptImage"))
 }
 
-fn render_template(template: &str, prompt: &IrPrompt, args: &[Value]) -> String {
+/// Fill each `{param}` with the argument's JSON form, as the model is
+/// shown it ([`to_model_text`]). An argument with no JSON form is an
+/// error naming the parameter, never a fallback.
+fn render_template(template: &str, prompt: &IrPrompt, args: &[Value], types: &TypesById) -> Result<String, String> {
     let mut out = template.to_string();
     for (param, value) in prompt.params.iter().zip(args) {
         let needle = format!("{{{}}}", param.name);
         if out.contains(&needle) {
-            let replacement = if is_prompt_image(value) { "[image]".to_string() } else { value_to_json(value).to_string() };
+            let replacement = if is_prompt_image(value) {
+                "[image]".to_string()
+            } else {
+                to_model_text(value, &param.ty, types).map_err(|e| format!("prompt argument `{}`: {e}", param.name))?
+            };
             out = out.replace(&needle, &replacement);
         }
     }
-    out
+    Ok(out)
 }
 
 /// The 46b-compatible flat form, used by the ensemble/adversarial
@@ -554,8 +620,9 @@ pub(super) fn render_messages(
     prompt: &IrPrompt,
     args: &[Value],
     rendered: &str,
+    types: &TypesById,
 ) -> Vec<corvid_runtime::llm::LlmMessage> {
-    build_message_segments(prompt, args, rendered, Span::new(0, 0))
+    build_message_segments(prompt, args, rendered, types, Span::new(0, 0))
         .map(|segments| segments.flatten())
         .unwrap_or_default()
 }

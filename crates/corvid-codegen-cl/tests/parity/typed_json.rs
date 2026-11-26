@@ -134,6 +134,24 @@ agent main() -> String:
     assert_eq!(text, "sku / String / a number");
 }
 
+/// `JsonError` written in a signature: the error passes to a helper
+/// agent and is read there, on both tiers, and released once.
+#[test]
+fn a_json_error_passes_to_a_helper_agent_that_names_its_type() {
+    let text = assert_parity_text(
+        r#"
+agent explain(problem: JsonError) -> String:
+    return problem.path + ": " + problem.message
+
+agent main() -> String:
+    return match Line.from_json("{\"sku\": 5, \"quantity\": 2}"):
+        Ok(line) -> line.sku
+        Err(problem) -> explain(problem)
+"#,
+    );
+    assert!(text.starts_with("sku: "), "{text}");
+}
+
 #[test]
 fn strict_decoding_refuses_undeclared_keys_on_both_tiers() {
     let text = assert_parity_text(
@@ -250,4 +268,34 @@ agent match_inner(inner: Result<Int, String>) -> Int:
         ),
         740,
     );
+}
+
+/// B01: a record with `@json(case:)` and a field's own `@json(key:)`
+/// reads and writes the same keys on both tiers, and a failure names the
+/// key the sender wrote.
+#[test]
+fn json_keys_match_on_both_tiers() {
+    let out = assert_parity_text(
+        r#"
+@json(case: camel)
+type Ticket:
+    ticket_id: Int
+    @json(key: "ID")
+    legacy_id: String
+    due_date: Option<String>
+
+agent main() -> String:
+    read = match Ticket.from_json("{\"ticketId\": 7, \"ID\": \"T-7\", \"dueDate\": null}"):
+        Ok(t) -> t.to_json() + " " + t.legacy_id
+        Err(e) -> "failed at " + e.path
+    wrong = match Ticket.from_json("{\"ticketId\": \"seven\", \"ID\": \"T\"}"):
+        Ok(t) -> "decoded"
+        Err(e) -> e.path
+    strict = match Ticket.from_json_strict("{\"ticket_id\": 7, \"ticketId\": 7, \"ID\": \"T\"}"):
+        Ok(t) -> "decoded"
+        Err(e) -> e.path
+    return read + " | " + wrong + " | " + strict
+"#,
+    );
+    assert_eq!(out, r#"{"ID":"T-7","dueDate":null,"ticketId":7} T-7 | ticketId | ticket_id"#);
 }

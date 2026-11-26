@@ -235,7 +235,7 @@ Use `None` for an absent option. Pass a type name as the second argument to `ask
 - `Response<Body>.body() -> Body`
 - `Response<Body>.header(name: String) -> Option<String>`
 
-A connector operation that declares `-> Response<Body>` (or `Result<Response<Body>, E>`) returns one: the decoded body, the HTTP status and the response headers. `header` compares names without case and returns the first match. `Set-Cookie` is never passed on. A `HEAD` operation returns `Response<Nothing>`. In mock mode, the operation's `mock:` is the body, answered with status 200 and no headers. A `Response` stays in the program that made the call: it cannot be a record field, a route, tool or prompt type, JSON, or part of `main`'s signature. See [connector declarations](grammar.md#connector-declarations).
+A connector operation that declares `-> Response<Body>` (or `Result<Response<Body>, E>`) returns one: the decoded body, the HTTP status and the response headers. `header` compares names without case and returns the first match. `Set-Cookie` is never passed on. A `HEAD` operation returns `Response<Nothing>`. In mock mode, the operation's `mock:` is the body, answered with status 200 and no headers. A `Response` stays in the program that made the call: it cannot be a record field, a route, tool or prompt type, JSON, or part of `main`'s signature. It works the same in native code, which holds it as a record of the status, the headers and the body, and answers `header` with the lookup the interpreter uses. See [connector declarations](grammar.md#connector-declarations).
 
 ## Every type
 

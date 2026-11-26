@@ -457,16 +457,16 @@ async fn harness_malformed_trace_mid_run_surfaces_as_errored_verdict_not_panic()
 }
 
 #[tokio::test]
-async fn harness_cross_tier_trace_is_errored_not_panic() {
+async fn harness_trace_load_error_is_errored_not_panic() {
     let dir = tempfile::tempdir().unwrap();
     let trace = trace_file(dir.path(), "native", WRITER_NATIVE);
     let state = Arc::new(Mutex::new(RunnerState::default()));
     state.lock().unwrap().set(
         &trace,
         "replay",
-        Scenario::Error(RuntimeError::CrossTierReplayUnsupported {
-            recorded_writer: WRITER_NATIVE.into(),
-            replay_writer: WRITER_INTERPRETER.into(),
+        Scenario::Error(RuntimeError::ReplayTraceLoad {
+            path: trace.clone(),
+            message: "unreadable".into(),
         }),
     );
 

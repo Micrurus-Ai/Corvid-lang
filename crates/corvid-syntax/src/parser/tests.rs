@@ -3778,6 +3778,7 @@ fn parses_connector_timeout_and_redirect_policy() {
     base_url: \"https://files.example.com\"
     timeout: 10s
     redirects: same_host
+    published: no
     modes: [real]
     operation upload(id: String) -> String:
         POST \"/files/{id}\"
@@ -3809,14 +3810,27 @@ fn connector_policy_items_reject_unclear_forms() {
         errors.first().map(|e| format!("{:?}", e.kind)).unwrap_or_default()
     };
 
-    let missing_unit = first_error(connector("    timeout: 10\n    redirects: never\n"));
+    let missing_unit = first_error(connector("    timeout: 10\n    redirects: never\n    published: no\n"));
     assert!(missing_unit.contains("timeout: 10s"), "{missing_unit}");
 
     let unknown = first_error(connector("    timeout: 10s\n    redirects: follow\n"));
     assert!(unknown.contains("`never`, `same_host`, or `allowed_hosts`"), "{unknown}");
 
-    let twice = first_error(connector("    timeout: 10s\n    timeout: 20s\n    redirects: never\n"));
+    let twice = first_error(connector("    timeout: 10s\n    timeout: 20s\n    redirects: never\n    published: no\n"));
     assert!(twice.contains("second `timeout:`"), "{twice}");
+
+    let maybe = first_error(connector("    timeout: 10s\n    redirects: never\n    published: maybe\n"));
+    assert!(maybe.contains("`published: yes`") && maybe.contains("`published: no`"), "{maybe}");
+
+    let published_twice =
+        first_error(connector("    timeout: 10s\n    redirects: never\n    published: no\n    published: yes\n"));
+    assert!(published_twice.contains("second `published:`"), "{published_twice}");
+
+    let (file, errors) =
+        parse_file_errs(&connector("    timeout: 10s\n    redirects: never\n    published: yes\n"));
+    assert!(errors.is_empty(), "{errors:?}");
+    let Decl::Connector(c) = &file.decls[0] else { panic!("a connector") };
+    assert_eq!(c.published, Some(true));
 }
 
 /// `query <param>` sits on the request line before any body, and
@@ -3827,6 +3841,7 @@ fn parses_operation_query_and_headers() {
     base_url: \"https://api.payments.example\"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation charge(filter: ChargeQuery, new: NewCharge, key: String) -> Charge:
         POST \"/v1/charges\" query filter body new
@@ -3855,6 +3870,7 @@ fn parses_an_any_host_connector() {
     hosts: allowed_hosts
     timeout: 10s
     redirects: allowed_hosts
+    published: no
     modes: [real]
     operation fetch(url: String) -> Response<String>:
         GET url
@@ -3879,6 +3895,7 @@ fn parses_a_streamed_operation_and_its_end_marker() {
     base_url: \"https://p.example\"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation deltas(q: String) -> Stream<Delta>:
         POST \"/v1/complete\" body q
@@ -3897,6 +3914,7 @@ fn parses_connector_with_config_and_operations() {
     let src = "connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     retry: 3
@@ -3968,6 +3986,7 @@ fn parses_optional_protocol_cancel_endpoint() {
     let src = r#"connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -4010,6 +4029,7 @@ fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
     let src = r#"connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -4050,6 +4070,7 @@ fn parses_verified_async_provider_protocol() {
     let src = r#"connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -4102,6 +4123,7 @@ fn a_protocol_without_a_resume_posture_is_a_compile_error() {
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4154,6 +4176,7 @@ fn a_cosmetically_edited_protocol_keeps_its_fingerprint() {
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4182,6 +4205,7 @@ connector video:
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4224,6 +4248,7 @@ fn a_protocol_without_an_idempotency_transport_is_a_compile_error() {
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4263,6 +4288,7 @@ fn an_unknown_resume_posture_is_rejected() {
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4296,6 +4322,7 @@ fn parses_connector_header_and_basic_auth() {
     let src = "connector svc:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://svc.example.com\"
     auth: header(\"X-Api-Key\", secret(\"API_KEY\"))
     operation ping() -> Pong:
@@ -4326,6 +4353,7 @@ fn connector_secret_must_not_be_a_literal() {
     let src = "connector svc:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://svc.example.com\"
     auth: bearer(\"raw-token\")
     operation ping() -> Pong:
@@ -4402,3 +4430,44 @@ fn parses_provisioning_claim_mapping_with_allowlist() {
 }
 
 
+
+/// B01: `@json(key: "...")` on a field and `@json(case: ...)` before a
+/// type, in either order with `public`; a variant payload field takes no
+/// attribute, because its value travels by position.
+#[test]
+fn json_keys_parse_on_fields_and_types() {
+    let (file, errors) = parse_file_errs(
+        "@json(case: camel)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    legacy_id: String\n\npublic @json(case: kebab)\ntype Tag:\n    created_at: String\n\n@json(case: pascal)\npublic type Note:\n    body: String\n",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let types: Vec<&corvid_ast::TypeDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            corvid_ast::Decl::Type(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(types[0].json_case, Some(corvid_ast::JsonCase::Camel));
+    assert_eq!(types[0].fields[0].json_key, None);
+    assert_eq!(types[0].fields[1].json_key.as_deref(), Some("ID"));
+    assert_eq!(types[1].json_case, Some(corvid_ast::JsonCase::Kebab));
+    assert_eq!(types[1].visibility, corvid_ast::Visibility::Public);
+    assert_eq!(types[2].json_case, Some(corvid_ast::JsonCase::Pascal));
+    assert_eq!(types[2].visibility, corvid_ast::Visibility::Public);
+
+    let first_error = |src: &str| {
+        let (_, errors) = parse_file_errs(src);
+        errors.first().map(|e| format!("{:?}", e.kind)).unwrap_or_default()
+    };
+    let snake = first_error("@json(case: snake)\ntype T:\n    a: Int\n");
+    assert!(snake.contains("`camel`, `pascal` or `kebab`"), "{snake}");
+    let field_case = first_error("type T:\n    @json(case: camel)\n    a: Int\n");
+    assert!(field_case.contains("goes before the `type`"), "{field_case}");
+    let type_key = first_error("@json(key: \"x\")\ntype T:\n    a: Int\n");
+    assert!(type_key.contains("goes on a field"), "{type_key}");
+    let twice = first_error("type T:\n    @json(key: \"a\")\n    @json(key: \"b\")\n    x: Int\n");
+    assert!(twice.contains("one `@json(key:"), "{twice}");
+    let variant = first_error("type T:\n    | Full(@json(key: \"max\") limit: Int)\n");
+    assert!(variant.contains("travels by position"), "{variant}");
+}

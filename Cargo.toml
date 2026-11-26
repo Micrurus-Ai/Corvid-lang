@@ -21,7 +21,6 @@ members = [
     "crates/corvid-prompt-format",
     "crates/corvid-vm",
     "crates/corvid-repl",
-    "crates/corvid-codegen-py",
     "crates/corvid-codegen-cl",
     "crates/corvid-codegen-wasm",
     "crates/corvid-runtime-core",
@@ -59,7 +58,9 @@ ariadne = "0.4"
 
 # serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: a `Float` written to a trace reads back as the same
+# number, so replay never reports a false divergence on a recorded draw.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.8"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 
@@ -96,7 +97,6 @@ corvid-ir       = { path = "crates/corvid-ir" }
 corvid-prompt-format = { path = "crates/corvid-prompt-format" }
 corvid-vm       = { path = "crates/corvid-vm" }
 corvid-repl     = { path = "crates/corvid-repl" }
-corvid-codegen-py = { path = "crates/corvid-codegen-py" }
 corvid-codegen-cl = { path = "crates/corvid-codegen-cl" }
 corvid-codegen-wasm = { path = "crates/corvid-codegen-wasm" }
 corvid-runtime-core = { path = "crates/corvid-runtime-core" }

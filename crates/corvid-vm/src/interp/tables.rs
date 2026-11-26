@@ -8,7 +8,7 @@
 
 use super::Interpreter;
 use crate::errors::{InterpError, InterpErrorKind};
-use crate::public_json::{decode_public_json_text, encode_public_json_text, UnknownFields};
+use crate::public_json::{decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields};
 use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
@@ -59,26 +59,24 @@ impl<'ir> Interpreter<'ir> {
                     None => Value::OptionNone,
                 }
             }
-            TableOp::Insert => {
+            TableOp::Insert | TableOp::Save | TableOp::Delete => {
                 let row = self.value_row(record, &arg).map_err(fail)?;
-                match self.runtime.table_insert(&target, row).await.map_err(runtime_error)? {
-                    Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, stored).map_err(fail)?)),
-                    Err(existing) => Value::ResultErr(BoxedValue::new(self.row_value(record, existing).map_err(fail)?)),
-                }
-            }
-            TableOp::Save | TableOp::Delete => {
-                let row = self.value_row(record, &arg).map_err(fail)?;
-                let outcome = if op == TableOp::Save {
-                    self.runtime.table_save(&target, row).await
-                } else {
-                    self.runtime.table_delete(&target, row).await
+                // How live subscriptions identify the row (B14), so the
+                // commit can name it and the revision it reached.
+                let key = self.live_key(record, table, &arg).map_err(fail)?;
+                let target = TableRef { row_key: Some(&key), ..target };
+                let outcome = match op {
+                    TableOp::Insert => self.runtime.table_insert(&target, row).await,
+                    TableOp::Save => self.runtime.table_save(&target, row).await,
+                    _ => self.runtime.table_delete(&target, row).await,
                 };
                 match outcome.map_err(runtime_error)? {
                     Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, stored).map_err(fail)?)),
-                    Err(Some(current)) => Value::ResultErr(BoxedValue::new(Value::OptionSome(BoxedValue::new(
-                        self.row_value(record, current).map_err(fail)?,
-                    )))),
-                    Err(None) => Value::ResultErr(BoxedValue::new(Value::OptionNone)),
+                    Err(conflict) => {
+                        let case = conflict.case();
+                        let row = conflict.into_row().map(|row| self.row_value(record, row)).transpose().map_err(fail)?;
+                        Value::ResultErr(BoxedValue::new(Value::conflict(case, row)))
+                    }
                 }
             }
         })
@@ -223,6 +221,31 @@ impl<'ir> Interpreter<'ir> {
     }
 
     /// A row value's columns, in declaration order.
+    /// A row's key as live subscriptions identify it: its key fields'
+    /// public JSON, in key order, as compact array text. The live
+    /// snapshot encodes rows with the same encoder, and
+    /// `LiveRow::from_json` reads its key from that JSON, so the two
+    /// agree by construction.
+    fn live_key(&self, record: &IrType, table: &IrTable, value: &Value) -> Result<String, String> {
+        let Value::Struct(fields) = value else {
+            return Err(format!("a `{}` row is {}", record.name, value.type_name()));
+        };
+        let values = table
+            .keys
+            .iter()
+            .map(|key| {
+                let field = record
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *key)
+                    .ok_or_else(|| format!("table `{}` has no key field `{key}`", table.name))?;
+                let value = fields.get_field(key).ok_or_else(|| format!("a `{}` row has no `{key}`", record.name))?;
+                encode_public_json(&value, &field.ty, &self.types_by_id)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(serde_json::Value::Array(values).to_string())
+    }
+
     fn value_row(&self, record: &IrType, value: &Value) -> Result<Row, String> {
         let Value::Struct(fields) = value else {
             return Err(format!("a `{}` row is {}", record.name, value.type_name()));
@@ -246,9 +269,19 @@ impl<'ir> Interpreter<'ir> {
             .iter()
             .zip(row)
             .map(|(field, column)| {
-                self.from_column(column, &field.ty)
-                    .map(|value| (field.name.clone(), value))
-                    .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))
+                let value = self
+                    .from_column(column, &field.ty)
+                    .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))?;
+                // A stored row holds its refinements too; one that does
+                // not was written outside this program.
+                if let Some(shown) = crate::conv::refinement_breach(field, &value) {
+                    let refinement = field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default();
+                    return Err(format!(
+                        "a stored `{}` row breaks `{}.{}` must be {refinement}: it holds {shown}",
+                        record.name, record.name, field.name
+                    ));
+                }
+                Ok((field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Value::Struct(StructValue::new(record.id, record.name.clone(), fields)))
@@ -356,6 +389,7 @@ fn table_target<'t>(
         .ok_or_else(|| format!("database `{}` names engine `{}`, which the runtime does not run", table.database.name, table.database.engine))?;
     Ok(TableRef {
         name: &table.name,
+        database: &table.database.name,
         keys: &table.keys,
         columns: &table.columns,
         kinds,
@@ -363,5 +397,6 @@ fn table_target<'t>(
         location: &table.database.location,
         engine,
         transaction,
+        row_key: None,
     })
 }

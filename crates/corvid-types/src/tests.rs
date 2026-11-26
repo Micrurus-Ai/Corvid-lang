@@ -8,10 +8,14 @@ mod time;
 mod time_zones;
 mod currency;
 mod json_forms;
+mod json_error_type;
+mod typed_path_parameters;
+mod try_else;
 mod text_methods;
 mod bytes;
 mod hmac;
 mod secrets;
+mod comparison_literals;
 mod passwords;
 mod signatures;
 
@@ -1652,6 +1656,51 @@ agent notify_members() -> String:
     assert!(unbounded(&all), "a query without take has no bound: {:?}", all.warnings);
 }
 
+/// B09 Refine-3: a query loop ending in `take(search.limit)` runs at most
+/// `limit`'s `between` maximum times, because every value of a refined
+/// field holds its refinement. An unrefined count has no bound.
+#[test]
+fn a_query_loop_is_bounded_by_a_refined_take() {
+    let program = |limit: &str| {
+        format!(
+            "\
+effect paid_notice:
+    cost: $0.30
+
+tool notify(name: String) -> String uses paid_notice
+
+database site:
+    engine: sqlite
+    location: \"site.sqlite\"
+
+table Member:
+    key id: Int
+    name: String
+
+type Search:
+    limit: {limit}
+
+@budget($1.00)
+agent notify_members(search: Search) -> String:
+    sent = \"\"
+    for member in Member.all().take(search.limit):
+        sent = notify(member.name)
+    return sent
+"
+        )
+    };
+    let unbounded = |c: &crate::Checked| c.warnings.iter().any(|w| matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. }));
+
+    let three = check(&program("Int where between(1, 3)"));
+    assert!(!has_effect_violation(&three, "cost") && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let fifty = check(&program("Int where between(1, 50)"));
+    assert!(has_effect_violation(&fifty, "cost"), "fifty notices at $0.30 exceed $1.00: {:?}", fifty.errors);
+
+    let unrefined = check(&program("Int"));
+    assert!(unbounded(&unrefined), "an unrefined count has no bound: {:?}", unrefined.warnings);
+}
+
 #[test]
 fn a_connector_operations_cost_counts_toward_the_budget() {
     // Regression (slice 52h-3): a connector `operation` resolves as a
@@ -1669,6 +1718,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     modes: [real]
     operation push_repo(owner: String) -> Repo dangerous uses http_write:
@@ -1704,6 +1754,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     retry: 3
     modes: [real]
@@ -1750,6 +1801,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.example.com\"
     modes: [real]
     operation submit_job(order: String) -> Job dangerous uses http_write:
@@ -2339,6 +2391,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2357,6 +2410,7 @@ const VERIFIED_PROVIDER_PROTOCOL: &str = r#"
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     retry: 3
     modes: [real]
@@ -2433,6 +2487,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2471,6 +2526,7 @@ type NewIssue:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2503,6 +2559,7 @@ type NewIssue:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2534,6 +2591,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2582,7 +2640,7 @@ connector svc:
     };
     let has = |messages: &[String], needle: &str| messages.iter().any(|m| m.contains(needle));
 
-    let declared = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    let declared = messages(connector("    timeout: 10s\n    redirects: never\n    published: no\n", ""));
     assert!(declared.is_empty(), "{declared:?}");
 
     let no_timeout = messages(connector("    redirects: never\n", ""));
@@ -2597,11 +2655,22 @@ connector svc:
         "{no_redirects:?}"
     );
 
-    let zero = messages(connector("    timeout: 0s\n    redirects: never\n", ""));
+    let no_publication = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    assert_eq!(no_publication.len(), 1, "{no_publication:?}");
+    assert!(
+        has(&no_publication, "connector `svc` must declare whether the published contract lists it")
+            && has(&no_publication, "`published: no`")
+            && has(&no_publication, "`published: yes`"),
+        "{no_publication:?}"
+    );
+    let listed = messages(connector("    timeout: 10s\n    redirects: never\n    published: yes\n", ""));
+    assert!(listed.is_empty(), "{listed:?}");
+
+    let zero = messages(connector("    timeout: 0s\n    redirects: never\n    published: no\n", ""));
     assert!(has(&zero, "`timeout: 0s`"), "{zero:?}");
 
     let too_long = messages(connector(
-        "    timeout: 10s\n    redirects: never\n",
+        "    timeout: 10s\n    redirects: never\n    published: no\n",
         "        timeout: 7200s\n",
     ));
     assert!(has(&too_long, "operation `ping` declares `timeout: 7200s`"), "{too_long:?}");
@@ -2634,6 +2703,7 @@ connector svc:
     auth: header("X-Api-Key", secret("SVC_KEY"))
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
 {operation}"#
         )
@@ -2721,6 +2791,7 @@ connector payments:
     base_url: "https://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [mock, real]
     operation charge(id: String) -> Response<Charge> uses http_read:
         GET "/v1/charges/{{id}}"
@@ -2830,7 +2901,7 @@ type Page:
     };
     let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
     let any_host = |operation: &str| {
-        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    modes: [real]\n{operation}")
+        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    published: no\n    modes: [real]\n{operation}")
     };
 
     let fine = messages(program(&any_host(
@@ -2844,7 +2915,7 @@ type Page:
     assert!(has(&path_on_any_host, "take the whole URL as a parameter"), "{path_on_any_host:?}");
 
     let url_on_base = messages(program(
-        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
+        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    published: no\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
     ));
     assert!(has(&url_on_base, "but the connector has a `base_url`"), "{url_on_base:?}");
 
@@ -2878,6 +2949,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation fetch(url: String) -> {ret} uses http_read:
         GET url
@@ -2920,6 +2992,7 @@ connector jobs:
     base_url: "https://jobs.example.com"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation submit(input: String) -> Result<Job, JobError> dangerous uses http_write:
         POST "/jobs" body input
@@ -2944,8 +3017,8 @@ connector jobs:
 
 /// A `Stream<T>` operation declares how its events arrive; nothing else
 /// declares `streams:`; a stream is the whole result and does not combine
-/// with `response: text` or `on failure`; `until` is for server-sent
-/// events; a mock is the `List<T>` of events.
+/// with `response: text`; `on failure` needs `Result` events; `until` is
+/// for server-sent events; a mock is the `List<T>` of events.
 #[test]
 fn streamed_operations_are_checked() {
     let program = |operation: &str| {
@@ -2964,6 +3037,7 @@ connector provider:
     base_url: "https://provider.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [mock, real]
 {operation}"#
         )
@@ -2997,7 +3071,18 @@ connector provider:
     let with_failure = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Delta(q)]\n",
     ));
-    assert!(has(&with_failure, "cannot also declare `on failure`"), "{with_failure:?}");
+    assert!(has(&with_failure, "so each event is a `Result`"), "{with_failure:?}");
+
+    // Decision 7: over `Result` events, `on failure` ends the stream with
+    // one final `Err` event.
+    let result_events = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(result_events.is_empty(), "{result_events:?}");
+    let wrong_variant = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Missing\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(has(&wrong_variant, "not a variant of its error type"), "{wrong_variant:?}");
 
     let until_lines = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines until \"end\"\n        mock: [Delta(q)]\n",
@@ -3008,6 +3093,72 @@ connector provider:
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        mock: Delta(q)\n",
     ));
     assert!(has(&wrong_mock, "the operation's mock is `List<"), "{wrong_mock:?}");
+}
+
+/// A `body` is a file sent as itself or a value with a JSON form; a
+/// `form` carries no files; `multipart` is a record of flat fields, files
+/// included; a response is read through JSON.
+#[test]
+fn connector_bodies_and_responses_have_a_wire_form() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect write:
+    cost: 1.0
+
+type Nested:
+    inner: Receipt
+
+type Receipt:
+    title: String
+    file: Upload<Pdf>
+    copies: List<Bytes>
+    note: Option<String>
+
+type Mixed:
+    title: String
+    file: Upload<Pdf>
+
+connector storage:
+    base_url: "https://storage.example"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        "    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" body file\n    operation b(data: Bytes) -> String uses write:\n        PUT \"/b\" body data\n    operation c(r: Receipt) -> String uses write:\n        POST \"/c\" multipart r\n",
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let json_with_file = messages(program("    operation a(m: Mixed) -> String uses write:\n        POST \"/a\" body m\n"));
+    assert!(has(&json_with_file, "sends `m` as its JSON body, but field `Mixed.file`: an upload has no JSON form"), "{json_with_file:?}");
+
+    let form_file = messages(program("    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" form file\n"));
+    assert!(has(&form_file, "carries text fields only"), "{form_file:?}");
+
+    let nested = messages(program("    operation a(n: Nested) -> String uses write:\n        POST \"/a\" multipart n\n"));
+    assert!(has(&nested, "multipart field `inner` is `Receipt`"), "{nested:?}");
+
+    let not_record = messages(program("    operation a(t: String) -> String uses write:\n        POST \"/a\" multipart t\n"));
+    assert!(has(&not_record, "so it is a record whose fields become the parts"), "{not_record:?}");
+
+    let upload_response = messages(program("    operation a() -> Upload<Pdf> uses write:\n        GET \"/a\"\n"));
+    assert!(has(&upload_response, "reads its response as `"), "{upload_response:?}");
 }
 
 #[test]
@@ -3024,6 +3175,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3052,6 +3204,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3077,6 +3230,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3110,6 +3264,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3136,6 +3291,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -3170,6 +3326,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -3205,6 +3362,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -8533,4 +8691,55 @@ agent open_demo(path: String) -> DbHandle:
     );
     use crate::types::Type;
     assert_eq!(Type::DbHandle.display_name(), "DbHandle");
+}
+
+/// B01: two fields may not share a JSON key, whether it comes from a
+/// field's `@json(key:)` or the type's `@json(case:)`, and a key is never
+/// empty.
+#[test]
+fn json_keys_name_one_field_each_and_are_not_empty() {
+    let messages = |src: &str| -> Vec<String> {
+        check(src)
+            .errors
+            .iter()
+            .filter(|e| matches!(e.kind, TypeErrorKind::JsonKeyInvalid { .. }))
+            .map(|e| e.kind.message())
+            .collect()
+    };
+    let clash = messages("@json(case: camel)\ntype Order:\n    order_id: Int\n    @json(key: \"orderId\")\n    legacy: Int\n");
+    assert_eq!(clash, vec!["type `Order`: fields `order_id` and `legacy` both have the JSON key `orderId`".to_string()]);
+    let empty = messages("type Order:\n    @json(key: \"\")\n    id: Int\n");
+    assert_eq!(empty, vec!["type `Order`: field `id` has an empty JSON key".to_string()]);
+    assert!(messages("@json(case: kebab)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    id: Int\n").is_empty());
+}
+
+/// A variant payload field takes a refinement as a record field does: a
+/// constant out of range is a compile error at the constructor, and a
+/// refinement that does not fit the field's type is refused at the
+/// declaration.
+#[test]
+fn variant_payload_fields_take_refinements() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    let base = "type BoardError:\n    | ColumnFull(limit: Int where between(1, 50))\n    | Closed\n\n";
+    assert!(errors(&format!("{base}agent ok() -> BoardError:\n    return ColumnFull(12)\n")).is_empty());
+    let out = errors(&format!("{base}agent bad() -> BoardError:\n    return ColumnFull(80)\n"));
+    assert!(out.iter().any(|m| m.contains("ColumnFull") && m.contains("limit") && m.contains("80")), "{out:?}");
+    let wrong = errors("type Problem:\n    | Named(label: String where between(1, 5))\n");
+    assert!(wrong.iter().any(|m| m.contains("requires an Int field")), "{wrong:?}");
+}
+
+/// B06: a duration literal is a `Duration`; a calendar unit and a
+/// fraction of a nanosecond are compile errors with the reason.
+#[test]
+fn duration_literals_check_and_explain_calendar_units() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent wait() -> Duration:\n    return 3 * 30 seconds + 1.5 minutes\n").is_empty());
+    let days = errors("agent wait() -> Duration:\n    return 30 days\n");
+    assert!(days.iter().any(|m| m.contains("`30 days` has no fixed length") && m.contains("add_days")), "{days:?}");
+    let week = errors("agent wait() -> Duration:\n    return 1 week\n");
+    assert!(week.iter().any(|m| m.contains("`1 week` has no fixed length")), "{week:?}");
+    let fraction = errors("agent wait() -> Duration:\n    return 0.5 nanoseconds\n");
+    assert!(fraction.iter().any(|m| m.contains("not a whole number of nanoseconds")), "{fraction:?}");
+    let mismatch = errors("agent wait() -> Int:\n    return 30 seconds\n");
+    assert!(!mismatch.is_empty(), "a duration is not an Int");
 }

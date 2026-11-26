@@ -30,54 +30,96 @@ fn compile_program(source: &str, source_path: &Path) -> Result<(corvid_ir::IrFil
     Ok((ir, file))
 }
 
-/// The databases the module at `source_path` declares. The program must
-/// compile, so each names a running engine and a location.
+/// The databases of the program at `source_path`: those its own module
+/// declares and those its modules' tables live in, imported or not, each
+/// with every table that lives in it. The program must compile, so each
+/// names a running engine and a location.
 pub fn declared_databases(source: &str, source_path: &Path) -> Result<Vec<DeclaredDatabase>, Vec<Diagnostic>> {
     let (_, file) = compile_program(source, source_path)?;
-    Ok(file
+    let (modules, _, _) = crate::modules::resolve_module_graph(&file, source_path, &|_| None);
+    let placed = placed_tables(&file, &modules);
+    let mut databases: Vec<&corvid_ast::DatabaseDecl> = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
             Decl::Database(db) => Some(db),
             _ => None,
         })
+        .collect();
+    for (_, database) in &placed {
+        if !databases.iter().any(|known| std::ptr::eq(*known, *database)) {
+            databases.push(database);
+        }
+    }
+    Ok(databases
+        .into_iter()
         .filter_map(|db| {
             Some(DeclaredDatabase {
                 name: db.name.name.clone(),
                 engine: TableEngine::from_declaration(&db.engine.as_ref()?.name, db.tls.as_ref().map(|t| t.name.as_str()), declared_connections(db))?,
                 location: db.location.clone()?,
-                tables: file
-                    .decls
+                tables: placed
                     .iter()
-                    .filter_map(|decl| match decl {
-                        Decl::Table(table) => Some(table.name().name.clone()),
-                        _ => None,
-                    })
-                    .filter(|table| corvid_types::table_ops::table_database(&file, table).is_some_and(|home| home.name.name == db.name.name))
+                    .filter(|(_, home)| std::ptr::eq(*home, db))
+                    .map(|(table, _)| table.name().name.clone())
                     .collect(),
             })
         })
         .collect())
 }
 
-/// The tables the module at `source_path` declares, with their columns'
-/// checked types and `revision` last, and the indexes its queries need.
-/// The program must compile.
+/// Every table of the program, the root module's and every imported
+/// module's, with the database it lives in, placed through each module's
+/// own view of its imports.
+fn placed_tables<'m>(
+    file: &'m corvid_ast::File,
+    modules: &'m corvid_resolve::ModuleResolution,
+) -> Vec<(&'m corvid_ast::TableDecl, &'m corvid_ast::DatabaseDecl)> {
+    let mut loaded: Vec<&corvid_resolve::ResolvedModule> = modules.all_modules.values().collect();
+    loaded.sort_by(|a, b| a.path.cmp(&b.path));
+    let views = std::iter::once((file, None)).chain(loaded.into_iter().map(|module| (module.file.as_ref(), Some(module))));
+    let mut placed = Vec::new();
+    for (module_file, module) in views {
+        for decl in &module_file.decls {
+            let Decl::Table(table) = decl else { continue };
+            let imported = |database: &str| corvid_types::table_ops::imported_database(modules, module, database);
+            if let Some(database) = corvid_types::table_ops::table_database_with(module_file, &table.name().name, &imported) {
+                placed.push((table, database));
+            }
+        }
+    }
+    placed
+}
+
+/// The tables of the program at `source_path`, its own and those of every
+/// module it imports, with their columns' checked types and `revision`
+/// last, and the indexes its queries need. Tables in other modules count
+/// because a `public database` is shared by import (B09 P11), so the
+/// migrations for a database cover every table that lives in it. The
+/// program must compile.
 pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema>, Vec<Diagnostic>> {
     let (ir, file) = compile_program(source, source_path)?;
+    let (modules, _, _) = crate::modules::resolve_module_graph(&file, source_path, &|_| None);
     let shapes = query_shapes(&ir);
-    let mut schemas: Vec<TableSchema> = file
-        .decls
-        .iter()
-        .filter_map(|decl| match decl {
-            Decl::Table(table) => Some(table),
-            _ => None,
-        })
-        .filter_map(|table| {
+    let placed = placed_tables(&file, &modules);
+    let mut problems = Vec::new();
+    for (i, (table, _)) in placed.iter().enumerate() {
+        if placed[..i].iter().any(|(earlier, _)| earlier.name().name == table.name().name) {
+            problems.push(Diagnostic {
+                origin: None,
+                span: corvid_ast::Span::new(0, 0),
+                message: format!("two modules of this program each declare a table named `{}`; a database stores one table under each name", table.name().name),
+                hint: Some("rename one of the tables".into()),
+            });
+        }
+    }
+    if !problems.is_empty() {
+        return Err(problems);
+    }
+    let mut schemas: Vec<TableSchema> = placed
+        .into_iter()
+        .filter_map(|(table, database)| {
             let record = ir.types.iter().find(|ty| ty.name == table.name().name)?;
-            // The checker proved the table lives in exactly one database
-            // whose engine and settings are stated.
-            let database = corvid_types::table_ops::table_database(&file, &record.name)?;
             let engine = TableEngine::from_declaration(
                 &database.engine.as_ref()?.name,
                 database.tls.as_ref().map(|tls| tls.name.as_str()),
@@ -90,13 +132,13 @@ pub fn table_schemas(source: &str, source_path: &Path) -> Result<Vec<TableSchema
                 renamed: table.renamed.iter().map(|r| (r.field.name.clone(), r.from.name.clone())).collect(),
                 retired: table.retired.iter().map(|name| name.name.clone()).collect(),
                 engine,
+                database: database.name.name.clone(),
                 unique: table.unique.iter().map(|rule| rule.iter().map(|c| c.name.clone()).collect()).collect(),
                 indexes: Vec::new(),
             })
         })
         .collect();
     // A table is private to its module, so these are every query it gets.
-    let mut problems = Vec::new();
     for schema in &mut schemas {
         let own: Vec<QueryShape> = shapes.iter().filter(|(table, _)| *table == schema.name).map(|(_, shape)| shape.clone()).collect();
         let columns: Vec<String> = schema.columns.iter().map(|(name, _)| name.clone()).collect();

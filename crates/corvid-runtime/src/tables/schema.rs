@@ -21,6 +21,9 @@ pub struct TableSchema {
     pub retired: Vec<String>,
     /// The engine its database runs on.
     pub engine: TableEngine,
+    /// The name of the database it lives in, which groups a program's
+    /// tables into one migration history per database.
+    pub database: String,
     /// Each `unique` rule's columns (B09 P10).
     pub unique: Vec<Vec<String>>,
     /// The indexes its queries and `unique` rules need (B09 P9, P10).

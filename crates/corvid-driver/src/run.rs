@@ -170,11 +170,15 @@ pub fn run_with_target(
         }
     };
 
-    let scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    let mut scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    // A connector's mock is a Corvid expression the interpreter evaluates.
+    if scan.is_ok() && !ir.connectors.is_empty() && connector_mode == Some(corvid_ast::ConnectorMode::Mock) {
+        scan = Err(crate::native_ability::NotNativeReason::ConnectorMockMode);
+    }
 
     match target {
         RunTarget::Native => match &scan {
-            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args),
+            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args, connector_mode),
             Err(reason) => {
                 eprintln!(
                     "error: `--target=native` refused: {reason}. Run without `--target` to fall back to the interpreter."
@@ -213,7 +217,7 @@ fn try_native_then_interpret(
     args: &[String],
     connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
-    match run_via_native_tier(path, source, ir, tools_lib, args) {
+    match run_via_native_tier(path, source, ir, tools_lib, args, connector_mode) {
         Ok(code) => Ok(code),
         Err(err) if is_missing_staticlib_error(&err) => {
             eprintln!("↻ running via interpreter: native staticlib unavailable");
@@ -501,7 +505,43 @@ fn run_via_native_tier(
     ir: &IrFile,
     tools_lib: Option<&Path>,
     args: &[String],
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
+    // A native program with connectors is checked as the interpreter's
+    // is before it starts, and runs with the selected mode and the
+    // project's HTTP policy (native dispatch N1).
+    let mut connector_env: Vec<(&str, String)> = Vec::new();
+    if !ir.connectors.is_empty() {
+        let policy = load_http_egress_policy(path);
+        let secret_present = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        let egress_refusal = |url: &str| {
+            policy.check(url).err().map(|err| match err {
+                corvid_runtime::RuntimeError::ToolFailed { message, .. } => message,
+                other => other.to_string(),
+            })
+        };
+        let ctx = crate::connector_startup::ConnectorRuntimeContext {
+            selected_mode: connector_mode,
+            egress_configured: policy.is_configured(),
+            egress_refusal: &egress_refusal,
+            replay_source_present: std::env::var_os("CORVID_REPLAY_TRACE_PATH").is_some(),
+            secret_present: &secret_present,
+            executable_modes: &[corvid_ast::ConnectorMode::Replay, corvid_ast::ConnectorMode::Real],
+        };
+        let refusals = crate::connector_startup::check_connector_startup(ir, &ctx);
+        if !refusals.is_empty() {
+            for refusal in &refusals {
+                eprintln!("{}", refusal.message());
+            }
+            return Ok(1);
+        }
+        if let Some(mode) = connector_mode {
+            connector_env.push(("CORVID_CONNECTOR_MODE", mode.as_str().to_string()));
+        }
+        if policy.is_configured() {
+            connector_env.push(("CORVID_HTTP_ALLOW", policy.allow_list().join(",")));
+        }
+    }
     let binary = build_or_get_cached_native(path, source, ir, tools_lib)?.path;
     // Slice 33Q17a: forward CLI positional args verbatim. The
     // codegen-emitted `main` decodes argv per parameter type, so the
@@ -509,6 +549,7 @@ fn run_via_native_tier(
     // pass the strings through.
     let status = std::process::Command::new(&binary)
         .args(args)
+        .envs(connector_env)
         .status()
         .map_err(|e| anyhow::anyhow!("spawn native binary `{}`: {e}", binary.display()))?;
     Ok(status.code().unwrap_or(1) as u8)
@@ -626,6 +667,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, real]
@@ -853,18 +895,8 @@ pub fn load_http_egress_policy(source_path: &Path) -> HttpEgressPolicy {
 /// environment, which other tests in the same process read.
 fn http_egress_policy_from(env_allow: Option<&str>, source_path: &Path) -> HttpEgressPolicy {
     // 1. Env override.
-    if let Some(env_allow) = env_allow {
-        let env_allow_trimmed = env_allow.trim();
-        if !env_allow_trimmed.is_empty() {
-            let hosts: Vec<String> = env_allow_trimmed
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !hosts.is_empty() {
-                return HttpEgressPolicy::new(Some(&hosts));
-            }
-        }
+    if let Some(policy) = env_allow.and_then(HttpEgressPolicy::from_allow_list) {
+        return policy;
     }
 
     // 2. corvid.toml.

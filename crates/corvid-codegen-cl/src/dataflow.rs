@@ -57,6 +57,8 @@ use corvid_types::Type;
 use std::collections::BTreeMap;
 
 mod cfg;
+mod loop_carried;
+pub(crate) use loop_carried::loop_carried_locals;
 mod liveness;
 mod ownership_plan;
 

@@ -30,8 +30,11 @@ A number literal is a `Decimal` wherever a `Decimal` is meant, and the compiler 
 | `price: Decimal = 19.99` | a `Decimal`, because the binding is declared `Decimal` |
 | `Line("Coffee", 4.50, 2)` | `4.50` is a `Decimal`, because the field is |
 | `price * 1.08` | `1.08` is a `Decimal`, because `price` is |
+| `s.price == Some(10)` | `Some(10)` is an `Option<Decimal>`, because `s.price` is: a side of a comparison written only as literals takes the other side's type |
 | `total: Decimal = 0.1 + 0.2` | exactly `0.3` |
 | `x = 0.1 + 0.2` | a `Float`: nothing here asks for a `Decimal` |
+
+The comparison rule is one rule for every type, not only `Decimal`: `zone == "Europe/Berlin"` reads the text as a `TimeZone` (checked against the IANA database, so an unknown zone is a compile error), `money != "USD"` as a `Currency`, and `zones == ["UTC"]` as a `List<TimeZone>`. It applies only to a side written as literals (text, numbers, `None`, `Some`, `Ok` or `Err` of one, or a list of them); a variable keeps its own type, so a `String` variable is never compared with a `TimeZone`.
 
 A literal keeps its scale, so `2.50` prints as `2.50`. A literal with more than 28 digits after the point, or more than 38 significant digits, is a compile error. An integer literal must fit in `Int`; write a larger whole number with a point, such as `100000000000000000000.0`.
 

@@ -1,9 +1,7 @@
-use crate::conv::json_to_value;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::interp::Interpreter;
 use crate::step::{StepAction, StepEvent};
 use crate::value::{value_confidence, Value};
-use crate::value_to_json;
 use corvid_ast::Span;
 use corvid_ir::IrPrompt;
 use corvid_runtime::{LlmRequest, TokenUsage, TraceEvent};
@@ -218,7 +216,7 @@ impl<'ir> Interpreter<'ir> {
         };
         let rendered_value = match &result.value {
             Value::String(s) => s.to_string(),
-            other => value_to_json(other).to_string(),
+            other => self.model_json(other, &prompt.return_ty, span)?.to_string(),
         };
         let score = super::judge_score(self.runtime, criteria, &rendered_value)
             .await
@@ -232,7 +230,7 @@ impl<'ir> Interpreter<'ir> {
             })?;
         if score < *min {
             return Err(InterpError::new(
-                InterpErrorKind::Marshal(format!(
+                InterpErrorKind::UnusableReply(format!(
                     "prompt `{callee_name}`: judged guard failed — score {score:.2} is below min {min} for criteria {criteria:?}"
                 )),
                 span,
@@ -263,20 +261,18 @@ impl<'ir> Interpreter<'ir> {
             other => other,
         };
 
-        let value = json_to_value(response_value, result_ty, &self.types_by_id).map_err(|e| {
+        let value = super::from_model_json(response_value, result_ty, &self.types_by_id).map_err(|e| {
             InterpError::new(
-                InterpErrorKind::Marshal(format!("prompt `{callee_name}`: {e}")),
+                InterpErrorKind::UnusableReply(format!("prompt `{callee_name}`: {e}")),
                 span,
             )
         })?;
 
         if let Some(param_idx) = prompt.cites_strictly_param {
             if let Some(ctx_value) = arg_values.get(param_idx) {
-                let ctx_text = match ctx_value {
-                    Value::Grounded(g) => value_to_json(&g.inner.get()).to_string(),
-                    other => value_to_json(other).to_string(),
-                };
-                let response_text = value_to_json(&value).to_string();
+                let ctx_ty = &prompt.params[param_idx].ty;
+                let ctx_text = self.citation_text(ctx_value, ctx_ty, span)?;
+                let response_text = self.citation_text(&value, result_ty, span)?;
                 if !corvid_runtime::citation::citation_verified(&ctx_text, &response_text) {
                     return Err(InterpError::new(
                         InterpErrorKind::Other(format!(
@@ -330,7 +326,7 @@ impl<'ir> Interpreter<'ir> {
         } else if usage.total_tokens > 0 {
             usage.total_tokens as u64
         } else {
-            super::super::effect_compose::estimate_tokens(&value_to_json(&value).to_string())
+            super::super::effect_compose::estimate_tokens(&self.model_json(&value, &prompt.return_ty, span)?.to_string())
         };
         let cost = self.prompt_call_cost(prompt, actual_model, rendered, usage);
 
@@ -352,7 +348,7 @@ impl<'ir> Interpreter<'ir> {
         selected_model: Option<String>,
         span: Span,
     ) -> Result<PromptCallResult, InterpError> {
-        let json_args: Vec<serde_json::Value> = arg_values.iter().map(value_to_json).collect();
+        let json_args = self.model_args(prompt, arg_values, span)?;
 
         if self.should_yield_boundary() {
             let action = self
@@ -370,7 +366,7 @@ impl<'ir> Interpreter<'ir> {
                     Type::Stream(inner) => inner.as_ref(),
                     other => other,
                 };
-                let value = json_to_value(val, result_ty, &self.types_by_id).map_err(|e| {
+                let value = super::from_model_json(val, result_ty, &self.types_by_id).map_err(|e| {
                     InterpError::new(
                         InterpErrorKind::Marshal(format!("prompt `{callee_name}` override: {e}")),
                         span,
@@ -379,7 +375,7 @@ impl<'ir> Interpreter<'ir> {
                 let confidence =
                     super::super::effect_compose::prompt_effective_confidence(prompt, &value);
                 let tokens = super::super::effect_compose::estimate_tokens(
-                    &value_to_json(&value).to_string(),
+                    &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                 );
                 let model_name = selected_model
                     .clone()
@@ -419,7 +415,7 @@ impl<'ir> Interpreter<'ir> {
         // window (minus the completion reserve). Deterministic —
         // replay reproduces the same truncation.
         let mut segments =
-            super::build_message_segments(prompt, arg_values, rendered, span)?;
+            super::build_message_segments(prompt, arg_values, rendered, &self.types_by_id, span)?;
         let mut final_rendered = rendered.to_string();
         if !segments.is_empty() {
             let window = self
@@ -488,7 +484,7 @@ impl<'ir> Interpreter<'ir> {
                 })
                 .await?;
             if let StepAction::Override(val) = action {
-                let value = json_to_value(val, result_ty, &self.types_by_id).map_err(|e| {
+                let value = super::from_model_json(val, result_ty, &self.types_by_id).map_err(|e| {
                     InterpError::new(
                         InterpErrorKind::Marshal(format!("prompt `{callee_name}` override: {e}")),
                         span,
@@ -497,7 +493,7 @@ impl<'ir> Interpreter<'ir> {
                 let confidence =
                     super::super::effect_compose::prompt_effective_confidence(prompt, &value);
                 let tokens = super::super::effect_compose::estimate_tokens(
-                    &value_to_json(&value).to_string(),
+                    &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                 );
                 let cost = self.prompt_call_cost(
                     prompt,
@@ -547,7 +543,7 @@ impl<'ir> Interpreter<'ir> {
         // accumulates onto the final result.
         let (mut last_err, mut wasted_cost) = match first {
             Ok(result) => return Ok(result),
-            Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+            Err(e) if matches!(e.kind, InterpErrorKind::UnusableReply(_)) => {
                 let wasted = self.prompt_call_cost(prompt, &actual_model, rendered, resp.usage);
                 (e, wasted)
             }
@@ -556,7 +552,7 @@ impl<'ir> Interpreter<'ir> {
         let attempts = prompt.repair_attempts.unwrap_or(0);
         let mut failed_value = resp.value;
         for _ in 0..attempts {
-            let InterpErrorKind::Marshal(feedback) = &last_err.kind else {
+            let InterpErrorKind::UnusableReply(feedback) = &last_err.kind else {
                 return Err(last_err);
             };
             let retry_rendered = format!(
@@ -567,7 +563,7 @@ impl<'ir> Interpreter<'ir> {
                 prompt: callee_name.to_string(),
                 model: actual_model.clone(),
                 rendered: retry_rendered.clone(),
-                args: arg_values.iter().map(value_to_json).collect(),
+                args: self.model_args(prompt, arg_values, span)?,
                 output_schema: crate::schema::prompt_output_schema(result_ty, &self.types_by_id),
                 sampling: self.resolve_sampling(prompt, &actual_model),
                 messages: Vec::new(),
@@ -598,7 +594,7 @@ impl<'ir> Interpreter<'ir> {
                     result.cost += wasted_cost;
                     return Ok(result);
                 }
-                Err(e) if matches!(e.kind, InterpErrorKind::Marshal(_)) => {
+                Err(e) if matches!(e.kind, InterpErrorKind::UnusableReply(_)) => {
                     wasted_cost +=
                         self.prompt_call_cost(prompt, &actual_model, &retry_rendered, retry_resp.usage);
                     failed_value = retry_resp.value;

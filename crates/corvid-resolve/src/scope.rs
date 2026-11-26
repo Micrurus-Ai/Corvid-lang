@@ -79,6 +79,8 @@ pub enum BuiltIn {
     BrowserFields,
     BrowserFieldKey,
     BrowserRowKey,
+    LiveArguments,
+    LiveField,
     /// Call: `Weak::upgrade(reference: Weak<T>) -> Option<T>`.
     WeakUpgrade,
     /// Call: `merge(streams: List<Stream<T>>) -> Stream<T>`.
@@ -134,10 +136,23 @@ pub enum BuiltIn {
     /// connector call produces one; programs read it with `status()`,
     /// `body()` and `header(name)`.
     Response,
+    /// B09 — `Conflict<Row>`, why a table write did not happen.
+    Conflict,
+    /// Call: `Changed(current: Row) -> Conflict<Row>`.
+    Changed,
+    /// The unit case `Deleted` of `Conflict<Row>`.
+    Deleted,
+    /// Call: `Taken(holder: Row) -> Conflict<Row>`.
+    Taken,
     /// B03 — `RegexMatch`, the compiler-known record `find_regex` and
     /// `find_all_regex` return. Nameable so helper agents can take a
     /// match as a parameter; only the regex methods construct one.
     RegexMatch,
+    /// B01 — `JsonError`, the compiler-known record `T.from_json`
+    /// returns on failure. Nameable so a helper agent can take the error
+    /// and a signature can return `Result<T, JsonError>`; only
+    /// `from_json` constructs one.
+    JsonError,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -226,6 +241,8 @@ impl SymbolTable {
         self.builtins.insert("None".into(), BuiltIn::None);
         self.builtins.insert("Weak::new".into(), BuiltIn::WeakNew);
         self.builtins.insert("range".into(), BuiltIn::Range);
+        self.builtins.insert("__live_arguments".into(), BuiltIn::LiveArguments);
+        self.builtins.insert("__live_field".into(), BuiltIn::LiveField);
         self.builtins.insert("__browser_row_key".into(), BuiltIn::BrowserRowKey);
         self.builtins.insert("__browser_field_key".into(), BuiltIn::BrowserFieldKey);
         self.builtins.insert("__browser_fields".into(), BuiltIn::BrowserFields);
@@ -249,8 +266,15 @@ impl SymbolTable {
         self.builtins.insert("Upload".into(), BuiltIn::Upload);
         self.builtins.insert("Page".into(), BuiltIn::Page);
         self.builtins.insert("Response".into(), BuiltIn::Response);
+        // B09 — a table write's conflict and its cases.
+        self.builtins.insert("Conflict".into(), BuiltIn::Conflict);
+        self.builtins.insert("Changed".into(), BuiltIn::Changed);
+        self.builtins.insert("Deleted".into(), BuiltIn::Deleted);
+        self.builtins.insert("Taken".into(), BuiltIn::Taken);
         // B03 — see the `BuiltIn::RegexMatch` docstring.
         self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
+        // B01 — see the `BuiltIn::JsonError` docstring.
+        self.builtins.insert("JsonError".into(), BuiltIn::JsonError);
     }
 
     /// Insert a top-level declaration.

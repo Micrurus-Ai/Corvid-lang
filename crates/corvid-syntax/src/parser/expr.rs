@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::Call { callee: Box::new(callee), args: vec![children], span })
     }
 
-    fn parse_child_list(&mut self) -> Result<Expr, ParseError> {
+    pub(super) fn parse_child_list(&mut self) -> Result<Expr, ParseError> {
         let start = self.expect(TokKind::Colon, ": before child views")?;
         self.expect_newline()?;
         self.expect(TokKind::Indent, "indented child expressions")?;
@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
     }
 
     fn field_key_builtin(&self, owner: &Expr) -> &'static str {
-        if matches!(owner, Expr::Ident { name, .. } if self.row_bindings.contains(&name.name)) {
+        if matches!(owner, Expr::Ident { name, .. } if self.row_bindings.iter().any(|row| row.name == name.name)) {
             "__browser_row_key"
         } else {
             "__browser_field_key"
@@ -84,6 +84,9 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokKind::KwIn, "in before the list of records")?;
         let source = self.parse_expr()?;
+        if matches!(self.peek(), TokKind::Colon) {
+            return self.parse_live_children(row, source, start);
+        }
         self.expect_contextual_ident("by")?;
         if row == "agent" {
             self.expect(TokKind::KwAgent, "the current agent row")?;
@@ -92,7 +95,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::Dot, "a key field on the current row")?;
         let (key, key_span) = self.expect_ident()?;
-        self.row_bindings.push(row.clone());
+        self.row_bindings.push(super::RowBinding { name: row.clone(), live: None });
         let children = self.parse_child_list();
         self.row_bindings.pop();
         let children = children?;
@@ -128,7 +131,7 @@ impl<'a> Parser<'a> {
 
     fn parse_browser_field_path(&mut self) -> Result<(Expr, Expr), ParseError> {
         let (owner, owner_span) = if matches!(self.peek(), TokKind::KwAgent)
-            && self.row_bindings.iter().any(|row| row == "agent") {
+            && self.row_bindings.iter().any(|row| row.name == "agent") {
             ("agent".to_owned(), self.bump().span)
         } else {
             self.expect_ident()?
@@ -411,12 +414,29 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A number just read, followed by a unit word, is a duration
+    /// literal (B06): `30 seconds`, `1.5 hours`. A number followed by a
+    /// word was a parse error before, so no program changes meaning.
+    fn duration_literal(&mut self, count: String, start: corvid_ast::Span) -> Option<Expr> {
+        let TokKind::Ident(word) = self.peek() else { return None };
+        corvid_ast::duration_unit(word)?;
+        let unit = word.clone();
+        self.bump();
+        Some(Expr::Literal {
+            value: Literal::Duration { count, unit },
+            span: start.merge(self.prev_span()),
+        })
+    }
+
     // primary := literal | IDENT | '(' expr ')' | '[' items? ']'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let start_span = self.peek_span();
         match self.peek().clone() {
             TokKind::Int(n) => {
                 self.bump();
+                if let Some(duration) = self.duration_literal(n.to_string(), start_span) {
+                    return Ok(duration);
+                }
                 Ok(Expr::Literal {
                     value: Literal::Int(n),
                     span: start_span,
@@ -424,6 +444,9 @@ impl<'a> Parser<'a> {
             }
             TokKind::Float { value: f, text } => {
                 self.bump();
+                if let Some(duration) = self.duration_literal(text.clone(), start_span) {
+                    return Ok(duration);
+                }
                 Ok(Expr::Literal {
                     value: Literal::Float { value: f, text },
                     span: start_span,
@@ -465,6 +488,13 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let (owner, key) = self.parse_browser_field_path()?;
                 let field_span = key.span();
+                if let Expr::Ident { name, .. } = &owner {
+                    let binding = self.row_bindings.iter().rev().find(|row| row.name == name.name);
+                    if let Some((server, live)) = binding.and_then(|row| row.live.as_ref()) {
+                        return Ok(super::authoring::call("__live_field",
+                            vec![server.clone(), live.clone(), key], start_span.merge(field_span)));
+                    }
+                }
                 Ok(super::authoring::call(self.field_key_builtin(&owner), vec![owner, key], start_span.merge(field_span)))
             }
             TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
@@ -481,7 +511,7 @@ impl<'a> Parser<'a> {
                     span: start.merge(self.prev_span()),
                 })
             }
-            TokKind::KwAgent if self.row_bindings.iter().any(|row| row == "agent") => {
+            TokKind::KwAgent if self.row_bindings.iter().any(|row| row.name == "agent") => {
                 let span = self.bump().span;
                 Ok(Expr::Ident { name: Ident::new("agent", span), span })
             }
@@ -712,60 +742,63 @@ impl<'a> Parser<'a> {
             None
         };
 
-        // The retry clause is optional when a timeout is present:
-        // `try slow_call() timeout 2000` stands alone.
-        if !matches!(self.peek(), TokKind::KwOn) {
-            let Some(timeout_ms) = timeout_ms else {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken {
-                        got: "a bare `try` with neither clause".into(),
-                        expected: "`timeout <ms>`, `on error retry ...`, or both".into(),
-                    },
-                    span: self.peek_span(),
-                });
+        // `on error retry N times backoff ...`, optional when a timeout
+        // or an `else` is present.
+        let (attempts, backoff) = if matches!(self.peek(), TokKind::KwOn) {
+            self.bump();
+            self.expect(TokKind::KwError, "`error` after `on` in retry expression")?;
+            self.expect(TokKind::KwRetry, "`retry` in retry expression")?;
+            let attempts = self.parse_u64_literal("retry attempt count")?;
+            self.expect(TokKind::KwTimes, "`times` after retry count")?;
+            self.expect(TokKind::KwBackoff, "`backoff` after retry count")?;
+            let backoff = match self.peek() {
+                TokKind::KwLinear => {
+                    self.bump();
+                    Backoff::Linear(self.parse_u64_literal("linear backoff delay in ms")?)
+                }
+                TokKind::KwExponential => {
+                    self.bump();
+                    Backoff::Exponential(self.parse_u64_literal("exponential backoff base delay in ms")?)
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(other),
+                            expected: "`linear <ms>` or `exponential <ms>`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
             };
-            return Ok(Expr::TryRetry {
-                body: Box::new(body),
-                attempts: 0,
-                backoff: Backoff::Linear(0),
-                timeout_ms: Some(timeout_ms),
-                span: start.merge(self.prev_span()),
-            });
-        }
-        self.expect(TokKind::KwOn, "`on` after `try` body")?;
-        self.expect(TokKind::KwError, "`error` after `on` in retry expression")?;
-        self.expect(TokKind::KwRetry, "`retry` in retry expression")?;
-        let attempts = self.parse_u64_literal("retry attempt count")?;
-        self.expect(TokKind::KwTimes, "`times` after retry count")?;
-        self.expect(TokKind::KwBackoff, "`backoff` after retry count")?;
-
-        let backoff = match self.peek() {
-            TokKind::KwLinear => {
-                self.bump();
-                Backoff::Linear(self.parse_u64_literal("linear backoff delay in ms")?)
-            }
-            TokKind::KwExponential => {
-                self.bump();
-                Backoff::Exponential(
-                    self.parse_u64_literal("exponential backoff base delay in ms")?,
-                )
-            }
-            other => {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken {
-                        got: describe_token(other),
-                        expected: "`linear <ms>` or `exponential <ms>`".into(),
-                    },
-                    span: self.peek_span(),
-                });
-            }
+            (attempts, backoff)
+        } else {
+            (0, Backoff::Linear(0))
         };
 
+        // `else <fallback>`: the value when the last attempt failed with
+        // an outage.
+        let fallback = if matches!(self.peek(), TokKind::KwElse) {
+            self.bump();
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        if timeout_ms.is_none() && attempts == 0 && fallback.is_none() {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "a bare `try` with no clause".into(),
+                    expected: "`timeout <ms>`, `on error retry ...` or `else <fallback>`".into(),
+                },
+                span: self.peek_span(),
+            });
+        }
         Ok(Expr::TryRetry {
             body: Box::new(body),
             attempts,
             backoff,
             timeout_ms,
+            fallback,
             span: start.merge(self.prev_span()),
         })
     }

@@ -16,6 +16,80 @@ pub struct ImportedStructType {
     pub name: String,
 }
 
+/// The cases a `Conflict<Row>` value can be. A narrower set is
+/// assignable to a wider one, so the result of `insert` (only `Taken`)
+/// can be returned as a written `Conflict<Row>` (every case).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConflictCases(u8);
+
+/// One case of a [`Type::Conflict`], in declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictCase {
+    /// `Changed(current)`: the row changed since it was read.
+    Changed,
+    /// `Deleted`: the row is gone.
+    Deleted,
+    /// `Taken(holder)`: another row holds its key or a unique value.
+    Taken,
+}
+
+impl ConflictCase {
+    /// Every case, in declaration order; a case's position is its
+    /// variant index at run time.
+    pub const ALL: [ConflictCase; 3] = [ConflictCase::Changed, ConflictCase::Deleted, ConflictCase::Taken];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ConflictCase::Changed => "Changed",
+            ConflictCase::Deleted => "Deleted",
+            ConflictCase::Taken => "Taken",
+        }
+    }
+
+    /// The case's payload field, if it has one.
+    pub fn field(self) -> Option<&'static str> {
+        match self {
+            ConflictCase::Changed => Some("current"),
+            ConflictCase::Deleted => None,
+            ConflictCase::Taken => Some("holder"),
+        }
+    }
+
+    pub fn index(self) -> u32 {
+        self as u32
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|case| case.name() == name)
+    }
+}
+
+impl ConflictCases {
+    /// Every case: what a written `Conflict<Row>` means.
+    pub const ALL: ConflictCases = ConflictCases(0b111);
+
+    pub fn of(cases: &[ConflictCase]) -> Self {
+        ConflictCases(cases.iter().fold(0, |bits, case| bits | 1 << case.index()))
+    }
+
+    pub fn contains(self, case: ConflictCase) -> bool {
+        self.0 & 1 << case.index() != 0
+    }
+
+    pub fn is_within(self, other: ConflictCases) -> bool {
+        self.0 & !other.0 == 0
+    }
+
+    pub fn union(self, other: ConflictCases) -> Self {
+        ConflictCases(self.0 | other.0)
+    }
+
+    /// The cases in declaration order.
+    pub fn cases(self) -> impl Iterator<Item = ConflictCase> {
+        ConflictCase::ALL.into_iter().filter(move |case| self.contains(*case))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
     // Primitives
@@ -128,6 +202,14 @@ pub enum Type {
     /// `header(name)`. It has no JSON form and never crosses a route,
     /// prompt, store or table boundary.
     Response(Box<Type>),
+
+    /// Compiler-known `Conflict<Row>` (B09): why a table write did not
+    /// happen — `Changed(current)`, `Deleted` or `Taken(holder)`. The
+    /// cases say which of them this value can be: a written
+    /// `Conflict<Row>` can be any, and each table operation returns only
+    /// the ones it produces, so a `match` is complete when it covers
+    /// those. [`ConflictCases`] has the rules.
+    Conflict(Box<Type>, ConflictCases),
 
     /// Compiler-known `TraceId` — an opaque handle to a recorded
     /// JSONL trace, used as the subject of a `replay <expr>:`
@@ -265,8 +347,18 @@ impl Type {
         })
     }
 
-    /// Human-readable name used in diagnostic messages.
+    /// Human-readable name used in diagnostic messages. A declared
+    /// struct reads `struct`; [`Self::display_name_with`] names it.
     pub fn display_name(&self) -> String {
+        self.display_name_with(&|_| None)
+    }
+
+    /// The type's name, with each declared struct named by `struct_name`
+    /// (`struct` when it gives none). The one renderer of a resolved
+    /// type: diagnostics use it without names, and the Application
+    /// Contract uses it to name the type an alias stands for.
+    pub fn display_name_with(&self, struct_name: &dyn Fn(DefId) -> Option<String>) -> String {
+        let name = |ty: &Type| ty.display_name_with(struct_name);
         match self {
             Type::Int => "Int".into(),
             Type::Float => "Float".into(),
@@ -282,19 +374,19 @@ impl Type {
             Type::String => "String".into(),
             Type::Bool => "Bool".into(),
             Type::Nothing => "Nothing".into(),
-            Type::Struct(_) => "struct".into(),
+            Type::Struct(id) => struct_name(*id).unwrap_or_else(|| "struct".into()),
             Type::ImportedStruct(imported) => imported.name.clone(),
             Type::Function { .. } => "function".into(),
-            Type::List(inner) => format!("List<{}>", inner.display_name()),
-            Type::Map(k, v) => format!("Map<{}, {}>", k.display_name(), v.display_name()),
-            Type::Stream(inner) => format!("Stream<{}>", inner.display_name()),
+            Type::List(inner) => format!("List<{}>", name(inner)),
+            Type::Map(k, v) => format!("Map<{}, {}>", name(k), name(v)),
+            Type::Stream(inner) => format!("Stream<{}>", name(inner)),
             Type::Result(ok, err) => {
-                format!("Result<{}, {}>", ok.display_name(), err.display_name())
+                format!("Result<{}, {}>", name(ok), name(err))
             }
-            Type::Option(inner) => format!("Option<{}>", inner.display_name()),
+            Type::Option(inner) => format!("Option<{}>", name(inner)),
             Type::Weak(inner, effects) => {
                 if effects.is_any() {
-                    format!("Weak<{}>", inner.display_name())
+                    format!("Weak<{}>", name(inner))
                 } else {
                     let names = effects
                         .effects()
@@ -307,16 +399,17 @@ impl Type {
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    format!("Weak<{}, {{{names}}}>", inner.display_name())
+                    format!("Weak<{}, {{{names}}}>", name(inner))
                 }
             }
-            Type::Grounded(inner) => format!("Grounded<{}>", inner.display_name()),
-            Type::Tainted(inner) => format!("Tainted<{}>", inner.display_name()),
-            Type::Partial(inner) => format!("Partial<{}>", inner.display_name()),
-            Type::ResumeToken(inner) => format!("ResumeToken<{}>", inner.display_name()),
-            Type::Upload(inner) => format!("Upload<{}>", inner.display_name()),
-            Type::Page(inner) => format!("Page<{}>", inner.display_name()),
-            Type::Response(inner) => format!("Response<{}>", inner.display_name()),
+            Type::Grounded(inner) => format!("Grounded<{}>", name(inner)),
+            Type::Tainted(inner) => format!("Tainted<{}>", name(inner)),
+            Type::Partial(inner) => format!("Partial<{}>", name(inner)),
+            Type::ResumeToken(inner) => format!("ResumeToken<{}>", name(inner)),
+            Type::Upload(inner) => format!("Upload<{}>", name(inner)),
+            Type::Page(inner) => format!("Page<{}>", name(inner)),
+            Type::Response(inner) => format!("Response<{}>", name(inner)),
+            Type::Conflict(row, _) => format!("Conflict<{}>", name(row)),
             Type::TraceId => "TraceId".into(),
             Type::DbHandle => "DbHandle".into(),
             Type::JsonValue => "JsonValue".into(),
@@ -362,29 +455,21 @@ impl Type {
     /// that can see declarations walk the fields too.
     /// Whether a `Response` appears anywhere inside this type.
     pub fn mentions_response(&self) -> bool {
-        match self {
-            Type::Response(_) => true,
-            Type::List(inner)
-            | Type::Stream(inner)
-            | Type::Option(inner)
-            | Type::Grounded(inner)
-            | Type::Tainted(inner)
-            | Type::Partial(inner)
-            | Type::ResumeToken(inner)
-            | Type::Upload(inner)
-            | Type::Page(inner)
-            | Type::Weak(inner, _) => inner.mentions_response(),
-            Type::Map(a, b) | Type::Result(a, b) => a.mentions_response() || b.mentions_response(),
-            Type::Function { params, ret, .. } => {
-                ret.mentions_response() || params.iter().any(Type::mentions_response)
-            }
-            _ => false,
-        }
+        self.mentions(&|ty| matches!(ty, Type::Response(_)))
     }
 
     pub fn mentions_secret(&self) -> bool {
+        self.mentions(&|ty| matches!(ty, Type::Secret))
+    }
+
+    /// Whether this type, or any type inside it, satisfies `found`. The
+    /// one walk over a type's parts; it does not enter a declared
+    /// record's fields, which live in its declaration.
+    pub fn mentions(&self, found: &dyn Fn(&Type) -> bool) -> bool {
+        if found(self) {
+            return true;
+        }
         match self {
-            Type::Secret => true,
             Type::List(inner)
             | Type::Option(inner)
             | Type::Tainted(inner)
@@ -395,10 +480,55 @@ impl Type {
             | Type::Upload(inner)
             | Type::Page(inner)
             | Type::Response(inner)
-            | Type::Weak(inner, _) => inner.mentions_secret(),
-            Type::Map(a, b) | Type::Result(a, b) => a.mentions_secret() || b.mentions_secret(),
-            Type::Function { params, ret, .. } => ret.mentions_secret() || params.iter().any(Type::mentions_secret),
-            Type::RouteParams(params) => params.iter().any(|(_, param)| param.mentions_secret()),
+            | Type::Conflict(inner, _)
+            | Type::Weak(inner, _) => inner.mentions(found),
+            Type::Map(a, b) | Type::Result(a, b) => a.mentions(found) || b.mentions(found),
+            Type::Function { params, ret, .. } => ret.mentions(found) || params.iter().any(|p| p.mentions(found)),
+            Type::RouteParams(params) => params.iter().any(|(_, param)| param.mentions(found)),
+            _ => false,
+        }
+    }
+
+    /// Offer this type, and then each type inside it, to `replace`, the
+    /// mutable twin of [`Type::mentions`]. When `replace` rewrites a type
+    /// it returns true and its parts are not visited. Returns whether
+    /// anything was replaced. Like `mentions`, it does not enter a
+    /// declared record's fields.
+    pub fn replace_within(&mut self, replace: &mut dyn FnMut(&mut Type) -> bool) -> bool {
+        if replace(self) {
+            return true;
+        }
+        match self {
+            Type::List(inner)
+            | Type::Option(inner)
+            | Type::Tainted(inner)
+            | Type::Grounded(inner)
+            | Type::Stream(inner)
+            | Type::Partial(inner)
+            | Type::ResumeToken(inner)
+            | Type::Upload(inner)
+            | Type::Page(inner)
+            | Type::Response(inner)
+            | Type::Conflict(inner, _)
+            | Type::Weak(inner, _) => inner.replace_within(replace),
+            Type::Map(a, b) | Type::Result(a, b) => {
+                let a = a.replace_within(replace);
+                b.replace_within(replace) | a
+            }
+            Type::Function { params, ret, .. } => {
+                let mut found = ret.replace_within(replace);
+                for param in params {
+                    found |= param.replace_within(replace);
+                }
+                found
+            }
+            Type::RouteParams(params) => {
+                let mut found = false;
+                for (_, param) in params {
+                    found |= param.replace_within(replace);
+                }
+                found
+            }
             _ => false,
         }
     }
@@ -431,6 +561,9 @@ impl Type {
             // silently — `trusted(expr)` is the only exit.
             (Type::Partial(a), Type::Partial(b)) => a.is_assignable_to(b),
             (Type::ResumeToken(a), Type::ResumeToken(b)) => a.is_assignable_to(b),
+            (Type::Conflict(a, cases_a), Type::Conflict(b, cases_b)) => {
+                a.is_assignable_to(b) && cases_a.is_within(*cases_b)
+            }
             (Type::RouteParams(a), Type::RouteParams(b)) => a == b,
             // Function types (45j): parameters are contravariant,
             // the return type covariant. The legacy binary effect is
@@ -457,6 +590,67 @@ impl Type {
             (Type::Grounded(inner), other) => inner.is_assignable_to(other),
             (a, b) => a == b,
         }
+    }
+
+    /// The narrowest type both `self` and `other` are assignable to,
+    /// when there is one: the wider of the two, or, for conflicts with
+    /// different cases (an `insert`'s beside a `delete`'s), a conflict
+    /// holding the cases of both. Match arms and branches join with it.
+    pub fn join(&self, other: &Type) -> Option<Type> {
+        if other.is_assignable_to(self) {
+            return Some(self.clone());
+        }
+        if self.is_assignable_to(other) {
+            return Some(other.clone());
+        }
+        Some(match (self, other) {
+            (Type::Conflict(a, cases_a), Type::Conflict(b, cases_b)) => {
+                Type::Conflict(Box::new(a.join(b)?), cases_a.union(*cases_b))
+            }
+            (Type::Result(ok_a, err_a), Type::Result(ok_b, err_b)) => {
+                Type::Result(Box::new(ok_a.join(ok_b)?), Box::new(err_a.join(err_b)?))
+            }
+            (Type::Option(a), Type::Option(b)) => Type::Option(Box::new(a.join(b)?)),
+            (Type::List(a), Type::List(b)) => Type::List(Box::new(a.join(b)?)),
+            _ => return None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    use super::{ConflictCase, ConflictCases, Type};
+
+    fn conflict(cases: &[ConflictCase]) -> Type {
+        Type::Conflict(Box::new(Type::String), ConflictCases::of(cases))
+    }
+
+    /// An `insert`'s conflict (only `Taken`) goes where any conflict is
+    /// expected, never the other way round.
+    #[test]
+    fn a_narrower_conflict_is_assignable_to_a_wider_one() {
+        let taken = conflict(&[ConflictCase::Taken]);
+        let any = Type::Conflict(Box::new(Type::String), ConflictCases::ALL);
+        assert!(taken.is_assignable_to(&any));
+        assert!(!any.is_assignable_to(&taken));
+        assert_eq!(taken.display_name(), "Conflict<String>");
+    }
+
+    /// An `insert`'s conflict beside a `delete`'s joins into one holding
+    /// the cases of both, inside a `Result` too.
+    #[test]
+    fn conflicts_join_into_the_union_of_their_cases() {
+        let taken = conflict(&[ConflictCase::Taken]);
+        let stale = conflict(&[ConflictCase::Changed, ConflictCase::Deleted]);
+        assert_eq!(taken.join(&stale), Some(Type::Conflict(Box::new(Type::String), ConflictCases::ALL)));
+        let result = |err: Type| Type::Result(Box::new(Type::Int), Box::new(err));
+        assert_eq!(
+            result(taken.clone()).join(&result(stale)),
+            Some(result(Type::Conflict(Box::new(Type::String), ConflictCases::ALL)))
+        );
+        assert_eq!(taken.join(&Type::Int), None);
+        let cases: Vec<&str> = ConflictCases::of(&[ConflictCase::Taken, ConflictCase::Changed]).cases().map(ConflictCase::name).collect();
+        assert_eq!(cases, ["Changed", "Taken"]);
     }
 }
 

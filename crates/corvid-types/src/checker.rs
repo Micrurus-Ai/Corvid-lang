@@ -296,7 +296,7 @@ fn typecheck_with_everything(
         }
 
         if let Some(estimate) =
-            crate::effects::compute_worst_case_cost(file, resolved, &registry, &agent.name.name)
+            crate::effects::compute_worst_case_cost_with_types(file, resolved, &registry, &agent.name.name, &c.types)
         {
             for warning in estimate.warnings {
                 let crate::effects::CostWarningKind::UnboundedLoop { agent, message } =
@@ -578,8 +578,35 @@ impl<'a> Checker<'a> {
     /// refines Int fields, `len_between` refines String fields, and
     /// bounds must be ordered. A mismatched form is a decl error
     /// here, never a decode surprise later.
-    fn check_field_refinements(&mut self, t: &corvid_ast::TypeDecl) {
+    /// B01: every field's JSON key is non-empty and names one field.
+    /// Keys come from `corvid_ast::json_key`, the rule lowering and the
+    /// contract use, so what is checked here is what is sent.
+    fn check_json_keys(&mut self, t: &corvid_ast::TypeDecl) {
+        let mut seen: HashMap<String, &str> = HashMap::new();
         for field in &t.fields {
+            let key = corvid_ast::json_key(&field.name.name, field.json_key.as_deref(), t.json_case);
+            let message = if key.is_empty() {
+                Some(format!("field `{}` has an empty JSON key", field.name.name))
+            } else {
+                seen.insert(key.clone(), &field.name.name).map(|other| {
+                    format!(
+                        "fields `{other}` and `{}` both have the JSON key `{key}`",
+                        field.name.name
+                    )
+                })
+            };
+            if let Some(message) = message {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::JsonKeyInvalid { type_name: t.name.name.clone(), message },
+                    field.span,
+                ));
+            }
+        }
+    }
+
+    fn check_field_refinements(&mut self, t: &corvid_ast::TypeDecl) {
+        // A variant's payload fields take refinements as record fields do.
+        for field in t.fields.iter().chain(t.variants.iter().flat_map(|v| v.fields.iter())) {
             let Some(refinement) = &field.refinement else {
                 continue;
             };
@@ -838,8 +865,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                Decl::Type(t) => self.check_field_refinements(t),
-                Decl::Table(t) => self.check_table(t),
+                Decl::Type(t) => {
+                    self.check_field_refinements(t);
+                    self.check_json_keys(t);
+                }
+                Decl::Table(t) => {
+                    self.check_table(t);
+                    self.check_json_keys(&t.record);
+                }
                 Decl::Database(d) => self.check_database(d),
                 Decl::Identity(i) => self.check_identity(i),
                 Decl::Connector(c) => self.check_connector(c),
@@ -923,6 +956,7 @@ mod response_boundaries;
 mod currency;
 mod time;
 mod form;
+mod live;
 mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
@@ -935,6 +969,7 @@ mod expr;
 mod import_call;
 mod json_methods;
 mod regex_methods;
+mod request_text;
 mod signature_types;
 mod tables;
 mod ops;

@@ -164,6 +164,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
             span,
         ),
         Type::Option(inner) => generic_type("Option", vec![type_to_type_ref(inner, symbols)], span),
+        Type::Conflict(row, _) => generic_type("Conflict", vec![type_to_type_ref(row, symbols)], span),
         Type::Weak(inner, effects) => TypeRef::Weak {
             inner: Box::new(type_to_type_ref(inner, symbols)),
             effects: if effects.is_any() {

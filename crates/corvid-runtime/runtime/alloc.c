@@ -222,6 +222,30 @@ const corvid_typeinfo corvid_typeinfo_String = {
     .name = "String",
 };
 
+/* A native `Secret` (native dispatch N3): an 8-byte payload holding a
+ * pointer to the runtime's boxed `corvid_crypto::Secret`. Compiled code
+ * only retains, releases and passes it; the runtime's exports open it.
+ * The box is dropped from `weak_fn`, which runs on final release and on
+ * collector sweep alike, so a secret inside a collected cycle is freed
+ * too. A separate type means nothing walking values by their type
+ * information can take a secret for a string. */
+extern void corvid_secret_drop_payload(void* payload);
+
+static void corvid_clear_secret(void* payload) {
+    corvid_weak_clear_self(payload);
+    corvid_secret_drop_payload(payload);
+}
+
+const corvid_typeinfo corvid_typeinfo_Secret = {
+    .size = 8,
+    .flags = 0,
+    .destroy_fn = NULL,
+    .trace_fn = corvid_trace_String_fn,
+    .weak_fn = corvid_clear_secret,
+    .elem_typeinfo = NULL,
+    .name = "Secret",
+};
+
 /* This callback runs on both final release and collector sweep, before
  * the allocator can hand the descriptor address to another value. */
 static void (*forget_grounded_pointer)(void*);

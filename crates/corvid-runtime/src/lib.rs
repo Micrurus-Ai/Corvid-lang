@@ -45,6 +45,7 @@ pub mod catalog;
 pub mod catalog_c_api;
 pub mod citation;
 pub mod connectors;
+pub mod number_text;
 pub mod db;
 pub mod protocol;
 pub mod protocol_simulate;
@@ -194,7 +195,7 @@ pub use auth::{
     JwtVerificationContract, OAuthCallbackResolution, OAuthStateCreate, OAuthStatePurpose,
     OAuthStateRecord, PermissionRequirement, ProvisioningOutcome, ProvisioningRequest,
     RouteAuthzOutcome, RoutePolicyRequirement, SessionAuthRuntime, SessionCreate, SessionRecord,
-    SessionResolution, TenantSource,
+    SessionResolution, SessionState, TenantSource,
 };
 pub use calibration::{CalibrationObservation, CalibrationStats};
 pub use cache::{
@@ -295,7 +296,7 @@ pub use review_queue::{
     ReviewStatus,
 };
 pub use runtime::{Runtime, RuntimeBuilder};
-pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, REDACTED_SECRET};
+pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, DECODED_KEY_TO_TOOL, REDACTED_SECRET};
 pub use secrets::{SecretAuditMetadata, SecretRead, SecretRuntime};
 #[cfg(feature = "python")]
 pub use python_ffi::{PythonRuntime, PythonSandboxProfile};

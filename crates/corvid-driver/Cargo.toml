@@ -17,7 +17,6 @@ corvid-syntax = { workspace = true }
 corvid-resolve = { workspace = true }
 corvid-types = { workspace = true }
 corvid-ir = { workspace = true }
-corvid-codegen-py = { workspace = true }
 corvid-codegen-cl = { workspace = true }
 corvid-codegen-wasm = { workspace = true }
 corvid-c-header = { workspace = true }
@@ -43,6 +42,12 @@ ed25519-dalek = { version = "2", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Native dispatch N1: the native connector tests link against the
+# release corvid-test-tools staticlib, as the codegen native tests do.
+corvid-test-paths = { workspace = true }
+# Native dispatch N3b: the secret tests hash a password with the code
+# both tiers verify with.
+corvid-crypto = { workspace = true }
 # B06: the zone-rules replay test compares the recorded tz database.
 corvid-time = { workspace = true }
 # B09 P4: the table tests create tables on SQLite and, when

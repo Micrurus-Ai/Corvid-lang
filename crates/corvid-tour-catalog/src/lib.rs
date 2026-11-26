@@ -528,7 +528,7 @@ agent api_key() -> Result<String, String>:
         spec: "docs/reference/cryptography.md#secrets",
         roadmap: "B04 cryptography, slices 2 to 4",
         test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-vm/src/tests/hmac.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-driver/tests/webhook_verification.rs + crates/corvid-vm/src/tests/passwords.rs + crates/corvid-driver/tests/tokens_and_passwords.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
-        non_scope: "Interpreter tier only: a native build refuses `Secret`, because native binaries do not dispatch the standard library's tools that produce and take secrets (a roadmap item). Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
+        non_scope: "Native code does everything with a secret except pass it to a tool of the program's own, which runs on the interpreter because native tool calls record their arguments without redaction. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
         source: r#"import "./std/secrets" use secret
 import "./std/crypto" use random_token, hash_password, owasp_2023
 
@@ -754,6 +754,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: allowed_hosts
+    published: no
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -937,6 +938,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     retry: 3
@@ -972,6 +974,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]

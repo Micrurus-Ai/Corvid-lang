@@ -41,7 +41,7 @@ impl Runtime {
         if self.tracer.is_enabled() {
             let result = match &outcome {
                 Ok(value) => value.clone(),
-                Err(error) => serde_json::json!({ crate::replay::CORVID_TOOL_ERROR_KEY: error.to_string() }),
+                Err(error) => crate::replay::recorded_failure(error),
             };
             self.tracer.emit(TraceEvent::ToolResult {
                 ts_ms: now_ms(),

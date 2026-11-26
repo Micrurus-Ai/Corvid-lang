@@ -90,6 +90,44 @@ table PageView in analytics:
 A table without `in` in a module with several databases is a compile
 error that names them, and so is a table in a module with none.
 
+### One database, many modules
+
+An application has one database and many modules. Declare the database
+once as `public database` and import it where tables live:
+
+```corvid
+# storage.cor
+public database library:
+    engine: postgres
+    location: env("LIBRARY_DATABASE_URL")
+    tls: required
+    connections: 10
+
+# shelves.cor
+import "./storage" use library
+
+table Shelf in library:
+    key shelf: Int
+    title: String
+
+public agent rename(shelf: Int, title: String) -> Result<Shelf, String>:
+    ...
+```
+
+Every module's tables in `library` are one database:
+
+- An `atomic:` block may call agents in other modules, and their writes
+  join the block's transaction. Each one is checked in its own module, so
+  an imported agent that calls a tool is refused inside the block, by
+  name.
+- `corvid migrate plan src/main.cor` plans every table of the program,
+  from every module, in one migration history, with the indexes their
+  queries need. Two modules declaring a table of the same name is an
+  error, because a database stores one table under each name.
+- Tables stay private: other modules reach the rows only through the
+  agents a table's module exports. Sharing the database shares where rows
+  live, not access to them.
+
 ### Postgres
 
 ```corvid
@@ -137,9 +175,9 @@ read many rows.
 | Call | Result |
 | --- | --- |
 | `Shelf.get(key)` | `Option<Shelf>` |
-| `Shelf.insert(row)` | `Result<Shelf, Shelf>`. `Ok` holds the stored row, with revision 1; `Err` holds the row already stored under that key. |
-| `Shelf.save(row)` | `Result<Shelf, Option<Shelf>>`. It writes only if the stored row still has `row.revision`. `Ok` holds the stored row with its new revision; `Err` holds the row stored now, or `None` if it was deleted. |
-| `Shelf.delete(row)` | `Result<Shelf, Option<Shelf>>`, checked like `save`. `Ok` holds the deleted row. |
+| `Shelf.insert(row)` | `Result<Shelf, Conflict<Shelf>>`. `Ok` holds the stored row, with revision 1. Its conflict is only `Taken(holder)`: the row with that key or one of its [unique values](#unique-values). |
+| `Shelf.save(row)` | `Result<Shelf, Conflict<Shelf>>`. It writes only if the stored row still has `row.revision`. `Ok` holds the stored row with its new revision. Its conflict is `Changed(current)` or `Deleted`, and also `Taken(holder)` when the table declares [unique values](#unique-values). |
+| `Shelf.delete(row)` | `Result<Shelf, Conflict<Shelf>>`, checked like `save`. `Ok` holds the deleted row. Its conflict is `Changed(current)` or `Deleted`. |
 
 There is no unchecked overwrite. A row read from the database carries
 its revision, and editing it with `Shelf { title: t, ..shelf }` keeps
@@ -155,8 +193,55 @@ agent rename(shelf_id: Int, title: String) -> String:
 agent store(renamed: Shelf) -> String:
     return match Shelf.save(renamed):
         Ok(saved) -> "saved revision " + saved.revision.to_string()
-        Err(current) -> "someone else changed the shelf first"
+        Err(Changed(current)) -> "someone else changed the shelf first"
+        Err(Deleted) -> "the shelf was removed"
 ```
+
+### Conflicts
+
+`Conflict<Row>` names why a write did not happen, one case per reason:
+
+| Case | Meaning |
+| --- | --- |
+| `Changed(current)` | The row changed since it was read; `current` is the row now. |
+| `Deleted` | The row is gone. |
+| `Taken(holder)` | Another row holds its key or one of its unique values. |
+
+```corvid
+agent explain(conflict: Conflict<Member>) -> String:
+    return match conflict:
+        Changed(current) -> "someone else edited this member first"
+        Deleted -> "this member was removed"
+        Taken(holder) -> holder.email + " already has that value"
+```
+
+A `match` covers the cases the value can be. Each operation returns
+only the conflicts it can produce, so a match on an `insert` is complete
+with `Taken` alone, and one on a `save` needs `Taken` only when the table
+has `unique` values:
+
+```corvid
+agent join(member: Member) -> String:
+    return match Member.insert(member):
+        Ok(stored) -> "welcome"
+        Err(Taken(holder)) -> "that email is already a member"
+```
+
+A written `Conflict<Row>` can be any of the three, so a function taking
+one needs all three arms, or `_`, and the conflict of any operation can
+be passed to it. An arm naming a case the value can never be, such as
+`Err(Changed(_))` on an `insert`, is a compile error, because it could
+never run. Code can
+build each case, `Changed(row)`, `Deleted` and `Taken(row)`, so a test
+or a fake store returns the same value a table does. A conflict crosses
+JSON as a sum type: `{"tag": "variant", "type": "Conflict", "variant":
+"Taken", "fields": [holder]}`. The generated clients name it too: a
+union of the three cases in TypeScript, `Conflict[Row]` with
+`Conflict.Taken(holder)` in Python, and `CorvidConflict<Row>` in Swift
+and Kotlin.
+
+The trace records which case each write returned, so a replay returns
+the same case. [Why one conflict type](../proposals/write-conflicts.md).
 
 ## Atomic writes
 
@@ -166,7 +251,7 @@ undone: a `?` that passes an error out of it, or a runtime failure such
 as a division by zero.
 
 ```corvid
-agent move_title(from: Shelf, to: Shelf) -> Result<String, Option<Shelf>>:
+agent move_title(from: Shelf, to: Shelf) -> Result<String, Conflict<Shelf>>:
     atomic:
         cleared = Shelf.save(Shelf { title: "", ..from })?
         filled = Shelf.save(Shelf { title: from.title, ..to })?
@@ -267,8 +352,8 @@ like any other:
 
 | Call | When another row holds the value |
 | --- | --- |
-| `Member.insert(row)` | `Err(holder)`: the row that has it, as for a repeated key. |
-| `Member.save(row)` | `Err(Some(holder))`, and nothing is written. If `holder`'s key is the row's own, the row changed since it was read; otherwise `holder` is the row that has the value. |
+| `Member.insert(row)` | `Err(Taken(holder))`: the row that has it, as for a repeated key. |
+| `Member.save(row)` | `Err(Taken(holder))`, and nothing is written. A row that changed since it was read is `Err(Changed(current))` instead. |
 
 A missing value never conflicts, so many members may have no nickname.
 Each rule is a unique index that `corvid migrate plan` creates and drops
@@ -319,8 +404,11 @@ parameter-only binding.
 
 A query returns at most its `take` count of rows, so a `@budget` agent
 that loops over `Member.all().take(3)` is charged three times the loop's
-body. A loop over a query without a literal `take` has no bound the
-compiler can prove, and the budget check warns rather than guessing.
+body. The count may be a refined field, `take(search.limit)` with `limit:
+Int where between(1, 50)`, which charges fifty times: every value of a
+refined field holds its refinement, so the maximum is a real bound. A
+loop over a query whose count has no such bound has none the compiler
+can prove, and the budget check warns rather than guessing.
 
 ## Replay
 
@@ -487,6 +575,27 @@ migration has run; the planner does nothing for a name no longer stored.
 A name in either clause cannot also be a declared field, and each stored
 name appears in one clause. `retired` written without a colon is the
 clause, so a table may still have a field named `retired: Bool`.
+
+### Several databases
+
+Each database keeps its own migration history. A program with one
+database keeps it in `migrations/`. A program with several keeps each in
+`migrations/<database>/`, and `corvid migrate plan src/main.cor` plans
+every database's tables into its own folder:
+
+```text
+migrations/
+  orders/001_create_order.sql
+  analytics/001_create_pageview.sql
+```
+
+`corvid migrate up --program src/main.cor` applies each database's
+history to that database, and `status` and `down` work the same way; a
+`--state target/state.json` becomes `target/state.orders.json` and
+`target/state.analytics.json`. When a program gains a second database,
+the files already in `migrations/` belong to the first one. The planner
+refuses to guess: it stops and asks you to move them into that
+database's folder.
 
 ## Not yet
 

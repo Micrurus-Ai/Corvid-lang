@@ -294,3 +294,26 @@ fn tool_roundtrips_string() {
         },
     );
 }
+
+/// A tool call in a `match` arm compiles natively: only the arm taken
+/// calls its tool, and nothing the call allocates outlives the arm (the
+/// harness checks the allocator balances).
+#[test]
+fn a_tool_call_in_a_match_arm_runs_only_on_its_arm() {
+    assert_parity_with_mock_tools(
+        "tool a() -> Int\ntool b() -> Int\n\nagent pick(x: Option<Int>) -> Int:\n    return match x:\n        Some(v) -> v + a()\n        None -> b()\n\nagent main() -> Int:\n    return pick(Some(1)) + pick(None)\n",
+        &[("a", 10), ("b", 100)],
+        111,
+    );
+}
+
+/// A runtime tool returning a reference-counted value in an arm: the
+/// text is released on the arm's own path.
+#[test]
+fn a_runtime_tool_returning_text_in_a_match_arm_releases_it() {
+    assert_parity_with_mock_tools(
+        "tool uuid_v4() -> String\n\nagent width(x: Option<Int>) -> Int:\n    return match x:\n        Some(v) -> uuid_v4().length() + v\n        None -> 0\n\nagent main() -> Int:\n    return width(Some(1)) + width(None)\n",
+        &[],
+        37,
+    );
+}

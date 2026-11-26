@@ -1,5 +1,10 @@
 //! Tool arguments that hold a `Secret`.
 //!
+//! The same two forms carry a connector's file body (B05): the recorded
+//! form holds an upload's name, type, size and SHA-256, the revealed form
+//! its bytes. Nothing in a file body is a `<redacted>` marker, so nothing
+//! is scrubbed from the result.
+//!
 //! A tool may take a `Secret` parameter, and its implementation must
 //! receive the real text. Every record of the call must not: the
 //! `ToolCall` event, the replay comparison, an approval request, the
@@ -28,6 +33,10 @@ use serde_json::Value as J;
 
 /// What every trace record writes in place of a secret's text.
 pub const REDACTED_SECRET: &str = "<redacted>";
+
+/// Why a key made by `decode_base64_after` cannot reach a tool: it is
+/// bytes, so there is no text to reveal. Both tiers stop with this.
+pub const DECODED_KEY_TO_TOOL: &str = "a key made by `decode_base64_after` is bytes, not text, so no tool can receive it; pass the secret `secret(name)` read, or use the key only for `hmac_sha256` and `hmac_sha512`";
 
 /// The reserved key of a recorded `ToolResult` whose payload had a
 /// secret's text replaced. A scrubbed result is recorded as
@@ -108,18 +117,18 @@ impl RevealedToolArguments {
         }
     }
 
-    /// The recorded form of a failed call's error message, marked when
-    /// it held a secret's text.
-    pub(crate) fn recorded_error(&self, message: &str) -> J {
-        let scrubbed = self.scrub_text(message);
-        if scrubbed == message {
-            serde_json::json!({ crate::replay::CORVID_TOOL_ERROR_KEY: message })
-        } else {
-            serde_json::json!({
-                crate::replay::CORVID_TOOL_ERROR_KEY: scrubbed,
-                CORVID_SECRET_SCRUBBED_KEY: true,
-            })
+    /// The recorded form of a failed call, marked when its message held
+    /// a secret's text, with whether it was an outage as every recorded
+    /// failure has (`replay::recorded_failure`).
+    pub(crate) fn recorded_error(&self, error: &crate::errors::RuntimeError) -> J {
+        let mut recorded = crate::replay::recorded_failure(error);
+        let message = error.to_string();
+        let scrubbed = self.scrub_text(&message);
+        if scrubbed != message {
+            recorded[crate::replay::CORVID_TOOL_ERROR_KEY] = J::String(scrubbed);
+            recorded[CORVID_SECRET_SCRUBBED_KEY] = J::Bool(true);
         }
+        recorded
     }
 }
 
@@ -171,11 +180,19 @@ mod tests {
             json!({"__corvid_secret_scrubbed__": {"echo": "key=<redacted>;pw=<redacted>", "n": 1}})
         );
         assert_eq!(arguments.recorded_result(&json!({"ok": true})), json!({"ok": true}), "no echo, no marker");
+        let failed = |message: &str| crate::errors::RuntimeError::ToolFailed { tool: "t".into(), message: message.into() };
         assert_eq!(
-            arguments.recorded_error("bad key whsec_abc123"),
-            json!({"__corvid_tool_error__": "bad key <redacted>", "__corvid_secret_scrubbed__": true})
+            arguments.recorded_error(&failed("bad key whsec_abc123")),
+            json!({
+                "__corvid_tool_error__": "tool `t` failed: bad key <redacted>",
+                "__corvid_secret_scrubbed__": true,
+                "__corvid_outage__": true,
+            })
         );
-        assert_eq!(arguments.recorded_error("timed out"), json!({"__corvid_tool_error__": "timed out"}));
+        assert_eq!(
+            arguments.recorded_error(&failed("timed out")),
+            json!({"__corvid_tool_error__": "tool `t` failed: timed out", "__corvid_outage__": true})
+        );
     }
 
     #[test]

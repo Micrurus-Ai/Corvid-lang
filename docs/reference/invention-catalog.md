@@ -238,7 +238,7 @@ Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
 Tour: `corvid tour --topic secrets`
 Roadmap: [B04 cryptography, slices 2 to 4](../../docs/backend-ai-roadmap.md)
 Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs), [tokens and passwords end to end](../../crates/corvid-driver/tests/tokens_and_passwords.rs)
-Non-scope: interpreter tier only, because native binaries do not dispatch the standard library's tools that produce and take secrets, so a native build refuses `Secret` by name (a roadmap item); secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
+Non-scope: in native code, a secret cannot yet reach a tool of the program's own, and a library's exported agents never take or return one; secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
 
 ### AI-Native Ergonomics
 
@@ -661,6 +661,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s                          # omit → compile error
     redirects: allowed_hosts              # never | same_host | allowed_hosts
+    published: no                         # yes lists it at /.well-known/corvid
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -860,7 +861,7 @@ Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the s
 
 #### The Backend Proves Its Own Contract, Or Refuses To Start
 
-Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (one `data:` event per yield, `event: done` to close); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
+Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (a `chunk` event per item, `completed` to close, `failed` with a sanitized `{error, detail}` on a server failure); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
 
 ```corvid
 server imports:
@@ -922,6 +923,7 @@ connector github:
     auth: bearer(secret("GITHUB_TOKEN"))
     timeout: 10s                          # omit → compile error; no default
     redirects: never                      # never | same_host | allowed_hosts
+    published: no                         # omit → compile error; no default
     rate_limit: 60 per 60s
     modes: [mock, replay, real]           # omit → compile error; no default
     operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
@@ -1018,7 +1020,8 @@ table Shelf:
 agent store(renamed: Shelf) -> String:
     return match Shelf.save(renamed):
         Ok(saved) -> "saved revision " + saved.revision.to_string()
-        Err(current) -> "someone else changed the shelf first"
+        Err(Changed(current)) -> "someone else changed the shelf first"
+        Err(Deleted) -> "the shelf was removed"
 ```
 
 Try it: `corvid tour --topic tables`. Reference: [Tables](./tables.md).

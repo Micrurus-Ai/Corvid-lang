@@ -47,10 +47,7 @@ pub fn tool_argument_json(v: &Value) -> Result<serde_json::Value, String> {
     let decoded_key = std::cell::Cell::new(false);
     let json = to_json(v, SecretForm::Revealed(&decoded_key));
     if decoded_key.get() {
-        return Err(
-            "a key made by `decode_base64_after` is bytes, not text, so no tool can receive it; pass the secret `secret(name)` read, or use the key only for `hmac_sha256` and `hmac_sha512`"
-                .to_string(),
-        );
+        return Err(corvid_runtime::DECODED_KEY_TO_TOOL.to_string());
     }
     Ok(json)
 }
@@ -609,6 +606,7 @@ fn type_label(t: &Type) -> String {
         Type::Upload(inner) => format!("Upload<{}>", type_label(inner)),
         Type::Page(inner) => format!("Page<{}>", type_label(inner)),
         Type::Response(inner) => format!("Response<{}>", type_label(inner)),
+        Type::Conflict(row, _) => format!("Conflict<{}>", type_label(row)),
         Type::TraceId => "TraceId".into(),
         Type::DbHandle => "DbHandle".into(),
         Type::JsonValue => "JsonValue".into(),
@@ -805,6 +803,22 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Whether `value` holds `field`'s refinement, and if not the value as
+/// shown in a message. The one rule every check of a refinement uses:
+/// decoding, building a record in code, assigning a field, and reading
+/// a table row.
+pub fn refinement_breach(field: &corvid_ir::IrField, value: &Value) -> Option<String> {
+    let refinement = field.refinement.as_ref()?;
+    let admitted = match value {
+        Value::Int(n) => refinement.admits_int(*n),
+        Value::String(s) => refinement.admits_text(s),
+        // Form/type mismatches are rejected at typecheck; anything
+        // else reaching here has no value check.
+        _ => true,
+    };
+    (!admitted).then(|| value_to_json(value).to_string())
+}
+
 /// Slice 50j — enforce a field's declared value refinement after
 /// its structural decode. Violations render actionably (field,
 /// value, refinement) because this exact string is what `with
@@ -814,22 +828,12 @@ pub fn check_field_refinement(
     field: &corvid_ir::IrField,
     value: &Value,
 ) -> Result<(), ConvError> {
-    let Some(refinement) = &field.refinement else {
-        return Ok(());
-    };
-    let violated = match value {
-        Value::Int(n) => !refinement.admits_int(*n),
-        Value::String(s) => !refinement.admits_text(s),
-        // Form/type mismatches are rejected at typecheck; anything
-        // else reaching here decodes without a value check.
-        _ => false,
-    };
-    if violated {
+    if let Some(got) = refinement_breach(field, value) {
         return Err(ConvError::RefinementViolated {
             struct_name: struct_name.to_string(),
             field: field.name.clone(),
-            refinement: refinement.describe(),
-            got: value_to_json(value).to_string(),
+            refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+            got,
         });
     }
     Ok(())
@@ -895,6 +899,7 @@ mod tests {
                     name: "age".into(),
                     ty: Type::Int,
                     refinement: Some(corvid_ast::Refinement::Between { min: 0, max: 150 }),
+                    json_key: None,
                     span: corvid_ast::Span::new(0, 0),
                 },
             ],
@@ -971,6 +976,7 @@ mod tests {
                 name: "should_refund".into(),
                 ty: Type::Bool,
                 refinement: None,
+                json_key: None,
                 span: corvid_ast::Span::new(0, 0),
             }],
             span: corvid_ast::Span::new(0, 0),
@@ -1001,6 +1007,7 @@ mod tests {
                 name: "needed".into(),
                 ty: Type::Int,
                 refinement: None,
+                json_key: None,
                 span: corvid_ast::Span::new(0, 0),
             }],
             span: corvid_ast::Span::new(0, 0),

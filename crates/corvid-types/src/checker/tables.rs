@@ -10,7 +10,7 @@ use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
 use crate::table_ops::{table_method_target, QueryCondition, TableOp};
 use crate::types::Type;
-use corvid_ast::{Block, DatabaseDecl, DatabaseLocation, Decl, Expr, Ident, Span, Stmt, TableDecl, TypeRef, Visibility};
+use corvid_ast::{Block, DatabaseDecl, DatabaseLocation, Expr, Ident, Span, Stmt, TableDecl, TypeRef, Visibility};
 use corvid_resolve::{Binding, BuiltIn, DeclKind};
 
 /// The engines the runtime runs today.
@@ -58,7 +58,9 @@ impl<'a> Checker<'a> {
         self.check_column_history(table);
         self.check_unique_rules(table);
 
-        match crate::table_ops::table_placement(self.file, &name) {
+        let modules = self.module_resolution;
+        let imported = |database: &str| modules.and_then(|m| crate::table_ops::imported_database(m, None, database));
+        match crate::table_ops::table_placement_with(self.file, &name, &imported) {
             crate::table_ops::TablePlacement::In(_) | crate::table_ops::TablePlacement::NotATable => {}
             crate::table_ops::TablePlacement::NoDatabase => {
                 self.errors.push(TypeError::new(TypeErrorKind::TableOutsideDatabase { table: name }, span))
@@ -201,15 +203,9 @@ impl<'a> Checker<'a> {
         let mut visited = Vec::new();
         self.atomic_contents(body, None, &mut visited, &mut refusals);
 
-        let tables = crate::table_ops::atomic_tables(body, self.file, self.symbols, self.bindings);
-        let mut databases: Vec<&str> = Vec::new();
-        for table in &tables {
-            if let Some(db) = crate::table_ops::table_database(self.file, &table.name().name) {
-                if !databases.contains(&db.name.name.as_str()) {
-                    databases.push(&db.name.name);
-                }
-            }
-        }
+        let view = crate::table_ops::ModuleView { file: self.file, symbols: self.symbols, bindings: self.bindings, module: None };
+        let found = crate::table_ops::atomic_databases(body, view, self.module_resolution);
+        let databases: Vec<&str> = found.iter().map(|db| db.name.name.as_str()).collect();
         if databases.len() > 1 {
             refusals.push((
                 span,
@@ -235,11 +231,22 @@ impl<'a> Checker<'a> {
     ) {
         let mut stmts = Vec::new();
         let mut calls = Vec::new();
+        let mut caught = Vec::new();
         corvid_ast::visit::walk_block(body, &mut |stmt| stmts.push(stmt), &mut |expr| {
             if let Expr::Call { callee, args, span } = expr {
                 calls.push((callee.as_ref(), args.as_slice(), *span));
             }
+            if let Expr::TryRetry { fallback: Some(_), span, .. } = expr {
+                caught.push(*span);
+            }
         });
+        for span in caught {
+            let via = through.map(|agent| format!(" (in agent `{agent}`, called inside the block)")).unwrap_or_default();
+            refusals.push((
+                span,
+                format!("an `atomic:` block cannot hold a `try ... else`{via}: a failure leaves the transaction unusable, so the block must roll back; put the `try ... else` around the call to the agent that holds the block"),
+            ));
+        }
         let at = |span: Span, what: &str| {
             let via = through.map(|agent| format!(" (in agent `{agent}`, called inside the block)")).unwrap_or_default();
             (span, format!("an `atomic:` block cannot hold {what}{via}, because the database cannot undo it"))
@@ -264,6 +271,13 @@ impl<'a> Checker<'a> {
                     visited.push(agent.name.name.clone());
                     self.atomic_contents(&agent.body, Some(&agent.name.name), visited, refusals);
                 }
+                continue;
+            }
+            // An agent another module exports runs inside the block too
+            // (B09 P11), so it is held to the same rules, in its own module.
+            let view = crate::table_ops::ModuleView { file: self.file, symbols: self.symbols, bindings: self.bindings, module: None };
+            if let Some((module, agent)) = self.module_resolution.and_then(|m| crate::table_ops::imported_agent(m, view, callee)) {
+                imported_atomic_refusals(module, &agent.body, &agent.name.name, self.module_resolution, visited, refusals, span);
                 continue;
             }
             if let Some(what) = self.call_the_database_cannot_undo(callee) {
@@ -420,10 +434,9 @@ impl<'a> Checker<'a> {
                     .collect::<Vec<_>>();
                 (key_types, Type::Option(Box::new(row.clone())))
             }
-            TableOp::Insert => (vec![row.clone()], Type::Result(Box::new(row.clone()), Box::new(row.clone()))),
-            TableOp::Save | TableOp::Delete => (
+            TableOp::Insert | TableOp::Save | TableOp::Delete => (
                 vec![row.clone()],
-                Type::Result(Box::new(row.clone()), Box::new(Type::Option(Box::new(row.clone())))),
+                Type::Result(Box::new(row.clone()), Box::new(Type::Conflict(Box::new(row.clone()), op.conflicts(!table.unique.is_empty())))),
             ),
         };
         let label = format!("{}.{}", table.name().name, op.name());
@@ -594,6 +607,84 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// What an imported agent called inside an `atomic:` block does that the
+/// database cannot undo, read in the agent's own module. The refusal is
+/// reported at the call, naming the agent. It follows the agent's own
+/// calls into its module and onward to the modules that one imports.
+fn imported_atomic_refusals<'m>(
+    view: crate::table_ops::ModuleView<'m>,
+    body: &'m Block,
+    agent: &str,
+    modules: Option<&'m corvid_resolve::ModuleResolution>,
+    visited: &mut Vec<String>,
+    refusals: &mut Vec<(Span, String)>,
+    call: Span,
+) {
+    let key = format!("{:p}:{agent}", view.file);
+    if visited.contains(&key) {
+        return;
+    }
+    visited.push(key);
+    let mut stmts = Vec::new();
+    let mut calls = Vec::new();
+    corvid_ast::visit::walk_block(body, &mut |stmt| stmts.push(stmt), &mut |expr| {
+        if let Expr::Call { callee, args, .. } = expr {
+            calls.push((callee.as_ref(), args.as_slice()));
+        }
+    });
+    let refuse = |what: &str| {
+        (call, format!("an `atomic:` block cannot hold {what} (in imported agent `{agent}`, called inside the block), because the database cannot undo it"))
+    };
+    for stmt in stmts {
+        match stmt {
+            Stmt::Atomic { .. } => refusals.push(refuse("another `atomic:` block")),
+            Stmt::Approve { .. } => refusals.push(refuse("an `approve`")),
+            Stmt::Yield { .. } => refusals.push(refuse("a `yield`")),
+            Stmt::Parallel { .. } => refusals.push(refuse("a `parallel:` block")),
+            _ => {}
+        }
+    }
+    for (callee, args) in calls {
+        let table_operation = crate::table_ops::table_call_target(callee, view.file, view.symbols, view.bindings).is_some()
+            || crate::table_ops::table_query_call(callee, args, view.file, view.symbols, view.bindings).is_some();
+        if table_operation {
+            continue;
+        }
+        if let Some(inner) = crate::table_ops::called_agent(callee, view.file, view.symbols, view.bindings) {
+            imported_atomic_refusals(view, &inner.body, &inner.name.name, modules, visited, refusals, call);
+            continue;
+        }
+        if let Some((next, inner)) = modules.and_then(|m| crate::table_ops::imported_agent(m, view, callee)) {
+            imported_atomic_refusals(next, &inner.body, &inner.name.name, modules, visited, refusals, call);
+            continue;
+        }
+        let Expr::Ident { name, .. } = callee else {
+            // A qualified call into another module: refuse it, as the root does.
+            refusals.push(refuse("a call through a module alias"));
+            continue;
+        };
+        if let Some(Binding::Decl(id)) = view.bindings.get(&name.span) {
+            let what = match view.symbols.get(*id).kind {
+                DeclKind::Tool => Some(format!("a call to tool `{}`", name.name)),
+                DeclKind::Prompt => Some(format!("a call to prompt `{}`", name.name)),
+                DeclKind::Fixture => Some(format!("a call to fixture `{}`", name.name)),
+                DeclKind::ImportedUse => {
+                    let kind = modules
+                        .and_then(|m| crate::table_ops::importing_module(m, view.module, &name.name))
+                        .and_then(|(module, original)| module.exports.get(&original).map(|export| export.kind));
+                    (!matches!(kind, Some(DeclKind::Fn | DeclKind::Type))).then(|| format!("a call to imported `{}`", name.name))
+                }
+                _ => None,
+            };
+            if let Some(what) = what {
+                refusals.push(refuse(&what));
+            }
+        } else if let Some(Binding::BuiltIn(BuiltIn::Ask | BuiltIn::Choose)) = view.bindings.get(&name.span) {
+            refusals.push(refuse(&format!("`{}(...)`", name.name)));
+        }
+    }
+}
+
 /// A `return`, or a `break` or `continue` that is not inside a loop of
 /// its own within the block, would leave an `atomic:` block without
 /// saying whether to keep its writes.
@@ -692,10 +783,10 @@ table Shelf:
 agent find(id: Int) -> Option<Shelf>:
     return Shelf.get(id)
 
-agent add(owner: String) -> Result<Shelf, Shelf>:
+agent add(owner: String) -> Result<Shelf, Conflict<Shelf>>:
     return Shelf.insert(Shelf(1, owner, \"Reading\", None))
 
-agent rename(shelf: Shelf, title: String) -> Result<Shelf, Option<Shelf>>:
+agent rename(shelf: Shelf, title: String) -> Result<Shelf, Conflict<Shelf>>:
     return Shelf.save(Shelf {{ title: title, ..shelf }})
 
 agent seen(shelf: Shelf) -> Int:

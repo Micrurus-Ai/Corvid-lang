@@ -43,6 +43,7 @@ impl<'a> Parser<'a> {
         let mut modes: Vec<ConnectorMode> = Vec::new();
         let mut timeout_secs: Option<u64> = None;
         let mut redirects: Option<RedirectPolicy> = None;
+        let mut published: Option<bool> = None;
         let mut operations = Vec::new();
 
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -98,11 +99,17 @@ impl<'a> Parser<'a> {
                     }
                     redirects = Some(self.parse_redirect_policy()?);
                 }
+                "published" => {
+                    if published.is_some() {
+                        return Err(duplicate_connector_key("published", key_span));
+                    }
+                    published = Some(self.parse_connector_publication()?);
+                }
                 _ => {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("connector key `{key}`"),
-                            expected: "`base_url`, `hosts`, `auth`, `timeout`, `redirects`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
+                            expected: "`base_url`, `hosts`, `auth`, `timeout`, `redirects`, `published`, `retry`, `rate_limit`, `circuit_breaker`, `modes`, or `operation ...`".into(),
                         },
                         span: key_span,
                     });
@@ -146,6 +153,7 @@ impl<'a> Parser<'a> {
             circuit_breaker,
             timeout_secs,
             redirects,
+            published,
             modes,
             operations,
             visibility: Visibility::Private,
@@ -243,6 +251,22 @@ impl<'a> Parser<'a> {
             value,
             span: start.merge(value_span),
         })
+    }
+
+    /// `published: yes | no`.
+    fn parse_connector_publication(&mut self) -> Result<bool, ParseError> {
+        let (name, name_span) = self.expect_ident()?;
+        match name.as_str() {
+            "yes" => Ok(true),
+            "no" => Ok(false),
+            _ => Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("`published: {name}`"),
+                    expected: "`published: yes` (listed in the published contract) or `published: no` (backend only)".into(),
+                },
+                span: name_span,
+            }),
+        }
     }
 
     /// `redirects: never | same_host | allowed_hosts`.
@@ -407,6 +431,14 @@ impl<'a> Parser<'a> {
                 Some(OperationBody {
                     param: Ident::new(param, param_span),
                     encoding: BodyEncoding::Form,
+                })
+            }
+            _ if self.peek_ident_is("multipart") => {
+                self.bump();
+                let (param, param_span) = self.expect_ident()?;
+                Some(OperationBody {
+                    param: Ident::new(param, param_span),
+                    encoding: BodyEncoding::Multipart,
                 })
             }
             _ => None,

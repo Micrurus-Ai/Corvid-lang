@@ -45,6 +45,9 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod equality;
+mod number_text;
+mod secret_object;
+mod response_exports;
 mod approval_exports;
 mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.
@@ -79,7 +82,7 @@ pub use json_exports::{
 };
 pub use prompt_exports::{
     corvid_prompt_call_bool, corvid_prompt_call_float, corvid_prompt_call_int,
-    corvid_prompt_call_string, corvid_prompt_call_struct,
+    corvid_prompt_call_string, corvid_prompt_call_typed,
 };
 pub use replay_exports::{
     corvid_replay_tool_call_bool, corvid_replay_tool_call_float, corvid_replay_tool_call_int,
@@ -196,13 +199,12 @@ pub unsafe extern "C" fn corvid_tool_call_sync_int(name_ptr: *const u8, name_len
 // consumed by compile-time-generated code.
 // ------------------------------------------------------------
 
-fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
+pub(crate) fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
     if matches!(
         err,
         RuntimeError::ReplayTraceLoad { .. }
             | RuntimeError::ReplayDivergence(_)
             | RuntimeError::InvalidReplayMutation { .. }
-            | RuntimeError::CrossTierReplayUnsupported { .. }
     ) {
         panic!("{context}: {err}");
     }

@@ -41,7 +41,14 @@ impl<'a> Checker<'a> {
             Expr::Literal { value: Literal::String(name), span } if matches!(expected, Some(Type::TimeZone)) => {
                 self.check_time_zone_literal(name, *span)
             }
+            Expr::Literal { value: Literal::Duration { count, unit }, span } => {
+                if let Err(message) = crate::duration_literal_value(count, unit) {
+                    self.errors.push(TypeError::new(TypeErrorKind::DurationLiteralInvalid { message }, *span));
+                }
+                Type::Duration
+            }
             Expr::Literal { value, .. } => match value {
+                Literal::Duration { .. } => Type::Duration,
                 Literal::Int(_) => Type::Int,
                 Literal::Float { value: _, .. } => Type::Float,
                 Literal::String(_) => Type::String,
@@ -50,9 +57,14 @@ impl<'a> Checker<'a> {
             },
             Expr::Ident { name, .. } => {
                 let ty = self.type_of_ident(name);
-                match (&ty, expected) {
-                    (Type::Option(inner), Some(expected @ Type::Option(_)))
-                        if **inner == Type::Unknown && matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::None))) => expected.clone(),
+                // A bare `None` or `Deleted` takes its payload type from
+                // where it goes.
+                match (&ty, expected, self.bindings.get(&name.span)) {
+                    (Type::Option(inner), Some(expected @ Type::Option(_)), Some(Binding::BuiltIn(BuiltIn::None)))
+                        if **inner == Type::Unknown => expected.clone(),
+                    (Type::Conflict(..), Some(Type::Conflict(row, _)), Some(Binding::BuiltIn(BuiltIn::Deleted))) => {
+                        Type::Conflict(row.clone(), crate::types::ConflictCases::ALL)
+                    }
                     _ => ty,
                 }
             }
@@ -251,9 +263,10 @@ impl<'a> Checker<'a> {
             Expr::TryRetry {
                 body,
                 timeout_ms,
+                fallback,
                 span,
                 ..
-            } => self.check_try_retry(body, timeout_ms.is_some(), *span),
+            } => self.check_try_retry(body, timeout_ms.is_some(), fallback.as_deref(), *span),
             Expr::Replay {
                 trace,
                 arms,
@@ -317,8 +330,11 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Page
                 // B05 — a `Response` comes only from a connector call.
                 | BuiltIn::Response
+                | BuiltIn::Conflict
                 // B03 — a `RegexMatch` comes only from the regex methods.
-                | BuiltIn::RegexMatch => {
+                | BuiltIn::RegexMatch
+                // B01 — a `JsonError` comes only from `from_json`.
+                | BuiltIn::JsonError => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -336,11 +352,15 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::LiveArguments
+                | BuiltIn::LiveField
                 | BuiltIn::BrowserRowKey
                 | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor
                 | BuiltIn::Range
+                | BuiltIn::Changed
+                | BuiltIn::Taken
                 | BuiltIn::Choose => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::BareFunctionReference {
@@ -351,6 +371,7 @@ impl<'a> Checker<'a> {
                     Type::Unknown
                 }
                 BuiltIn::None => Type::Option(Box::new(Type::Unknown)),
+                BuiltIn::Deleted => Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL),
             },
         }
     }
@@ -811,6 +832,7 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
                 "ResumeToken" => Type::ResumeToken(Box::new(inner)),
                 "Upload" => Type::Upload(Box::new(inner)),
                 "Page" => Type::Page(Box::new(inner)),
+                "Conflict" => Type::Conflict(Box::new(inner), crate::types::ConflictCases::ALL),
                 _ => Type::Unknown,
             }
         }

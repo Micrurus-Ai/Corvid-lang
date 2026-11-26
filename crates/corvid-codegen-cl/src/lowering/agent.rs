@@ -23,6 +23,24 @@ pub(super) fn define_extern_c_wrapper(
     let Some(IrExternAbi::C) = agent.extern_abi else {
         return Ok(());
     };
+    // No secret crosses a library's boundary, in a record field either:
+    // a host would receive the text.
+    let types_by_id: HashMap<DefId, &corvid_ir::IrType> = runtime.ir_types.iter().map(|(id, ty)| (*id, ty)).collect();
+    if let Some(span) = agent
+        .params
+        .iter()
+        .find(|p| corvid_ir::holds_secret(&p.ty, &types_by_id))
+        .map(|p| p.span)
+        .or_else(|| corvid_ir::holds_secret(&agent.return_ty, &types_by_id).then_some(agent.span))
+    {
+        return Err(CodegenError::not_supported(
+            format!(
+                "extern-c agent `{}` takes or returns a `Secret`, and no secret crosses a library's boundary; keep the secret inside the library",
+                agent.name
+            ),
+            span,
+        ));
+    }
 
     let mut sig = module.make_signature();
     for param in &agent.params {
@@ -289,12 +307,6 @@ pub(super) fn define_extern_c_wrapper(
 }
 
 pub(super) fn reject_unsupported_types(agent: &IrAgent) -> Result<(), CodegenError> {
-    // B04 — a signature holding a `Secret` gets the reason native code
-    // has none, not the generic shape message.
-    if let Some(span) = agent.params.iter().find(|p| p.ty.mentions_secret()).map(|p| p.span)
-        .or_else(|| agent.return_ty.mentions_secret().then_some(agent.span)) {
-        return Err(CodegenError::not_supported(crate::secret_boundary::SECRET_REQUIREMENT, span));
-    }
     for p in &agent.params {
         cl_type_for(&p.ty, p.span).map_err(|_| {
             CodegenError::not_supported(
@@ -465,19 +477,21 @@ pub(super) fn cl_type_for(ty: &Type, span: Span) -> Result<clir::Type, CodegenEr
             "internal compiler error: `JsonError` reached native lowering; `compile_to_object` represents it as a record first",
             span,
         )),
-        Type::RegexMatch => Err(CodegenError::not_supported(
-            "`RegexMatch` - regular expressions run on the interpreter tier until native regex lowering lands",
+        Type::RegexMatch => Err(CodegenError::cranelift(
+            "`RegexMatch` reached lowering before `compile_to_object` rewrote it as its record",
             span,
         )),
         // B06, B04 — a native `Decimal`, time, currency, locale or
         // `Bytes` value is a String holding its canonical text.
         Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Ok(I64),
-        Type::Secret => Err(CodegenError::not_supported(
-            crate::secret_boundary::SECRET_REQUIREMENT,
-            span,
-        )),
+        // Native dispatch N3 — a pointer to the runtime's secret object.
+        Type::Secret => Ok(I64),
         Type::Upload(_) => Err(CodegenError::not_supported(
             "`Upload<Format>` - file uploads are an HTTP-boundary type served by `corvid serve` (multipart), not the native backend; the application contract and its OpenAPI projection describe the surface. Use the interpreter/serve tier until native upload lowering lands.",
+            span,
+        )),
+        Type::Conflict(_, _) => Err(CodegenError::not_supported(
+            "`Conflict<Row>` - a conflict comes from a table write, and tables run on the interpreter until they compile natively (B09 P6); `corvid run` picks the interpreter for them.",
             span,
         )),
         Type::Response(_) => Err(CodegenError::not_supported(
@@ -548,6 +562,23 @@ pub(super) fn define_agent(
                     scope_stack[0].push((p.local_id, var));
                 }
             }
+        }
+
+        // A refcounted local first bound inside a loop but needed after
+        // an iteration is bound here, with no value, as a parameter is, so
+        // its `Let` in the loop is a rebinding that releases the previous
+        // iteration's value. The ownership analysis reads the same set
+        // (`dataflow::loop_carried_locals`).
+        for (local_id, ty) in crate::dataflow::loop_carried_locals(agent) {
+            if env.contains_key(&local_id) {
+                continue;
+            }
+            let cl_ty = cl_type_for(&ty, agent.span)?;
+            let var = runtime.declare_variable(&mut builder, cl_ty);
+            let nothing = builder.ins().iconst(cl_ty, 0);
+            builder.def_var(var, nothing);
+            env.insert(local_id, (var, cl_ty));
+            scope_stack[0].push((local_id, var));
         }
 
         let lowered = lower_block(

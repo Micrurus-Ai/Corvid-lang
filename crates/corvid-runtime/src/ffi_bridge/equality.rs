@@ -31,6 +31,7 @@ fn text_scalar_equality(kind: u32) -> Option<unsafe fn(u64, u64) -> bool> {
         k if k == Layout::Currency as u32 => super::currency::currency_slots_equal,
         k if k == Layout::Locale as u32 => super::currency::locale_slots_equal,
         k if k == Layout::Bytes as u32 => super::bytes::slots_equal,
+        k if k == Layout::Secret as u32 => super::secret_object::slots_equal,
         _ => return None,
     })
 }

@@ -295,12 +295,14 @@ fn infer_typeref(
                     refinement: None,
                     ui: Vec::new(),
                     upload: None,
+                    json_key: None,
                     span: *sp,
                 }
             }).collect();
 
             type_decls.push(TypeDecl {
                 alias: None,
+                json_case: None,
                 variants: Vec::new(),
                 name: Ident::new(type_name.clone(), *sp),
                 fields,
