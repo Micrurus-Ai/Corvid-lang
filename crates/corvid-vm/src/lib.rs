@@ -21,6 +21,7 @@ pub mod conv;
 pub mod cycle_collector;
 pub mod parallel_profile;
 pub mod public_json;
+pub mod printed_result;
 pub mod env;
 pub mod errors;
 pub mod interp;
@@ -31,6 +32,7 @@ pub mod step;
 pub mod value;
 
 pub use conv::{json_to_value, value_to_json, ConvError};
+pub use printed_result::printed_result;
 pub use public_json::{
     decode_public_json, decode_public_json_text, encode_public_json, encode_public_json_text, JsonDecodeError,
     UnknownFields,

@@ -154,7 +154,8 @@ pub(super) fn emit_entry_main(
     // Validate that every entry parameter and the return type are
     // representable at the command-line / stdout boundary. Struct and
     // List are deliberately excluded ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â they need a serialization implementation.
-    check_entry_boundary(entry_agent)?;
+    let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
+    check_entry_boundary(entry_agent, &types)?;
 
     // main signature: (i32 argc, i64 argv) -> i32
     let mut sig = module.make_signature();
@@ -425,33 +426,50 @@ pub(super) fn emit_entry_main(
     Ok(())
 }
 
-/// Validate that a type is supported at the command-line / stdout
-/// boundary. `Int` / `Bool` / `Float` / `String` print directly via
-/// the typed scalar printers. `Struct` prints as JSON via a per-
-/// struct encoder emitted by `crate::lowering::struct_encode`. List,
-/// Result, Option, Weak, Stream, Partial, ResumeToken, RouteParams,
-/// and ImportedStruct each need their own dedicated serialization
-/// paths and are filed as later slices.
 /// Why the entry agent cannot cross the native command-line boundary, or
 /// `Ok` when every parameter and its return can. The one rule: the
 /// emitted `main` enforces it, and `corvid run` asks it first so a
 /// program it refuses runs on the interpreter instead.
-pub(crate) fn check_entry_boundary(entry_agent: &IrAgent) -> Result<(), CodegenError> {
+///
+/// Arguments arrive as `Int`, `Float`, `Bool` or `String` text. A result
+/// prints as both tiers print it (`printed_result` on the interpreter): a
+/// scalar as its text, and a record, variant, list, option, result or map
+/// as its public JSON form, which native code writes through the embedded
+/// plan whenever the type has a native form.
+pub(crate) fn check_entry_boundary(entry_agent: &IrAgent, types: &[corvid_ir::IrType]) -> Result<(), CodegenError> {
     for p in &entry_agent.params {
-        check_entry_boundary_type(&p.ty, p.span, "parameter")?;
+        check_entry_boundary_type(&p.ty, p.span, "parameter", types)?;
     }
-    check_entry_boundary_type(&entry_agent.return_ty, entry_agent.span, "return")
+    check_entry_boundary_type(&entry_agent.return_ty, entry_agent.span, "return", types)
 }
 
-fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), CodegenError> {
+/// Whether a result prints as its public JSON form.
+fn prints_as_json(ty: &Type) -> bool {
+    matches!(ty, Type::Struct(_) | Type::List(_) | Type::Option(_) | Type::Result(_, _) | Type::Map(_, _))
+}
+
+fn check_entry_boundary_type(ty: &Type, span: Span, role: &str, types: &[corvid_ir::IrType]) -> Result<(), CodegenError> {
     match ty {
+        _ if role == "return" && prints_as_json(ty) => {
+            if native_public_json_type(ty, types) {
+                Ok(())
+            } else {
+                Err(CodegenError::not_supported(
+                    format!(
+                        "entry agent return of type `{}` - a type in it has no native JSON form, so native code cannot print it",
+                        ty.display_name()
+                    ),
+                    span,
+                ))
+            }
+        }
         Type::Map(_, _) => Err(CodegenError::not_supported(
             format!("entry agent {role} of type `Map<K, V>` - interpreter-only in 45g"),
             Span::new(0, 0),
         )),
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),
         // Taint is compile-time only: the entry boundary sees the inner.
-        Type::Tainted(inner) => check_entry_boundary_type(inner, span, role),
+        Type::Tainted(inner) => check_entry_boundary_type(inner, span, role, types),
         Type::Struct(_) if role == "parameter" => Err(CodegenError::not_supported(
             "entry agent parameter of a record type - `corvid run` passes arguments as `Int`, `Float`, `Bool` or `String` text; take a `String` and decode it with the record type's `from_json(text)`",
             span,
@@ -478,7 +496,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             "native command-line arguments carry no source information for a grounded parameter; call this helper from Corvid with a retrieval-backed value",
             span,
         )),
-        Type::Grounded(inner) => check_entry_boundary_type(inner, span, role),
+        Type::Grounded(inner) => check_entry_boundary_type(inner, span, role, types),
         Type::TraceId => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `TraceId` - `replay` expressions at the native command-line boundary land in Phase 21 slice 21-inv-E-4; use the interpreter tier for now"
@@ -609,22 +627,19 @@ fn emit_entry_result_print(
             emit_release(builder, module, runtime, text);
             emit_release(builder, module, runtime, result_val);
         }
-        Type::Struct(def_id) => {
-            // Hand the struct pointer to the per-struct encoder
-            // (cached by `def_id`); print the resulting JSON string
-            // via the existing `print_string` path; release both
-            // the JSON string (refcount 1, fresh from
-            // `corvid_json_object_finish`) and the struct itself
-            // (the entry agent's owning return).
-            let to_json_fid = lookup_or_emit_struct_to_json(module, runtime, *def_id, span)?;
-            let to_json_ref = module.declare_func_in_func(to_json_fid, builder.func);
-            let call = builder.ins().call(to_json_ref, &[result_val]);
-            let json_str = builder.inst_results(call)[0];
+        // A record, variant, list, option, result or map prints its
+        // public JSON form, through the embedded plan, as the interpreter
+        // prints it (`printed_result`).
+        ty if prints_as_json(ty) => {
+            builder.declare_value_needs_stack_map(result_val);
+            let json_str = lower_json_encode(builder, module, runtime, ty, result_val, span)?;
             builder.declare_value_needs_stack_map(json_str);
             let print_ref = module.declare_func_in_func(runtime.print_string, builder.func);
             builder.ins().call(print_ref, &[json_str]);
             emit_release(builder, module, runtime, json_str);
-            emit_release(builder, module, runtime, result_val);
+            if is_refcounted_type(ty) {
+                emit_release(builder, module, runtime, result_val);
+            }
         }
         Type::Grounded(inner) => {
             emit_entry_result_print(builder, module, runtime, inner, result_val, span)?;
@@ -646,9 +661,9 @@ mod tests {
     fn command_line_can_print_grounded_text_but_cannot_supply_its_provenance() {
         let ty = Type::Grounded(Box::new(Type::String));
         let span = Span::new(0, 0);
-        let error = check_entry_boundary_type(&ty, span, "parameter").unwrap_err();
+        let error = check_entry_boundary_type(&ty, span, "parameter", &[]).unwrap_err();
         assert!(error.to_string().contains("source information"));
-        check_entry_boundary_type(&ty, span, "return").unwrap();
+        check_entry_boundary_type(&ty, span, "return", &[]).unwrap();
     }
 
     /// The native entry boundary REFUSES `ImportedStruct` loudly with
@@ -663,7 +678,7 @@ mod tests {
             name: "Ticket".to_string(),
             module_path: "./types".to_string(),
         });
-        let err = check_entry_boundary_type(&ty, Span::new(0, 0), "parameter")
+        let err = check_entry_boundary_type(&ty, Span::new(0, 0), "parameter", &[])
             .expect_err("ImportedStruct at the entry boundary must refuse");
         let message = format!("{err:?}");
         assert!(

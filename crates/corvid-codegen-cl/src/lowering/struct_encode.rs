@@ -1,13 +1,12 @@
-//! Per-struct JSON encoder emission for entry-boundary struct
-//! returns.
+//! Per-struct JSON encoder emission for an `extern "c"` agent's struct
+//! return, the JSON a C host receives.
 //!
-//! When an entry agent declares a `Type::Struct(_)` return, the
-//! native code generator emits a small Cranelift function with the
-//! signature `extern "C" fn(struct_ptr: i64) -> CorvidString`. The
-//! emitted `main` calls this encoder on the agent's return value
-//! and prints the resulting JSON string via `corvid_print_string`,
-//! producing a `{"field": value, ...}` line on stdout that mirrors
-//! what the interpreter's `value_to_json` produces in source-order.
+//! The native code generator emits a small Cranelift function with the
+//! signature `extern "C" fn(struct_ptr: i64) -> CorvidString`, writing
+//! `{"field": value, ...}` in source order under each field's Corvid
+//! name. The command line no longer uses it: a printed result is the
+//! public JSON form, through the embedded plan. Moving this host ABI to
+//! the public form too is on the roadmap.
 //!
 //! Encoders are cached on `RuntimeFuncs.struct_to_json` keyed by
 //! `DefId` — mirror of the decoder cache in `struct_decode.rs`.

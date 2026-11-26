@@ -21,7 +21,7 @@ On macOS or Linux, use `export` instead of `set`.
 Expected output includes:
 
 ```text
-ReviewSession(... finding_count: 1 ... checklist_id: "approval-boundary" ... posted: false ...)
+{... "checklist_id":"approval-boundary" ... "finding_count":1 ... "posted":false ...}
 ```
 
 ## What It Shows

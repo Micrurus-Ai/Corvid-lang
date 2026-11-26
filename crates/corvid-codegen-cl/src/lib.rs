@@ -146,7 +146,7 @@ pub fn build_native_to_disk(
     extra_tool_libs: &[&Path],
 ) -> Result<PathBuf, CodegenError> {
     let entry = pick_entry_agent(ir)?;
-    lowering::check_entry_boundary(entry)?;
+    lowering::check_entry_boundary(entry, &ir.types)?;
     let out_bin = link::binary_path_for(
         bin_path.parent().unwrap_or(Path::new(".")),
         bin_path
@@ -236,7 +236,7 @@ fn define_embedded_descriptor(
 /// program on the interpreter instead of failing its native build.
 pub fn native_entry_refusal(ir: &IrFile) -> Option<String> {
     let entry = pick_entry_agent(ir).ok()?;
-    lowering::check_entry_boundary(entry).err().map(|err| match err.kind {
+    lowering::check_entry_boundary(entry, &ir.types).err().map(|err| match err.kind {
         errors::CodegenErrorKind::NotSupported(reason) => reason,
         other => other.to_string(),
     })

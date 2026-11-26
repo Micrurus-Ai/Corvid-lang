@@ -491,7 +491,17 @@ fn run_entry_with_runtime(path: &Path, ir: &IrFile, args: &[String], rt: Runtime
     match result {
         Ok(corvid_vm::Value::Nothing) => Ok(0),
         Ok(value) => {
-            println!("{value}");
+            // The entry agent `run_ir_with_runtime` ran: the only agent,
+            // or `main`.
+            let entry = if ir.agents.len() == 1 {
+                ir.agents.first()
+            } else {
+                ir.agents.iter().find(|agent| agent.name == "main")
+            };
+            match entry {
+                Some(agent) => println!("{}", corvid_vm::printed_result(ir, agent, &value)),
+                None => println!("{value}"),
+            }
             Ok(0)
         }
         Err(RunError::Compile(diags)) => {

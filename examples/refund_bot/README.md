@@ -14,7 +14,7 @@ cargo run -q -p corvid-cli -- run
 Expected output includes:
 
 ```text
-DemoStatus(contract: "approval-gated refund", app: "refund_bot")
+{"app":"refund_bot","contract":"approval-gated refund"}
 ```
 
 ## What It Shows

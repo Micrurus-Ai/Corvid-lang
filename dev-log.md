@@ -2,6 +2,24 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One printed form for a program's result
+
+The same program printed different output depending on its tier. The
+interpreter quoted a `String` and showed records in its `Display` form.
+Native code printed a bare `String` and a record as JSON under Corvid names,
+through a scalar-only encoder, and refused lists, options and results. Both
+now print through the public JSON form by declared type, the JSON a route
+returns, with a `String` as its text and other scalars as `to_string()`. The
+interpreter uses `corvid_vm::printed_result`. Native code uses the embedded
+plan (`lower_json_encode`), and its boundary accepts any structured result
+with a native public form. The [proposal](docs/proposals/printed-results.md)
+records why the `Display` form, JSON for a top-level `String`, and pretty JSON
+lost.
+
+Filed: an `extern "c"` agent's record return still reaches its host
+through `struct_encode.rs` under Corvid names. That is a host ABI, so it moves
+in its own slice with the descriptor and the examples.
+
 ### `corvid run` routes an entry agent native code cannot carry
 
 While measuring how the tiers print results, `corvid run` on

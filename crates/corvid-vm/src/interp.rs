@@ -42,7 +42,7 @@ mod currency;
 mod crypto;
 #[path = "interp/secret_tools.rs"]
 mod secret_tools;
-mod tool_json;
+pub(crate) mod tool_json;
 #[path = "interp/connector_json.rs"]
 mod connector_json;
 #[path = "interp/test_trace.rs"]

@@ -8409,3 +8409,7 @@ A skill's computed label puts each std tool it uses in the group named after the
 
 A program whose entry agent returns a `List`, `Option` or `Result`, or takes a record, runs on the interpreter under `corvid run`. It prints `↻ running via interpreter:` with the reason first, where it used to stop with a native build error. `--target=native` refuses it with the same reason.
 
+### What `corvid run` prints
+
+`corvid run` prints the entry agent's result the same way on both tiers. A `String` prints as its text, without quotes. Another scalar prints its `to_string()` text (`42`, `2.0`, `true`). A record, variant, list, option, result or map prints its JSON, compact and with sorted keys: the JSON a route returns for the same value, so a renamed key shows its JSON name. `Refund(amount: 42, order_id: "o-1")` became `{"amount":42,"order-id":"o-1"}`. Pipe it into `jq` to read it, or decode it with the generated client. A program returning a list, an option or a result now runs natively.
+

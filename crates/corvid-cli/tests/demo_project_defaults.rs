@@ -894,7 +894,7 @@ fn code_review_agent_runs_with_mock_github_and_llm() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("approval-boundary"), "{stdout}");
-    assert!(stdout.contains("posted: false"), "{stdout}");
+    assert!(stdout.contains("\"posted\":false"), "{stdout}");
 }
 
 #[test]
