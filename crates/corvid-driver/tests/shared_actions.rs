@@ -328,6 +328,47 @@ fn the_report_tells_breaking_from_additive() {
     assert!(report(format!("{IDENTITY}{REPORTED}")).is_empty(), "the same program reports nothing");
 }
 
+const NESTED: &str = r#"
+type Column:
+    | Todo
+    | Done
+
+type Place:
+    column: Column
+    position: Int
+
+type MoveCard:
+    card: Int
+    place: Place
+
+type Moved:
+    card: Int
+    column: Column
+
+action move_card(move: MoveCard) -> Moved requires anyone:
+    return Moved(move.card, move.place.column)
+"#;
+
+#[test]
+fn a_change_inside_a_record_the_input_or_result_holds_is_reported_by_direction() {
+    use corvid_abi::action_changes::{action_changes, ChangeSeverity};
+    let base = contract(&format!("{IDENTITY}{NESTED}"));
+    let report = |source: &str| action_changes(&base, &contract(&format!("{IDENTITY}{source}")));
+    let find = |changes: &[corvid_abi::action_changes::ActionChange], text: &str| {
+        changes.iter().find(|c| c.detail.contains(text)).map(|c| c.severity).unwrap_or_else(|| panic!("no `{text}` in {changes:#?}"))
+    };
+
+    let new_field = report(&NESTED.replace("    position: Int\n", "    position: Int\n    lane: Int\n"));
+    assert_eq!(find(&new_field, "`Place` in its input gained the field `lane`"), ChangeSeverity::Breaking, "a caller does not send it");
+
+    let new_variant = report(&NESTED.replace("    | Done\n", "    | Done\n    | Archived\n"));
+    assert_eq!(find(&new_variant, "`Column` in its result gained the variant `Archived`"), ChangeSeverity::Breaking, "a reader handling every case meets a new one");
+    assert_eq!(find(&new_variant, "`Column` in its input gained the variant `Archived`"), ChangeSeverity::Additive, "a sender is not affected");
+
+    let dropped = report(&NESTED.replace("    | Done\n", "").replace("return Moved(move.card, move.place.column)", "return Moved(move.card, Todo)"));
+    assert_eq!(find(&dropped, "`Column` in its input no longer has the variant `Done`"), ChangeSeverity::Breaking, "a caller that sends it is refused");
+}
+
 #[test]
 fn action_stays_an_ordinary_name_elsewhere() {
     let found = errors("agent run(action: String) -> String:\n    return action\n");

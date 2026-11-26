@@ -1811,6 +1811,21 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - The change report looks inside nested types
+
+The action change report now walks every declared type an action's
+input and result reach, through fields and variant payloads, and
+compares each with the same type in the new contract. Direction
+decides the verdict, because each surface fails differently: a sender
+of a record breaks on a new required field and on a removed variant
+(the server refuses it), but not on a new variant; a reader breaks on a
+new variant (a TypeScript `switch` over the union stops being
+exhaustive) but not on a new field or a removed variant. A type renamed
+or removed is already reported where it is named. This widens the
+narrowing B10-5a recorded.
+
+---
+
 ## 2026-11-26 - What an action change breaks (B10-5a)
 
 `corvid contract app --diff base.json` compares the program's contract

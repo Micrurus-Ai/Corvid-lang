@@ -57,6 +57,9 @@ pub fn action_changes(base: &ApplicationContract, head: &ApplicationContract) ->
                 format!("its result changed from `{}` to `{}`", old.callable.output_type, new.callable.output_type),
             );
         }
+        for (severity, detail) in reached_type_changes(old, base, head) {
+            push(severity, detail);
+        }
         for (severity, detail) in policy_changes(old, new) {
             push(severity, detail);
         }
@@ -192,6 +195,121 @@ fn input_changes(
                 format!("its input gained the required `{name}`, which existing callers do not send"),
             ));
         }
+    }
+    changes
+}
+
+/// Where a declared type is reached: what a caller sends, what it reads,
+/// or both. The direction decides what breaks: a caller that sends a
+/// record breaks on a new required field, one that reads a choice breaks
+/// on a new variant it does not handle.
+#[derive(Clone, Copy, PartialEq)]
+enum Reached {
+    Sent,
+    Read,
+}
+
+/// The declared types a type name mentions (`Option<List<Card>>` names
+/// `Card`), by the contract's own type list.
+fn named_types<'a>(type_name: &str, contract: &'a ApplicationContract) -> Vec<&'a ContractType> {
+    type_name
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty())
+        .filter_map(|word| contract.types.iter().find(|t| t.name == word))
+        .collect()
+}
+
+/// Every declared type reached from `roots`, following fields and variant
+/// payloads, each once.
+fn reach<'a>(roots: Vec<&'a ContractType>, contract: &'a ApplicationContract) -> Vec<&'a ContractType> {
+    let mut seen: Vec<&ContractType> = Vec::new();
+    let mut pending = roots;
+    while let Some(ty) = pending.pop() {
+        if seen.iter().any(|t| t.name == ty.name) {
+            continue;
+        }
+        seen.push(ty);
+        let fields = ty.fields.iter().chain(ty.variants.iter().flat_map(|v| v.fields.iter()));
+        for field in fields {
+            pending.extend(named_types(&field.type_name, contract));
+        }
+    }
+    seen
+}
+
+/// Changes inside the declared types an action's input and result hold.
+/// The input's own record is compared by `input_changes`; this covers
+/// what it and the result reach.
+fn reached_type_changes(old: &ContractAction, base: &ApplicationContract, head: &ApplicationContract) -> Vec<(ChangeSeverity, String)> {
+    let sent_roots: Vec<&ContractType> = match &old.input_type {
+        Some(record) => base
+            .types
+            .iter()
+            .find(|t| &t.name == record)
+            .map(|t| t.fields.iter().flat_map(|f| named_types(&f.type_name, base)).collect())
+            .unwrap_or_default(),
+        None => old.callable.inputs.iter().flat_map(|p| named_types(&p.type_name, base)).collect(),
+    };
+    let read_roots = named_types(&old.callable.output_type, base);
+    let mut changes = Vec::new();
+    for (reached, roots) in [(Reached::Sent, sent_roots), (Reached::Read, read_roots)] {
+        for before in reach(roots, base) {
+            // A type renamed or removed shows up where it is named, as a
+            // changed field or result type.
+            let Some(after) = head.types.iter().find(|t| t.name == before.name) else { continue };
+            changes.extend(type_changes(before, after, reached));
+        }
+    }
+    changes
+}
+
+fn type_changes(before: &ContractType, after: &ContractType, reached: Reached) -> Vec<(ChangeSeverity, String)> {
+    let name = &before.name;
+    let place = match reached {
+        Reached::Sent => "in its input",
+        Reached::Read => "in its result",
+    };
+    let mut changes = Vec::new();
+    let fields = |ty: &ContractType| -> BTreeMap<String, (String, String)> {
+        ty.fields.iter().map(|f| (f.key().to_string(), (f.type_name.clone(), bounds(f)))).collect()
+    };
+    let (old_fields, new_fields) = (fields(before), fields(after));
+    for (key, (ty, limits)) in &old_fields {
+        match new_fields.get(key) {
+            None => changes.push((ChangeSeverity::Breaking, format!("`{name}.{key}` {place} was removed"))),
+            Some((now, _)) if now != ty => {
+                changes.push((ChangeSeverity::Breaking, format!("`{name}.{key}` {place} changed from `{ty}` to `{now}`")))
+            }
+            Some((_, now)) if now != limits && reached == Reached::Sent => changes.push((
+                ChangeSeverity::Breaking,
+                format!("`{name}.{key}` {place} has different bounds, so a value accepted before can be refused"),
+            )),
+            _ => {}
+        }
+    }
+    for (key, (ty, _)) in &new_fields {
+        if old_fields.contains_key(key) {
+            continue;
+        }
+        let severity = if reached == Reached::Sent && !ty.starts_with("Option<") {
+            ChangeSeverity::Breaking
+        } else {
+            ChangeSeverity::Additive
+        };
+        changes.push((severity, format!("`{name}` {place} gained the field `{key}`")));
+    }
+    let variants = |ty: &ContractType| -> Vec<String> { ty.variants.iter().map(|v| v.name.clone()).collect() };
+    let (old_variants, new_variants) = (variants(before), variants(after));
+    for variant in old_variants.iter().filter(|v| !new_variants.contains(v)) {
+        // A caller that sends a removed variant is refused; one that reads
+        // it simply never receives it again.
+        let severity = if reached == Reached::Sent { ChangeSeverity::Breaking } else { ChangeSeverity::Informational };
+        changes.push((severity, format!("`{name}` {place} no longer has the variant `{variant}`")));
+    }
+    for variant in new_variants.iter().filter(|v| !old_variants.contains(v)) {
+        // A reader that handles every variant meets one it does not know.
+        let severity = if reached == Reached::Read { ChangeSeverity::Breaking } else { ChangeSeverity::Additive };
+        changes.push((severity, format!("`{name}` {place} gained the variant `{variant}`")));
     }
     changes
 }
