@@ -325,6 +325,10 @@ route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
 # name everywhere but the start of a server-block declaration.
 live_decl         ::= 'live' route_path '->' type_ref route_policy? ':' INDENT block DEDENT
 
+# Inside either declaration's path string, {board} binds path.board as
+# String and {board: Int} binds it as Int. An explicit String is also valid.
+path_placeholder  ::= '{' IDENT (':' ('Int' | 'String'))? '}'
+
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref
 route_policy      ::= 'requires' route_requirement ('and' route_requirement)*
@@ -821,6 +825,16 @@ Inside a function, write `browser state name = expression`. The initializer is e
 ### Keyed rows in view layouts
 
 Inside an indented child list, `for item in records by item.id:` builds one editable row per record in the input list, in source order. The key must be a unique nonempty string field. The loop variable is in scope inside the block, including in `bind item.field` expressions. A row accepts the same editable record fields as a browser record editor. Moving a row preserves its browser-local edits and input focus. Declare `browser state members = workspace.agents` to initialize a typed list of editable records. A typed list expression can also appear directly after `in`. The list is initialized when the page renders.
+
+### Live rows in view layouts
+
+Inside an indented child list, write `for row in ui.live(server.subscription, arguments...):`.
+The subscription belongs to a server declared in the module. Its path
+parameters determine the number, order and types of the arguments. The table
+supplies the complete key. In the child template, `ui.value(bind row.field)`
+projects a checked field into text. Nested field paths traverse records.
+The subscription belongs to the mounted list and is released on disconnect.
+[Browser guide](../book/19-browser-views.md#display-a-live-board-in-corvid)
 
 ### Conditions in view layouts
 

@@ -7,10 +7,12 @@
 // for exhaustive handling.
 
 export class CorvidError extends Error {
+  /**
+   * @param status HTTP status code.
+   * @param body Parsed error body, if the response was JSON.
+   */
   constructor(
-    /** HTTP status code. */
     readonly status: number,
-    /** The parsed error body, if the response was JSON. */
     readonly body: unknown,
     message?: string,
   ) {

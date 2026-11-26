@@ -344,6 +344,8 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::LiveArguments
+                | BuiltIn::LiveField
                 | BuiltIn::BrowserRowKey
                 | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields

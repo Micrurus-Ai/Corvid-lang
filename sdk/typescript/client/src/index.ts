@@ -11,6 +11,7 @@
 
 export { CorvidClient, type CorvidClientOptions, type RouteShape } from "./transport.js";
 export { CorvidError } from "./errors.js";
+export type { LiveObserver } from "./live-connection.js";
 export {
   type AgentEvent,
   type AgentStream,
@@ -20,3 +21,4 @@ export {
   type RouteStream,
 } from "./events.js";
 export { type Page, paginate } from "./pagination.js";
+export { fillPath } from "./path.js";

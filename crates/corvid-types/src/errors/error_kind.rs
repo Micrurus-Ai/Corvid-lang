@@ -280,6 +280,7 @@ pub enum TypeErrorKind {
     /// a record at all.
     RouteQueryFieldType { path: String, field: String, ty: String },
     InvalidForm { message: String },
+    InvalidLiveBinding { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
     /// 52g): a non-absolute `base_url`, a malformed reliability value, a
@@ -849,6 +850,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { path, message } => {
                 format!("invalid approval policy on route `{path}`: {message}")
             }
+            Self::InvalidLiveBinding { message } => format!("invalid live binding: {message}"),
             Self::InvalidForm { message } => format!("invalid form: {message}"),
             Self::RouteUploadPolicyInvalid { path, message } => {
                 format!("invalid upload policy on route `{path}`: {message}")
@@ -1589,7 +1591,7 @@ impl TypeErrorKind {
             Self::RouteApprovalPolicyInvalid { .. } => Some(
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
-            Self::InvalidForm { .. } => None,
+            Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
             Self::RoutePathParamType { .. } => Some(format!(
                 "a path parameter is one of {}",
                 crate::text_parameters::TEXT_TYPES

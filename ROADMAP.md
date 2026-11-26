@@ -2,6 +2,14 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
+- [x] RT-4 / F08 live subscriptions. The generated TypeScript observer and
+  Corvid child loop received a missed commit on reconnect and the next live
+  edit over RT-3. Edge retained the unaffected row, input focus and selection.
+  Unmount released the component subscription while the observer kept receiving
+  edits. [Hosted Edge checks](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45802618761)
+- [ ] Verify full-width integer table keys across RT-2, RT-3 and both clients.
+  The SDK rejects JSON number keys outside JavaScript's safe integer range.
+  Agree a lossless key representation before accepting those subscriptions.
 - [ ] RT-3 live subscription transport. The socket and frame lifecycle are implemented. Serve resolves compiled RT-1 declarations and binds their path arguments. Serve reads the ordered query again on relevant RT-2 commits. Serve uses written row revisions from RT-2 for removals. Local session notifications wake idle sockets and the durable authority revision guards delivery across processes. Verify reconnect, idle revocation and multi-process delivery with the RT-3 browser check. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
 
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.

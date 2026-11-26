@@ -2,6 +2,52 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-4 live subscriptions verified over RT-3
+
+Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.
+The board fixture wrote to SQLite through a Corvid route. The generated client
+and Corvid view received the offline write in the reconnect snapshot and the
+next edit on the resumed WebSocket. An unchanged row kept its DOM node and
+its input kept focus, text and selection. Removing the list sent one unsubscribe.
+The generated observer received another write, then released the last socket.
+[Hosted verification](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45802618761)
+
+### RT-4 Corvid live child loops
+
+The child loop reads the declared live route's path parameters and row type.
+Its browser element consumes the SDK's reconciled row objects and uses the
+existing focus-preserving row placement algorithm. Each mounted list releases
+its own subscription. Generated callers and Corvid views share the page's
+same-origin connection. Cleanup also suppresses an already queued terminal
+error for the released observer. The generated caller also uses the same segment encoder
+as the element. The Edge script compares the embedded SDK modules to fresh
+TypeScript output before starting the service. Comments inside two parameter
+lists caused the compiler to emit trailing spaces missing from the embedded
+modules. Moving the comments above the signatures keeps the output reproducible.
+
+The public board fixture checks the emitted component markup. The driver
+tests reject a missing subscription, a wrong or missing argument and an
+unknown row field. Real reconnect and component cleanup remain open on the
+revision whose interpreter reports E5204 for live routes.
+The invalid path-type test now changes only the live declaration and checks
+that the shared path reader's diagnostic identifies its parameter and route.
+
+Hosted Windows reached migration setup and then failed to find a global
+TypeScript compiler. The Edge verifier now runs TypeScript 5.9.3 through npm
+by default and accepts a local compiler through `--tsc` for offline checks.
+Both paths compiled the board client and matched the embedded modules locally.
+Startup then stopped at E5204 for the board's live route, before Edge launched.
+
+### RT-4 live row schemas and typed client generation
+
+The contract uses each reachable table's record and ordered keys. Generated
+subscriptions use the same path parameter types as the handler and release
+the SDK subscription through the returned function. A server-qualified name
+lets two servers independently declare a live list named `cards`.
+The generated client's type check covers a wrong path type, an omitted
+observer and an unknown row field. The Edge check reached the server startup
+gate for RT-3 (`E5204`). The component binding and a reconnect across
+committed edits remain open.
 ### RT-3 Windows deployment check
 
 The [hosted Edge run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45789832802) passed the SQLite scenario on `e182a19`. Its Postgres check stopped before either replica started because `initdb` could not read the temporary password file. On elevated Windows runners the verifier now gives the runner's user SID inheritable access to a dedicated cluster directory before creating that file. Postgres drops the administrator group when it starts. The two-process Edge check remains open.
@@ -29,6 +75,13 @@ Serve now selects the compiled live query and its declared permission even when 
 The RT-3 transport now decodes page requests, forwards revisioned rows, releases unsubscribed handles and refreshes active queries on authority changes. Each open goes through serve's existing GET permission check. The upgrade refuses service until the live declaration, session notifications and committed stream are connected. The CLI smoke check exercises this boundary with the booking example. F08 reconnect acceptance remains pending. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
 
 ### Live subscriptions protocol agreement
+
+RT-4 SDK work exercises PR 46's snapshot, ordered change, unsubscribe and
+forbidden frames through the public TypeScript client. The client compares
+decimal revisions as strings and reconciles each subscription independently.
+The tests use injected frames. Generated methods, the Corvid binding and
+committed-stream verification await the backend inputs recorded in the
+[client implementation boundary](docs/proposals/real-time.md#rt-4-client-implementation-boundary).
 
 The frontend and backend now share a proposed implementation target for live declarations, ordered snapshots, committed changes and reconnect. Transport and grammar can start in parallel. [Protocol and ownership](docs/proposals/real-time.md#frontend-agreement-and-wire-protocol)
 

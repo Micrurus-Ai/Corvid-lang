@@ -66,6 +66,7 @@ use corvid_vm::{
 use libloading::{Library, Symbol};
 
 mod browser_asset;
+mod live_assets;
 mod live;
 mod public_failure;
 mod route_stream;
@@ -369,7 +370,7 @@ pub(crate) fn cmd_serve(
         && !ir.servers.iter().flat_map(http_routes).any(|route|
             route.path == "/target/wasm/events.quantity.js" && route.method == HttpMethod::Get);
     let mut page_scripts = browser_asset::PageScripts::default();
-    let mut compiled_assets = Vec::new();
+    let mut compiled_assets = live_assets::for_contract(&contract.live)?;
     if asset_dir.join("events.js").try_exists()? || asset_dir.join("events.wasm").try_exists()? {
         for (name, mime) in [
             ("events.js", "text/javascript; charset=utf-8"),

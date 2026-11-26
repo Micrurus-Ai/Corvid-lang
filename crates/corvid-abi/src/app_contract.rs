@@ -397,10 +397,13 @@ pub struct ContractRoute {
 /// rows: a snapshot, then `Added`, `Updated` and `Removed` changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractLive {
+    pub server: String,
     pub name: String,
     pub path: String,
     pub path_params: Vec<ContractParam>,
     pub row_type: String,
+    /// Fields identifying one row, in table declaration order.
+    pub key_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<ContractRoutePolicy>,
 }
@@ -533,6 +536,10 @@ pub fn emit_application_contract(
         })
         .flat_map(|server| server.routes.iter().filter(|route| !route.is_live()).map(|route| contract_route(route, &names)))
         .collect();
+    let tables: std::collections::HashMap<_, _> = file.decls.iter().filter_map(|decl| match decl {
+        Decl::Table(table) => Some((table.name().name.as_str(), table)),
+        _ => None,
+    }).collect();
     let live = file
         .decls
         .iter()
@@ -540,7 +547,20 @@ pub fn emit_application_contract(
             Decl::Server(server) => Some(server),
             _ => None,
         })
-        .flat_map(|server| server.routes.iter().filter_map(|route| contract_live(route, &names)))
+        .flat_map(|server| server.routes.iter().map(move |route| (server, route)))
+        .filter_map(|(server, route)| {
+            let row = names.name(route.response.live_row()?);
+            let table = tables[row.as_str()];
+            Some(ContractLive {
+                server: server.name.name.clone(),
+                name: route.live_name()?.into(),
+                path: route.path.clone(),
+                path_params: contract_path_params(route, &names),
+                row_type: row,
+                key_fields: table.keys.iter().map(|key| key.name.clone()).collect(),
+                policy: contract_policy(route),
+            })
+        })
         .collect();
 
     // `compute_worst_case_cost` is available for a tighter
@@ -1068,14 +1088,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
     ContractRoute {
         method: r.method.as_str().to_string(),
         path: r.path.clone(),
-        path_params: r
-            .path_params
-            .iter()
-            .map(|p| ContractParam {
-                name: p.name.name.clone(),
-                type_name: names.name(&p.ty),
-            })
-            .collect(),
+        path_params: contract_path_params(r, names),
         query_type: r.query_ty.as_ref().map(|ty| names.name(ty)),
         body_type: r.body_ty.as_ref().map(|ty| names.name(ty)),
         request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
@@ -1107,33 +1120,22 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             .map(|e| e.name.name.clone())
             .collect(),
         pagination: names.pagination(&r.response.ty),
-        policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| {
-            ContractRoutePolicy {
-                authenticated: true,
-                roles: p.roles.clone(),
-                permissions: p.permissions.clone(),
-            }
-        }),
+        policy: contract_policy(r),
     }
 }
 
-/// A `live` declaration's contract entry, or `None` for an ordinary
-/// route.
-fn contract_live(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> Option<ContractLive> {
-    Some(ContractLive {
-        name: r.live_name()?.to_string(),
-        path: r.path.clone(),
-        path_params: r
-            .path_params
-            .iter()
-            .map(|p| ContractParam { name: p.name.name.clone(), type_name: names.name(&p.ty) })
-            .collect(),
-        row_type: names.name(r.response.live_row()?),
-        policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| ContractRoutePolicy {
-            authenticated: true,
-            roles: p.roles.clone(),
-            permissions: p.permissions.clone(),
-        }),
+fn contract_path_params(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> Vec<ContractParam> {
+    r.path_params.iter().map(|p| ContractParam {
+        name: p.name.name.clone(),
+        type_name: names.name(&p.ty),
+    }).collect()
+}
+
+fn contract_policy(r: &corvid_ast::HttpRouteDecl) -> Option<ContractRoutePolicy> {
+    r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| ContractRoutePolicy {
+        authenticated: true,
+        roles: p.roles.clone(),
+        permissions: p.permissions.clone(),
     })
 }
 

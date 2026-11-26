@@ -6,6 +6,47 @@
 canonical help output lives in `corvid --help`; this page is the
 overview.
 
+## Live client transport
+
+`corvid contract app` publishes each live declaration's `server`, `name`,
+`path`, ordered `path_params`, `row_type`, ordered `key_fields` and policy.
+Look up `row_type` in `types` for its public JSON fields. Both `route` and
+`live` accept `{board: Int}` in the source path. The contract path uses
+`{board}` and records its type separately. An unannotated segment is a String.
+
+`corvid contract ts-client` generates a method per live declaration. For
+`live "/boards/{board: Int}/cards" -> Card` on `board_app`, subscribe with
+`const stop = api.live.board_app.cards(7, observer)`. Path arguments appear
+in declaration order, followed by the observer. Its `rows` callback receives
+`readonly Card[]`. Call `stop()` when the component unmounts. If a public
+callable uses the name `live`, the generated group appends underscores until
+its name is available.
+
+The SDK exports `livePath(template, values)`. Pass a normalized contract path
+and a record of named string or safe integer arguments. The result contains
+one percent-encoded segment per placeholder. Both browser clients use this
+function. The compiler's template helper
+`ui.live_rows(server_name: String, subscription: String, arguments: List<String>, content: List<ui.View>) -> ui.View`
+takes the positional arguments as text and wraps the child views in a live row
+template. Application code uses the checked child loop.
+[Live rows](grammar.md#live-rows-in-view-layouts)
+
+The TypeScript SDK provides
+`CorvidClient.subscribe<Row>(path, keyFields, observer): () => void` for client
+bindings. The binding supplies the concrete encoded path and the ordered names
+of the table's key fields. String keys and exactly representable safe integer
+keys are supported. An inexact numeric key terminates delivery. The browser
+uses its session cookie on the WebSocket connection. HTTP request headers in
+the client options apply only to fetch requests.
+
+`LiveObserver<Row>.rows(rows)` receives a complete ordered list after a
+snapshot or change. Rows with the same key and revision keep their identity.
+`LiveObserver<Row>.error(error)` signals terminal failure. Clear the displayed
+result on error. A scoped denial yields a `CorvidError` with status 403 and
+body code `forbidden`. Session invalidation ends every subscription on the
+connection. Call the returned function when the owner unmounts. Multiple
+calls are safe. The Corvid component binding remains pending.
+
 ## Project commands
 
 ```sh

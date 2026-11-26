@@ -7,6 +7,7 @@
 // audited surface. Nothing here is regenerated per app.
 
 import { CorvidError } from "./errors.js";
+import { connectionForPage, type LiveConnection, type LiveObserver } from "./live-connection.js";
 import {
   type AgentEvent,
   type AgentStream,
@@ -40,6 +41,7 @@ export interface CorvidClientOptions {
 }
 
 export class CorvidClient {
+  private live?: LiveConnection;
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
   private readonly doFetch: typeof fetch;
@@ -48,6 +50,15 @@ export class CorvidClient {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.headers = options.headers ?? {};
     this.doFetch = options.fetch ?? fetch.bind(globalThis);
+  }
+
+  /** Subscribe with a concrete route path and its ordered table key fields.
+   * The returned function releases this subscription and is safe to call twice. */
+  subscribe<Row extends object>(
+    path: string, keyFields: readonly (keyof Row)[], observer: LiveObserver<Row>,
+  ): () => void {
+    this.live ??= connectionForPage(this.baseUrl);
+    return this.live.subscribe(path, keyFields, observer, CorvidError);
   }
 
   /** Invoke a public agent/prompt and await its single JSON result. */

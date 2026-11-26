@@ -158,7 +158,7 @@ fn emit_protocol_types(contract: &ApplicationContract) -> String {
 }
 
 fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    serde_json::to_string(value).expect("a string is a JSON literal")
 }
 
 fn upper_first(name: &str) -> String {
@@ -263,6 +263,9 @@ fn emit_api(contract: &ApplicationContract) -> String {
     let mut out = String::new();
     out.push_str(GENERATED_HEADER);
     out.push('\n');
+    if !contract.live.is_empty() {
+        out.push_str("import { fillPath } from \"@corvid/client\";\n");
+    }
     out.push_str(
         "import { CorvidClient, type AgentStream, type Page, type RouteShape, type RouteStream } from \"@corvid/client\";\n",
     );
@@ -276,6 +279,9 @@ fn emit_api(contract: &ApplicationContract) -> String {
     out.push_str(&routes.tables);
     out.push_str("export class Api {\n");
     out.push_str("  constructor(private readonly client: CorvidClient) {}\n\n");
+    if !contract.live.is_empty() {
+        out.push_str(&live_methods(contract));
+    }
     out.push_str(&routes.method);
 
     for agent in &contract.agents {
@@ -298,6 +304,43 @@ fn emit_api(contract: &ApplicationContract) -> String {
     }
 
     out.push_str("}\n");
+    out
+}
+
+fn live_methods(contract: &ApplicationContract) -> String {
+    let mut servers = std::collections::BTreeMap::new();
+    for live in &contract.live {
+        servers.entry(&live.server).or_insert_with(Vec::new).push(live);
+    }
+    let mut group = "live".to_owned();
+    while contract.agents.iter().chain(&contract.prompts).any(|c| c.name == group) {
+        group.push('_');
+    }
+    let mut out = format!("  readonly {group} = {{\n");
+    for (server, declarations) in servers {
+        out.push_str(&format!("    [{}]: {{\n", quote(server)));
+        for live in declarations {
+            let row = &live.row_type;
+            let mut params = Vec::new();
+            let mut arguments = Vec::new();
+            for param in &live.path_params {
+                // Prefix source identifiers so reserved JS names and 'observer'
+                // remain valid arguments. Each value fills one encoded segment.
+                let arg = format!("path_{}", param.name);
+                params.push(format!("{arg}: {}", ts_type(&param.type_name)));
+                arguments.push(format!("[{}]: {arg}", quote(&param.name)));
+            }
+            let path = format!("fillPath({}, {{ {} }})", quote(&live.path), arguments.join(", "));
+            params.push(format!("observer: import(\"@corvid/client\").LiveObserver<{row}>"));
+            let keys = serde_json::to_string(&live.key_fields).expect("string key names");
+            out.push_str(&format!(
+                "      [{}]: ({}): (() => void) =>\n        this.client.subscribe<{row}>({path}, {keys}, observer),\n",
+                quote(&live.name), params.join(", ")
+            ));
+        }
+        out.push_str("    },\n");
+    }
+    out.push_str("  };\n\n");
     out
 }
 

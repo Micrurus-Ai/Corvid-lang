@@ -36,6 +36,22 @@ A connector operation that returns `Response<Charge>` now runs as native code: `
 
 A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.
 
+A Corvid child loop can read `for card in ui.live(board_app.cards, board):`.
+Display the title with `ui.value(bind card.title)`. The compiler checks the
+path argument and row field. Its `ui.live_rows` template helper carries the
+subscription into the browser, where the shared SDK's `livePath` encodes the
+arguments. Real delivery requires an RT-3 server.
+[Live board example](docs/book/19-browser-views.md#display-a-live-board-in-corvid)
+
+The TypeScript SDK's low-level `client.subscribe(path, keyFields, observer)`
+shares a WebSocket across a client's subscriptions. Use `observer.rows` to
+display the ordered result, clear it on `observer.error`, and call the
+returned unsubscribe function on unmount. With `live "/boards/{board: Int}/cards" -> Card`,
+`path.board` is an Int in Corvid. The generated TypeScript call is
+`const stop = api.live.board_app.cards(7, observer)`. Its observer receives
+the typed rows in query order. The table declaration supplies every key field,
+including both parts of a composite key. [Live client transport](docs/reference/cli.md#live-client-transport)
+
 Hashing and checking passwords now runs as native code: `hash_password(password, owasp_2023())` records the password as `<redacted>` and reveals it only to the hashing, exactly as on the interpreter, so a sign-up and log-in service builds into a native binary. The only secret use that still needs the interpreter is passing a secret to a tool you declared yourself. [Native code](docs/reference/cryptography.md#native-code)
 
 Verifying a webhook with a key read as a `Secret` now runs as native code: `hmac_sha256` and `hmac_sha512` keyed by a secret, `verify_password` and `decode_base64_after("whsec_")` give the same answers in a native binary as on the interpreter. Passing a secret to a tool of your own or to `hash_password` still runs on the interpreter. [Native code](docs/reference/cryptography.md#native-code)

@@ -68,6 +68,49 @@ fn the_contract_lists_a_live_by_name_apart_from_the_routes() {
 }
 
 #[test]
+fn generated_live_client_uses_the_table_schema_and_typed_route() {
+    let source = include_str!("../../../sdk/typescript/client/test/boards.cor");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk/typescript/client/test/boards.cor");
+    let check = |source: &str| corvid_driver::compile_to_ir_with_config_at_path(source, &path, None);
+    let contract = compile_to_application_contract_with_config(source, path.to_str().unwrap(), "test", None)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+    let live = &contract.live[0];
+    assert_eq!(live.server, "board_app");
+    assert_eq!(live.key_fields, ["board", "card"]);
+    assert_eq!(live.path, "/boards/{board}/cards");
+    assert_eq!(live.path_params[0].type_name, "Int");
+    let card = contract.types.iter().find(|ty| ty.name == live.row_type).unwrap();
+    let fields: Vec<_> = card.fields.iter().map(|f| (f.name.as_str(), f.type_name.as_str())).collect();
+    assert_eq!(fields, [("board", "Int"), ("card", "Int"), ("title", "String"), ("revision", "Int")]);
+    let files = corvid_abi::ts_client::emit_ts_client(&contract);
+    let api = &files.iter().find(|file| file.filename == "api.ts").unwrap().contents;
+    assert!(api.contains("path_board: number, observer: import(\"@corvid/client\").LiveObserver<Card>"));
+    assert!(api.contains("[\"board\",\"card\"]"));
+
+    let invalid = source.replace("{board: Int}", "{board}");
+    assert!(check(&invalid).is_err(), "String path.board cannot match an Int column");
+    let invalid = source.replace("live \"/boards/{board: Int}", "live \"/boards/{board: Card}");
+    let diagnostics = check(&invalid).unwrap_err();
+    assert!(diagnostics.iter().any(|error|
+        error.message.contains("path parameter `board` of `/boards/{board}/cards`")
+            && error.message.contains("a path segment cannot be read as")
+    ), "{diagnostics:#?}");
+
+    let agent_row = source.replace("for card in ui.live", "for agent in ui.live")
+        .replace("bind card.title", "bind agent.title");
+    check(&agent_row).unwrap_or_else(|errors| panic!("{errors:#?}"));
+    for (original, replacement, expected) in [
+        ("bind card.title", "bind card.caption", "caption"),
+        ("board_app.cards, board", "board_app.unknown, board", "no live declaration"),
+        ("board_app.cards, board", "board_app.cards", "ui.live path"),
+        ("board_app.cards, board", "board_app.cards, \"7\"", "live path parameter"),
+    ] {
+        let errors = check(&source.replace(original, replacement)).unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains(expected)), "{errors:#?}");
+    }
+}
+
+#[test]
 fn serve_refuses_to_start_a_live_until_the_transport_serves_it() {
     let ir = compile_to_ir(&program(LIVE)).unwrap_or_else(|errors| panic!("{errors:#?}"));
     let gaps = check_contract_closure(&ir, RuntimeCapabilities::interpreter_tier());
