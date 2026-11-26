@@ -119,9 +119,30 @@ Use the existing server session and route permission rules. Match the browser or
 
 RT-1 supplies the contract entry and the runtime open/close handle described above. RT-2 supplies committed, filtered changes. RT-3 and RT-4 use those interfaces. RT-5 reuses B10's action contract when available. F08/F18 acceptance exercises a missed edit in the new snapshot and a subsequent live edit over the same subscription.
 
+### RT-3 integration boundary
+
+Serve resolves the compiled live declaration, converts its path arguments with
+the HTTP route binder and enforces its own GET permission policy. The socket
+owns each subscription's commit receiver. Serve registers the receiver before
+running the ordered query with the verified actor and bound path, so commits
+during the initial read are covered. It merges the written row revisions from
+queued commits before calling the ordered RT-2 diff. A lagged receiver gets
+a fresh snapshot. Releasing the id drops the receiver and any
+outstanding query. Several subscriptions share the same socket.
+
+Serve observes authority in the same SQLite store used by login and HTTP
+authorization. A per-actor revision changes in the same transaction as a role,
+actor or session change. The socket samples that revision around canonical
+cookie validation and registration with the session watcher. Local authority
+changes wake the socket immediately. It also checks at expiry and at one-second
+intervals while idle, and guards each frame enqueue against a concurrent writer. This includes
+writers in another serve process using the same durable session store.
+A changed revision discards the old queries and rebuilds them with GET policy.
+This requires no additional declaration or client message.
+
 ## Built in RT-1, and two points to agree
 
-RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. `corvid serve` refuses to start a program that declares one (`E5204`, `live /boards/{board}/cards needs live subscriptions over the WebSocket transport`) until RT-3 sets `RuntimeCapabilities::live_subscriptions`.
+RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. Serve enables the transport for programs with an identity.
 
 **The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
 
@@ -134,7 +155,7 @@ Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route para
 
 Two pieces in `corvid_runtime::tables`, and one loop RT-3 runs per subscription:
 
-1. **`Runtime::subscribe_table_commits()`** returns a broadcast receiver of `TableCommit { database, tables }`. A write outside an `atomic:` block is announced once it succeeds; an `atomic:` block announces the set of tables it wrote when it commits, and nothing when it rolls back; a conflict writes nothing and announces nothing. Clones of one `Runtime` share the feed, so every run a server makes feeds it. A receiver more than 1,024 commits behind gets `RecvError::Lagged`; the subscription then sends a fresh `snapshot`.
+1. **`Runtime::subscribe_table_commits()`** returns a broadcast receiver of `TableCommit { database, tables, rows }`. A write outside an `atomic:` block is announced once it succeeds; an `atomic:` block announces the set of tables it wrote when it commits, and nothing when it rolls back; a conflict writes nothing and announces nothing. Clones of one `Runtime` share the feed, so every run a server makes feeds it. A receiver more than 1,024 commits behind gets `RecvError::Lagged`; the subscription then sends a fresh `snapshot`.
 2. **`live_changes(previous, next, written)`** takes the rows a subscriber last received, the new ordered result, both as `LiveRow { key, revision, row }` (`LiveRow::from_json(row, keys)` builds one from the public JSON of a row), and the live's table's `WrittenRows` from the commits being handled (`commit.rows[table]`, merged across commits with `WrittenRows::merge`). It returns `Unchanged`, `Changes(Vec<LiveChange>)` or `Snapshot(rows)`. Changes put removals first, then walk the new result in order, adding or updating each row not already at its index, so a client that applies them in order holds the new result exactly (`apply_live_changes` is that client, and the tests hold the two together). When more changes than rows would be needed, it returns the snapshot instead, as the wire protocol allows. `LiveChangeKind::wire_name` gives `added`, `updated` and `removed`.
 3. **A removal's revision** is the revision of the write that removed the row, which only the commit knows: a row saved out of the query is absent from the new result. Each `TableCommit` carries `rows`, for each table the key of every row written and the revision it reached (an insert reaches 1, a save the row's new revision, a delete the revision after the row's last). The interpreter computes each key with the public JSON encoder the snapshot uses, so the commit's key and `LiveRow::from_json`'s key agree by construction; a test holds them together for text keys and keys of two fields. When a removed row is not in `written`, as after `Lagged`, after a reconnect's empty commit, or for a cross-process commit whose rows did not fit in the 8000-byte notification, `live_changes` returns a snapshot rather than guess a revision.
 
@@ -152,7 +173,7 @@ A live socket outlives the request that opened it, so it has to hear when its se
 | The session's expiry time passes | `Invalid` |
 | A role granted, or the actor record updated (`upsert_actor`) | `Active`, so the socket re-checks each subscription |
 
-`Invalid` is final; the client logs in again and reconnects. Validation and registration happen under the watcher lock, and every change writes the database before it notifies under that same lock, so a logout can never fall between the check and the registration. A session nobody watches leaves no entry behind. RT-3's `SessionObserver` maps onto it directly: `observe_session(token)` calls `auth.observe_session(token, trace_id)`, maps an error to `401`, and maps `SessionState` to `SessionStatus`, or uses `SessionState` in its place.
+`Invalid` is final; the client logs in again and reconnects. Validation and registration happen under the watcher lock, and every change writes the database before it notifies under that same lock, so a logout can never fall between the check and the registration. A session nobody watches leaves no entry behind. Serve uses `watch_session_cookie` to register this watcher and capture the durable revision in one validation. An invalid cookie at upgrade gets HTTP 401.
 
 ## Built in RT-6: commits shared between server processes
 

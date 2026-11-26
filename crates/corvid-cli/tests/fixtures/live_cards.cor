@@ -1,0 +1,23 @@
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        board_member: "board.view"
+
+database boards:
+    engine: sqlite
+    location: "boards.sqlite"
+
+table Card:
+    key card: Int
+    board: String
+
+server boards_app:
+    route GET "/boards/{board}/cards" -> json List<Card>:
+        return Card.all()
+    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+        return Card.where(fn (c) -> c.board == path.board)
+    route GET "/archive" -> json List<Card>:
+        return Card.all()

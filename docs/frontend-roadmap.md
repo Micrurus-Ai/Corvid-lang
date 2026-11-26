@@ -18,6 +18,8 @@ The table below is the execution order for the browser frontend. The detailed de
 
 ### Ordered tasks
 
+F08 can exercise reconnect against the authenticated RT-3 endpoint. The transport check covers an offline commit, a subsequent edit, idle revocation, logout and expiry. Run `scripts/verify_live_subscriptions.py --cli <corvid> --channel msedge` for the browser assertions. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
+
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
 Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. These tasks can proceed while F08 waits for B14. Commerce and offline-editor acceptance can start before F08 merges. Final acceptance requires the merged F08 subscription contract and a passing collaborative-workspace reconnect and resubscription check.
