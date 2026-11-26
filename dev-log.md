@@ -41,6 +41,81 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - A native prompt's text argument reads as its JSON form
+
+The grammar says a prompt parameter "renders as its JSON form", and the
+interpreter renders a `String` argument quoted and escaped:
+`Greet "Ann \"A\""`. Native code inserted the raw text, `Greet Ann "A"`.
+So the same program sent the model different text on each tier, and its
+native recordings could not match an interpreter run. It now renders
+through `corvid_string_json_quote` at run time and through `serde_json`
+when the arguments are constants. A parity test compares the recorded
+prompt text on both tiers for a string with quotes, a backslash, a
+newline, a tab and a non-ASCII letter, which shows the two escapers
+agree.
+
+Found while starting slice B1 of the native scalar boundaries proposal,
+which also found that prompts use the interpreter's internal JSON form
+(an `Option` as a tagged envelope) for arguments, the schema shown to the
+model and replies, rather than the public form. The proposal now records
+the decision to move prompts to the public form on both tiers before
+native prompts are routed through the public plan.
+
+---
+
+## 2026-11-26 - Compound assignment on Decimal and time values in native code
+
+`total += price` on a `Decimal` local, and `+=` and `-=` on a `Duration`
+or an `Instant`, now compile to native code. Before, any compound
+assignment except on a plain number kept a program on the interpreter.
+
+**How.** On these types `total += price` means exactly
+`total = total + price`, and that rebinding was already native: one
+runtime call for the operator, and the release of the old value that
+every reassignment of a reference-counted local gets. `scalar_compound`
+rewrites the one into the other once, before ownership analysis, so the
+analysis and lowering both see a form they already handle. The tier
+picker accepts what `native_scalar_compound` names. The checker's
+refusals, such as `total /= 3` without a rounding mode, are unchanged.
+
+**Simpler options considered.** Lowering the compound form directly would
+need its own ownership modelling of the old value, the reassignment
+path's logic written a second time.
+
+**Tests.** Parity tests under the leak detector cover a `Decimal` total
+in a loop with `+=`, `-=` and `*=`, and a `Duration` and an `Instant`
+with `+=` and `-=`.
+
+---
+
+## 2026-11-26 - Native find_regex and find_all_regex
+
+`text.find_regex(pattern)` and `text.find_all_regex(pattern)` now
+compile to native code, so every regex method does. A program that
+looked for a match used to run on the interpreter, because native code
+could not build `RegexMatch` records.
+
+**How.** `RegexMatch` becomes an ordinary native record before ownership
+analysis, as `JsonError` and `Response<Body>` do. The record has the
+fields `corvid_types::regex_match_fields` declares, the list the
+interpreter builds its record from, under the reserved
+`REGEX_MATCH_TYPE_ID`. The runtime exports run `corvid_text::regex`, the
+code the interpreter calls, and build the `Option<RegexMatch>` or
+`List<RegexMatch>` through the public JSON decoder, with the plan the
+compiler embeds for the method's result type. The runtime decides no
+native layout of its own. An invalid pattern stops the program with the
+same message as the other native regex methods.
+
+**Simpler options considered.** Building the record field by field in
+the runtime would be a second description of the layout; the decode plan
+already carries one.
+
+**Tests.** A parity test under the leak detector covers the match text,
+byte positions, a group present and a group absent, no match, all
+matches in a loop, and an empty `find_all_regex`.
+
+---
+
 ## 2026-11-26 - Native loops release a carried local each time round
 
 A reference-counted local first bound inside a native loop body and read
@@ -1023,6 +1098,77 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-26 - One typed reader for request text
+
+The owner pointed out that `Int`-only path types were a limit, and they
+were. They stopped there because `serve`'s `coerce_str_to_value` read
+only `Int`, `Float` and `Bool` exactly and turned every other type into
+a `String` value. The same function read query fields, so `query
+Search` with a `Decimal`, time, `Option` or `List` field type-checked
+and handed the handler a `String`: a type hole at the HTTP boundary.
+
+The fix has two halves, each with one copy:
+- **The shape.** `corvid_types::text_parameters::text_shape` (and
+  `query_field_shape`, which adds `Option` and `List`) decides which
+  types request text can have. The checker uses it to refuse the rest,
+  and `serve` uses it to read, so the two agree by construction. A
+  type of plain variants is answered from the declarations in the
+  checker and from the IR in the server.
+- **The reading.** `corvid_public_json::request_text` turns the text
+  into the JSON the type's public mapping reads, and the public JSON
+  decoder builds the value. So a `Decimal` keeps its digits, a variant
+  is checked against the type's names, and an `Instant` reads RFC 3339,
+  exactly as in a JSON body, with no second parser. An `Int` is digits
+  with an optional minus: no `+`, spaces or exponent.
+
+Found and fixed along the way: the query reader kept the last value of
+a repeated name and silently dropped the others. A `List` field now
+reads every value in order, and a one-value field given twice is a 400.
+
+Filed under "Narrowing is temporary": connector query fields still use
+their own type list. Next is making them use the same shape, so request
+text has one shape in both directions.
+
+---
+
+## 2026-11-26 - Typed path parameters for routes and live subscriptions
+
+Agreed with frontend development in PR #47:
+`"/boards/{board: Int}/cards"` makes `path.board` an `Int`. Most of the
+pipeline already carried a type per path parameter: the AST, the
+checker's `path` record, the contract and OpenAPI. The server already
+converted segments by type with a 400. Only the parser hardcoded
+`String`. It now reads `{name}` and `{name: Type}` and keeps the path in
+its plain form, `"/boards/{board}/cards"`, because the router, the
+contract and RT-3's live path resolution all match on that.
+
+Decisions, against the laws:
+- **Only `Int` takes a type, for now.** The checker allows exactly the
+  types the server reads exactly (`Int`, and `String` by default) and
+  refuses others by name. A `Decimal` segment would otherwise have
+  reached the handler as text.
+- **`{board: String}` is refused**, as a second spelling of `{board}`
+  ("one obvious way").
+- **A malformed placeholder is a parse error.** `{9x}` or an unclosed
+  `{` used to be passed to the router silently as a parameter no
+  handler reads.
+- **Considered:** `/boards/:board` and `<int:board>`. Both are symbols
+  a first-time reader has to learn. `{board: Int}` reads as the same
+  `name: Type` Corvid writes everywhere else.
+
+Found and fixed: each placeholder's span started at the literal's
+opening quote rather than the path text, so diagnostics pointed one
+character early. A test now pins the name's and the type's spans to
+their text.
+
+Found and filed ahead of the next item: route query fields of any type
+but `Int`, `Float`, `Bool` and `String` reach the handler as a `String`
+value, because the server's string-to-value conversion falls through
+to text. The checker does not limit route query field types the way it
+limits connector queries. A type hole at the HTTP boundary.
 
 ---
 

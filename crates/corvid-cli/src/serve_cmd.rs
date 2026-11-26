@@ -811,32 +811,27 @@ fn corvid_route_to_axum_path(path: &str) -> String {
 /// Bind decoded route captures to the handler's typed path argument.
 fn bind_path<'a>(
     params: &[corvid_ir::IrRoutePathParam],
+    types_by_id: &HashMap<DefId, &IrType>,
     capture: impl Fn(&str) -> Option<std::borrow::Cow<'a, str>>,
 ) -> Result<Value, String> {
     let mut fields = Vec::with_capacity(params.len());
     for param in params {
         let name = &param.name;
         let raw = capture(name).ok_or_else(|| format!("{name}: missing or invalid path parameter"))?;
-        let value = coerce_str_to_value(&raw, &param.ty).map_err(|error| format!("{name}: {error}"))?;
+        let value = coerce_str_to_value(&raw, &param.ty, types_by_id).map_err(|error| format!("{name}: {error}"))?;
         fields.push((name.clone(), value));
     }
     Ok(Value::Struct(corvid_driver::StructValue::new(DefId(0), "path", fields)))
 }
 
-/// Coerce a raw request string (path/query param) into a `Value` of the
-/// declared scalar type (slice 52a).
-fn coerce_str_to_value(raw: &str, ty: &Type) -> Result<Value, String> {
-    Ok(match ty {
-        Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| format!("`{raw}` is not an Int"))?),
-        Type::Float => {
-            Value::Float(raw.parse::<f64>().map_err(|_| format!("`{raw}` is not a Float"))?)
-        }
-        Type::Bool => Value::Bool(
-            raw.parse::<bool>().map_err(|_| format!("`{raw}` is not a Bool"))?,
-        ),
-        // String / TraceId / anything else the boundary carries as text.
-        _ => Value::String(raw.into()),
-    })
+/// Read request text (a path segment or one query value) as a value of
+/// its declared type, through the public JSON decoder, so a `Decimal`,
+/// time or plain variant reads exactly as in a JSON body. A type that
+/// cannot be request text is refused here as the checker refuses it,
+/// never passed on as text where another type was declared.
+fn coerce_str_to_value(raw: &str, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<Value, String> {
+    corvid_vm::public_json::decode_request_text(raw, ty, types_by_id)
+        .unwrap_or_else(|| Err(format!("`{}` cannot be read from request text", ty.display_name())))
 }
 
 /// The unauthenticated `actor` placeholder bound in a route body when
@@ -1240,7 +1235,7 @@ async fn run_route(
 
     // Path params → a `path` struct value.
     let path_lookup: HashMap<&str, &str> = raw_path.iter().collect();
-    let path_value = match bind_path(&meta.path_params, |name| path_lookup.get(name).copied().map(Into::into)) {
+    let path_value = match bind_path(&meta.path_params, &types_by_id, |name| path_lookup.get(name).copied().map(Into::into)) {
         Ok(value) => value,
         Err(error) => return bad_request("invalid_path_param", &error),
     };
@@ -1507,18 +1502,44 @@ fn urlencoded_record(
         .get(def_id)
         .copied()
         .ok_or_else(|| format!("unknown {source} struct type"))?;
-    let mut pairs = HashMap::new();
+    // Every value under each name, in order: a `List` field reads them
+    // all, and a field of one value refuses a name given twice.
+    let mut given: HashMap<String, Vec<String>> = HashMap::new();
     for pair in encoded.split('&').filter(|s| !s.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        pairs.insert(urldecode(key)?, urldecode(value)?);
+        given.entry(urldecode(key)?).or_default().push(urldecode(value)?);
     }
+    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
+    let read = |raw: &str, ty: &Type, name: &str| {
+        coerce_str_to_value(raw, ty, types_by_id).map_err(|e| format!("{source} param `{name}`: {e}"))
+    };
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
-        let raw = pairs
-            .get(&field.name)
-            .cloned()
-            .ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
-        let value = coerce_str_to_value(&raw, &field.ty)?;
+        let values = given.get(&field.name).map(Vec::as_slice).unwrap_or(&[]);
+        let shape = corvid_types::text_parameters::query_field_shape(&field.ty, &plain)
+            .ok_or_else(|| format!("{source} param `{}` has a type a query string cannot carry", field.name))?;
+        let once = |values: &[String]| -> Result<Option<String>, String> {
+            match values {
+                [] => Ok(None),
+                [one] => Ok(Some(one.clone())),
+                _ => Err(format!("{source} param `{}` is given {} times, but holds one value", field.name, values.len())),
+            }
+        };
+        let value = match (shape, &field.ty) {
+            (corvid_types::text_parameters::QueryFieldShape::One(_), ty) => {
+                let raw = once(values)?.ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
+                read(&raw, ty, &field.name)?
+            }
+            (corvid_types::text_parameters::QueryFieldShape::Optional(_), Type::Option(inner)) => match once(values)? {
+                Some(raw) => Value::OptionSome(corvid_vm::value::BoxedValue::new(read(&raw, inner, &field.name)?)),
+                None => Value::OptionNone,
+            },
+            (corvid_types::text_parameters::QueryFieldShape::Repeated(_), Type::List(inner)) => {
+                let items = values.iter().map(|raw| read(raw, inner, &field.name)).collect::<Result<Vec<_>, _>>()?;
+                Value::List(corvid_driver::ListValue::new(items))
+            }
+            _ => return Err(format!("{source} param `{}` has a type a query string cannot carry", field.name)),
+        };
         corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
             .map_err(|err| err.to_string())?;
         fields.push((field.name.clone(), value));
@@ -2503,24 +2524,34 @@ mod tests {
 
     #[test]
     fn coerce_parses_scalar_types() {
-        assert!(matches!(coerce_str_to_value("42", &Type::Int), Ok(Value::Int(42))));
+        let types = HashMap::new();
+        assert!(matches!(coerce_str_to_value("42", &Type::Int, &types), Ok(Value::Int(42))));
         assert!(matches!(
-            coerce_str_to_value("3.5", &Type::Float),
+            coerce_str_to_value("3.5", &Type::Float, &types),
             Ok(Value::Float(f)) if (f - 3.5).abs() < 1e-9
         ));
         assert!(matches!(
-            coerce_str_to_value("true", &Type::Bool),
+            coerce_str_to_value("true", &Type::Bool, &types),
             Ok(Value::Bool(true))
         ));
         assert!(matches!(
-            coerce_str_to_value("hello", &Type::String),
+            coerce_str_to_value("hello", &Type::String, &types),
             Ok(Value::String(s)) if &*s == "hello"
+        ));
+        assert!(matches!(
+            coerce_str_to_value("19.90", &Type::Decimal, &types),
+            Ok(Value::Decimal(d)) if d.to_string() == "19.90"
         ));
     }
 
     #[test]
-    fn coerce_rejects_malformed_int() {
-        assert!(coerce_str_to_value("notanint", &Type::Int).is_err());
+    fn coerce_rejects_malformed_values_and_types_text_cannot_hold() {
+        let types = HashMap::new();
+        assert!(coerce_str_to_value("notanint", &Type::Int, &types).is_err());
+        assert!(coerce_str_to_value("19.9.0", &Type::Decimal, &types).is_err());
+        // Was passed on as a String where a list was declared.
+        let error = coerce_str_to_value("1,2", &Type::List(Box::new(Type::Int)), &types).unwrap_err();
+        assert!(error.contains("cannot be read from request text"), "{error}");
     }
 
     #[test]

@@ -815,11 +815,28 @@ impl<'a> Checker<'a> {
         let path_fields = route
             .path_params
             .iter()
-            .map(|param| (param.name.name.clone(), self.type_ref_to_type(&param.ty)))
+            .map(|param| {
+                let ty = self.type_ref_to_type(&param.ty);
+                // A path segment is text the server reads before the
+                // handler runs, through the shape the server reads too.
+                let plain = |ty: &Type| self.has_plain_variants(ty);
+                if ty != Type::Unknown && crate::text_parameters::text_shape(&ty, &plain).is_none() {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::RoutePathParamType {
+                            path: route.path.clone(),
+                            param: param.name.name.clone(),
+                            ty: ty.display_name(),
+                        },
+                        param.ty.span(),
+                    ));
+                }
+                (param.name.name.clone(), ty)
+            })
             .collect();
         self.bind_route_local_by_name(&route.body, "path", Type::RouteParams(path_fields));
         if let Some(query_ty) = &route.query_ty {
             let ty = self.type_ref_to_type(query_ty);
+            self.check_route_query_fields(route, &ty, query_ty.span());
             self.bind_route_local_by_name(&route.body, "query", ty);
         }
         if let Some(body_ty) = &route.body_ty {

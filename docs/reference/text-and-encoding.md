@@ -2,7 +2,7 @@
 
 Corvid's text methods encode and decode text, parse UUIDs and match regular expressions. They are builtin `String` methods, so they need no import. They are pure: they run in `@deterministic` agents, are not traced, and give the same result on every run and in replay.
 
-Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing, `contains_regex`, `replace_regex` and `split_regex` also compile to native code, with the same results and messages. A program that calls `find_regex` or `find_all_regex` runs on the interpreter until native code can build `RegexMatch` records. `uuid_v4` and `uuid_v7` run in native code through the runtime, so a native run records and replays them as the interpreter does. [Proposal](../proposals/text-and-encoding.md)
+Status: B03 in progress. Everything here runs on the interpreter. Encoding, UUID parsing and every regex method (`contains_regex`, `find_regex`, `find_all_regex`, `replace_regex`, `split_regex`) also compile to native code, with the same results and messages; native code holds a `RegexMatch` as the same record the interpreter does. `uuid_v4` and `uuid_v7` run in native code through the runtime, so a native run records and replays them as the interpreter does. [Proposal](../proposals/text-and-encoding.md)
 
 ## Encoding
 

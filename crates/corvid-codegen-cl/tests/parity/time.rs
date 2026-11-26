@@ -356,3 +356,25 @@ agent main() -> Int:
         "the reading is outside the Int range",
     );
 }
+
+/// Compound assignment on a `Duration` and an `Instant` local compiles
+/// natively as the rebinding it means.
+#[test]
+fn compound_assignment_on_time_values_matches_the_interpreter() {
+    let out = assert_parity_text(
+        r#"
+agent main() -> String:
+    start = Instant.from_epoch_milliseconds(1783758600000)
+    later = Instant.from_epoch_milliseconds(1783758600500)
+    step: Duration = later - start
+    total: Duration = step
+    for n in [1, 2, 3]:
+        total += step
+    at = start
+    at += total
+    at -= step
+    return total.to_string() + " " + at.to_string()
+"#,
+    );
+    assert_eq!(out, "PT2S 2026-07-11T08:30:01.500Z");
+}

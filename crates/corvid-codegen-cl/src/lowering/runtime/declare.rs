@@ -115,6 +115,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     // B03 text methods: encoders take the text and return a String;
     // decoders also take a Result payload slot and return its tag,
     // the `corvid_string_parse_int` shape.
+    let mut regex_find_sig = module.make_signature();
+    for _ in 0..5 {
+        regex_find_sig.params.push(AbiParam::new(I64));
+    }
+    regex_find_sig.returns.push(AbiParam::new(I64));
     let mut text_methods = Vec::new();
     for kind in crate::text_methods::NATIVE_TEXT_METHODS {
         let Some((symbol, shape)) = crate::text_methods::native_text_symbol(kind) else { continue };
@@ -124,6 +129,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             NativeTextShape::Decoder => &char_at_sig,
             NativeTextShape::RegexSearch => &search_sig,
             NativeTextShape::RegexReplace | NativeTextShape::RegexSplit => &substring_sig,
+            NativeTextShape::RegexFind => &regex_find_sig,
         };
         let id = module
             .declare_function(symbol, Linkage::Import, sig)
@@ -895,6 +901,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let mut sfi_sig = module.make_signature();
     sfi_sig.params.push(AbiParam::new(I64));
     sfi_sig.returns.push(AbiParam::new(I64));
+    // A `String` prompt argument renders as its JSON form, quoted and
+    // escaped, as the interpreter renders it.
+    let string_json_quote = module
+        .declare_function("corvid_string_json_quote", Linkage::Import, &sfi_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare string_json_quote: {e}"), Span::new(0, 0)))?;
     let string_from_int_id = module
         .declare_function(STRING_FROM_INT_SYMBOL, Linkage::Import, &sfi_sig)
         .map_err(|e| {
@@ -1450,6 +1461,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_from_int: string_from_int_id,
         string_from_bool: string_from_bool_id,
         string_from_float: string_from_float_id,
+        string_json_quote,
         approve_sync: approve_sync_id,
         prompt_call_int: prompt_call_int_id,
         prompt_call_bool: prompt_call_bool_id,

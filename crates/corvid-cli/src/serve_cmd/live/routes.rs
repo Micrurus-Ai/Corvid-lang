@@ -35,7 +35,8 @@ impl Routes {
         let matched = self.0.as_ref()?.at(path).ok()?;
         let (server, index) = *matched.value;
         let route = &ir.servers[server].routes[index];
-        let argument = bind_path(&route.path_params, |name| {
+        let types_by_id = ir.types.iter().map(|ty| (ty.id, ty)).collect();
+        let argument = bind_path(&route.path_params, &types_by_id, |name| {
             percent_decode_str(matched.params.get(name)?)
                 .decode_utf8()
                 .ok()
