@@ -970,6 +970,42 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - Watching a session for live sockets (B14 RT-3)
+
+Codex's RT-3 transport was blocked: a live socket must validate its
+session and register for changes atomically, then close or re-authorize
+when the session ends or its authority changes. `serve` had the
+interface and no implementation. The session store
+(`SessionAuthRuntime`) now has `observe_session`, which returns a
+`watch::Receiver<SessionState>`:
+- `Invalid` on logout, revocation, a role taken away, rotation and
+  expiry;
+- `Active` again when a role is granted or the actor record changes, so
+  the socket re-checks what it may see.
+
+Atomicity comes from one lock. `observe_session` validates and
+registers while holding the watcher lock. Every mutation writes the
+database first and then notifies under that lock. So a change either
+happens before the check, which then fails, or reaches a watcher that is
+already registered.
+
+Expiry is the one change no call makes, so a timer makes it. A rotated
+session keeps its id, so each watch has a generation, and the old
+token's timer cannot end the new token's watch; a test holds that.
+
+Considered: polling the store from each socket. It is simpler, but it
+leaves a revoked session working until the next poll, which the
+real-time proposal rules out ("takes effect at once").
+
+Found and fixed in its own commit: two audit events with the same kind,
+session and trace in the same millisecond got the same id. The second
+insert hit the primary key and failed the session check it was
+recording. `serve` passes a random trace id per request, so it was not
+hit there, but any caller reusing a trace id was. Audit ids now carry a
+random part, and events list in the order they were written.
+
+---
+
 ## 2026-11-25 - Dependencies past their security advisories
 
 Each push reported 16 Dependabot alerts on `main`. `cargo audit` on

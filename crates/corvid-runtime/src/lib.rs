@@ -195,7 +195,7 @@ pub use auth::{
     JwtVerificationContract, OAuthCallbackResolution, OAuthStateCreate, OAuthStatePurpose,
     OAuthStateRecord, PermissionRequirement, ProvisioningOutcome, ProvisioningRequest,
     RouteAuthzOutcome, RoutePolicyRequirement, SessionAuthRuntime, SessionCreate, SessionRecord,
-    SessionResolution, TenantSource,
+    SessionResolution, SessionState, TenantSource,
 };
 pub use calibration::{CalibrationObservation, CalibrationStats};
 pub use cache::{
