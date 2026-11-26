@@ -31,6 +31,10 @@ Simpler alternatives considered: keying on `Debug` text of the values
 (depends on a hash map's order), and sharing by path only (wrong for a query
 that filters by caller). No grammar change.
 
+Filed: lowercase hex is hand-written in about forty places, three of them
+identical `encode_hex` functions in `corvid-cli`; the roadmap item asks for
+one encoder every copy calls.
+
 ### Records cross the C ABI in the public JSON form
 
 The last place a record crossed in a second shape. A `pub extern "c"`
