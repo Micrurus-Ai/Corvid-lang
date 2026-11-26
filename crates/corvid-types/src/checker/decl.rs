@@ -1304,13 +1304,7 @@ fn is_direct_upload_type(ty: &corvid_ast::TypeRef) -> bool {
 /// sets. Provider tokens are deliberately ABSENT — the login actor
 /// never carries connector workspace credentials (slice 51j).
 fn actor_type() -> Type {
-    Type::RouteParams(vec![
-        ("id".to_string(), Type::String),
-        ("tenant".to_string(), Type::String),
-        ("display_name".to_string(), Type::String),
-        ("roles".to_string(), Type::List(Box::new(Type::String))),
-        ("permissions".to_string(), Type::List(Box::new(Type::String))),
-    ])
+    Type::actor()
 }
 
 /// A conservative "looks like a bare registrable domain" check for
