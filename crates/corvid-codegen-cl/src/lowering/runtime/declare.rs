@@ -809,50 +809,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare approve_sync: {e}"), Span::new(0, 0))
         })?;
 
-    // Typed prompt bridges. Each takes 7 args:
-    //   prompt name, signature, rendered template, model,
-    //   arg type-tag string, argc, arg value slots pointer.
-    let make_prompt_sig = |module: &mut ObjectModule, ret_ty: cranelift_codegen::ir::Type| {
-        let mut s = module.make_signature();
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.params.push(AbiParam::new(I64));
-        s.returns.push(AbiParam::new(ret_ty));
-        s
-    };
-    let prompt_int_sig = make_prompt_sig(module, I64);
-    let prompt_call_int_id = module
-        .declare_function(PROMPT_CALL_INT_SYMBOL, Linkage::Import, &prompt_int_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare prompt_call_int: {e}"), Span::new(0, 0))
-        })?;
-    let prompt_bool_sig = make_prompt_sig(module, I8);
-    let prompt_call_bool_id = module
-        .declare_function(PROMPT_CALL_BOOL_SYMBOL, Linkage::Import, &prompt_bool_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare prompt_call_bool: {e}"), Span::new(0, 0))
-        })?;
-    let prompt_float_sig = make_prompt_sig(module, F64);
-    let prompt_call_float_id = module
-        .declare_function(PROMPT_CALL_FLOAT_SYMBOL, Linkage::Import, &prompt_float_sig)
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare prompt_call_float: {e}"), Span::new(0, 0))
-        })?;
-    let prompt_string_sig = make_prompt_sig(module, I64); // returns CorvidString descriptor ptr
-    let prompt_call_string_id = module
-        .declare_function(
-            PROMPT_CALL_STRING_SYMBOL,
-            Linkage::Import,
-            &prompt_string_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare prompt_call_string: {e}"), Span::new(0, 0))
-        })?;
-
+    // The prompt bridge every native prompt call uses (B1b).
     let mut prompt_typed_sig = module.make_signature();
     for _ in 0..12 {
         prompt_typed_sig.params.push(AbiParam::new(I64));
@@ -1216,10 +1173,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_from_bool: string_from_bool_id,
         string_from_float: string_from_float_id,
         approve_sync: approve_sync_id,
-        prompt_call_int: prompt_call_int_id,
-        prompt_call_bool: prompt_call_bool_id,
-        prompt_call_float: prompt_call_float_id,
-        prompt_call_string: prompt_call_string_id,
         prompt_call_typed: prompt_call_typed_id,
         json_parse: json_parse_id,
         json_release: json_release_id,

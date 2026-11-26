@@ -104,6 +104,41 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native prompts ask and retry as the interpreter does
+
+Filed during B1b: a native prompt with an `Int`, `Bool`, `Float` or
+`String` reply put a system prompt with text instructions in front of
+the user's text and sent no schema. It parsed the answer leniently, and
+retried up to `CORVID_PROMPT_MAX_RETRIES` times. The interpreter sends
+the rendered prompt with `reply_schema`'s schema and retries only under
+`with repair N`. So a real model was asked differently by the two
+tiers, and a recording of a retried call diverged.
+
+Now every native prompt goes through `corvid_prompt_call_typed`. Three
+rules have one definition each, which both tiers call:
+- `corvid_prompt_format::reply_schema`: the schema to send, none for a
+  `String`.
+- `corvid_public_json::model_reply`: a reply that arrives as text for a
+  type whose JSON form is not a string, such as `"42"` for an `Int`, is
+  read as the JSON it holds.
+- `corvid_runtime::prompt_repair_rendered`: the retry text, the previous
+  reply and why it failed.
+
+A prompt without `with repair` makes one call. A reply still unusable
+after the repairs stops a native program with "unusable reply: ...",
+exiting with status 1, the interpreter's wording.
+
+Removed: the four scalar prompt bridges, their text instructions and
+lenient parsers, the system-prompt builder, the retry setting, and the
+env-mock fast path, which skipped the runtime's own env-mock adapter.
+
+Test: `repairs_follow_with_repair_on_both_tiers` answers "very good",
+then 7, for an `Int` prompt with `with repair 1`. Both tiers make the
+same two calls with the same retry text and return 7. Without
+`with repair` a native prompt makes one call and stops.
+
+---
+
 ## 2026-11-26 - Native maps with text-held keys and values (B3)
 
 Native maps held only `String` keys and a few value types, and compared

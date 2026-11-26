@@ -282,11 +282,19 @@ agent run(amount: Int) -> Int:
     );
 }
 
+/// A record reply that does not decode is retried as the prompt's
+/// `with repair N` says, as on the interpreter; without it, one call is
+/// all a prompt makes.
 #[test]
 fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     let _ = test_tools_lib_path();
 
-    let ir = ir_of(STRUCT_PROMPT_SRC);
+    let source = STRUCT_PROMPT_SRC.replace(
+        "prompt classify(amount: Int) -> Decision:\n",
+        "prompt classify(amount: Int) -> Decision:\n    with repair 2\n",
+    );
+    assert_ne!(source, STRUCT_PROMPT_SRC, "the fixture declares `with repair 2`");
+    let ir = ir_of(&source);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let bin_path = tmp.path().join("struct_prompt_retry");
@@ -298,15 +306,10 @@ fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     )
     .expect("compile native binary");
 
-    // First reply is missing the required `code` field — decoder
-    // returns 0, bridge retries. Second reply is missing `reason`.
-    // Third reply is well-formed; bridge returns the decoded ptr.
-    //
-    // The `field_present` check inside the decoder is what makes
-    // the first two attempts fail rather than silently returning
-    // garbage; if the present-check were missing, the decoder
-    // would happily build a struct with zero-sentinel field values
-    // and the test would observe "0" instead of "11".
+    // The first reply lacks the required `code` field and the second
+    // `reason`, so each is refused with the missing field and repaired;
+    // the third is well formed. Were a missing field not refused, the
+    // record would hold a made-up value and the test would not see 11.
     let mock_replies_json = serde_json::json!({
         "classify": [
             r#"{"confidence":0.5,"approved":false,"reason":"no code field"}"#,

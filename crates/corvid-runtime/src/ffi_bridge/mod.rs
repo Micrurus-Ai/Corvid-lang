@@ -79,10 +79,7 @@ pub use json_exports::{
     corvid_json_object_set_int, corvid_json_object_set_str, corvid_json_parse,
     corvid_json_release,
 };
-pub use prompt_exports::{
-    corvid_prompt_call_bool, corvid_prompt_call_float, corvid_prompt_call_int,
-    corvid_prompt_call_string, corvid_prompt_call_typed,
-};
+pub use prompt_exports::corvid_prompt_call_typed;
 pub(crate) use state::bridge;
 pub use state::{
     corvid_bench_approval_wait_ns, corvid_bench_json_bridge_ns, corvid_bench_mock_dispatch_ns,
@@ -90,7 +87,7 @@ pub use state::{
     corvid_runtime_embed_init_default, corvid_runtime_init,
     corvid_runtime_probe, corvid_runtime_shutdown, runtime,
 };
-use state::{record_json_bridge_ns, BridgeState, BRIDGE};
+use state::{record_json_bridge_ns, BridgeState};
 pub(crate) use strings::{borrow_corvid_string, read_corvid_string};
 pub use strings::{
     corvid_free_string, corvid_string_into_cstr, release_string, string_from_rust,

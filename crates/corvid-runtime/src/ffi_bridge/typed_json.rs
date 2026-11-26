@@ -86,23 +86,23 @@ pub(crate) unsafe fn native_value_from_json(json: &J, plan: *const u8, plan_len:
 }
 
 /// A model's reply to a native prompt, read as the plan's root type with
-/// the public mapping: what the interpreter's prompt does
-/// (`model_json::from_model_json`). Undeclared keys are ignored, as
-/// `T.from_json` ignores them. A reply that is not JSON or does not
-/// decode is an error with the reason, for the retry's feedback; values
-/// a failed decode had built are released.
+/// the public mapping, as the interpreter's prompt reads it
+/// (`corvid_public_json::model_reply`, then the decoder ignoring
+/// undeclared keys). The error is the decoder's message, the feedback a
+/// `with repair N` retry carries; values a failed decode had built are
+/// released.
 ///
 /// # Safety
 /// `plan`, `plan_len` and `typeinfos` as for [`corvid_json_decode_typed`].
 pub(crate) unsafe fn native_value_from_model_reply(
-    text: &str,
+    reply: J,
     plan: *const u8,
     plan_len: i64,
     typeinfos: *const *const c_void,
 ) -> Result<i64, String> {
-    let json: J = serde_json::from_str(text.trim()).map_err(|err| format!("the reply is not JSON: {err}"))?;
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
+    let json = corvid_public_json::model_reply(reply, &plan.root);
     let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
     corvid_public_json::decode(&json, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder)
         .map(|value| value.bits)

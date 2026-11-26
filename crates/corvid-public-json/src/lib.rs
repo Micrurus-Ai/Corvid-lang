@@ -42,3 +42,28 @@ pub use decode::{decode, decode_text, ValueBuilder};
 pub use encode::{encode, encode_text, ValueReader};
 pub use error::{conflict_decl, json_error_decl, parse_json_text, JsonDecodeError, UnknownFields};
 pub use plan::{builder_shapes, reachable_types, DecodePlan, Shape};
+
+/// A model's reply as the JSON to decode for type `ty`. A provider that
+/// answers in text gives the JSON as a string: `"42"` for an `Int`,
+/// `"{...}"` for a record. When `ty`'s public form is not itself a JSON
+/// string, a string reply holding JSON text is that JSON. A reply for a
+/// text-shaped type (a `String`, a `Decimal`, a time value, or an
+/// `Option` of one) is read as it came. Both tiers read prompt replies
+/// through this one rule.
+pub fn model_reply(value: serde_json::Value, ty: &corvid_types::Type) -> serde_json::Value {
+    use corvid_types::Type;
+    fn text_shaped(ty: &Type) -> bool {
+        match ty {
+            Type::String => true,
+            Type::Option(inner) | Type::Grounded(inner) | Type::Tainted(inner) => text_shaped(inner),
+            other => text_scalar::name(other).is_some(),
+        }
+    }
+    match value {
+        serde_json::Value::String(text) if !text_shaped(ty) => {
+            serde_json::from_str(text.trim()).unwrap_or(serde_json::Value::String(text))
+        }
+        other => other,
+    }
+}
+

@@ -312,3 +312,13 @@ pub use test_from_traces::{
 pub use tools::{ToolHandler, ToolRegistry};
 pub use tracing::{fresh_run_id, now_ms, Tracer};
 pub use usage::{LlmUsageLedger, LlmUsageRecord, LlmUsageTotals};
+
+/// The prompt a `with repair N` retry sends: the rendered prompt, the
+/// reply that failed and why. Both tiers build retries with this, so a
+/// recording of a repaired call replays on either.
+pub fn prompt_repair_rendered(rendered: &str, failed_reply: &serde_json::Value, feedback: &str) -> String {
+    format!(
+        "{rendered}\n\nYour previous response was:\n{failed_reply}\n\nIt failed schema validation: {feedback}\nRespond again, matching the required schema exactly."
+    )
+}
+

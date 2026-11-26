@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A native prompt now asks the model exactly what the interpreter asks: the prompt text and the reply's JSON schema, with no extra instructions, and it retries a reply that does not fit only as `with repair N` says, never on its own. A prompt without `with repair` stops with "unusable reply" after one unusable answer on both tiers, and a recording of a repaired call replays on either.
+
 The generated TypeScript client calls the backend through actions only. It no longer has methods for public agents or prompts, which posted to `/agents/<name>` where no server answered; declare an `action` for what a page or a client should call. An action returning `Stream<T>` gives a `RouteStream<T>`. Client calls now send the CSRF token, so signed-in POSTs work from a browser. A private type an action takes or returns is now published in the contract, so it appears in `types.ts` and OpenAPI. The dev console and the React scaffold list actions. [CLI: actions](docs/reference/cli.md#actions)
 
 The TypeScript client from `corvid contract ts-client` has a method per action: `await api.move_card(move)` or `await api.rename(3, "Ship")`, typed from the contract. An action with `@approval` returns `T | ApprovalPending`; check `result.kind === "approval_pending"` and poll `result.poll` for the decision. [CLI: actions](docs/reference/cli.md#actions)
