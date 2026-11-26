@@ -35,9 +35,47 @@ pub fn request_text_json(raw: &str, shape: TextShape) -> Result<J, String> {
     })
 }
 
+/// The request text for one value's public JSON: the reverse of
+/// [`request_text_json`], which a connector uses to write a query
+/// parameter exactly as a route reads one in. `None` for JSON that is
+/// not one piece of request text (an object with fields, a list).
+pub fn json_request_text(json: &J) -> Option<String> {
+    Some(match json {
+        J::String(text) => text.clone(),
+        J::Number(number) => number.to_string(),
+        J::Bool(flag) => flag.to_string(),
+        // A plain variant: the variant's name.
+        J::Object(object) => {
+            let fields_empty = object.get("fields").map_or(true, |f| f.as_array().is_some_and(Vec::is_empty));
+            match object.get("variant") {
+                Some(J::String(name)) if fields_empty => name.clone(),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writing_then_reading_request_text_gives_back_the_json() {
+        let cases = [
+            (json!(42), TextShape::Int),
+            (json!(-2.5), TextShape::Float),
+            (json!(true), TextShape::Bool),
+            (json!("19.90"), TextShape::Exact),
+            (json!({ "variant": "Open", "fields": [] }), TextShape::PlainVariant),
+        ];
+        for (json, shape) in cases {
+            let text = json_request_text(&json).unwrap_or_else(|| panic!("{json} is request text"));
+            assert_eq!(request_text_json(&text, shape), Ok(json.clone()), "{text}");
+        }
+        assert_eq!(json_request_text(&json!({ "variant": "Done", "fields": [3] })), None, "a variant with fields");
+        assert_eq!(json_request_text(&json!([1])), None);
+    }
 
     #[test]
     fn an_int_is_digits_with_an_optional_minus() {

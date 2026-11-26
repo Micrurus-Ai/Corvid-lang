@@ -678,8 +678,10 @@ fn encode_multipart(value: &serde_json::Value) -> Option<(String, Vec<u8>)> {
 /// The query string for a record argument in its public JSON form: one
 /// `name=value` pair per field, in field-name order. An absent `Option`
 /// (`null`) is left out and a `List` repeats the name, the forms most
-/// APIs read. `None` when the value is not a flat record, which the
-/// checker already refuses.
+/// APIs read. Each value is written as a route reads request text
+/// (`corvid_public_json::request_text`), so a plain variant goes out by
+/// its name and `Bytes` as base64url. `None` when the value is not a
+/// flat record, which the checker already refuses.
 fn encode_query(value: &serde_json::Value) -> Option<String> {
     let serde_json::Value::Object(fields) = value else {
         return None;
@@ -692,12 +694,7 @@ fn encode_query(value: &serde_json::Value) -> Option<String> {
             single => vec![single],
         };
         for item in items {
-            let text = match item {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Number(n) => n.to_string(),
-                serde_json::Value::Bool(b) => b.to_string(),
-                _ => return None,
-            };
+            let text = corvid_public_json::request_text::json_request_text(item)?;
             pairs.push(format!("{}={}", urlencode(name), urlencode(&text)));
         }
     }
@@ -776,6 +773,26 @@ fn build_auth_header(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A query goes out as a route reads one in: a plain variant by its
+    /// name, `Bytes` as its base64url text, an absent `Option` left out
+    /// and a `List` as the name repeated.
+    #[test]
+    fn a_query_writes_variants_by_name_and_bytes_as_text() {
+        let record = json!({
+            "status": [{ "tag": "variant", "type": "Status", "variant": "Open", "fields": [] },
+                       { "tag": "variant", "type": "Status", "variant": "Closed", "fields": [] }],
+            "digest": "3q2-7w",
+            "limit": null,
+            "total": "19.90",
+        });
+        assert_eq!(
+            encode_query(&record).as_deref(),
+            Some("digest=3q2-7w&status=Open&status=Closed&total=19.90")
+        );
+        let with_fields = json!({ "outcome": { "variant": "Done", "fields": [3] } });
+        assert_eq!(encode_query(&with_fields), None, "a variant with fields is not query text");
+    }
 
     fn spec() -> ConnectorHttpSpec {
         ConnectorHttpSpec {

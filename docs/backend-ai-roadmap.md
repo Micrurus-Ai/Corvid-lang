@@ -108,7 +108,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 **Removing the limits** (decided by the owner 2026-11-26; [the plan](proposals/removing-limits.md)). Amends the order: these come first, because each is a hole or a block that a first real application hits.
 
 - [x] One typed reader for path segments and query fields (the item under B14 below).
-- [ ] Connector query fields take the same shape: `is_query_scalar` in the checker still lists its own types (no `Bytes`, no plain variants), and the connector's query encoder writes them. Make it `text_parameters::query_field_shape`, with the encoder writing a variant by its name and `Bytes` as base64url, so a value goes out exactly as a route reads it in. One shape for request text, both directions.
+- [x] Connector query fields take the same shape (done 2026-11-26: the checker uses `query_field_shape`, the encoder writes each value with `json_request_text`, the reverse of what a route reads, and a test sends `?fingerprint=aGk&status=Paid&status=Refunded`). Before, `is_query_scalar` in the checker listed its own types (no `Bytes`, no plain variants), and the connector's query encoder writes them. Make it `text_parameters::query_field_shape`, with the encoder writing a variant by its name and `Bytes` as base64url, so a value goes out exactly as a route reads it in. One shape for request text, both directions.
 - [ ] `try ... else`, built under the amended grammar law. [Proposal](proposals/recoverable-failures.md)
 - [ ] B10 shared actions, built under the amended grammar law. [Proposal](proposals/shared-actions.md)
 - [ ] JSON key renaming, built under the amended grammar law. [Proposal](proposals/json-field-keys.md)

@@ -1085,6 +1085,25 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - Connector queries write request text as routes read it
+
+The typed reader left one narrowing behind, filed under "Narrowing is
+temporary": a connector's query fields were checked against
+`is_query_scalar`, a second type list without `Bytes` or plain
+variants. The encoder wrote numbers, text and booleans, and gave up on
+anything else. Now the checker uses `text_parameters::query_field_shape`
+for connector queries too, and the encoder writes each value through
+`corvid_public_json::request_text::json_request_text`, the reverse of
+`request_text_json`. A test holds the two directions together: writing
+a value and reading it back gives the same JSON. So a value goes out to
+a provider exactly as a Corvid route reads the same field in.
+
+`is_query_scalar` remains only for multipart text parts, renamed
+`is_multipart_scalar`. In a multipart body `Bytes` is a file part, not
+text, so it is a different form and keeps its own list.
+
+---
+
 ## 2026-11-26 - One typed reader for request text
 
 The owner pointed out that `Int`-only path types were a limit, and they

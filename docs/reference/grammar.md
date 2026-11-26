@@ -392,8 +392,11 @@ its own `timeout:`, which replaces the connector's for that operation.
 `query <param>` names a record parameter whose fields become the query
 string, through the public JSON mapping: a scalar field is one
 `name=value` pair, an `Option` field is left out when it is `None`, and a
-`List` field repeats its name. A query field must be a number, text,
-`Bool`, a decimal or time value, or an `Option` or `List` of one.
+`List` field repeats its name. A query field has the types a route's
+`query` record has: a number, text, `Bool`, a decimal, time, zone,
+currency, locale, `Bytes` (base64url) or a type of plain variants (sent
+by the variant's name), or an `Option` or `List` of one. Each value is
+written exactly as a route reads it in.
 `header "Name": value` sends a `String` parameter or a fixed string. An
 operation cannot set `Authorization`, `Proxy-Authorization`, `Cookie`,
 `Host`, `Content-Type`, `Content-Length` or `Transfer-Encoding`, the
