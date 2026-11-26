@@ -8399,3 +8399,7 @@ A host that loads an `approve_site` approver from source runs it on Corvid's app
 
 An integer literal where a `Float` is meant is a `Float`: `ratio: Float = 3`, `half(3)` for a `Float` parameter, `Point(1, -2)` for `Float` fields and `[1, 2.5]` as a `List<Float>` all work on both tiers. A literal a `Float` cannot hold exactly, beyond 9007199254740992, is a compile error. An `Int` value is never widened silently, because large values would round: `x: Float = n` is a compile error whose hint names `n.to_float()`, and a `List<Int>` is not a `List<Float>`. Arithmetic that mixes an `Int` and a `Float` still gives a `Float`.
 
+### A skill's capability groups come from the std modules
+
+A skill's computed label puts each std tool it uses in the group named after the std module that declares it: `random_token` and `hash_password` are `crypto`, `secret` and `secret_read` are `secrets`, `uuid_v4` is `uuid`, `path_join` is `path`. A skill that used `secret`, a UUID, a path helper or the browser tools was not labeled with those groups before, so its label could claim less than the code did. A tool of the skill's own is in no group, even if its name starts like a std tool's.
+

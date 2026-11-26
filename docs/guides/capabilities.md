@@ -22,7 +22,9 @@ corvid add skill git:https://example.com/skills.git#main//summarize
 To install a subdirectory from a local Git repository on Unix, use a file URL such as `git:file:///tmp/skill%20repo#main//skills/greeter`. Here `%20` encodes a space in the repository path, `main` selects the branch and `skills/greeter` selects the directory containing `skill.toml`.
 
 The label is **computed from the source, never self-reported** —
-capability groups by scanning for stdlib tool usage, trust/cost/data
+capability groups by scanning for stdlib tool usage (a tool's group is
+the std module that declares it: `std:crypto`'s `random_token` is
+`crypto`, `std:uuid`'s `uuid_v7` is `uuid`), trust/cost/data
 from the skill's own `effect` declarations. What you consent to at
 add time is what the code actually does:
 

@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Skill capability groups read from the std modules
+
+The skill audit mapped a std tool to its capability group with a hand-kept
+list of names and prefixes. It missed `secret`, `uuid_v4`, `uuid_v7`, the
+`path_*` tools and the browser tools, so a skill using them was labeled
+without those groups. A label is what the user consents to, so the audit
+under-reported. The list is gone: the groups are read once from the bundled
+std sources (`scaffold::BUNDLED_STD`), each tool in the group of the module
+that declares it. Matching by exact name replaces the prefixes, which also
+counted a skill's own `io_*` names. Every std tool still reaches a skill by
+name, so nothing is missed. A test covers each module's tools.
+
+Left alone: `serve_auth/pkce.rs` drawing its own tokens is in the area the
+main line owns.
+
 ### Integer literals in `Float` slots, and no silent widening
 
 The roadmap said an `Int` in a `Float` slot was not converted at run time.
