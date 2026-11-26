@@ -1549,6 +1549,29 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - An action's approvals queue under its `@approval` (B10-2b-2)
+
+An `approve` inside an action was denied, because the process runtime's
+approver says no and actions took no `@approval`. Now an action takes an
+agent's annotations and an `@approval(...)`, in any order, and the route
+approval rule became one function both use (`check_approval_clause`): a
+body that can reach an `approve` needs a complete `@approval` and a
+signed-in policy, and an `@approval` with no reachable `approve` is
+refused. `@approval` before a plain `agent` is a parse error saying an
+agent's caller decides its approvals. Serve queues under the action's
+policy with the verified caller as requester; the request answers `202`
+and the reviewer's approve runs the action. The contract lists the
+policy. A serve test queues, approves as the declared reviewer, and
+reads the action's result.
+
+Two copies removed: the serve approval-queue setup was inline in the
+route handler and is now `approval_runtime`, which actions call too;
+the contract's approval projection is `ContractApprovalPolicy::of`. The
+error kinds were renamed `ApprovalRequiresAuthentication` and
+`ApprovalPolicyInvalid`, naming the route or the action.
+
+---
+
 ## 2026-11-26 - An action reads its caller (B10-2b-1)
 
 `action claim(card: Int, by: Caller) -> Card requires authenticated:`.

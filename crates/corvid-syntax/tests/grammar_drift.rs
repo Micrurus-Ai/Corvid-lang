@@ -731,6 +731,12 @@ action move_card(move: MoveCard) -> Int requires permission("board.edit") and au
 
 action ping() -> String requires anyone:
     return "pong"
+
+@budget($0.10)
+@approval(role: "reviewer", risk: "board_change", data: "internal", expires_ms: 900000, max_cost_usd: $1.0, irreversible: false)
+action wipe(column: Int) -> Int requires authenticated:
+    approve Wipe(column)
+    return column
 "#,
     ),
 ];

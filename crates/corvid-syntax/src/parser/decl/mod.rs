@@ -135,7 +135,51 @@ impl<'a> Parser<'a> {
                 Ok(Decl::Type(decl))
             }
             TokKind::At => {
-                let (attributes, constraints) = self.parse_agent_annotations()?;
+                // Annotations, and for an action its `@approval(...)`
+                // policy, in any order.
+                let mut attributes = Vec::new();
+                let mut constraints = Vec::new();
+                let mut approval: Option<corvid_ast::ApprovalSpec> = None;
+                while matches!(self.peek(), TokKind::At) {
+                    if matches!(self.peek_ahead(1), TokKind::Ident(name) if name == "approval") {
+                        if approval.is_some() {
+                            return Err(ParseError {
+                                kind: ParseErrorKind::UnexpectedToken {
+                                    got: "a second `@approval`".into(),
+                                    expected: "at most one `@approval(...)`".into(),
+                                },
+                                span: self.peek_span(),
+                            });
+                        }
+                        approval = Some(self.parse_approval_spec()?);
+                        self.skip_newlines();
+                    } else {
+                        let (more_attributes, more_constraints) = self.parse_agent_annotations()?;
+                        attributes.extend(more_attributes);
+                        constraints.extend(more_constraints);
+                    }
+                }
+                if matches!(self.peek(), TokKind::Ident(word) if word == "action")
+                    && matches!(self.peek_ahead(1), TokKind::Ident(_))
+                    && matches!(self.peek_ahead(2), TokKind::LParen)
+                {
+                    let mut action = self.parse_action_decl(visibility)?;
+                    action.constraints = constraints;
+                    action.attributes = attributes;
+                    if let Some(spec) = action.action.as_mut() {
+                        spec.approval = approval;
+                    }
+                    return Ok(Decl::Agent(action));
+                }
+                if let Some(approval) = approval {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "`@approval(...)` before an agent".into(),
+                            expected: "`@approval(...)` before an `action` or a route; an agent's caller decides its approvals".into(),
+                        },
+                        span: approval.span,
+                    });
+                }
                 let extern_abi = if matches!(self.peek(), TokKind::KwPub) {
                     let abi = self.parse_extern_abi_prefix()?;
                     self.skip_newlines();
@@ -430,7 +474,7 @@ impl<'a> Parser<'a> {
         self.expect_newline()?;
         let body = self.parse_indented_block()?;
         let end = body.span;
-        let spec = ActionSpec { policy, span: start.merge(name_span) };
+        let spec = ActionSpec { policy, approval: None, span: start.merge(name_span) };
         Ok(AgentDecl {
             name: Ident::new(name, name_span),
             extern_abi: None,

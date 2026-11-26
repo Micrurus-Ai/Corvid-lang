@@ -259,15 +259,15 @@ pub enum TypeErrorKind {
         path: String,
     },
 
-    /// Executing a route can reach an `approve` boundary, but the
-    /// route does not require an authenticated caller. Without a
-    /// verified requester there is no honest actor or tenant to put
-    /// on the durable approval record.
-    RouteApprovalRequiresAuthentication { path: String },
+    /// A route or an action can reach an `approve` boundary but does not
+    /// require an authenticated caller. Without a verified requester
+    /// there is no honest actor or tenant to put on the durable approval
+    /// record. `subject` names it: "route `/x`" or "action `x`".
+    ApprovalRequiresAuthentication { subject: String },
 
-    /// An approval-capable route omitted or contradicted its complete
-    /// source-declared queue/reviewer policy.
-    RouteApprovalPolicyInvalid { path: String, message: String },
+    /// An approval-capable route or action omitted or contradicted its
+    /// complete source-declared queue/reviewer policy.
+    ApprovalPolicyInvalid { subject: String, message: String },
 
     /// A route-level `@upload(...)` policy is missing, incomplete, or
     /// attached to a route whose body is not `Upload<Format>`.
@@ -867,13 +867,11 @@ impl TypeErrorKind {
                     "route `{path}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` — the requirement could never be satisfied"
                 )
             }
-            Self::RouteApprovalRequiresAuthentication { path } => {
-                format!(
-                    "route `{path}` can request approval but does not require an authenticated caller"
-                )
+            Self::ApprovalRequiresAuthentication { subject } => {
+                format!("{subject} can request approval but does not require an authenticated caller")
             }
-            Self::RouteApprovalPolicyInvalid { path, message } => {
-                format!("invalid approval policy on route `{path}`: {message}")
+            Self::ApprovalPolicyInvalid { subject, message } => {
+                format!("invalid approval policy on {subject}: {message}")
             }
             Self::InvalidLiveBinding { message } => format!("invalid live binding: {message}"),
             Self::InvalidForm { message } => format!("invalid form: {message}"),
@@ -1639,11 +1637,11 @@ impl TypeErrorKind {
             Self::FirstLoginPolicyRequired { .. } => Some(
                 "add a `provisioning:` sub-block, e.g. `provisioning: first_login: open` with `tenant: fixed(\"public\")` for public signup, or `first_login: invited` with `tenant: from_invitation` for invite-gated access. There is no default — the posture must be stated.".into(),
             ),
-            Self::RouteApprovalRequiresAuthentication { .. } => Some(
-                "add `requires authenticated` to the route; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
+            Self::ApprovalRequiresAuthentication { .. } => Some(
+                "require a signed-in caller, such as `requires authenticated`; Corvid records the verified actor and tenant as the approval requester and never substitutes an anonymous global identity".into(),
             ),
-            Self::RouteApprovalPolicyInvalid { .. } => Some(
-                "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
+            Self::ApprovalPolicyInvalid { .. } => Some(
+                "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the declaration; the role must be declared and able to decide approvals".into(),
             ),
             Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
             Self::TryElseFallbackType { .. } => Some(

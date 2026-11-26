@@ -207,6 +207,42 @@ server board:
         return retire(path.card, actor)
 "#;
 
+const APPROVED: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        editor: "board.edit"
+        reviewer: "approvals.decide"
+
+@approval(role: "reviewer", risk: "board_change", data: "internal", expires_ms: 900000, max_cost_usd: $1.0, irreversible: false)
+action wipe_column(column: Int) -> Int requires permission("board.edit"):
+    approve WipeColumn(column)
+    return column
+"#;
+
+#[test]
+fn an_action_that_reaches_approve_queues_it_for_the_declared_reviewer() {
+    let mut editor = Vec::new();
+    let mut reviewer = Vec::new();
+    let app = serve(APPROVED, |data| {
+        editor = seed_actor(data, "editor-1", Some("editor"));
+        reviewer = seed_actor(data, "reviewer-1", Some("reviewer"));
+    });
+    let (status, queued) = post_json(&app, "/actions/wipe_column", &json!({"column": 2}), &editor);
+    assert_eq!(status, 202, "the approve queues instead of being denied: {queued}");
+    let id = queued["approval_id"].as_str().expect("an approval id").to_string();
+
+    let (status, decided) =
+        request(app.port, "POST", &format!("/__approvals/{id}/approve"), "application/json", "", &reviewer).unwrap();
+    assert_eq!(status, 200, "{decided}");
+    assert_eq!(decided["result"], json!(2), "approving runs the action: {decided}");
+
+    let (_, contract) = request(app.port, "GET", "/.well-known/corvid", "application/json", "", &[]).unwrap();
+    assert_eq!(contract["actions"][0]["approval"]["role"], "reviewer");
+}
+
 #[test]
 fn a_route_cannot_lend_its_caller_to_an_action_that_requires_more() {
     let mut editor = Vec::new();

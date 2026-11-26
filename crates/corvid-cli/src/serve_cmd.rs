@@ -1350,27 +1350,12 @@ async fn run_route(
         }
     }
 
-    let request_runtime = match (&enforced_actor, &meta.approval_policy) {
-        (Some(enforced), Some(policy)) => {
-            state.runtime.with_approver(Arc::new(QueueApprover::new(
-                state.approval_queue.clone(),
-                ApprovalRequester {
-                    actor_id: enforced.actor.id.clone(),
-                    tenant_id: enforced.actor.tenant_id.clone(),
-                },
-                ApprovalQueuePolicy {
-                    route: format!("{} {}", meta.method.as_str(), meta.route_path),
-                    required_role: policy.role.clone(),
-                    risk_level: policy.risk.clone(),
-                    data_class: policy.data.clone(),
-                    expires_in_ms: policy.expires_ms,
-                    max_cost_usd: policy.max_cost_usd,
-                    irreversible: policy.irreversible,
-                },
-            )))
-        }
-        _ => state.runtime.clone(),
-    };
+    let request_runtime = approval_runtime(
+        &state,
+        enforced_actor.as_ref(),
+        meta.approval_policy.as_ref(),
+        format!("{} {}", meta.method.as_str(), meta.route_path),
+    );
     let outcome = run_ir_with_runtime(
         &state.ir,
         Some(&meta.handler_agent),
@@ -1381,6 +1366,37 @@ async fn run_route(
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     let route = format!("{} {}", meta.method.as_str(), meta.route_path);
     finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
+}
+
+/// The runtime one request runs on. A signed-in request to a route or an
+/// action with an `@approval(...)` policy queues each `approve` it
+/// reaches under that policy, with the verified caller as requester; any
+/// other request keeps the process runtime, whose approver says no.
+fn approval_runtime(
+    state: &ServeState,
+    enforced: Option<&EnforcedRouteActor>,
+    policy: Option<&corvid_ast::ApprovalSpec>,
+    label: String,
+) -> Runtime {
+    match (enforced, policy) {
+        (Some(enforced), Some(policy)) => state.runtime.with_approver(Arc::new(QueueApprover::new(
+            state.approval_queue.clone(),
+            ApprovalRequester {
+                actor_id: enforced.actor.id.clone(),
+                tenant_id: enforced.actor.tenant_id.clone(),
+            },
+            ApprovalQueuePolicy {
+                route: label,
+                required_role: policy.role.clone(),
+                risk_level: policy.risk.clone(),
+                data_class: policy.data.clone(),
+                expires_in_ms: policy.expires_ms,
+                max_cost_usd: policy.max_cost_usd,
+                irreversible: policy.irreversible,
+            },
+        ))),
+        _ => state.runtime.clone(),
+    }
 }
 
 enum RouteRequestBody {

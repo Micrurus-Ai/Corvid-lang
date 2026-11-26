@@ -271,7 +271,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+            TypeErrorKind::ApprovalRequiresAuthentication { .. }
         )),
         "expected requester-authentication error, got {:?}",
         checked.errors
@@ -332,7 +332,7 @@ server api:
             error.guarantee_id == Some("approval.policy_clause_static_check")
                 && matches!(
                     error.kind,
-                    TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+                    TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                         if message.contains("role `reviewer` is not declared")
                 )
         }),
@@ -366,7 +366,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+            TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                 if message.contains("approvals.decide")
         )),
         "expected missing decision-permission error, got {:?}",
@@ -395,7 +395,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+            TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                 if message.contains("reach an `approve` boundary")
         )),
         "expected dead-policy error, got {:?}",
@@ -438,7 +438,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+            TypeErrorKind::ApprovalRequiresAuthentication { .. }
         )),
         "expected requester-authentication error through agent method, got {:?}",
         checked.errors

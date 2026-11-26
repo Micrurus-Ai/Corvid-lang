@@ -30,8 +30,8 @@ use corvid_types::Type;
 use corvid_vm::{decode_public_json, UnknownFields};
 
 use super::{
-    bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish, invalid_body,
-    reply_encoding, urlencoded_record, ServeState,
+    approval_runtime, bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish,
+    invalid_body, reply_encoding, urlencoded_record, ServeState,
 };
 
 /// What one action's endpoint needs at request time.
@@ -40,6 +40,9 @@ struct ActionEndpoint {
     agent: String,
     path: String,
     policy: IrRoutePolicy,
+    /// Who decides an `approve` the body reaches; the checker requires it
+    /// whenever one can be reached.
+    approval: Option<corvid_ast::ApprovalSpec>,
     /// The input parameters, callers left out.
     params: Vec<(String, Type)>,
     whole_input: Option<Type>,
@@ -72,6 +75,7 @@ pub(super) fn endpoints(state: &ServeState) -> anyhow::Result<Vec<(String, Metho
             agent: agent.name.clone(),
             path: format!("{ACTIONS_PATH}{}", action.name),
             policy: action.policy.clone(),
+            approval: action.approval.clone(),
             whole_input: whole_input_type(params.iter().map(|(_, ty)| ty)).cloned(),
             params,
             callers,
@@ -131,9 +135,10 @@ async fn run_action(
             "tenant": actor.as_ref().map(|a| a.tenant_id.clone()),
         }),
     );
-    let outcome = run_ir_with_runtime(&state.ir, Some(&endpoint.agent), args.clone(), &state.runtime).await;
-    capture_pending_invocation_if_queued(&state, &endpoint.agent, &args, &outcome);
     let route = format!("POST {}", endpoint.path);
+    let runtime = approval_runtime(&state, enforced.as_ref(), endpoint.approval.as_ref(), route.clone());
+    let outcome = run_ir_with_runtime(&state.ir, Some(&endpoint.agent), args.clone(), &runtime).await;
+    capture_pending_invocation_if_queued(&state, &endpoint.agent, &args, &outcome);
     finish(outcome, RouteResponseKind::Json, &state.page_scripts, reply_encoding(&state, &endpoint.agent), route)
 }
 

@@ -53,6 +53,8 @@ pub struct IrAction {
     pub name: String,
     pub agent: DefId,
     pub policy: IrRoutePolicy,
+    /// Who decides an `approve` the action's body reaches.
+    pub approval: Option<corvid_ast::ApprovalSpec>,
     pub span: Span,
 }
 

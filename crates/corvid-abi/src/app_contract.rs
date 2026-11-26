@@ -442,6 +442,10 @@ pub struct ContractAction {
     /// with one field per parameter. See `corvid_types::action_input`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_type: Option<String>,
+    /// Who decides an `approve` the action reaches: a call may answer
+    /// `202` with an approval to poll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ContractApprovalPolicy>,
 }
 
 impl ContractAction {
@@ -471,6 +475,20 @@ pub struct ContractApprovalPolicy {
     pub expires_ms: u64,
     pub max_cost_usd: f64,
     pub irreversible: bool,
+}
+
+impl ContractApprovalPolicy {
+    /// A route's or an action's `@approval(...)`, as the contract carries it.
+    pub fn of(policy: &corvid_ast::ApprovalSpec) -> Self {
+        Self {
+            role: policy.role.clone(),
+            risk: policy.risk.clone(),
+            data: policy.data.clone(),
+            expires_ms: policy.expires_ms,
+            max_cost_usd: policy.max_cost_usd,
+            irreversible: policy.irreversible,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -660,6 +678,7 @@ pub fn emit_application_contract(
                     callable: contract_callable(&a.name.name, &params, &a.return_ty, &a.effect_row, registry, &names),
                     policy: contract_policy(&spec.policy),
                     input_type: whole.then(|| names.name(&params[0].ty)),
+                    approval: spec.approval.as_ref().map(ContractApprovalPolicy::of),
                 }
             }),
             _ => None,
@@ -1176,14 +1195,7 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             .body_ty
             .as_ref()
             .and_then(|ty| names.upload(ty, r.upload.as_ref())),
-        approval: r.approval.as_ref().map(|policy| ContractApprovalPolicy {
-            role: policy.role.clone(),
-            risk: policy.risk.clone(),
-            data: policy.data.clone(),
-            expires_ms: policy.expires_ms,
-            max_cost_usd: policy.max_cost_usd,
-            irreversible: policy.irreversible,
-        }),
+        approval: r.approval.as_ref().map(ContractApprovalPolicy::of),
         response_type: names.name(&r.response.ty),
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),

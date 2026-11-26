@@ -1922,6 +1922,10 @@ pub struct ActionSpec {
     /// `requires anyone` is an empty policy, and leaving `requires` out is
     /// a parse error, so an action is never open by accident.
     pub policy: RoutePolicy,
+    /// `@approval(...)` before the action: who decides an `approve` its
+    /// body reaches, and how long the request waits. Required when the
+    /// body can reach one, as on a route.
+    pub approval: Option<crate::ApprovalSpec>,
     pub span: Span,
 }
 

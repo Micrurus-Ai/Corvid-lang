@@ -349,7 +349,7 @@ impl<'a> Parser<'a> {
     /// A complete approval policy. Every key is mandatory because
     /// reviewer authority and expiry are consequential deployment
     /// policy and must never come from runtime defaults.
-    fn parse_approval_spec(&mut self) -> Result<corvid_ast::ApprovalSpec, ParseError> {
+    pub(super) fn parse_approval_spec(&mut self) -> Result<corvid_ast::ApprovalSpec, ParseError> {
         let start = self.peek_span();
         self.bump(); // @
         self.bump(); // approval

@@ -177,6 +177,48 @@ fn only_a_verified_session_supplies_an_actor() {
     assert!(found.iter().any(|m| m.contains("a route's path, query or body")), "{found:#?}");
 }
 
+const REVIEWED: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        board_member: "board.edit"
+        reviewer: "approvals.decide"
+"#;
+
+const APPROVAL: &str = "@approval(role: \"reviewer\", risk: \"board_change\", data: \"internal\", expires_ms: 900000, max_cost_usd: $1.0, irreversible: false)\n";
+
+#[test]
+fn an_action_that_can_reach_approve_declares_who_decides() {
+    let body = "action wipe(column: Int) -> Int requires permission(\"board.edit\"):\n    approve Wipe(column)\n    return column\n";
+    let found = errors(&format!("{REVIEWED}{body}"));
+    assert!(
+        found.iter().any(|m| m.contains("action `wipe` can reach an `approve`, so it must declare a complete `@approval(...)`")),
+        "{found:#?}"
+    );
+    assert!(errors(&format!("{REVIEWED}{APPROVAL}{body}")).is_empty());
+
+    let open = "action wipe(column: Int) -> Int requires anyone:\n    approve Wipe(column)\n    return column\n";
+    let found = errors(&format!("{REVIEWED}{APPROVAL}{open}"));
+    assert!(found.iter().any(|m| m.contains("action `wipe` can request approval but does not require an authenticated caller")), "{found:#?}");
+
+    let dead = "action ping() -> String requires authenticated:\n    return \"pong\"\n";
+    let found = errors(&format!("{REVIEWED}{APPROVAL}{dead}"));
+    assert!(found.iter().any(|m| m.contains("only valid when it can reach an `approve`")), "{found:#?}");
+
+    let found = errors(&format!("{REVIEWED}{APPROVAL}agent wipe(column: Int) -> Int:\n    return column\n"));
+    assert!(found.iter().any(|m| m.contains("before an agent")), "an agent takes no approval policy: {found:#?}");
+}
+
+#[test]
+fn an_action_takes_annotations_as_an_agent_does() {
+    let found = errors(&format!(
+        "{REVIEWED}@budget($0.10)\n{APPROVAL}action wipe(column: Int) -> Int requires permission(\"board.edit\"):\n    approve Wipe(column)\n    return column\n"
+    ));
+    assert!(found.is_empty(), "annotations and `@approval` in any order: {found:#?}");
+}
+
 #[test]
 fn action_stays_an_ordinary_name_elsewhere() {
     let found = errors("agent run(action: String) -> String:\n    return action\n");

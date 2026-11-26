@@ -284,8 +284,10 @@ agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref
 # B10: an operation people, assistants and the program share. Corvid code
 # calls it as an agent. `requires` is mandatory: it says who may call it
 # from outside, and `requires anyone` must stand alone. `action` is
-# contextual: an ordinary name unless followed by a name and `(`.
-action_decl       ::= 'action' IDENT params '->' type_ref uses_clause? action_policy ':' INDENT block DEDENT
+# contextual: an ordinary name unless followed by a name and `(`. It takes
+# an agent's annotations, and an `@approval(...)` in any position among
+# them, required when the body can reach an `approve`.
+action_decl       ::= (annotation NEWLINE | approval_annotation NEWLINE)* 'action' IDENT params '->' type_ref uses_clause? action_policy ':' INDENT block DEDENT
 action_policy     ::= 'requires' 'anyone' | route_policy
 
 # Pure function (slice 45r) — the fourth callable kind. The body is
