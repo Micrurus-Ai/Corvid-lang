@@ -25,6 +25,46 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native loops release a carried local each time round
+
+A reference-counted local first bound inside a native loop body and read
+after the loop leaked every iteration's value but the last. For example,
+`for word in words: last = word + "!"` followed by `return last` kept
+two of three strings alive. Native lowering lowers the body once, so the
+`Let` was lowered as a first binding and released nothing. The ownership
+analysis agreed it was a first binding, so neither side released the
+previous value.
+
+**The fix, one rule for both sides.** `dataflow::loop_carried_locals`
+finds each refcounted local whose first binding is inside a loop and that
+is read outside that loop. Both lowering and the analysis treat it as a
+parameter:
+- lowering binds it at function entry with no value, in the outermost
+  scope;
+- the analysis counts it as bound from the start.
+
+So the `Let` in the loop is a rebinding that releases the previous value
+(the first time, there is none). A local read only within its iteration
+is not carried, so it still dies at its last read. A read before a local's
+first binding is refused by the resolver, so it cannot occur inside a
+loop either.
+
+**Simpler options considered.** Binding every body local before the loop
+would also stop the leak, but the analysis already drops a local that
+dies within its iteration. The extra release would double-free it.
+Liveness at the loop head would be the exact criterion, but liveness runs
+on the analysis's own graph, which depends on this set. The syntactic
+rule gives the same answer for every loop the language allows.
+
+**Tests.** Parity tests under the leak detector cover:
+- the original `for` loop, with and without the local declared before it;
+- a nested loop;
+- a `while` loop;
+- a record;
+- a `break`.
+
+---
+
 ## 2026-11-26 - Tool and prompt calls in native match arms
 
 A native `match` arm can now call a tool or a prompt:

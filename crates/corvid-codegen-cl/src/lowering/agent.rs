@@ -564,6 +564,23 @@ pub(super) fn define_agent(
             }
         }
 
+        // A refcounted local first bound inside a loop but needed after
+        // an iteration is bound here, with no value, as a parameter is, so
+        // its `Let` in the loop is a rebinding that releases the previous
+        // iteration's value. The ownership analysis reads the same set
+        // (`dataflow::loop_carried_locals`).
+        for (local_id, ty) in crate::dataflow::loop_carried_locals(agent) {
+            if env.contains_key(&local_id) {
+                continue;
+            }
+            let cl_ty = cl_type_for(&ty, agent.span)?;
+            let var = runtime.declare_variable(&mut builder, cl_ty);
+            let nothing = builder.ins().iconst(cl_ty, 0);
+            builder.def_var(var, nothing);
+            env.insert(local_id, (var, cl_ty));
+            scope_stack[0].push((local_id, var));
+        }
+
         let lowered = lower_block(
             &mut builder,
             &agent.body,
