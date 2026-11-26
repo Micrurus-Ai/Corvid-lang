@@ -397,4 +397,4 @@ A table can hold the hash in a `String` column, never the password. Both agents 
 
 The driver test `crates/corvid-driver/tests/tokens_and_passwords.rs` runs these steps from Corvid source: a password read with `secret(name)` is hashed, the right password verifies and a wrong one does not, the trace holds neither the password nor an issued key, a replayed issuance returns the recorded hash with one re-drawn-token warning, and a replay whose result depends on the token reports the divergence.
 
-`verify_password` runs Argon2id on the interpreter's own thread, tens of milliseconds at the OWASP cost; `hash_password` runs on a blocking worker. Moving verification off the request thread under heavy concurrent load is a roadmap item.
+Both `verify_password` and `hash_password` run Argon2id, tens of milliseconds at the OWASP cost, on a blocking worker, so a login check does not hold up the other requests a server is handling on the same thread.

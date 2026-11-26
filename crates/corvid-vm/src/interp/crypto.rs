@@ -66,8 +66,8 @@ pub(super) fn eval_crypto_method(
             Some(Value::String(prefix)) => Ok(decoded(secret.decode_base64_after(prefix).map(Value::Secret))),
             other => Err(internal(format!("a key prefix must be a String, not {other:?}"))),
         },
-        // Argon2id at the hash's own cost: tens of milliseconds, on this
-        // thread (see the roadmap's B04 items).
+        // The interpreter runs this on the blocking pool from its async
+        // dispatch (interp.rs); this arm serves the synchronous callers.
         (SecretVerifyPassword, Value::Secret(secret)) => match args.first() {
             Some(Value::String(hash)) => Ok(Value::Bool(secret.verify_password(hash))),
             other => Err(internal(format!("a password hash must be a String, not {other:?}"))),

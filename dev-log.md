@@ -1811,6 +1811,21 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - `verify_password` off the interpreter's thread (limits row 13)
+
+`password.verify_password(hash)` ran Argon2id, tens of milliseconds at
+the OWASP cost, on the thread the interpreter shares with other work,
+so under `corvid serve` a login stalled the other requests on that
+thread. The interpreter's async method dispatch now runs it with
+`spawn_blocking`, as `hash_password` already did, and the synchronous
+arm stays for other callers. A test runs a check on a single-threaded
+runtime beside a task that ticks every millisecond: with the change it
+keeps ticking, and with the change set aside it ticked zero times. The
+API-key store's Argon2id check has no request-path caller yet, so it is
+unchanged.
+
+---
+
 ## 2026-11-26 - The delegation grant store (B11-2a)
 
 B11's grammar is in its review window, so the part that does not depend

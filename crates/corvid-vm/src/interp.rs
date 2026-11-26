@@ -727,6 +727,24 @@ impl<'ir> Interpreter<'ir> {
                         return eval_json_encode(&recv, &receiver.ty, &self.types_by_id, expr.span)
                             .map(ExprFlow::Value);
                     }
+                    // Argon2id spends tens of milliseconds of CPU at the
+                    // hash's own cost. It runs on the blocking pool, so the
+                    // thread this program shares with other requests keeps
+                    // serving them while one password is checked.
+                    if let (Bmk::SecretVerifyPassword, Value::Secret(secret), Some(Value::String(hash))) =
+                        (kind, &recv, arg_vals.first())
+                    {
+                        let (secret, hash) = (secret.clone(), hash.clone());
+                        let verified = tokio::task::spawn_blocking(move || secret.verify_password(&hash))
+                            .await
+                            .map_err(|err| {
+                                InterpError::new(
+                                    InterpErrorKind::Other(format!("internal: the password check stopped: {err}")),
+                                    expr.span,
+                                )
+                            })?;
+                        return Ok(ExprFlow::Value(Value::Bool(verified)));
+                    }
                 }
                 // B06 — a replay warns when this operation's zone rules
                 // may differ from the recording's tz database.
