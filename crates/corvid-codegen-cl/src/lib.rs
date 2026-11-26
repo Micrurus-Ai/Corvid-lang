@@ -46,6 +46,7 @@ pub use lowering::{native_public_json_type, native_runtime_call_types};
 pub use lowering::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod json_error_record;
 mod response_record;
+mod regex_match_record;
 mod map_support;
 pub use map_support::{native_string_map, native_string_map_lookup, NATIVE_MAP_REQUIREMENTS};
 pub mod scope_reduce;
@@ -97,6 +98,7 @@ pub fn compile_to_object(
     // `Response<Body>` becomes a record per body type, after `JsonError`
     // so a body holding one already names its record (native dispatch N4).
     response_record::represent_responses_as_records(&mut ir);
+    regex_match_record::represent_regex_match_as_record(&mut ir);
     let (ir_analyzed, _summaries) = ownership::analyze(ir);
 
     let mut module = module::make_host_object_module(module_name)?;

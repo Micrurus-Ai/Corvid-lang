@@ -25,6 +25,34 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native find_regex and find_all_regex
+
+`text.find_regex(pattern)` and `text.find_all_regex(pattern)` now
+compile to native code, so every regex method does. A program that
+looked for a match used to run on the interpreter, because native code
+could not build `RegexMatch` records.
+
+**How.** `RegexMatch` becomes an ordinary native record before ownership
+analysis, as `JsonError` and `Response<Body>` do. The record has the
+fields `corvid_types::regex_match_fields` declares, the list the
+interpreter builds its record from, under the reserved
+`REGEX_MATCH_TYPE_ID`. The runtime exports run `corvid_text::regex`, the
+code the interpreter calls, and build the `Option<RegexMatch>` or
+`List<RegexMatch>` through the public JSON decoder, with the plan the
+compiler embeds for the method's result type. The runtime decides no
+native layout of its own. An invalid pattern stops the program with the
+same message as the other native regex methods.
+
+**Simpler options considered.** Building the record field by field in
+the runtime would be a second description of the layout; the decode plan
+already carries one.
+
+**Tests.** A parity test under the leak detector covers the match text,
+byte positions, a group present and a group absent, no match, all
+matches in a loop, and an empty `find_all_regex`.
+
+---
+
 ## 2026-11-26 - Native loops release a carried local each time round
 
 A reference-counted local first bound inside a native loop body and read

@@ -361,6 +361,44 @@ pub(super) fn lower_expr(
                 builder, expr, method, receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )
         }
+        // `find_regex` and `find_all_regex`: the runtime runs the match and
+        // builds the `Option<RegexMatch>` or `List<RegexMatch>` from the
+        // decode plan of the result type (`RegexMatch` is a record here,
+        // see `regex_match_record`).
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::StringFindRegex | corvid_types::BuiltinMethodKind::StringFindAllRegex),
+            receiver,
+            args,
+        } => {
+            let (text, text_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let (pattern, pattern_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let method = runtime
+                .text_methods
+                .iter()
+                .find(|(declared, _)| declared == kind)
+                .map(|(_, id)| *id)
+                .ok_or_else(|| CodegenError::cranelift(format!("text method {kind:?} was not declared"), expr.span))?;
+            let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, &expr.ty, expr.span)?;
+            let plan = module.declare_data_in_func(plan, builder.func);
+            let plan = builder.ins().symbol_value(I64, plan);
+            let plan_len = builder.ins().iconst(I64, plan_len);
+            let table = module.declare_data_in_func(table, builder.func);
+            let table = builder.ins().symbol_value(I64, table);
+            let func = module.declare_func_in_func(method, builder.func);
+            let call = builder.ins().call(func, &[text, pattern, plan, plan_len, table]);
+            let value = builder.inst_results(call)[0];
+            if !pattern_borrowed {
+                emit_release(builder, module, runtime, pattern);
+            }
+            if !text_borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(value)
+        }
         IrExprKind::BuiltinMethod { kind, receiver, .. }
             if crate::native_text_method(*kind) && !crate::text_methods::native_regex_method(*kind) => {
             // B03 encoders and decoders: one runtime call into

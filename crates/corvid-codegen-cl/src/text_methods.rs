@@ -19,6 +19,10 @@ pub enum NativeTextShape {
     /// `(text, pattern, list) -> List<String>`, filling a fresh list
     /// as `corvid_string_split` does.
     RegexSplit,
+    /// `(text, pattern, plan, plan_len, typeinfos) -> value`: an
+    /// `Option<RegexMatch>` or `List<RegexMatch>` the runtime builds from
+    /// the decode plan of the method's result type.
+    RegexFind,
 }
 
 /// The runtime symbol and call shape of a text method, or `None` when
@@ -40,23 +44,28 @@ pub fn native_text_symbol(kind: BuiltinMethodKind) -> Option<(&'static str, Nati
         StringReplaceRegex => ("corvid_string_replace_regex", RegexReplace),
         StringReplaceRegexVerbatim => ("corvid_string_replace_regex_verbatim", RegexReplace),
         StringSplitRegex => ("corvid_string_split_regex", RegexSplit),
-        // `find_regex` and `find_all_regex` build `RegexMatch` records,
-        // which native code cannot allocate yet.
+        StringFindRegex => ("corvid_string_find_regex", RegexFind),
+        StringFindAllRegex => ("corvid_string_find_all_regex", RegexFind),
         _ => return None,
     })
 }
 
-/// Whether this method is a regex method with a native form; these
-/// take their arguments through the ordinary string-method lowering.
+/// Whether this method is a regex method with a native form. The search,
+/// replace and split methods take their arguments through the ordinary
+/// string-method lowering; `find_regex` and `find_all_regex` have their
+/// own arm, which builds the match records from a decode plan.
 pub fn native_regex_method(kind: BuiltinMethodKind) -> bool {
     matches!(
         native_text_symbol(kind),
-        Some((_, NativeTextShape::RegexSearch | NativeTextShape::RegexReplace | NativeTextShape::RegexSplit))
+        Some((
+            _,
+            NativeTextShape::RegexSearch | NativeTextShape::RegexReplace | NativeTextShape::RegexSplit | NativeTextShape::RegexFind
+        ))
     )
 }
 
 /// Every text method with a native form, for declaring the imports.
-pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 13] = {
+pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 15] = {
     use BuiltinMethodKind::*;
     [
         StringEncodeBase64,
@@ -72,6 +81,8 @@ pub(crate) const NATIVE_TEXT_METHODS: [BuiltinMethodKind; 13] = {
         StringReplaceRegex,
         StringReplaceRegexVerbatim,
         StringSplitRegex,
+        StringFindRegex,
+        StringFindAllRegex,
     ]
 };
 
@@ -93,7 +104,7 @@ mod tests {
             assert_eq!(shape == NativeTextShape::Encoder, kind.is_text_encoder(), "{kind:?}");
             assert_eq!(native_regex_method(kind), kind.is_regex(), "{kind:?}");
         }
-        assert!(!native_text_method(BuiltinMethodKind::StringFindRegex));
-        assert!(!native_text_method(BuiltinMethodKind::StringFindAllRegex));
+        assert!(native_text_method(BuiltinMethodKind::StringFindRegex));
+        assert!(native_text_method(BuiltinMethodKind::StringFindAllRegex));
     }
 }

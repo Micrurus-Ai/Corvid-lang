@@ -115,6 +115,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     // B03 text methods: encoders take the text and return a String;
     // decoders also take a Result payload slot and return its tag,
     // the `corvid_string_parse_int` shape.
+    let mut regex_find_sig = module.make_signature();
+    for _ in 0..5 {
+        regex_find_sig.params.push(AbiParam::new(I64));
+    }
+    regex_find_sig.returns.push(AbiParam::new(I64));
     let mut text_methods = Vec::new();
     for kind in crate::text_methods::NATIVE_TEXT_METHODS {
         let Some((symbol, shape)) = crate::text_methods::native_text_symbol(kind) else { continue };
@@ -124,6 +129,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             NativeTextShape::Decoder => &char_at_sig,
             NativeTextShape::RegexSearch => &search_sig,
             NativeTextShape::RegexReplace | NativeTextShape::RegexSplit => &substring_sig,
+            NativeTextShape::RegexFind => &regex_find_sig,
         };
         let id = module
             .declare_function(symbol, Linkage::Import, sig)
