@@ -6,15 +6,16 @@ use corvid_driver::Value;
 use corvid_ir::{IrFile, IrRoute};
 use percent_encoding::percent_decode_str;
 
-pub(in crate::serve_cmd) struct Routes(matchit::Router<(usize, usize)>);
+pub(in crate::serve_cmd) struct Routes(Option<matchit::Router<(usize, usize)>>);
 
 impl Routes {
     pub(in crate::serve_cmd) fn new(ir: &IrFile) -> anyhow::Result<Self> {
-        let mut routes = matchit::Router::new();
+        let mut routes = None;
         for (server_index, server) in ir.servers.iter().enumerate() {
             for (route_index, route) in server.routes.iter().enumerate() {
                 if route.response_kind == RouteResponseKind::Live {
                     routes
+                        .get_or_insert_with(matchit::Router::new)
                         .insert(
                             corvid_route_to_axum_path(&route.path),
                             (server_index, route_index),
@@ -26,8 +27,12 @@ impl Routes {
         Ok(Self(routes))
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
     pub(super) fn resolve<'a>(&self, ir: &'a IrFile, path: &str) -> Option<(&'a IrRoute, Value)> {
-        let matched = self.0.at(path).ok()?;
+        let matched = self.0.as_ref()?.at(path).ok()?;
         let (server, index) = *matched.value;
         let route = &ir.servers[server].routes[index];
         let argument = bind_path(&route.path_params, |name| {

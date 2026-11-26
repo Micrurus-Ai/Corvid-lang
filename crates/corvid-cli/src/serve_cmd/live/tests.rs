@@ -1,8 +1,10 @@
 use super::protocol::{Change, Envelope, Request};
 use super::*;
 use axum::extract::ws::Message;
+use corvid_runtime::{AuthActor, SessionAuthRuntime, SessionCreate};
 use futures::{channel::mpsc, StreamExt};
 use serde_json::{json, Value};
+use tokio::sync::watch;
 use tokio::time::{advance, Duration};
 
 #[test]
@@ -146,7 +148,7 @@ impl Sink<Message> for FrameSocket {
 
 /// Exercise the actual connection loop at its frame boundary.
 struct Client {
-    status: watch::Sender<SessionStatus>,
+    auth: Arc<SessionAuthRuntime>,
     requests: mpsc::UnboundedSender<Result<Message, ()>>,
     frames: mpsc::UnboundedReceiver<Message>,
     opened: mpsc::UnboundedReceiver<(String, Updates)>,
@@ -156,12 +158,35 @@ struct Client {
 
 impl Client {
     fn new() -> Self {
-        let (status, receiver) = watch::channel(SessionStatus::Active);
+        let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+        auth.upsert_actor(AuthActor {
+            id: "member".into(),
+            tenant_id: "public".into(),
+            display_name: "Member".into(),
+            actor_kind: "user".into(),
+            auth_method: "oauth".into(),
+            assurance_level: "aal1".into(),
+            role_fingerprint: String::new(),
+            permission_fingerprint: String::new(),
+            created_ms: 0,
+            updated_ms: 0,
+        })
+        .unwrap();
+        auth.create_session(SessionCreate {
+            id: "login".into(),
+            actor_id: "member".into(),
+            tenant_id: "public".into(),
+            raw_token: "cookie".into(),
+            issued_ms: 1,
+            expires_ms: i64::MAX as u64,
+            csrf_binding_id: "binding".into(),
+        })
+        .unwrap();
         let (requests, reader) = mpsc::unbounded();
         let (writer, frames) = mpsc::unbounded();
         let (source, opened) = mpsc::unbounded();
         let session = Session {
-            status: receiver,
+            status: authority::Authority::observe(auth.clone(), "cookie".into()).unwrap(),
             source: Box::new(Source(source)),
         };
         let (shutdown, stop) = watch::channel(false);
@@ -171,7 +196,7 @@ impl Client {
             stop,
         ));
         Self {
-            status,
+            auth,
             requests,
             frames,
             opened,
@@ -231,7 +256,10 @@ async fn multiplexes_and_discards_handles_before_refresh() {
     second
         .unbounded_send(Ok(Delivery::Snapshot { rows: vec![] }))
         .unwrap();
-    client.status.send(SessionStatus::Active).unwrap();
+    client
+        .auth
+        .grant_actor_role("member", "reader", 100)
+        .unwrap();
     assert_eq!(client.reply().await["rows"][0]["row"]["card"], 4);
     assert!(second.is_closed());
     let (_, refreshed) = client.opened.next().await.unwrap();
@@ -242,7 +270,7 @@ async fn multiplexes_and_discards_handles_before_refresh() {
     );
     assert!(refreshed.is_closed());
     let last = client.subscribe("b").await;
-    client.status.send(SessionStatus::Invalid).unwrap();
+    client.auth.revoke_session("login", 101).unwrap();
     client.expect_close(1008).await;
     assert!(last.is_closed());
 }

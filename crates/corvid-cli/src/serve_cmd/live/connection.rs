@@ -1,6 +1,6 @@
 //! One page connection owns all its subscriptions. No forwarding tasks survive it.
 use super::protocol::{forbidden, Delivery, Envelope, Request};
-use super::{AuthorizedSource, Failure, Session, SessionStatus};
+use super::{AuthorizedSource, Failure, Session};
 use axum::extract::ws::{CloseFrame, Message};
 use futures::{stream, stream::BoxStream, Sink, SinkExt, Stream, StreamExt};
 use std::{collections::BTreeMap, time::Duration};
@@ -11,6 +11,7 @@ const IDLE: Duration = Duration::from_secs(30);
 
 enum Outgoing {
     Rows(String),
+    Forbidden(String),
     Control(Message),
 }
 
@@ -65,10 +66,7 @@ impl Page {
             Ok(delivery) => serde_json::to_string(&Envelope { id, delivery })
                 .map(Outgoing::Rows)
                 .map_err(|_| 1011),
-            Err(Failure::Forbidden) => {
-                self.remove(id);
-                Ok(Outgoing::Control(Message::Text(forbidden(id))))
-            }
+            Err(Failure::Forbidden) => Ok(Outgoing::Forbidden(id.into())),
             Err(Failure::InvalidSession) => Err(1008),
             Err(Failure::Unavailable) => Err(1011),
         }
@@ -130,18 +128,10 @@ where
         waiting_for_pong: false,
     };
     loop {
-        let (status, changed) = {
-            let status = session.status.borrow_and_update();
-            (*status, status.has_changed())
-        };
-        if changed {
+        if session.status.refresh()? {
             // Release every old filter and its pending data before rechecking any path.
             page.streams.clear();
             refresh = page.paths.keys().rev().cloned().collect();
-        }
-        match status {
-            SessionStatus::Invalid => return Err(1008),
-            SessionStatus::Active => {}
         }
         let outgoing = if Instant::now() >= heartbeat.deadline {
             heartbeat.expired(Instant::now())?;
@@ -150,11 +140,7 @@ where
             page.open(session.source.as_mut(), &id)?
         } else {
             tokio::select! {
-                result = session.status.changed() => {
-                    result.map_err(|_| 1008u16)?;
-                    session.status.mark_changed();
-                    continue;
-                }
+                _ = tokio::time::sleep(session.status.next_check()) => continue,
                 _ = sleep_until(heartbeat.deadline) => continue,
                 message = socket.next() => {
                     heartbeat.activity(Instant::now());
@@ -179,7 +165,6 @@ where
                     }
                 }
                 Some((id, result)) = page.streams.next(), if !page.streams.is_empty() => {
-                    if session.status.has_changed().map_err(|_| 1008u16)? { continue; }
                     Some(page.reply(&id, result)?)
                 }
             }
@@ -192,21 +177,17 @@ where
                 .await
                 .map_err(|_| 1002u16)?
                 .map_err(|_| 1011u16)?;
-            {
-                // Synchronize the final enqueue with the authority publisher.
-                // Never hold a watch read lock across a socket wait.
-                session.status.has_changed().map_err(|_| 1008u16)?;
-                let status = session.status.borrow();
-                if matches!(*status, SessionStatus::Invalid) {
-                    return Err(1008);
-                }
+            session.status.enqueue(|| {
                 let message = match outgoing {
-                    Outgoing::Rows(_) if status.has_changed() => continue,
                     Outgoing::Rows(text) => Message::Text(text),
                     Outgoing::Control(message) => message,
+                    Outgoing::Forbidden(id) => {
+                        page.remove(&id);
+                        Message::Text(forbidden(&id))
+                    }
                 };
-                Sink::start_send(std::pin::Pin::new(&mut *socket), message).map_err(|_| 1011u16)?;
-            }
+                Sink::start_send(std::pin::Pin::new(&mut *socket), message).map_err(|_| 1011u16)
+            })?;
             tokio::time::timeout_at(heartbeat.deadline, socket.flush())
                 .await
                 .map_err(|_| 1002u16)?

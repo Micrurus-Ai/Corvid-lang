@@ -1,4 +1,5 @@
 //! Browser socket upgrade and the integration point for RT-1 and RT-2.
+mod authority;
 mod connection;
 mod feed;
 pub(super) use feed::share_commits;
@@ -6,7 +7,7 @@ mod routes;
 pub(super) use routes::Routes;
 pub(super) mod protocol;
 pub(super) mod source;
-pub(super) use source::SessionObserver;
+
 #[cfg(test)]
 mod tests;
 
@@ -19,20 +20,13 @@ use protocol::Delivery;
 #[cfg(test)]
 use protocol::Row;
 use std::sync::Arc;
-use tokio::sync::watch;
 
 pub(super) const PATH: &str = "/.well-known/corvid/live";
 const PROTOCOL: &str = "corvid.live.v1";
 
 pub(super) struct Session {
     source: Box<dyn AuthorizedSource>,
-    status: watch::Receiver<SessionStatus>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum SessionStatus {
-    Active,
-    Invalid,
+    status: authority::Authority,
 }
 
 /// Each open (including re-open after a role change) resolves a declared path,
@@ -90,10 +84,10 @@ pub(super) async fn upgrade(
     {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let Some(observer) = &state.live_sessions else {
+    if state.live_routes.is_empty() {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
-    match source::connect(state.clone(), observer.clone(), headers) {
+    }
+    match source::connect(state.clone(), headers) {
         Ok(session) => {
             let shutdown = state.live_shutdown.subscribe();
             ws.write_buffer_size(0)

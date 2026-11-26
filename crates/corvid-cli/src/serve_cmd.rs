@@ -103,7 +103,6 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     live_routes: live::Routes,
-    live_sessions: Option<Arc<dyn live::SessionObserver>>,
     live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
@@ -172,8 +171,10 @@ pub(crate) fn cmd_serve(
     // execute — a streaming/upload/pagination boundary type, or a
     // `requires` policy with no authorization enforcement — is a startup
     // error (E5204) naming the element, never a silent runtime 501.
-    let closure_gaps =
-        corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    let identity = declared_identity(&source);
+    let mut capabilities = corvid_driver::RuntimeCapabilities::interpreter_tier();
+    capabilities.live_subscriptions = identity.is_some();
+    let closure_gaps = corvid_driver::check_contract_closure(&ir, capabilities);
     if !closure_gaps.is_empty() {
         eprintln!(
             "error: {} is not contract-closed — {} route(s) the contract advertises \
@@ -209,7 +210,7 @@ pub(crate) fn cmd_serve(
     // — refuses to start rather than mounting a login route that half
     // works. The identity block is not lowered into IR, so read it from
     // the AST (the source already compiled cleanly above).
-    let auth_context = match declared_identity(&source) {
+    let auth_context = match identity {
         Some(identity) => match crate::serve_auth::context::AuthContext::from_identity(
             &identity,
             data_dir.as_deref(),
@@ -394,8 +395,6 @@ pub(crate) fn cmd_serve(
     }
     let state = Arc::new(ServeState {
         live_routes: live::Routes::new(&ir)?,
-        // Synchronized session-change notifications are required before enabling upgrades.
-        live_sessions: None,
         live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,

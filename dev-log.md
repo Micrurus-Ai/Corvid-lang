@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-3 authenticated live connections
+
+Serve uses the durable auth store's per-actor revision to detect changes during cookie validation and to guard the final frame enqueue. A timer checks idle connections across processes. An in-memory notification alone would miss a logout made by another replica. The check exercises fresh snapshots and committed edits with one SQLite server or two Postgres servers. A failed logout write now reports service unavailable. The SQLite wire check passed. The two-process Postgres check reached the reopened snapshot but timed out on the live edit. A separate libpq listener also received no notification on the local Windows test cluster. The hosted Edge and Postgres checks remain open. [Transport checks](docs/reference/cli.md#live-subscriptions)
+
 ### RT-3 committed subscription rows
 
 The serve adapter registers for RT-2 commits before running the compiled query with the subscription's path and actor. Registering first closes the gap in which a write could otherwise be missed. The SQLite regression exercises reopening after an offline write and receiving a later matching write. A save can move a row outside the filter at an unseen revision. Serve sends a replacement snapshot for removals until RT-2 supplies that revision. End-to-end socket acceptance awaits synchronized session notifications for idle connections.

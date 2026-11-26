@@ -129,15 +129,18 @@ during the initial read are covered. It forwards RT-2's ordered changes,
 replacing the snapshot on lag. Releasing the id drops the receiver and any
 outstanding query. Several subscriptions share the same socket.
 
-Serve still requires a session observer that validates the cookie and registers
-for changes atomically. Logout, expiry and authority changes must wake idle
-sockets and invalidate queued data when the change takes effect. Live apps
-remain gated at startup until the auth runtime supplies that interface.
-[Session interface](../../crates/corvid-cli/src/serve_cmd/live/source.rs)
+Serve observes authority in the same SQLite store used by login and HTTP
+authorization. A per-actor revision changes in the same transaction as a role,
+actor or session change. The socket samples that revision around canonical
+cookie validation, rechecks at expiry and at one-second intervals while idle,
+and guards each frame enqueue against a concurrent writer. This includes
+writers in another serve process using the same durable session store.
+A changed revision discards the old queries and rebuilds them with GET policy.
+This requires no additional declaration or client message.
 
 ## Built in RT-1, and two points to agree
 
-RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. `corvid serve` refuses to start a program that declares one (`E5204`, `live /boards/{board}/cards needs live subscriptions over the WebSocket transport`) until RT-3 sets `RuntimeCapabilities::live_subscriptions`.
+RT-1 shipped the declaration: it parses beside `route`, a body is checked to be one `return` of a query on the table it delivers (no `take`), a `live` is named by its path's last fixed segment (`cards`), unique in its server, and `corvid contract app` lists it under `live` with `name`, `path`, `path_params`, `row_type` and `policy`. Serve enables the transport for programs with an identity.
 
 **The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
 

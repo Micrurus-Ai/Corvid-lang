@@ -2,7 +2,7 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-- [ ] RT-3 live subscription transport. The socket and frame lifecycle are implemented. Serve resolves compiled RT-1 declarations and binds their path arguments. Serve reads the ordered query again on relevant RT-2 commits. Connect synchronized session-change notifications, then verify revocation and reconnect through a running app. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
+- [ ] RT-3 live subscription transport. The socket and frame lifecycle are implemented. Serve resolves compiled RT-1 declarations and binds their path arguments. Serve reads the ordered query again on relevant RT-2 commits. Serve now guards delivery with the durable session revision. Verify reconnect, idle revocation and multi-process delivery with the RT-3 browser check. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
 
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
 

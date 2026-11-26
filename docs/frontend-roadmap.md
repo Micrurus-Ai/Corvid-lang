@@ -18,7 +18,7 @@ The table below is the execution order for the browser frontend. The detailed de
 
 ### Ordered tasks
 
-F08 live reconnect acceptance awaits the auth runtime's session observer. The SQLite query test covers an offline edit in the reopened snapshot followed by a matching commit on the same subscription. Once serve can start a live app, repeat that sequence over an authenticated browser socket. Also verify that logout or expiry closes an idle socket and that an authority change stops delivery of rows the subscriber can no longer read. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
+F08 can exercise reconnect against the authenticated RT-3 endpoint. The transport check covers an offline commit, a subsequent edit, idle revocation, logout and expiry. Run `scripts/verify_live_subscriptions.py --cli <corvid> --channel msedge` for the browser assertions. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
 
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
