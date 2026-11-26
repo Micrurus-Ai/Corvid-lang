@@ -23,70 +23,17 @@ use axum::routing::{on, MethodFilter, MethodRouter};
 use axum::Json;
 use corvid_ast::{HttpMethod, RouteResponseKind};
 use corvid_driver::{run_ir_with_runtime, Value};
-use corvid_ir::{IrRoutePolicy, IrType};
+use corvid_ir::IrType;
 use corvid_resolve::DefId;
-use corvid_types::action_input::{is_caller, whole_input_type, ACTIONS_PATH};
-use corvid_types::Type;
-use corvid_vm::{decode_public_json, UnknownFields};
+
+pub(super) use crate::action_calls::{catalog, decode_json_input, ActionEndpoint};
+use crate::action_calls::{decode_text_input, TextInputRefusal};
+use crate::request_text::urlencoded_values;
 
 use super::{
     approval_runtime, bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish,
-    reply_encoding, urlencoded_record, urlencoded_value, urlencoded_values, EnforcedRouteActor,
-    ServeState,
+    reply_encoding, EnforcedRouteActor, ServeState,
 };
-
-/// What one action needs at request time, whichever surface calls it.
-pub(super) struct ActionEndpoint {
-    pub(super) name: String,
-    agent: String,
-    pub(super) path: String,
-    pub(super) policy: IrRoutePolicy,
-    /// Who decides an `approve` the body reaches; the checker requires it
-    /// whenever one can be reached.
-    approval: Option<corvid_ast::ApprovalSpec>,
-    /// The `assistants:` line, when an assistant is offered the action.
-    pub(super) assistants: Option<corvid_ast::AssistantExposure>,
-    /// The input parameters, callers left out.
-    params: Vec<(String, Type)>,
-    whole_input: Option<Type>,
-    /// For each declared parameter, in order: whether it is the caller.
-    callers: Vec<bool>,
-}
-
-/// Every declared action, as the endpoints and the assistant endpoint
-/// call it.
-pub(super) fn catalog(ir: &corvid_ir::IrFile) -> anyhow::Result<Vec<Arc<ActionEndpoint>>> {
-    let mut catalog = Vec::new();
-    for action in &ir.actions {
-        let agent = ir
-            .agents
-            .iter()
-            .find(|agent| agent.id == action.agent)
-            .ok_or_else(|| anyhow::anyhow!("action `{}` has no lowered body", action.name))?;
-        let callers: Vec<bool> = agent.params.iter().map(|p| is_caller(&p.ty)).collect();
-        if callers.iter().any(|caller| *caller) && !action.policy.requires_auth() {
-            anyhow::bail!("action `{}` reads its caller but requires no sign-in", action.name);
-        }
-        let params: Vec<(String, Type)> = agent
-            .params
-            .iter()
-            .filter(|p| !is_caller(&p.ty))
-            .map(|p| (p.name.clone(), p.ty.clone()))
-            .collect();
-        catalog.push(Arc::new(ActionEndpoint {
-            name: action.name.clone(),
-            agent: agent.name.clone(),
-            path: format!("{ACTIONS_PATH}{}", action.name),
-            policy: action.policy.clone(),
-            approval: action.approval.clone(),
-            assistants: action.assistants.clone(),
-            whole_input: whole_input_type(params.iter().map(|(_, ty)| ty)).cloned(),
-            params,
-            callers,
-        }));
-    }
-    Ok(catalog)
-}
 
 /// One `(path, handler)` per declared action.
 pub(super) fn endpoints(
@@ -193,73 +140,14 @@ fn decode_input(
         }
         "application/x-www-form-urlencoded" => {
             let text = std::str::from_utf8(body).map_err(|_| bad_request("invalid_form", "form body must be UTF-8"))?;
-            let refused = |err: String| bad_request("invalid_form", &err);
-            match &endpoint.whole_input {
-                Some(ty) => urlencoded_record(text, ty, types_by_id, "form").map(|value| vec![value]).map_err(refused),
-                // One form field per parameter, read by the same rule as a
-                // record's fields.
-                None => {
-                    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
-                    if let Some((name, _)) = endpoint
-                        .params
-                        .iter()
-                        .find(|(_, ty)| corvid_types::text_parameters::query_field_shape(ty, &plain).is_none())
-                    {
-                        return Err(unsupported(&format!(
-                            "parameter `{name}` of `{}` cannot come from a form field; send this action JSON",
-                            endpoint.name
-                        )));
-                    }
-                    let given = urlencoded_values(text).map_err(refused)?;
-                    endpoint
-                        .params
-                        .iter()
-                        .map(|(name, ty)| urlencoded_value(&given, name, ty, types_by_id, "form").map_err(refused))
-                        .collect()
-                }
-            }
+            let given = urlencoded_values(text).map_err(|err| bad_request("invalid_form", &err))?;
+            decode_text_input(endpoint, &given, types_by_id, "form").map_err(|refusal| match refusal {
+                TextInputRefusal::Unsupported(detail) => unsupported(&detail),
+                TextInputRefusal::Refused(detail) => bad_request("invalid_form", &detail),
+            })
         }
         _ => Err(unsupported("expected application/json or application/x-www-form-urlencoded")),
     }
-}
-
-/// The action's inputs from a JSON value, or the refusal body naming the
-/// field or parameter. The HTTP endpoint answers it as `400`; the
-/// assistant endpoint returns it as a tool error.
-pub(super) fn decode_json_input(
-    endpoint: &ActionEndpoint,
-    json: &serde_json::Value,
-    types_by_id: &HashMap<DefId, &IrType>,
-) -> Result<Vec<Value>, serde_json::Value> {
-    let refusal = |error: &str, detail: String| serde_json::json!({ "error": error, "detail": detail });
-    if let Some(ty) = &endpoint.whole_input {
-        return decode_public_json(json, ty, types_by_id, UnknownFields::Reject).map(|value| vec![value]).map_err(|e| {
-            let mut refused = e.to_json();
-            refused["error"] = serde_json::json!("invalid_body");
-            refused["detail"] = serde_json::json!(e.message());
-            refused
-        });
-    }
-    let Some(object) = json.as_object() else {
-        return Err(refusal("invalid_input", "the input is a JSON object with one field per parameter".into()));
-    };
-    if let Some(unknown) = object.keys().find(|key| !endpoint.params.iter().any(|(name, _)| name == *key)) {
-        return Err(refusal("invalid_input", format!("`{unknown}` is not a parameter of `{}`", endpoint.name)));
-    }
-    endpoint
-        .params
-        .iter()
-        .map(|(name, ty)| {
-            let given = object.get(name).unwrap_or(&serde_json::Value::Null);
-            decode_public_json(given, ty, types_by_id, UnknownFields::Reject).map_err(|e| {
-                let mut refused = e.to_json();
-                refused["error"] = serde_json::json!("invalid_input");
-                refused["parameter"] = serde_json::json!(name);
-                refused["detail"] = serde_json::json!(format!("parameter `{name}`: {}", e.message()));
-                refused
-            })
-        })
-        .collect()
 }
 
 fn unsupported(detail: &str) -> Response {

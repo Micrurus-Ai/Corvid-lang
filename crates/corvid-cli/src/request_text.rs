@@ -20,6 +20,17 @@ pub(crate) fn urlencoded_record(
     types_by_id: &HashMap<DefId, &IrType>,
     source: &str,
 ) -> Result<Value, String> {
+    record_from_values(&urlencoded_values(encoded)?, ty, types_by_id, source)
+}
+
+/// The declared record `ty` from text values already collected by name,
+/// such as a form body's pairs or command-line flags.
+pub(crate) fn record_from_values(
+    given: &HashMap<String, Vec<String>>,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+    source: &str,
+) -> Result<Value, String> {
     let def_id = match ty {
         Type::Struct(id) => id,
         Type::ImportedStruct(record) => &record.def_id,
@@ -29,10 +40,9 @@ pub(crate) fn urlencoded_record(
         .get(def_id)
         .copied()
         .ok_or_else(|| format!("unknown {source} struct type"))?;
-    let given = urlencoded_values(encoded)?;
     let mut fields: Vec<(String, Value)> = Vec::new();
     for field in &ir_type.fields {
-        let value = urlencoded_value(&given, &field.name, &field.ty, types_by_id, source)?;
+        let value = urlencoded_value(given, &field.name, &field.ty, types_by_id, source)?;
         corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
             .map_err(|err| err.to_string())?;
         fields.push((field.name.clone(), value));

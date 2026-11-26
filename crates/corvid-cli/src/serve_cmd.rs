@@ -65,7 +65,7 @@ use corvid_vm::{
 };
 use libloading::{Library, Symbol};
 
-use crate::request_text::{coerce_str_to_value, urlencoded_record, urlencoded_value, urlencoded_values};
+use crate::request_text::{coerce_str_to_value, urlencoded_record};
 
 mod actions;
 mod assistant_endpoint;
