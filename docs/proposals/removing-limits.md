@@ -26,9 +26,9 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 | 1 | ~~Path parameters take only `Int`; route query fields of most types reach the handler as text.~~ Done 2026-11-26: one typed reader for both, through the public JSON decoder. | Windows session | type hole, narrowing |
 | 2 | `try ... else`: a failing table, tool or prompt call stops the request instead of degrading. [Proposal](recoverable-failures.md) | Windows session | grammar |
 | 3 | Shared actions (B10): actions are named by strings, with no derived endpoint, form, tool or CLI. The defining feature, and it blocks B11, B13 and RT-5. [Proposal](shared-actions.md) | Windows session | grammar |
-| 4 | JSON key renaming for camelCase APIs. [Proposal](json-field-keys.md) | Mac session (started 2026-11-26) | grammar |
-| 5 | Variant payload fields take refinements, as record fields do. | Mac session (started 2026-11-26) | grammar |
-| 6 | The duration literal, `30 seconds`. | Mac session (started 2026-11-26) | grammar |
+| 4 | ~~JSON key renaming for camelCase APIs.~~ Done 2026-11-26: `@json(key:)` and `@json(case:)`, one key rule read by every public JSON surface on both tiers. [Proposal](json-field-keys.md) | Mac session | grammar |
+| 5 | ~~Variant payload fields take refinements, as record fields do.~~ Done 2026-11-26. | Mac session | grammar |
+| 6 | ~~The duration literal, `30 seconds`.~~ Done 2026-11-26, with the calendar-unit compile error. | Mac session | grammar |
 | 7 | A connector call with the signed-in user's own credential (per-call bearer token). | Windows session | needs a proposal |
 | 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). | Windows session | needs a proposal |
 | 9 | Joins and aggregates in table queries and `live`. | Windows session | needs a proposal |
