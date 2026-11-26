@@ -2,22 +2,6 @@
 
 The package for writing [Corvid](https://github.com/Micrurus-Ai/Corvid-lang) tools in Python. `corvid serve` and `corvid run` load a project's `tools.py`, and each `@tool` function becomes a tool the program can call, with tracing, approval and replay.
 
-Corvid's Python build target, which generated `.py` modules that imported this package, was retired on 2026-11-25; build natively instead. To run Corvid standard-library tools such as HTTP, SQLite, or MCP, use the interpreter tier with `corvid run`. See the [build guide](https://github.com/Micrurus-Ai/Corvid-lang/blob/e42da8eae303010ca7b8f9cb15945e6a3a451a1e/docs/book/16-building.md).
-
-## Installation
-
-Corvid distributions include this package under `runtime-py`. To use generated agents in an existing Python environment, run the following from the extracted Corvid distribution directory with Python 3.11 or later.
-
-```sh
-python -m pip install ./runtime-py
-```
-
-Use `python -m pip install "./runtime-py[anthropic]"` to include the optional Anthropic adapter. From a Corvid source checkout, the package directory is `./runtime/python`.
-
-## Usage
-
-You generally don't import this package directly — the Corvid compiler emits code that imports it. What you *do* write is tool implementations:
-
 ```python
 from corvid_runtime import tool
 
@@ -26,12 +10,18 @@ async def get_order(order_id: str):
     ...
 ```
 
-## Configuration
+A tool may be `async` or a plain function. The Corvid program declares the tool, its types and its effects; `tools.py` only supplies the implementation.
 
-No default model. Set one via:
+## Installation
 
-- Environment: `CORVID_MODEL=claude-opus-4-6`
-- Config file: `corvid.toml` with `[llm] default_model = "..."`
-- Per-call: `llm_call(..., model="...")`
+`corvid serve` and `corvid run` find the copy bundled with a Corvid distribution under `runtime-py`, so there is nothing to install. To import it in your own Python environment, for example to test your tools with pytest, run the following from the extracted distribution with Python 3.11 or later:
 
-Approvals are interactive by default. For CI, set `CORVID_APPROVE_ALL=1`.
+```sh
+python -m pip install ./runtime-py
+```
+
+From a Corvid source checkout, the package directory is `./runtime/python`.
+
+## What it no longer contains
+
+Corvid's Python build target, which generated `.py` modules that called `tool_call`, `approve_gate` and `llm_call` from this package, was retired on 2026-11-25. Those functions went with it. Build natively with `corvid build`, or run with `corvid run`; model calls, approvals and traces are the Corvid runtime's job.

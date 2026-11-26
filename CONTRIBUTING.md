@@ -203,15 +203,13 @@ git clone <repo>
 cd corvid
 cargo build --workspace
 cargo test --workspace                 # 134+ tests should pass
-pip install -e './runtime/python[dev]' # only needed to work on Python tool implementations (tools.py)
+pip install -e './runtime/python[dev]' # only needed to work on the Python `@tool` package
 ```
 
 ### Run the offline demo
 
 ```bash
-cd examples/offline_refund_bot
-cargo run --manifest-path ../../Cargo.toml --bin corvid -- build src/refund_bot.cor
-python3 tools.py
+cargo run -p offline_refund_bot
 ```
 
 ### Document a language feature

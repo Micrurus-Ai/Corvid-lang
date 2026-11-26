@@ -861,6 +861,35 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The Python package holds only `@tool`
+
+The `corvid_runtime` Python package was a parallel runtime for the
+generated Python code: `tool_call`, `approve_gate`, `llm_call`, its own
+tracing, model adapters and test helpers. With the Python build target
+retired, nothing calls them. Their behavior differed from the Rust
+runtime, which is the real one, and anyone who imported them got a
+second, weaker runtime. What remains is what `tools.py` needs and what
+the Rust loader (`corvid_runtime::python_tools`) reads: `@tool`, the
+`_TOOL_IMPLS` dict and `invoke_tool`. The package tests now cover
+exactly that.
+
+Found while removing them:
+- **The release-archive test was broken.** `install/test_release_archive.py`
+  still ran `corvid build --target python` and imported `run_sync`,
+  which fails since the retirement. It runs only against a built
+  release archive, so the gate never ran it. It now builds the same
+  numbers program natively and runs the binary, which prints `42` only
+  if the checked multiply and the floored `Float` remainder are both
+  right.
+- **Dead example code.** `examples/offline_refund_bot/tools.py` drove
+  the retired `target/py` output. The example's runner is Rust, so the
+  file, its "legacy Python" instructions and the CONTRIBUTING steps that
+  used it are gone.
+- **Stale docs.** ARCHITECTURE.md described a generated Python layout
+  and a mirrored Python runtime; it now describes the `@tool` package.
+
+---
+
 ## 2026-11-25 - Commits shared between server processes (B14 RT-6)
 
 An application served by several processes on one Postgres database
