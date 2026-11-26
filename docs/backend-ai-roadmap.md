@@ -48,7 +48,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 | B08 | Server-side npm interoperability | B01 | Import a pinned npm package in a backend module with its TypeScript declarations, call async functions, handle exceptions and callbacks, and package it into a native build. Share package resolution and lock format with frontend F09. |
 | B09 | Typed persistence | B01 | Declare tables in Corvid. Queries return typed records, and renaming a column reports every affected query at compile time. Every row carries a revision, and `save(record, expecting: revision)` reports a typed conflict. Generate migrations from declaration changes. Run the same program on SQLite, Postgres and MySQL. |
 | B10 | Shared action declarations | B09 | Declare an action once with typed input and result, permission, validation, conflict outcome and assistant discoverability. The compiler derives its HTTP endpoint, form binding, assistant tool, CLI command and worker call. Changing its input reports affected UI, backend and agent callers. Build the project-board move-task example. Agree the shared grammar with frontend F15 before implementation. |
-| B11 | Assistant authority | B10 | An assistant invoking an action on a person's behalf never exceeds that person's permissions. Each discoverable action declares `allow`, `confirm` or `never` for assistant calls, and omitting it is a compile error. Confirmation uses the existing approval path. Revocation during a pending call denies it with no writes. |
+| B11 | Assistant authority | B10 | An assistant invoking an action on a person's behalf never exceeds that person's permissions or what they granted. A person grants an assistant actions for a time the source caps (`delegation: up_to 8 hours`); a call is the intersection of the grant, the action's `assistants:` line and the person's current authority. `assistants: allow` runs without confirmation only through a grant or the person's session; an action without the line stays people only (B10). Revocation drops pending confirmations. [Proposal](proposals/assistant-authority.md) |
 | B12 | Model and tool failure recovery | none | `ask` and prompt calls declare recovery next to the call: malformed output, tool failure, timeout, retry limit and fallback model. A reader can predict each failure path from the source. Replay reproduces the chosen path. |
 | B13 | Durable work declarations | B09, B10 | Declare long-running agent work with checkpoints, pause and resume, revisable instructions, an operation budget and leases. The reading-list extraction worker loses its hand-written lease and budget SQL and keeps its restart, pause and correction behavior. |
 | B14 | Real-time connections | B01 | WebSocket routes and clients with typed messages, backpressure, authentication, heartbeat and reconnect. Typed change streams publish committed B09 records to subscribers. Coordinate the client side with frontend F08. |
@@ -266,6 +266,14 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] `corvid migrate plan` and `migrate up | status | down --program` compile the program as `corvid check` does, with its path and `corvid.toml`, so imports resolve. Before, a program importing `std:ui` or a sibling module was refused (found during P7c).
 - [ ] P5. MySQL, after B10 (see the order note).
 - [ ] P6. Native target, after B10 (see the order note). Follow [native dispatch](proposals/native-dispatch.md): native code reaches the runtime's table operations through one runtime export, so recording, replay, transactions and the `WriteConflict` cases are the interpreter's own, never re-implemented in generated code; `Conflict<Row>` then becomes a native sum type built from `ConflictCase`.
+
+**B11 assistant authority** (proposal posted for frontend review 2026-11-26; built after one working day unless frontend development objects). [Proposal](proposals/assistant-authority.md)
+
+- [ ] B11-1. `delegation: up_to <duration>` in the identity block and `assistants: allow "..."`, carried by the contract. Shared grammar: after the review window.
+- [ ] B11-2. Grants: hashed store and `POST/GET/DELETE /__delegations`, expiry bounded by the declared cap.
+- [ ] B11-3. Bearer authority on `/mcp` and `/actions/<name>`: grant ∩ offered ∩ the person's current authority, `allow` without confirmation, grant in the trace.
+- [ ] B11-4. Revocation and expiry drop pending confirmations (`410`).
+- [ ] B11-5. `corvid act --server --token-file`, and workers carrying the grant (B10-4b).
 
 **B10 shared actions** (building under the propose-then-build grammar law). [Proposal](proposals/shared-actions.md)
 
