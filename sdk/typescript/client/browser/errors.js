@@ -8,11 +8,11 @@
 export class CorvidError extends Error {
     status;
     body;
-    constructor(
-    /** HTTP status code. */
-    status,
-    /** The parsed error body, if the response was JSON. */
-    body, message) {
+    /**
+     * @param status HTTP status code.
+     * @param body Parsed error body, if the response was JSON.
+     */
+    constructor(status, body, message) {
         super(message ?? `Corvid request failed with status ${status}`);
         this.status = status;
         this.body = body;

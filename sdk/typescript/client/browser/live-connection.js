@@ -23,9 +23,8 @@ export class LiveConnection {
             throw new Error("Expected an HTTP base URL");
         this.url.protocol = this.url.protocol === "https:" ? "wss:" : "ws:";
     }
-    subscribe(path, keyFields, observer,
     // Each SDK bundle delivers instances of its own exported error class.
-    ErrorType = CorvidError) {
+    subscribe(path, keyFields, observer, ErrorType = CorvidError) {
         const rows = new LiveRows(keyFields);
         const id = String(++this.sequence);
         let active = true;

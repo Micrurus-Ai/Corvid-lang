@@ -42,9 +42,9 @@ export class LiveConnection {
     this.url.protocol = this.url.protocol === "https:" ? "wss:" : "ws:";
   }
 
+  // Each SDK bundle delivers instances of its own exported error class.
   subscribe<Row extends object>(
     path: string, keyFields: readonly (keyof Row)[], observer: LiveObserver<Row>,
-    // Each SDK bundle delivers instances of its own exported error class.
     ErrorType = CorvidError,
   ): () => void {
     const rows = new LiveRows<Row>(keyFields);

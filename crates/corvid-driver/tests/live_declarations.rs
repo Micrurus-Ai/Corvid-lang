@@ -89,8 +89,12 @@ fn generated_live_client_uses_the_table_schema_and_typed_route() {
 
     let invalid = source.replace("{board: Int}", "{board}");
     assert!(check(&invalid).is_err(), "String path.board cannot match an Int column");
-    let invalid = source.replace("{board: Int}", "{board: Card}");
-    assert!(check(&invalid).unwrap_err().iter().any(|error| error.message.contains("{name: Int}")));
+    let invalid = source.replace("live \"/boards/{board: Int}", "live \"/boards/{board: Card}");
+    let diagnostics = check(&invalid).unwrap_err();
+    assert!(diagnostics.iter().any(|error|
+        error.message.contains("path parameter `board` of `/boards/{board}/cards`")
+            && error.message.contains("a path segment cannot be read as")
+    ), "{diagnostics:#?}");
 
     let agent_row = source.replace("for card in ui.live", "for agent in ui.live")
         .replace("bind card.title", "bind agent.title");

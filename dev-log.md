@@ -11,12 +11,16 @@ its own subscription. Generated callers and Corvid views share the page's
 same-origin connection. Cleanup also suppresses an already queued terminal
 error for the released observer. The generated caller also uses the same segment encoder
 as the element. The Edge script compares the embedded SDK modules to fresh
-TypeScript output before starting the service.
+TypeScript output before starting the service. Comments inside two parameter
+lists caused the compiler to emit trailing spaces missing from the embedded
+modules. Moving the comments above the signatures keeps the output reproducible.
 
 The public board fixture checks the emitted component markup. The driver
 tests reject a missing subscription, a wrong or missing argument and an
 unknown row field. Real reconnect and component cleanup remain open on the
 revision whose interpreter reports E5204 for live routes.
+The invalid path-type test now changes only the live declaration and checks
+that the shared path reader's diagnostic identifies its parameter and route.
 
 ### RT-4 live row schemas and typed client generation
 
