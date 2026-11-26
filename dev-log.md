@@ -1583,6 +1583,26 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - Action methods in the TypeScript client (B10-2b-4)
+
+`corvid contract ts-client` emits one method per action, posting to
+`POST /actions/<name>` through a new `CorvidClient.action`. The input
+follows the contract's `input_type`: `move_card(move)` sends the record,
+`rename(card, title)` sends `{ card, title }`. An action with
+`@approval` returns `Promise<T | ApprovalPending>`, so code that treats
+a queued call as a result does not compile; `ApprovalPending` carries
+the approval id and the poll URL from the `202`. The transport
+typechecks under the package's strict `tsconfig`.
+
+Found: the client's agent and prompt methods, and the dev console,
+post to `/agents/<name>`, which neither server serves, so every call
+fails. Serving it would open every public agent to outside callers
+without a declared policy. Filed first in B10, ahead of the UI binding:
+outside calls go through actions, the client stops generating agent
+methods, and a test checks each generated call names a served endpoint.
+
+---
+
 ## 2026-11-26 - A form posts to any action (B10-2b-3)
 
 A form posted only to an action taking one record; any other answered

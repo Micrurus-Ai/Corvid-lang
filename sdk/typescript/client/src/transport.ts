@@ -31,6 +31,16 @@ export interface RouteShape {
   readonly body: "json" | "form" | null;
 }
 
+/**
+ * An action call a reviewer must approve first. Poll `poll` for the
+ * decision; approving runs the action.
+ */
+export interface ApprovalPending {
+  readonly kind: "approval_pending";
+  readonly approvalId: string;
+  readonly poll: string;
+}
+
 export interface CorvidClientOptions {
   /** Base URL of the Corvid backend, e.g. `https://api.example.com`. */
   baseUrl: string;
@@ -69,6 +79,27 @@ export class CorvidClient {
       headers: { "content-type": "application/json", ...this.headers },
       body: JSON.stringify(input ?? {}),
     });
+    return this.parse<T>(res);
+  }
+
+  /**
+   * Call a declared `action` at `POST /actions/<name>` with its input:
+   * the record itself when the action takes one, otherwise an object
+   * with one field per parameter. An action that declares `@approval`
+   * answers `202` while a reviewer decides, which resolves to an
+   * `ApprovalPending`; every other non-2xx answer throws `CorvidError`.
+   */
+  async action<T>(name: string, input: unknown): Promise<T | ApprovalPending> {
+    const res = await this.doFetch(`${this.baseUrl}/actions/${encodeURIComponent(name)}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", ...this.headers },
+      body: JSON.stringify(input ?? {}),
+    });
+    if (res.status === 202) {
+      const queued = (await safeJson(res)) as { approval_id?: string; poll?: string } | null;
+      return { kind: "approval_pending", approvalId: queued?.approval_id ?? "", poll: queued?.poll ?? "" };
+    }
     return this.parse<T>(res);
   }
 

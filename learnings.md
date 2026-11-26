@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+The TypeScript client from `corvid contract ts-client` has a method per action: `await api.move_card(move)` or `await api.rename(3, "Ship")`, typed from the contract. An action with `@approval` returns `T | ApprovalPending`; check `result.kind === "approval_pending"` and poll `result.poll` for the decision. [CLI: actions](docs/reference/cli.md#actions)
+
 A map keyed by a `Decimal`, a time value, a currency, a locale or `Bytes`, or holding such values, now runs in native code. A `Decimal` key is found by value, so `prices[1.00]` and `prices[1.0]` are the same entry, as on the interpreter. A map literal's keys also take the declared key type now: `prices: Map<Decimal, String> = {1.0: "one"}` and `rates: Map<Currency, Int> = {"EUR": 1}` check, where before the keys read as a `Float` and a `String`.
 
 A form can post to any action now: `action rename(card: Int, title: String)` reads `card=3&title=Ship`, an `Option` parameter may be left out, and a `List` parameter takes its name repeated (`labels=urgent&labels=blocked`). A parameter a form field cannot carry, such as a record beside other parameters, answers `415` naming it; send that action JSON. [CLI: actions](docs/reference/cli.md#actions)

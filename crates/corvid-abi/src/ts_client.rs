@@ -277,9 +277,10 @@ fn emit_api(contract: &ApplicationContract) -> String {
     if !contract.live.is_empty() {
         out.push_str("import { fillPath } from \"@corvid/client\";\n");
     }
-    out.push_str(
-        "import { CorvidClient, type AgentStream, type Page, type RouteShape, type RouteStream } from \"@corvid/client\";\n",
-    );
+    let pending = if contract.actions.iter().any(|a| a.approval.is_some()) { " type ApprovalPending," } else { "" };
+    out.push_str(&format!(
+        "import {{ CorvidClient, type AgentStream,{pending} type Page, type RouteShape, type RouteStream }} from \"@corvid/client\";\n",
+    ));
     // Import every generated type so method signatures resolve.
     if !contract.types.is_empty() {
         let names: Vec<&str> = contract.types.iter().map(|t| t.name.as_str()).collect();
@@ -295,6 +296,9 @@ fn emit_api(contract: &ApplicationContract) -> String {
     }
     out.push_str(&routes.method);
 
+    for action in &contract.actions {
+        out.push_str(&action_method(action));
+    }
     for agent in &contract.agents {
         out.push_str(&callable_method(agent, "agent"));
     }
@@ -456,6 +460,33 @@ fn stream_routes(contract: &ApplicationContract) -> StreamRoutes {
          return this.client.routeStream(route, ROUTES[route], args) as Routes[K][\"reply\"];\n  }}\n\n"
     );
     StreamRoutes { tables, method }
+}
+
+/// An action's method, posting to `POST /actions/<name>` in the shape
+/// the contract's `input_type` names: the record itself, or an object
+/// with one field per parameter. An action with `@approval` can answer
+/// with an `ApprovalPending`, and its return type says so, so a caller
+/// that ignores the pending case does not compile.
+fn action_method(action: &crate::app_contract::ContractAction) -> String {
+    let c = &action.callable;
+    let params: Vec<String> = c
+        .inputs
+        .iter()
+        .map(|p| format!("{}: {}", sanitize_ident(&p.name), ts_type(&p.type_name)))
+        .collect();
+    let input = match (&action.input_type, c.inputs.first()) {
+        (Some(_), Some(only)) => sanitize_ident(&only.name),
+        _ => format!("{{ {} }}", c.inputs.iter().map(|p| sanitize_ident(&p.name)).collect::<Vec<_>>().join(", ")),
+    };
+    let result = ts_type(&c.output_type);
+    let ret = if action.approval.is_some() { format!("{result} | ApprovalPending") } else { result.clone() };
+    let cast = if action.approval.is_some() { String::new() } else { format!(" as Promise<{result}>") };
+    format!(
+        "  /** Calls the `{orig}` action. */\n  {name}({params}): Promise<{ret}> {{\n    return this.client.action<{result}>(\"{orig}\", {input}){cast};\n  }}\n\n",
+        name = sanitize_ident(&c.name),
+        params = params.join(", "),
+        orig = c.name,
+    )
 }
 
 fn callable_method(c: &crate::app_contract::ContractCallable, kind: &str) -> String {
@@ -667,6 +698,28 @@ tool stream_answer(m: String) -> Stream<String>
         assert!(api.contains("this.client.stream(\"chat\", { message })"));
         // Reuses the shipped transport, never regenerates it.
         assert!(api.contains("import { CorvidClient"));
+    }
+
+    #[test]
+    fn actions_project_to_methods_posting_their_input() {
+        let contract = contract_for(
+            "type MoveCard:
+    card: Int
+    position: Int
+
+action move_card(move: MoveCard) -> Int requires anyone:
+    return move.position
+
+action rename(card: Int, title: String) -> String requires anyone:
+    return title
+",
+        );
+        let api = &files_api(&contract);
+        assert!(api.contains("move_card(move: MoveCard): Promise<number>"), "{api}");
+        assert!(api.contains("this.client.action<number>(\"move_card\", move)"), "one record is the whole input: {api}");
+        assert!(api.contains("rename(card: number, title: string): Promise<string>"), "{api}");
+        assert!(api.contains("this.client.action<string>(\"rename\", { card, title })"), "{api}");
+        assert!(!api.contains("ApprovalPending"), "no action here can wait for approval: {api}");
     }
 
     #[test]
