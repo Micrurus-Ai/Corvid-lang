@@ -82,18 +82,10 @@ fn payload_forms(value: &Value, ty: &Type, types_by_id: &HashMap<DefId, &IrType>
                 Some(Value::String(s)) => s.to_string(),
                 _ => String::new(),
             };
-            let bytes = match upload.get_field("bytes") {
-                Some(Value::List(items)) => items
-                    .iter_cloned()
-                    .into_iter()
-                    .map(|item| match item {
-                        Value::Int(b) => u8::try_from(b).map_err(|_| "an upload byte is out of range".to_string()),
-                        other => Err(format!("an upload byte is {}", other.type_name())),
-                    })
-                    .collect::<Result<Vec<u8>, String>>()?,
-                _ => return Err("the upload has no bytes".to_string()),
+            let Some(Value::Bytes(bytes)) = upload.get_field("bytes") else {
+                return Err("the upload has no bytes".to_string());
             };
-            Ok(file_forms(Some(text("filename")), Some(text("content_type")), &bytes))
+            Ok(file_forms(Some(text("filename")), Some(text("content_type")), bytes.as_slice()))
         }
         (Type::Bytes, Value::Bytes(bytes)) => Ok(file_forms(None, None, bytes.as_slice())),
         (Type::Struct(_), Value::Struct(record)) => {

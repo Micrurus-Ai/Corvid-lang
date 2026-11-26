@@ -264,8 +264,8 @@ pub enum BuiltinMethodKind {
     /// `Upload<Format>.text() -> String` — the upload bytes decoded
     /// as UTF-8 (lossy for non-UTF-8 content).
     UploadText,
-    /// `Upload<Format>.bytes() -> List<Int>` — the raw upload bytes,
-    /// each 0–255.
+    /// `Upload<Format>.bytes() -> Bytes` — the raw upload bytes, one
+    /// shared buffer.
     UploadBytes,
     /// `Upload<Format>.filename() -> String` — the client-supplied
     /// file name (may be empty).
@@ -1161,9 +1161,7 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
 
         // ----- Upload<Format> accessors (slice 52c-2) -------------
         (Type::Upload(_), "text") => sig(UploadText, vec![], Type::String),
-        (Type::Upload(_), "bytes") => {
-            sig(UploadBytes, vec![], Type::List(Box::new(Type::Int)))
-        }
+        (Type::Upload(_), "bytes") => sig(UploadBytes, vec![], Type::Bytes),
         (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
         (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
         (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),

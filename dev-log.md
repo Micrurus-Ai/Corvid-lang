@@ -1876,6 +1876,26 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - An upload is one buffer, and never reaches a trace
+
+`corvid serve` built an upload's content as a `List<Int>`, one value per
+byte, so a 10 MB file took hundreds of megabytes. It is now one shared
+`Bytes` buffer, and `upload.bytes()` returns `Bytes` (with `length`,
+`sha256`, `to_hex` and `to_utf8`) instead of a list; no program in the
+repository called it.
+
+Found by the change: a connector test checks that an uploaded file's
+content never reaches the trace, and with `Bytes` it failed, showing the
+content base64-encoded in `run_started`. A run's recorded arguments had
+always held the whole file; as a list of numbers the text check could
+not see it. Every recorded value (a run's arguments and result, an
+`approve`'s arguments) now replaces an upload, however deeply nested,
+with its name, type, size and SHA-256, the form connectors already
+record. Uploads are still whole in memory up to `max_bytes`; spilling
+large ones to disk is on the roadmap.
+
+---
+
 ## 2026-11-26 - `verify_password` off the interpreter's thread (limits row 13)
 
 `password.verify_password(hash)` ran Argon2id, tens of milliseconds at

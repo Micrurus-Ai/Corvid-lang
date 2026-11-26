@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+`upload.bytes()` now returns `Bytes`, one shared buffer, instead of a `List<Int>` with one value per byte; use `bytes.length()`, `bytes.sha256()`, `bytes.to_hex()` or `bytes.to_utf8()`. An uploaded file no longer reaches the trace: a run's recorded arguments hold its name, type, size and SHA-256, never its content.
+
 `password.verify_password(hash)` now runs on a blocking worker, as `hash_password` does, so a login check no longer holds up the other requests a server is handling on the same thread. Nothing changes in your code. [Cryptography: passwords](docs/reference/cryptography.md#passwords)
 
 See what a change to your actions breaks for callers outside the program: save the contract with a release (`corvid contract app --out base.json`), then run `corvid contract app --diff base.json`. Each change is reported as breaking or additive, with every place it reaches (the HTTP endpoint, the TypeScript client, `corvid act`, assistants), and the command exits 1 when something breaks, so CI can stop the release. Renaming `MoveCard.to` to `column` is reported as breaking twice: `to` is gone and `column` is required. [CLI: seeing what an action change breaks](docs/reference/cli.md#seeing-what-an-action-change-breaks)

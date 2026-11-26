@@ -806,23 +806,15 @@ pub(super) fn eval_builtin_method(
         UploadContentType => upload_field(&recv, "content_type", span),
         UploadSize => upload_field(&recv, "size", span),
         UploadBytes => upload_field(&recv, "bytes", span),
-        UploadText => {
-            let bytes_v = upload_field(&recv, "bytes", span)?;
-            let bytes: Vec<u8> = match &bytes_v {
-                Value::List(l) => l
-                    .iter_cloned()
-                    .iter()
-                    .filter_map(|v| match v {
-                        Value::Int(i) => Some(*i as u8),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            Ok(Value::String(std::sync::Arc::from(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            )))
-        }
+        UploadText => match upload_field(&recv, "bytes", span)? {
+            Value::Bytes(bytes) => Ok(Value::String(std::sync::Arc::from(
+                String::from_utf8_lossy(bytes.as_slice()).into_owned(),
+            ))),
+            other => Err(InterpError::new(
+                InterpErrorKind::TypeMismatch { expected: "an upload's Bytes".into(), got: other.type_name() },
+                span,
+            )),
+        },
 
         // These need checked types, so `eval_json_decode` and
         // `eval_json_encode` run them.

@@ -1506,9 +1506,10 @@ async fn parse_multipart_upload(
             data.extend_from_slice(&chunk);
         }
 
-        let bytes_list = Value::List(corvid_driver::ListValue::new(
-            data.iter().map(|b| Value::Int(*b as i64)),
-        ));
+        // One shared buffer, not one value per byte: a 10 MB file is
+        // 10 MB in memory, as the declared `max_bytes` assumes.
+        let size = data.len() as i64;
+        let bytes = Value::Bytes(corvid_crypto::Bytes::from(data));
         let upload = corvid_driver::StructValue::new(
             DefId(0),
             "Upload",
@@ -1518,8 +1519,8 @@ async fn parse_multipart_upload(
                     "content_type".to_string(),
                     Value::String(content_type.into()),
                 ),
-                ("size".to_string(), Value::Int(data.len() as i64)),
-                ("bytes".to_string(), bytes_list),
+                ("size".to_string(), Value::Int(size)),
+                ("bytes".to_string(), bytes),
             ],
         );
         return Ok(Value::Struct(upload));

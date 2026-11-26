@@ -224,7 +224,7 @@ Use `None` for an absent option. Pass a type name as the second argument to `ask
 ## Upload
 
 - `Upload<Format>.text() -> String`
-- `Upload<Format>.bytes() -> List<Int>`
+- `Upload<Format>.bytes() -> Bytes`
 - `Upload<Format>.filename() -> String`
 - `Upload<Format>.content_type() -> String`
 - `Upload<Format>.size() -> Int`
