@@ -2,11 +2,11 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-- [ ] RT-4 / F08. Verify the Corvid live child loop and generated TypeScript
-  observer on an integrated RT-3 server. The compiler checks the path arguments
-  and bound row fields. The hosted Edge check covers reconnect after a missed
-  commit, the next committed edit, retained focus and component unmount.
-  [Acceptance command](docs/proposals/real-time.md#rt-4-client-implementation-boundary)
+- [x] RT-4 / F08 live subscriptions. The generated TypeScript observer and
+  Corvid child loop received a missed commit on reconnect and the next live
+  edit over RT-3. Edge retained the unaffected row, input focus and selection.
+  Unmount released the component subscription while the observer kept receiving
+  edits. [Hosted Edge checks](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45802618761)
 - [ ] Verify full-width integer table keys across RT-2, RT-3 and both clients.
   The SDK rejects JSON number keys outside JavaScript's safe integer range.
   Agree a lossless key representation before accepting those subscriptions.

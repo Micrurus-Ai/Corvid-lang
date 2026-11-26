@@ -2,6 +2,16 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-4 live subscriptions verified over RT-3
+
+Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.
+The board fixture wrote to SQLite through a Corvid route. The generated client
+and Corvid view received the offline write in the reconnect snapshot and the
+next edit on the resumed WebSocket. An unchanged row kept its DOM node and
+its input kept focus, text and selection. Removing the list sent one unsubscribe.
+The generated observer received another write, then released the last socket.
+[Hosted verification](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45802618761)
+
 ### RT-4 Corvid live child loops
 
 The child loop reads the declared live route's path parameters and row type.
