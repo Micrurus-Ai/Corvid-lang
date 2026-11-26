@@ -142,7 +142,7 @@ impl<R: ValueReader> Encoder<'_, R> {
                     name: "Page".into(),
                     fields: Type::page_fields(item)
                         .into_iter()
-                        .map(|(name, ty)| corvid_ir::IrField { name: name.into(), ty, refinement: None, span })
+                        .map(|(name, ty)| corvid_ir::IrField { name: name.into(), ty, refinement: None, json_key: None, span })
                         .collect(),
                     variants: Vec::new(),
                     span,
@@ -177,7 +177,7 @@ impl<R: ValueReader> Encoder<'_, R> {
         let fields = self.reader.record(decl, value)?;
         let mut object = Map::new();
         for (field, field_value) in decl.fields.iter().zip(&fields) {
-            object.insert(field.name.clone(), self.encode(field_value, &field.ty)?);
+            object.insert(field.key().to_string(), self.encode(field_value, &field.ty)?);
         }
         Ok(J::Object(object))
     }

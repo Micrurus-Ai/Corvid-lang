@@ -304,7 +304,21 @@ pub struct IrField {
     /// Value refinement (slice 50j) — enforced at typed decode; the
     /// violation message feeds the structured-output repair loop.
     pub refinement: Option<corvid_ast::Refinement>,
+    /// The field's key in the public JSON form when it differs from its
+    /// name (`@json(key:)` or the type's `@json(case:)`, B01), computed
+    /// once at lowering by `corvid_ast::json_key`. Read it through
+    /// [`IrField::key`].
+    pub json_key: Option<String>,
     pub span: Span,
+}
+
+impl IrField {
+    /// The key this field has in the public JSON form: what HTTP bodies,
+    /// `to_json`, `from_json`, prompt schemas and replies, OpenAPI and
+    /// the generated clients all use. Code uses [`IrField::name`].
+    pub fn key(&self) -> &str {
+        self.json_key.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// A tool declaration (no body — externally implemented).

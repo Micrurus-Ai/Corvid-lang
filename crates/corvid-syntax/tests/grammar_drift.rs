@@ -311,6 +311,15 @@ memory prefs:
 "#,
     ),
     (
+        "json_keys",
+        r#"@json(case: camel)
+type Order:
+    order_id: Int
+    @json(key: "ID")
+    legacy_id: String
+"#,
+    ),
+    (
         "tables_and_databases",
         r#"database library:
     engine: sqlite
@@ -712,6 +721,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("import_item", "imports"),
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
+    ("json_case_attr", "json_keys"),
+    ("json_key_attr", "json_keys"),
     ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
     ("table_decl", "tables_and_databases"),

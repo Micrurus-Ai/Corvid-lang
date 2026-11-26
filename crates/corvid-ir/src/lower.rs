@@ -892,11 +892,15 @@ impl<'a> Lowerer<'a> {
         let fields = t
             .fields
             .iter()
-            .map(|f| IrField {
-                name: f.name.name.clone(),
-                ty: self.type_ref_to_type(&f.ty),
-                refinement: f.refinement,
-                span: f.span,
+            .map(|f| {
+                let key = corvid_ast::json_key(&f.name.name, f.json_key.as_deref(), t.json_case);
+                IrField {
+                    name: f.name.name.clone(),
+                    ty: self.type_ref_to_type(&f.ty),
+                    refinement: f.refinement,
+                    json_key: (key != f.name.name).then_some(key),
+                    span: f.span,
+                }
             })
             .collect();
         let variants = t
@@ -911,6 +915,7 @@ impl<'a> Lowerer<'a> {
                         name: f.name.name.clone(),
                         ty: self.type_ref_to_type(&f.ty),
                         refinement: f.refinement,
+                        json_key: None,
                         span: f.span,
                     })
                     .collect(),

@@ -456,6 +456,9 @@ pub enum TypeErrorKind {
         field: String,
         message: String,
     },
+    /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
+    /// empty or name one key twice.
+    JsonKeyInvalid { type_name: String, message: String },
     /// B09 P2 — a query part the database cannot run.
     TableQueryNotTranslatable { message: String },
     /// B09 P3 — `renamed from` or `retired` contradicts the table's
@@ -988,6 +991,7 @@ impl TypeErrorKind {
             } => {
                 format!("field `{field}` on `{type_name}`: {message}")
             }
+            Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
             Self::AtomicBlockRefused { message } => message.clone(),
@@ -1484,6 +1488,9 @@ impl TypeErrorKind {
             ),
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
+            ),
+            Self::JsonKeyInvalid { .. } => Some(
+                "give each field its own non-empty key with `@json(key: \"...\")`; a field's key replaces the one its type's `@json(case:)` derives".into(),
             ),
             Self::RefinementInvalid { .. } => Some(
                 "`between(min, max)` refines Int fields; `len_between(min, max)` refines                  String fields; bounds are inclusive and min must not exceed max"

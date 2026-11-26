@@ -102,7 +102,7 @@ import_item       ::= IDENT ('as' IDENT)?
 ## Types and stores
 
 ```ebnf
-type_decl         ::= 'type' IDENT ':' INDENT type_field+ DEDENT
+type_decl         ::= json_case_attr? 'type' IDENT ':' INDENT type_field+ DEDENT
                     | 'choice' IDENT ':' INDENT choice_variant+ DEDENT
                     | 'type' IDENT '=' type_alias_body NEWLINE
 choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
@@ -112,8 +112,18 @@ choice_variant    ::= IDENT ('(' field_list ')')? NEWLINE
 # bare values; payload variants construct with `Approved("alice")`.
 # Variant names are file-scope constructors (duplicates across types
 # are duplicate-declaration errors).
-type_field        ::= IDENT ':' type_ref NEWLINE
+type_field        ::= json_key_attr? IDENT ':' type_ref NEWLINE
                     | '|' IDENT ('(' field_list ')')? NEWLINE       # sum-type variant
+
+# B01: a field's key in the public JSON form (HTTP bodies, `to_json`,
+# `from_json`, prompts, OpenAPI, generated clients) when it differs from
+# the field name. `@json(case:)` derives every key from the snake_case
+# name (`created_at` is `createdAt`, `CreatedAt` or `created-at`); a
+# field's own `@json(key:)` wins. Code always uses the field name. Two
+# fields with one key, or an empty key, is a compile error. A variant's
+# payload travels by position, so its fields take no `@json`.
+json_case_attr    ::= '@' 'json' '(' 'case' ':' ('camel' | 'pascal' | 'kebab') ')' NEWLINE
+json_key_attr     ::= '@' 'json' '(' 'key' ':' STRING_LITERAL ')' NEWLINE
 
 field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
 

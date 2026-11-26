@@ -269,3 +269,33 @@ agent match_inner(inner: Result<Int, String>) -> Int:
         740,
     );
 }
+
+/// B01: a record with `@json(case:)` and a field's own `@json(key:)`
+/// reads and writes the same keys on both tiers, and a failure names the
+/// key the sender wrote.
+#[test]
+fn json_keys_match_on_both_tiers() {
+    let out = assert_parity_text(
+        r#"
+@json(case: camel)
+type Ticket:
+    ticket_id: Int
+    @json(key: "ID")
+    legacy_id: String
+    due_date: Option<String>
+
+agent main() -> String:
+    read = match Ticket.from_json("{\"ticketId\": 7, \"ID\": \"T-7\", \"dueDate\": null}"):
+        Ok(t) -> t.to_json() + " " + t.legacy_id
+        Err(e) -> "failed at " + e.path
+    wrong = match Ticket.from_json("{\"ticketId\": \"seven\", \"ID\": \"T\"}"):
+        Ok(t) -> "decoded"
+        Err(e) -> e.path
+    strict = match Ticket.from_json_strict("{\"ticket_id\": 7, \"ticketId\": 7, \"ID\": \"T\"}"):
+        Ok(t) -> "decoded"
+        Err(e) -> e.path
+    return read + " | " + wrong + " | " + strict
+"#,
+    );
+    assert_eq!(out, r#"{"ID":"T-7","dueDate":null,"ticketId":7} T-7 | ticketId | ticket_id"#);
+}

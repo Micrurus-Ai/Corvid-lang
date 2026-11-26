@@ -54,7 +54,7 @@ fn partial_to_model_json(partial: &PartialValue, inner: &Type, types: &HashMap<D
                 }
                 _ => serde_json::json!({ "tag": "streaming" }),
             };
-            out.insert(field.name.clone(), envelope);
+            out.insert(field.key().to_string(), envelope);
         }
         Ok(J::Object(out))
     })
@@ -93,7 +93,7 @@ fn partial_from_model_json(json: J, inner: &Type, types: &HashMap<DefId, &IrType
     };
     let mut fields = HashMap::new();
     for field in &ir_type.fields {
-        let state = match map.get(&field.name) {
+        let state = match map.get(field.key()) {
             None => PartialFieldValue::Streaming,
             Some(J::Object(envelope)) if envelope.get("tag").and_then(J::as_str) == Some("streaming") => {
                 PartialFieldValue::Streaming

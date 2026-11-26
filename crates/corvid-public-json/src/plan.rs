@@ -299,7 +299,11 @@ fn write_fields(fields: &[IrField]) -> Result<J, String> {
                 Some(Refinement::Between { min, max }) => json!({ "between": [min, max] }),
                 Some(Refinement::LenBetween { min, max }) => json!({ "len_between": [min, max] }),
             };
-            Ok(json!({ "name": field.name, "type": write_type(&field.ty)?, "refinement": refinement }))
+            let mut written = json!({ "name": field.name, "type": write_type(&field.ty)?, "refinement": refinement });
+            if let Some(key) = &field.json_key {
+                written["key"] = json!(key);
+            }
+            Ok(written)
         })
         .collect::<Result<Vec<_>, String>>()
         .map(J::Array)
@@ -322,7 +326,8 @@ fn read_fields(json: &J) -> Result<Vec<IrField>, String> {
             } else {
                 range("len_between").map(|(min, max)| Refinement::LenBetween { min: min as u64, max: max as u64 })
             };
-            Ok(IrField { name: text(field, "name")?.to_string(), ty: read_type(member(field, "type")?)?, refinement, span })
+            let json_key = field.get("key").and_then(J::as_str).map(str::to_string);
+            Ok(IrField { name: text(field, "name")?.to_string(), ty: read_type(member(field, "type")?)?, refinement, json_key, span })
         })
         .collect()
 }

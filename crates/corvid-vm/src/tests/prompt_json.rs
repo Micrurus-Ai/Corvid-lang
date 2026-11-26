@@ -167,3 +167,28 @@ agent run_pick() -> String:
     assert_eq!(seen.args, vec![json!(3), serde_json::Value::Null]);
     assert_eq!(seen.rendered, "Pick 3 null");
 }
+
+/// B01: a record's JSON keys reach the model, in the arguments, the reply
+/// schema and the reply, as everywhere the public form is used.
+#[tokio::test]
+async fn a_prompt_uses_the_json_keys() {
+    let src = r#"
+@json(case: camel)
+type Lead:
+    full_name: String
+    @json(key: "ID")
+    lead_id: Int
+
+prompt enrich(lead: Lead) -> Lead:
+    "Enrich {lead}"
+
+agent run() -> String:
+    lead = enrich(Lead("Ann Lee", 7))
+    return lead.full_name
+"#;
+    let (result, seen) = ask(src, "run", vec![], json!({"fullName": "Ann B. Lee", "ID": 7})).await;
+    assert_eq!(result.expect("run"), Value::String(Arc::from("Ann B. Lee")));
+    assert_eq!(seen.args, vec![json!({"fullName": "Ann Lee", "ID": 7})]);
+    let schema = seen.schema.expect("schema");
+    assert_eq!(schema["required"], json!(["fullName", "ID"]));
+}

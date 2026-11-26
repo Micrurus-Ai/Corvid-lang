@@ -235,13 +235,29 @@ fn schema_for_type(ty: &ContractType) -> Value {
         ty.fields
             .iter()
             .map(|field| schema::RecordField {
-                name: field.name.clone(),
-                schema: schema_for_field(field),
+                name: field.key().to_string(),
+                schema: corvid_field_name(field, schema_for_field(field)),
                 // Corvid fields are non-optional unless the type is Option<T>.
                 optional: field.type_name.starts_with("Option<"),
             })
             .collect(),
     )
+}
+
+/// A property whose JSON key differs from its Corvid field name records
+/// the field name as `x-corvid-field`, so a reader can map one to the
+/// other (B01).
+fn corvid_field_name(field: &ContractField, schema: Value) -> Value {
+    if field.json_key.is_none() {
+        return schema;
+    }
+    match schema {
+        Value::Object(mut map) => {
+            map.insert("x-corvid-field".into(), json!(field.name));
+            Value::Object(map)
+        }
+        other => json!({ "allOf": [other], "x-corvid-field": field.name }),
+    }
 }
 
 fn schema_for_field(field: &ContractField) -> Value {
@@ -475,6 +491,7 @@ mod tests {
                         max_length: None,
                         ui: Default::default(),
                         upload: None,
+                        json_key: None,
                     },
                     ContractField {
                         name: "explanation".into(),
@@ -485,6 +502,7 @@ mod tests {
                         max_length: Some(500),
                         ui: Default::default(),
                         upload: None,
+                        json_key: None,
                     },
                 ],
                 variants: vec![],
@@ -584,6 +602,7 @@ mod tests {
         c.types.push(ContractType {
             name: "DocSubmission".into(),
             fields: vec![ContractField {
+                json_key: None,
                 name: "file".into(),
                 type_name: "Upload<Pdf>".into(),
                 minimum: None,
@@ -666,6 +685,7 @@ mod tests {
         c.types.push(ContractType {
             name: "Item".into(),
             fields: vec![ContractField {
+                json_key: None,
                 name: "id".into(),
                 type_name: "String".into(),
                 minimum: None,

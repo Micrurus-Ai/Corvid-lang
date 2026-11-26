@@ -60,7 +60,7 @@ pub fn json_error_decl() -> corvid_ir::IrType {
         name: "JsonError".into(),
         fields: corvid_types::json_error_fields()
             .into_iter()
-            .map(|(name, ty)| corvid_ir::IrField { name: name.into(), ty, refinement: None, span })
+            .map(|(name, ty)| corvid_ir::IrField { name: name.into(), ty, refinement: None, json_key: None, span })
             .collect(),
         variants: Vec::new(),
         span,
@@ -84,7 +84,7 @@ pub fn conflict_decl(row: &corvid_types::Type) -> corvid_ir::IrType {
                 name: case.name().into(),
                 fields: case
                     .field()
-                    .map(|name| corvid_ir::IrField { name: name.into(), ty: row.clone(), refinement: None, span })
+                    .map(|name| corvid_ir::IrField { name: name.into(), ty: row.clone(), refinement: None, json_key: None, span })
                     .into_iter()
                     .collect(),
                 span,

@@ -132,6 +132,43 @@ public agent classify(q: String) -> Answer:
         assert_eq!(SdkLanguage::parse("cobol"), None);
     }
 
+    /// B01: every published surface carries a field's JSON key, from the
+    /// one rule lowering uses, while the generated code keeps the field
+    /// name where the language allows it.
+    #[test]
+    fn every_surface_uses_the_json_key() {
+        let c = contract_for(
+            "@json(case: camel)
+public type Order:
+    order_id: Int
+    @json(key: \"created-at\")
+    created_at: String
+
+public agent latest(n: Int) -> Order:
+    return Order(n, \"today\")
+",
+        );
+        let order = c.types.iter().find(|t| t.name == "Order").expect("Order is published");
+        assert_eq!(order.fields[0].key(), "orderId");
+        assert_eq!(order.fields[1].key(), "created-at");
+        assert_eq!(order.fields[0].name, "order_id");
+
+        let spec = crate::openapi::emit_openapi(&c);
+        let schema = &spec["components"]["schemas"]["Order"];
+        assert_eq!(schema["required"], serde_json::json!(["orderId", "created-at"]));
+        assert_eq!(schema["properties"]["orderId"]["x-corvid-field"], "order_id");
+
+        let ts = emit_sdk(&c, SdkLanguage::TypeScript).into_iter().find(|f| f.filename == "types.ts").unwrap().contents;
+        assert!(ts.contains("  orderId: number;") && ts.contains("  \"created-at\": string;"), "{ts}");
+
+        let swift = &emit_sdk(&c, SdkLanguage::Swift)[0].contents;
+        assert!(swift.contains("public var order_id: Int") && swift.contains("case order_id = \"orderId\""), "{swift}");
+        let kotlin = &emit_sdk(&c, SdkLanguage::Kotlin)[0].contents;
+        assert!(kotlin.contains("put(\"orderId\"") && kotlin.contains("obj[\"created-at\"]"), "{kotlin}");
+        let python = &emit_sdk(&c, SdkLanguage::Python)[0].contents;
+        assert!(python.contains("(\"order_id\", \"orderId\", ") && python.contains("    order_id: int"), "{python}");
+    }
+
     #[test]
     fn emit_sdk_dispatches_by_language() {
         let c = contract_for(SRC);

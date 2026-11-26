@@ -201,7 +201,92 @@ pub struct Field {
     /// violates it — not a display hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload: Option<UploadSpec>,
+    /// `@json(key: "userId")` (B01): the key this field has in the
+    /// public JSON form, when it differs from the field name. Code
+    /// always uses the field name. See [`json_key`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_key: Option<String>,
     pub span: Span,
+}
+
+/// `@json(case: camel)` on a type (B01): how its fields' JSON keys
+/// derive from their snake_case names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JsonCase {
+    /// `created_at` is `createdAt`.
+    Camel,
+    /// `created_at` is `CreatedAt`.
+    Pascal,
+    /// `created_at` is `created-at`.
+    Kebab,
+}
+
+impl JsonCase {
+    pub const ALL: [JsonCase; 3] = [Self::Camel, Self::Pascal, Self::Kebab];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Camel => "camel",
+            Self::Pascal => "pascal",
+            Self::Kebab => "kebab",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|case| case.as_str() == name)
+    }
+
+    /// The key a snake_case field name takes in this case.
+    pub fn apply(self, field_name: &str) -> String {
+        let words = field_name.split('_').filter(|word| !word.is_empty());
+        match self {
+            Self::Kebab => words.collect::<Vec<_>>().join("-"),
+            Self::Camel | Self::Pascal => {
+                let mut out = String::new();
+                for (index, word) in words.enumerate() {
+                    let mut chars = word.chars();
+                    if let Some(first) = chars.next() {
+                        if index == 0 && self == Self::Camel {
+                            out.push(first);
+                        } else {
+                            out.extend(first.to_uppercase());
+                        }
+                        out.push_str(chars.as_str());
+                    }
+                }
+                out
+            }
+        }
+    }
+}
+
+/// The key `field` has in the public JSON form: its own `@json(key:)`,
+/// else its name in the type's `@json(case:)`, else its name. The one
+/// place the rule lives; lowering stores the result on each IR field
+/// and every JSON surface reads it from there.
+pub fn json_key(field_name: &str, explicit: Option<&str>, case: Option<JsonCase>) -> String {
+    match (explicit, case) {
+        (Some(key), _) => key.to_string(),
+        (None, Some(case)) => case.apply(field_name),
+        (None, None) => field_name.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod json_key_tests {
+    use super::*;
+
+    #[test]
+    fn a_case_derives_each_key_and_an_explicit_key_wins() {
+        assert_eq!(JsonCase::Camel.apply("created_at"), "createdAt");
+        assert_eq!(JsonCase::Pascal.apply("created_at"), "CreatedAt");
+        assert_eq!(JsonCase::Kebab.apply("created_at"), "created-at");
+        assert_eq!(JsonCase::Camel.apply("id"), "id");
+        assert_eq!(JsonCase::Camel.apply("user_id_2"), "userId2");
+        assert_eq!(json_key("legacy_id", Some("ID"), Some(JsonCase::Camel)), "ID");
+        assert_eq!(json_key("order_id", None, None), "order_id");
+    }
 }
 
 impl Field {

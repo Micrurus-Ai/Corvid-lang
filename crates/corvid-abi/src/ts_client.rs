@@ -157,6 +157,15 @@ fn emit_protocol_types(contract: &ApplicationContract) -> String {
     out
 }
 
+/// A record property name: bare when it is a plain identifier, quoted
+/// otherwise.
+fn ts_property(key: &str) -> String {
+    let mut chars = key.chars();
+    let plain = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$');
+    if plain { key.to_string() } else { quote(key) }
+}
+
 fn quote(value: &str) -> String {
     serde_json::to_string(value).expect("a string is a JSON literal")
 }
@@ -187,7 +196,9 @@ fn type_declaration(ty: &ContractType) -> String {
         } else {
             ts_type(&f.type_name)
         };
-        out.push_str(&format!("  {}{}: {};\n", f.name, optional, ts));
+        // The property is the wire key (`@json(key:)`, B01), quoted when
+        // it is not a plain identifier, such as `created-at`.
+        out.push_str(&format!("  {}{}: {};\n", ts_property(f.key()), optional, ts));
     }
     out.push_str("}\n");
     out

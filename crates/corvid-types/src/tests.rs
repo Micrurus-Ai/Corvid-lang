@@ -8691,3 +8691,23 @@ agent open_demo(path: String) -> DbHandle:
     use crate::types::Type;
     assert_eq!(Type::DbHandle.display_name(), "DbHandle");
 }
+
+/// B01: two fields may not share a JSON key, whether it comes from a
+/// field's `@json(key:)` or the type's `@json(case:)`, and a key is never
+/// empty.
+#[test]
+fn json_keys_name_one_field_each_and_are_not_empty() {
+    let messages = |src: &str| -> Vec<String> {
+        check(src)
+            .errors
+            .iter()
+            .filter(|e| matches!(e.kind, TypeErrorKind::JsonKeyInvalid { .. }))
+            .map(|e| e.kind.message())
+            .collect()
+    };
+    let clash = messages("@json(case: camel)\ntype Order:\n    order_id: Int\n    @json(key: \"orderId\")\n    legacy: Int\n");
+    assert_eq!(clash, vec!["type `Order`: fields `order_id` and `legacy` both have the JSON key `orderId`".to_string()]);
+    let empty = messages("type Order:\n    @json(key: \"\")\n    id: Int\n");
+    assert_eq!(empty, vec!["type `Order`: field `id` has an empty JSON key".to_string()]);
+    assert!(messages("@json(case: kebab)\ntype Order:\n    order_id: Int\n    @json(key: \"ID\")\n    id: Int\n").is_empty());
+}

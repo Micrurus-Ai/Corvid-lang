@@ -72,7 +72,7 @@ mod tests {
         let line = IrType {
             id: DefId(1),
             name: "Line".into(),
-            fields: vec![IrField { name: "price".into(), ty: Type::Decimal, refinement: None, span: Span::new(0, 0) }],
+            fields: vec![IrField { name: "price".into(), ty: Type::Decimal, refinement: None, json_key: None, span: Span::new(0, 0) }],
             variants: vec![],
             span: Span::new(0, 0),
         };

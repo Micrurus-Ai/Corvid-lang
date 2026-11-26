@@ -316,7 +316,7 @@ impl<B: ValueBuilder> Decoder<'_, B> {
             return Err(mismatch(path, &ir_type.name, json));
         };
         if self.unknown_fields == UnknownFields::Reject {
-            if let Some(extra) = object.keys().find(|k| !ir_type.fields.iter().any(|f| &f.name == *k)) {
+            if let Some(extra) = object.keys().find(|k| !ir_type.fields.iter().any(|f| f.key() == k.as_str())) {
                 let mark = path.len();
                 push_key(path, extra);
                 let error = JsonDecodeError::new(path, format!("no field (`{}` declares no `{extra}`)", ir_type.name), "a value");
@@ -327,8 +327,10 @@ impl<B: ValueBuilder> Decoder<'_, B> {
         let mut fields = Vec::with_capacity(ir_type.fields.len());
         for field in &ir_type.fields {
             let mark = path.len();
-            push_key(path, &field.name);
-            let value = match object.get(&field.name) {
+            // The JSON key (`@json(key:)`, B01), which is also what the
+            // error path names: the sender wrote the key, not the field.
+            push_key(path, field.key());
+            let value = match object.get(field.key()) {
                 Some(raw) => match self.decode(raw, &field.ty, path) {
                     Ok(value) => {
                         if let Some(error) = refinement_violation(path, field, raw) {

@@ -104,6 +104,34 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - JSON keys that differ from field names (B01)
+
+A Corvid program reading a camelCase API had to name its fields
+`userId`, breaking the naming rule, or read one field at a time. Now
+`@json(key: "userId")` names a field's key, and `@json(case: camel)`
+before a type derives every key (`pascal` and `kebab` too). The
+[proposal](docs/proposals/json-field-keys.md) stood a working day
+without a frontend answer, so its own answers to the four questions
+stand, recorded in its "As built" section.
+
+One function, `corvid_ast::json_key`, computes a key. Lowering stores it
+on the IR field, and the native decode plan carries it. So the
+interpreter's and native code's public decoder and encoder, the native
+per-record decoder (prompt replies, the C ABI), prompt schemas and
+replies, the contract, OpenAPI and the four generated clients all read
+the same value; a parity test shows both tiers agree. The checker
+refuses an empty key and two fields with one key. The parser refuses an
+attribute on a variant payload field with the reason: the payload
+travels by position.
+
+The proposal said prompts would keep field names. B1, built earlier
+today, moved prompts to the public form, so they use the key like every
+other public surface, and the proposal says so. Tool arguments keep the
+internal form until B2. Reading a field's name as well as its key
+(serde's `alias`) is filed on the roadmap.
+
+---
+
 ## 2026-11-26 - Prompts exchange the public JSON form with a model
 
 The grammar says a prompt argument "renders as its JSON form", but a
