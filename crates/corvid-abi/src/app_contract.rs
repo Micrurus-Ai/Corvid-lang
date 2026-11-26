@@ -437,7 +437,21 @@ pub struct ContractAction {
     pub callable: ContractCallable,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<ContractRoutePolicy>,
+    /// The declared type that is the action's whole input, when it takes
+    /// one parameter of a declared type. Otherwise the input is an object
+    /// with one field per parameter. See `corvid_types::action_input`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<String>,
 }
+
+impl ContractAction {
+    /// The endpoint every outside caller posts the input to.
+    pub fn path(&self) -> String {
+        format!("{ACTIONS_PATH}{}", self.callable.name)
+    }
+}
+
+pub use corvid_types::action_input::ACTIONS_PATH;
 
 /// A route's authentication/authorization policy (slice 51h).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -632,9 +646,16 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Agent(a) => a.action.as_ref().map(|spec| ContractAction {
-                callable: contract_callable(&a.name.name, &a.params, &a.return_ty, &a.effect_row, registry, &names),
-                policy: contract_policy(&spec.policy),
+            Decl::Agent(a) => a.action.as_ref().map(|spec| {
+                let param_types: Vec<&corvid_types::Type> =
+                    a.params.iter().filter_map(|p| checked.type_refs.get(&p.ty.span())).collect();
+                let whole = param_types.len() == a.params.len()
+                    && corvid_types::action_input::whole_input_type(param_types.into_iter()).is_some();
+                ContractAction {
+                    callable: contract_callable(&a.name.name, &a.params, &a.return_ty, &a.effect_row, registry, &names),
+                    policy: contract_policy(&spec.policy),
+                    input_type: whole.then(|| names.name(&a.params[0].ty)),
+                }
             }),
             _ => None,
         })

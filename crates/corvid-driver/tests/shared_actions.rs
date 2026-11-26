@@ -105,6 +105,35 @@ fn the_contract_lists_each_action_with_its_callers() {
 }
 
 #[test]
+fn an_action_cannot_take_or_return_a_secret() {
+    let found = errors("action sign_in(password: Secret) -> Bool requires anyone:\n    return true\n");
+    assert!(
+        found.iter().any(|m| m.contains("an action's inputs and result")),
+        "a form or an assistant would have to send the secret as JSON: {found:#?}"
+    );
+}
+
+#[test]
+fn a_route_cannot_take_an_actions_path() {
+    let found = errors(
+        "action ping() -> String requires anyone:\n    return \"pong\"\n\nserver api:\n    route POST \"/actions/ping\" -> json String:\n        return \"mine\"\n",
+    );
+    assert!(found.iter().any(|m| m.contains("takes the path action `ping` is served at")), "{found:#?}");
+    let found = errors(
+        "action ping() -> String requires anyone:\n    return \"pong\"\n\nserver api:\n    route GET \"/actions/other\" -> json String:\n        return \"mine\"\n",
+    );
+    assert!(found.is_empty(), "only an action's own path is taken: {found:#?}");
+}
+
+#[test]
+fn the_contract_says_when_one_record_is_the_whole_input() {
+    let contract = compile_to_application_contract_with_config(&format!("{IDENTITY}{BOARD}"), "app.cor", "test", None)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+    assert_eq!(contract.actions[0].input_type.as_deref(), Some("MoveCard"));
+    assert_eq!(contract.actions[1].input_type, None, "`ping` takes no record");
+}
+
+#[test]
 fn action_stays_an_ordinary_name_elsewhere() {
     let found = errors("agent run(action: String) -> String:\n    return action\n");
     assert!(found.is_empty(), "{found:#?}");

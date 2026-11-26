@@ -65,6 +65,7 @@ use corvid_vm::{
 };
 use libloading::{Library, Symbol};
 
+mod actions;
 mod browser_asset;
 mod live_assets;
 mod live;
@@ -164,8 +165,8 @@ pub(crate) fn cmd_serve(
             return Ok(1);
         }
     };
-    if ir.servers.is_empty() {
-        eprintln!("error: no `server` block found in {}", file.display());
+    if ir.servers.is_empty() && ir.actions.is_empty() {
+        eprintln!("error: no `server` block or `action` found in {}", file.display());
         return Ok(1);
     }
 
@@ -578,6 +579,11 @@ pub(crate) fn cmd_serve(
     for (path, mr) in by_path {
         app = app.route(&path, mr);
     }
+    // B10-2: one `POST /actions/<name>` per action. The checker refuses a
+    // route declared at an action's path, so the two never collide.
+    for (path, mr) in actions::endpoints(&state)? {
+        app = app.route(&path, mr);
+    }
 
     // Slice 52e: mount the login surface (`/auth/{provider}/login`,
     // `/callback`, `/logout`, `/session`) when an identity block is
@@ -635,6 +641,9 @@ pub(crate) fn cmd_serve(
                 };
                 println!("  {:<6} {}{tag}", route.method.as_str(), route.path);
             }
+        }
+        for action in &state_for_banner.ir.actions {
+            println!("  POST   {}{}", corvid_types::action_input::ACTIONS_PATH, action.name);
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");

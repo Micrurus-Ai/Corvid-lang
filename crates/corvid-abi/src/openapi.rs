@@ -14,7 +14,7 @@
 //! shapes.
 
 use crate::app_contract::{
-    ApplicationContract, ContractField, ContractType, ContractUpload,
+    ApplicationContract, ContractAction, ContractField, ContractType, ContractUpload,
 };
 use serde_json::{json, Map, Value};
 
@@ -142,6 +142,10 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
         }
     }
 
+    for action in &contract.actions {
+        paths.insert(action.path(), json!({ "post": action_operation(action, contract) }));
+    }
+
     // Auto-exposed auth routes (slice 51h): a standard OpenAPI client
     // sees the sign-in / callback / logout / session surface derived
     // from the `identity` block.
@@ -219,6 +223,57 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             }
         }
     })
+}
+
+/// `POST /actions/<name>`: the input as JSON or a form, the result as JSON.
+fn action_operation(action: &ContractAction, contract: &ApplicationContract) -> Value {
+    let input = match &action.input_type {
+        Some(whole) => schema_for_type_name(whole),
+        None => {
+            let properties: Map<String, Value> = action
+                .callable
+                .inputs
+                .iter()
+                .map(|p| (p.name.clone(), schema_for_type_name(&p.type_name)))
+                .collect();
+            let required: Vec<&str> = action.callable.inputs.iter().map(|p| p.name.as_str()).collect();
+            json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false })
+        }
+    };
+    let mut responses = Map::new();
+    responses.insert(
+        "200".into(),
+        json!({
+            "description": "The action's result",
+            "content": { "application/json": { "schema": schema_for_type_name(&action.callable.output_type) } }
+        }),
+    );
+    for (status, schema) in error_status_responses(&action.callable.output_type, contract) {
+        responses.entry(status).or_insert(schema);
+    }
+    let mut operation = Map::new();
+    operation.insert("operationId".into(), json!(action.callable.name));
+    operation.insert("tags".into(), json!(["actions"]));
+    operation.insert(
+        "requestBody".into(),
+        json!({
+            "required": true,
+            "content": {
+                "application/json": { "schema": input },
+                "application/x-www-form-urlencoded": { "schema": input },
+            }
+        }),
+    );
+    operation.insert("responses".into(), Value::Object(responses));
+    if let Some(policy) = &action.policy {
+        let mut scopes: Vec<String> = policy.roles.iter().map(|r| format!("role:{r}")).collect();
+        scopes.extend(policy.permissions.iter().map(|p| format!("permission:{p}")));
+        if scopes.is_empty() {
+            scopes.push("authenticated".into());
+        }
+        operation.insert("security".into(), json!([{ "corvidSession": scopes }]));
+    }
+    Value::Object(operation)
 }
 
 fn schema_for_type(ty: &ContractType) -> Value {

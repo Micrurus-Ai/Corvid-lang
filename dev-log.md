@@ -1549,6 +1549,45 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - `POST /actions/<name>` (B10-2a)
+
+`corvid serve` answers one endpoint per action. The order is fixed:
+the `requires` policy through the route enforcement path (session,
+CSRF for a cookie session, roles and permissions read fresh), then the
+input decoded through the action's types, then an `action` trace event
+naming the action, the surface and the actor, then the body. A test
+sends an anonymous request with an input that would fail to decode and
+gets `401`, not `400`, so the order is visible from outside.
+
+The input's shape is one rule, in `corvid_types::action_input`: one
+parameter of a declared type is the whole input (a form posts
+`MoveCard`'s fields), anything else is an object with one field per
+parameter. The contract publishes the decision as `input_type`,
+OpenAPI builds the request schema from it, and serve decodes by the
+same function, so a client is never told one shape and sent through
+another. Alternatives considered: always an object of parameters
+(rejected: a form for `move_card(move: MoveCard)` would post
+`move.card`, and the CLI in B10-4 would need `--move.card`), and
+requiring every action to take one record (rejected: `rename(card,
+title)` would need a record declared only to carry two values).
+
+Found and fixed:
+- **An action could hold a `Secret` in its signature.** B10-1 listed
+  every action in the contract, so a form or assistant would have been
+  told to send the secret as JSON. It is now a boundary error like a
+  route's input, with a hint to read the secret inside the action.
+- **A route could be declared at an action's path.** It is now a
+  compile error naming both.
+- **`corvid serve` refused a program with no `server` block,** which an
+  action-only program is. It now serves its actions.
+
+Narrowed, on the roadmap first in B10: an action body cannot read the
+caller yet; an `approve` inside an action is denied because actions
+take no `@approval` yet; a form can post only to an action taking one
+record (`415` otherwise); the TypeScript client has no action methods.
+
+---
+
 ## 2026-11-26 - The `action` declaration (B10-1)
 
 `action move_card(move: MoveCard) -> Card requires permission("board.edit"):`

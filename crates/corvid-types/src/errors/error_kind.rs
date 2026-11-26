@@ -281,6 +281,8 @@ pub enum TypeErrorKind {
     /// An `action` requiring a role or permission the identity block
     /// does not declare (B10).
     ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
+    /// A route declared at the path an action is served at.
+    ActionPathTaken { action: String, path: String },
     /// A route's `query` record with a field the server cannot read
     /// from a query string; `field` is empty when the query type is not
     /// a record at all.
@@ -879,6 +881,9 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, action } => format!(
                 "action `{action}` requires {kind} `{name}`, but no `{kind}` named `{name}` is declared in the identity block's `roles:` - the requirement could never be satisfied"
             ),
+            Self::ActionPathTaken { action, path } => {
+                format!("route `{path}` takes the path action `{action}` is served at")
+            }
             Self::RoutePathParamType { path, param, ty } => {
                 format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
             }
@@ -1642,6 +1647,9 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
                 "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
+            Self::ActionPathTaken { .. } => Some(
+                "every action is served at `POST /actions/<name>`; give the route another path, or call the action from it".into(),
+            ),
             Self::RoutePathParamType { .. } => Some(format!(
                 "a path parameter is one of {}",
                 crate::text_parameters::TEXT_TYPES

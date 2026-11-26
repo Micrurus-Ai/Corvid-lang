@@ -4,7 +4,8 @@
 
 use super::Checker;
 use crate::errors::{TypeError, TypeErrorKind};
-use corvid_ast::{ActionSpec, AgentDecl, RoutePolicy};
+use crate::action_input::ACTIONS_PATH;
+use corvid_ast::{ActionSpec, AgentDecl, Decl, File, RoutePolicy};
 
 impl<'a> Checker<'a> {
     /// An action's caller policy names authorities the identity block
@@ -27,6 +28,31 @@ impl<'a> Checker<'a> {
             name: name.to_string(),
             action: action.clone(),
         });
+    }
+
+    /// No route is declared where an action is served, `/actions/<name>`:
+    /// the two would answer one URL.
+    pub(super) fn check_action_paths(&mut self, file: &File) {
+        let actions: Vec<&str> = file
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::Agent(agent) if agent.action.is_some() => Some(agent.name.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        for decl in &file.decls {
+            let Decl::Server(server) = decl else { continue };
+            for route in &server.routes {
+                let taken = route.path.strip_prefix(ACTIONS_PATH).filter(|name| actions.contains(name));
+                if let Some(action) = taken {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ActionPathTaken { action: action.to_string(), path: route.path.clone() },
+                        route.span,
+                    ));
+                }
+            }
+        }
     }
 
     /// Every role and permission a `requires` clause names is declared in
