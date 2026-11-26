@@ -398,8 +398,14 @@ fn rename_local_in_expr(expr: &mut Expr, resolved: &Resolved, target: LocalId, f
             }
         }
         Expr::TryPropagate { inner, .. } => rename_local_in_expr(inner, resolved, target, fresh),
-        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } => {
             rename_local_in_expr(body, resolved, target, fresh)
+        }
+        Expr::TryRetry { body, fallback, .. } => {
+            rename_local_in_expr(body, resolved, target, fresh);
+            if let Some(fallback) = fallback {
+                rename_local_in_expr(fallback, resolved, target, fresh);
+            }
         }
         Expr::Replay {
             trace,
@@ -822,8 +828,12 @@ fn expr_mentions_local(expr: &Expr, resolved: &Resolved, local: LocalId) -> bool
                 .is_some_and(|s| expr_mentions_local(s, resolved, local))
         }
         Expr::TryPropagate { inner, .. } => expr_mentions_local(inner, resolved, local),
-        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } => expr_mentions_local(body, resolved, local),
+        Expr::TryRetry { body, fallback, .. } => {
             expr_mentions_local(body, resolved, local)
+                || fallback
+                    .as_ref()
+                    .is_some_and(|f| expr_mentions_local(f, resolved, local))
         }
         Expr::Replay {
             trace,
@@ -1071,8 +1081,15 @@ fn fold_constants_in_expr(expr: &mut Expr) -> bool {
             false
         }
         Expr::TryPropagate { inner, .. } => fold_constants_in_expr(inner),
-        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
-            fold_constants_in_expr(body)
+        Expr::TrustBoundary { inner: body, .. } => fold_constants_in_expr(body),
+        Expr::TryRetry { body, fallback, .. } => {
+            if fold_constants_in_expr(body) {
+                return true;
+            }
+            match fallback {
+                Some(fallback) => fold_constants_in_expr(fallback),
+                None => false,
+            }
         }
         Expr::Replay {
             trace,

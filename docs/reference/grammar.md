@@ -750,8 +750,15 @@ lambda_expr       ::= 'fn' '(' (lambda_param (',' lambda_param)*)? ')' '->' expr
 
 lambda_param      ::= IDENT (':' type_ref)?
 
-retry_expr        ::= 'try' expr 'on' 'error' 'retry' INT 'times'
-                      'backoff' ('linear' | 'exponential') INT    # base delay in ms; backoff is mandatory
+# `try` retries and catches outages only: a tool, model, database or
+# provider that failed or answered unusably, and an expired `timeout`.
+# A bug or a decision (a denied approval, a budget) is raised past it.
+# At least one clause is present. `else` gives the value when the last
+# attempt failed with an outage; it has the expression's type.
+retry_expr        ::= 'try' expr ('timeout' INT)?
+                      ('on' 'error' 'retry' INT 'times'
+                       'backoff' ('linear' | 'exponential') INT)?   # base delay in ms; backoff is mandatory
+                      ('else' expr)?
 ```
 
 ## Lexical tokens

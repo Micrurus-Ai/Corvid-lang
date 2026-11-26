@@ -1699,12 +1699,14 @@ impl<'a> Lowerer<'a> {
                 attempts,
                 backoff,
                 timeout_ms,
+                fallback,
                 ..
             } => IrExprKind::TryRetry {
                 body: Box::new(self.lower_expr(body)),
                 attempts: *attempts,
                 backoff: *backoff,
                 timeout_ms: *timeout_ms,
+                fallback: fallback.as_ref().map(|f| Box::new(self.lower_expr(f))),
             },
             Expr::Replay {
                 trace,

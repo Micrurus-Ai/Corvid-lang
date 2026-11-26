@@ -1,6 +1,6 @@
 # Recoverable failures: `try ... else`
 
-Status: building. Proposed to frontend development before 2026-11-25 with no objection, so it is built under the amended grammar law (AGENTS.md, 2026-11-26) and revised on both sides if an objection comes later.
+Status: TE-1 and TE-2 built (interpreter); TE-3 (native) next. Proposed to frontend development before 2026-11-25 with no objection, so it is built under the amended grammar law (AGENTS.md, 2026-11-26) and revised on both sides if an objection comes later.
 
 ## The problem
 

@@ -231,11 +231,22 @@ impl<'a> Checker<'a> {
     ) {
         let mut stmts = Vec::new();
         let mut calls = Vec::new();
+        let mut caught = Vec::new();
         corvid_ast::visit::walk_block(body, &mut |stmt| stmts.push(stmt), &mut |expr| {
             if let Expr::Call { callee, args, span } = expr {
                 calls.push((callee.as_ref(), args.as_slice(), *span));
             }
+            if let Expr::TryRetry { fallback: Some(_), span, .. } = expr {
+                caught.push(*span);
+            }
         });
+        for span in caught {
+            let via = through.map(|agent| format!(" (in agent `{agent}`, called inside the block)")).unwrap_or_default();
+            refusals.push((
+                span,
+                format!("an `atomic:` block cannot hold a `try ... else`{via}: a failure leaves the transaction unusable, so the block must roll back; put the `try ... else` around the call to the agent that holds the block"),
+            ));
+        }
         let at = |span: Span, what: &str| {
             let via = through.map(|agent| format!(" (in agent `{agent}`, called inside the block)")).unwrap_or_default();
             (span, format!("an `atomic:` block cannot hold {what}{via}, because the database cannot undo it"))

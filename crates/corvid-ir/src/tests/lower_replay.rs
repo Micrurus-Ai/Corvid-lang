@@ -87,13 +87,14 @@ use super::*;
             | IrExprKind::ResultErr { inner: target }
             | IrExprKind::OptionSome { inner: target }
             | IrExprKind::TryPropagate { inner: target }
-            | IrExprKind::TryRetry { body: target, .. }
             | IrExprKind::UnOp {
                 operand: target, ..
             }
             | IrExprKind::WrappingUnOp {
                 operand: target, ..
             } => find_replay_in_expr(target),
+            IrExprKind::TryRetry { body, fallback, .. } => find_replay_in_expr(body)
+                .or_else(|| fallback.as_deref().and_then(find_replay_in_expr)),
             IrExprKind::Index { target, index }
             | IrExprKind::BinOp {
                 left: target,
@@ -284,7 +285,12 @@ agent run(x: String) -> Order:
             | IrExprKind::ResultErr { inner }
             | IrExprKind::OptionSome { inner }
             | IrExprKind::TryPropagate { inner } => expr_mentions_local_id(inner, target),
-            IrExprKind::TryRetry { body, .. } => expr_mentions_local_id(body, target),
+            IrExprKind::TryRetry { body, fallback, .. } => {
+                expr_mentions_local_id(body, target)
+                    || fallback
+                        .as_deref()
+                        .is_some_and(|f| expr_mentions_local_id(f, target))
+            }
             IrExprKind::Replay {
                 trace,
                 arms,

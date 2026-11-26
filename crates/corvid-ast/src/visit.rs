@@ -113,7 +113,12 @@ pub fn walk_expr<'a>(expr: &'a Expr, on_expr: &mut dyn FnMut(&'a Expr)) {
             }
         }
         Expr::TryPropagate { inner, .. } | Expr::TrustBoundary { inner, .. } => walk_expr(inner, on_expr),
-        Expr::TryRetry { body, .. } => walk_expr(body, on_expr),
+        Expr::TryRetry { body, fallback, .. } => {
+            walk_expr(body, on_expr);
+            if let Some(fallback) = fallback {
+                walk_expr(fallback, on_expr);
+            }
+        }
         Expr::Replay { trace, arms, else_body, .. } => {
             walk_expr(trace, on_expr);
             for arm in arms {

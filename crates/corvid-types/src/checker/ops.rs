@@ -271,8 +271,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn check_try_retry(&mut self, body: &Expr, has_timeout: bool, span: Span) -> Type {
+    pub(super) fn check_try_retry(&mut self, body: &Expr, has_timeout: bool, fallback: Option<&Expr>, span: Span) -> Type {
         let body_ty = self.check_expr(body);
+        if let Some(fallback) = fallback {
+            return self.check_try_else(body, body_ty, fallback, span);
+        }
         match body_ty {
             Type::Result(_, _) | Type::Option(_) | Type::Stream(_) | Type::Unknown => body_ty,
             // A `timeout` clause legitimizes ANY body type (slice
@@ -291,6 +294,46 @@ impl<'a> Checker<'a> {
                 Type::Unknown
             }
         }
+    }
+
+    /// `try <body> ... else <fallback>`: the form has the body's type, of
+    /// any kind, since the fallback answers an outage, not a value; the
+    /// fallback must be assignable to it. A connector operation that
+    /// declares `on failure` already returns its outages as a value, so
+    /// wrapping its call in `else` is refused with what to match instead.
+    fn check_try_else(&mut self, body: &Expr, body_ty: Type, fallback: &Expr, span: Span) -> Type {
+        let fallback_ty = self.check_expr(fallback);
+        if let Some((operation, variant)) = self.operation_with_on_failure(body) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TryElseAroundOnFailure { operation, variant },
+                span,
+            ));
+            return body_ty;
+        }
+        if body_ty != Type::Unknown && fallback_ty != Type::Unknown && !fallback_ty.is_assignable_to(&body_ty) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::TryElseFallbackType {
+                    expected: body_ty.display_name(),
+                    got: fallback_ty.display_name(),
+                },
+                fallback.span(),
+            ));
+        }
+        body_ty
+    }
+
+    /// The connector operation `body` calls directly, with the variant
+    /// its `on failure` names, when it declares one.
+    fn operation_with_on_failure(&self, body: &Expr) -> Option<(String, String)> {
+        let Expr::Call { callee, .. } = body else { return None };
+        let Expr::Ident { name, .. } = callee.as_ref() else { return None };
+        self.file.decls.iter().find_map(|decl| match decl {
+            corvid_ast::Decl::Connector(connector) => connector.operations.iter().find_map(|op| {
+                let variant = op.on_failure.as_ref()?;
+                (op.name.name == name.name).then(|| (op.name.name.clone(), variant.name.clone()))
+            }),
+            _ => None,
+        })
     }
 
     fn ensure_try_return_context(&mut self, required: &Type, span: Span) {

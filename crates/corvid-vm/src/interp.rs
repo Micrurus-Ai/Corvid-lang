@@ -1381,6 +1381,7 @@ impl<'ir> Interpreter<'ir> {
                 attempts,
                 backoff: _,
                 timeout_ms,
+                fallback,
             } => {
                 let total = (*attempts).max(1);
                 let timeout_ms = *timeout_ms;
@@ -1459,7 +1460,14 @@ impl<'ir> Interpreter<'ir> {
                             .await?,
                     ))
                 } else if let Some(err) = last_runtime_error {
-                    Err(err)
+                    // Only an outage reaches here (anything else was
+                    // raised at once), so `else` answers it. A replay
+                    // serves the recorded outage, so it takes the same
+                    // fallback.
+                    match fallback {
+                        Some(fallback) => self.eval_expr(fallback).await,
+                        None => Err(err),
+                    }
                 } else {
                     Ok(ExprFlow::Value(Value::Nothing))
                 }

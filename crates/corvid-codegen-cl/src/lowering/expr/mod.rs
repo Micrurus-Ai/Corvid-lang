@@ -1693,7 +1693,15 @@ pub(super) fn lower_expr(
             attempts,
             backoff,
             timeout_ms,
+            fallback,
         } => {
+            if fallback.is_some() {
+                // The tier picker routes these to the interpreter first.
+                return Err(CodegenError::not_supported(
+                    "`try ... else` runs on the interpreter until native code can catch outages (recoverable failures TE-3)".to_string(),
+                    expr.span,
+                ));
+            }
             if timeout_ms.is_some() {
                 return Err(CodegenError::not_supported(
                     "`try ... timeout <ms>` is interpreter-only today — the native tier's                      synchronous call lowering has no cancellation point; run through                      `corvid run --target=interpreter` (the default for effectful programs)"

@@ -112,8 +112,8 @@ pub enum Expr {
     TrustBoundary { inner: Box<Expr>, span: Span },
 
     /// Resilience wrapper (slice 50k widened the grammar):
-    /// `try expr [timeout <ms>] [on error retry N times backoff linear 100]`
-    /// — at least one of the two clauses must be present. `timeout`
+    /// `try expr [timeout <ms>] [on error retry N times backoff linear 100] [else <fallback>]`
+    /// — at least one of the clauses must be present. `timeout`
     /// bounds EACH attempt; expiry counts as a retryable error.
     TryRetry {
         body: Box<Expr>,
@@ -123,6 +123,11 @@ pub enum Expr {
         /// Per-attempt wall-clock bound in milliseconds.
         #[serde(default)]
         timeout_ms: Option<u64>,
+        /// `else <fallback>`: the value when the last attempt failed with
+        /// an outage (a tool, model, database or provider failure, or the
+        /// timeout). A bug or a decision is never caught.
+        #[serde(default)]
+        fallback: Option<Box<Expr>>,
         span: Span,
     },
 

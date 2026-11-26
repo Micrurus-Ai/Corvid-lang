@@ -2446,7 +2446,12 @@ fn expr_reaches_approve(
         | IrExprKind::TrustBoundary { inner } => expr_reaches_approve(ir, inner, visited),
         IrExprKind::Ask { prompt, .. } => expr_reaches_approve(ir, prompt, visited),
         IrExprKind::Choose { options } => expr_reaches_approve(ir, options, visited),
-        IrExprKind::TryRetry { body, .. } => expr_reaches_approve(ir, body, visited),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            expr_reaches_approve(ir, body, visited)
+                || fallback
+                    .as_ref()
+                    .is_some_and(|f| expr_reaches_approve(ir, f, visited))
+        }
         // Literals, locals, decls, option-none, weak/stream combinators,
         // and replay fall through: no agent call reachable through them
         // in a route handler (conservative under-count, no false positive).

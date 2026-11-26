@@ -642,14 +642,26 @@ impl<'a> CostAnalyzer<'a> {
             corvid_ast::Expr::List { items, span } => self.analyze_items(items, agent_name, "list", *span),
             corvid_ast::Expr::TryPropagate { inner, .. } => self.analyze_expr(inner, agent_name),
             corvid_ast::Expr::TrustBoundary { inner, .. } => self.analyze_expr(inner, agent_name),
-            corvid_ast::Expr::TryRetry { body, span, .. } => {
+            corvid_ast::Expr::TryRetry { body, attempts, fallback, span, .. } => {
+                // The worst case: every attempt runs and fails, then the
+                // fallback runs. Each attempt can spend the body's cost,
+                // so `retry 3 times` is charged three times it.
                 let estimate = self.analyze_expr(body, agent_name);
-                let tree = wrap_if_needed("retry", estimate.tree, *span);
+                let mut warnings = estimate.warnings;
+                let mut bounded = estimate.bounded;
+                let mut children = vec![scale_tree(estimate.tree, (*attempts).max(1), *span)];
+                if let Some(fallback) = fallback {
+                    let fallback = self.analyze_expr(fallback, agent_name);
+                    warnings.extend(fallback.warnings);
+                    bounded &= fallback.bounded;
+                    children.push(fallback.tree);
+                }
+                let tree = sequence_tree("retry", CostNodeKind::Sequence, children, *span);
                 CostEstimate {
                     dimensions: tree.costs.clone(),
                     tree,
-                    warnings: estimate.warnings,
-                    bounded: estimate.bounded,
+                    warnings,
+                    bounded,
                 }
             }
             corvid_ast::Expr::Replay {

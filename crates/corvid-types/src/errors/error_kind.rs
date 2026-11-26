@@ -279,6 +279,12 @@ pub enum TypeErrorKind {
     /// from a query string; `field` is empty when the query type is not
     /// a record at all.
     RouteQueryFieldType { path: String, field: String, ty: String },
+    /// `try ... else <fallback>` where the fallback's type is not the
+    /// body's.
+    TryElseFallbackType { expected: String, got: String },
+    /// `try ... else` around a connector operation that declares
+    /// `on failure`: its outages already arrive as a value.
+    TryElseAroundOnFailure { operation: String, variant: String },
     InvalidForm { message: String },
     InvalidLiveBinding { message: String },
 
@@ -864,6 +870,12 @@ impl TypeErrorKind {
             Self::RoutePathParamType { path, param, ty } => {
                 format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
             }
+            Self::TryElseFallbackType { expected, got } => {
+                format!("the `else` fallback is `{got}`, but the `try` expression is `{expected}`")
+            }
+            Self::TryElseAroundOnFailure { operation, variant } => format!(
+                "`try ... else` around `{operation}`, which declares `on failure -> {variant}`: its outages already arrive as `Err({variant}(...))`, so there is nothing to catch"
+            ),
             Self::RouteQueryFieldType { path, field, ty } if field.is_empty() => {
                 format!("the query of `{path}` is `{ty}`; a query is a record whose fields are the query parameters")
             }
@@ -1606,6 +1618,12 @@ impl TypeErrorKind {
                 "add a complete `@approval(role: \"...\", risk: \"...\", data: \"...\", expires_ms: N, max_cost_usd: $N, irreversible: true|false)` before the route; the role must be declared and able to decide approvals".into(),
             ),
             Self::InvalidForm { .. } | Self::InvalidLiveBinding { .. } => None,
+            Self::TryElseFallbackType { .. } => Some(
+                "give the fallback the expression's type: the form evaluates to one or the other".into(),
+            ),
+            Self::TryElseAroundOnFailure { variant, .. } => Some(format!(
+                "drop the `try` and match the result: `Err({variant}(reason)) -> ...`"
+            )),
             Self::RoutePathParamType { .. } => Some(format!(
                 "a path parameter is one of {}",
                 crate::text_parameters::TEXT_TYPES

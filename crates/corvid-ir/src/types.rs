@@ -1119,6 +1119,9 @@ pub enum IrExprKind {
         backoff: Backoff,
         /// Per-attempt wall-clock bound (slice 50k).
         timeout_ms: Option<u64>,
+        /// `else <fallback>`, evaluated only when the last attempt failed
+        /// with an outage (`InterpError::is_outage`).
+        fallback: Option<Box<IrExpr>>,
     },
     /// `trusted(expr)` (slice 50i) — compile-time taint unwrap;
     /// runtime identity.
