@@ -8791,7 +8791,8 @@ fn integer_literals_become_floats_by_slot_and_int_values_never_widen() {
 /// which is exhaustive, so a new kind cannot compile without a code.
 #[test]
 fn no_two_error_kinds_share_a_code() {
-    let source = include_str!("errors/error_kind.rs");
+    // A checkout with Windows line endings holds `\r\n`; read lines alike.
+    let source = include_str!("errors/error_kind.rs").replace("\r\n", "\n");
     let start = source.find("pub fn code(&self)").expect("TypeErrorKind::code");
     let body = &source[start..source[start..].find("\n    }\n").map(|end| start + end).expect("end of code()")];
     let mut seen = std::collections::BTreeMap::new();

@@ -185,7 +185,9 @@ mod code_tests {
             }
         };
         for (area, source) in sources {
-            let mut rest = source;
+            // A checkout with Windows line endings holds `\r\n`.
+            let source = source.replace("\r\n", "\n");
+            let mut rest = source.as_str();
             while let Some(start) = rest.find("pub fn code(&self)") {
                 let body = &rest[start..];
                 let body = &body[..body.find("\n    }\n").expect("end of code()")];
