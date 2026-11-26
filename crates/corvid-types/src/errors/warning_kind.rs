@@ -42,6 +42,23 @@ pub enum TypeWarningKind {
 }
 
 impl TypeWarningKind {
+    /// This warning's code: `W` and the range of its area.
+    /// Declared, never inferred from the message; codes are unique across
+    /// every diagnostic kind ([diagnostic codes](../../../docs/proposals/diagnostic-codes.md)).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnboundedCostAnalysis { .. } => "W0251",
+            Self::StreamReturnWithoutYield { .. } => "W0901",
+            Self::ReplayUnreachableArm { .. } => "W0101",
+            Self::UnsafePythonImport { .. } => "W0201",
+            Self::ScheduleNotExecutable { .. } => "W0902",
+            Self::InferenceNeedsAnnotation { .. } => "W0202",
+            Self::IdentityInsecureSession { .. } => "W0701",
+        }
+    }
+}
+
+impl TypeWarningKind {
     pub fn message(&self) -> String {
         match self {
             Self::UnboundedCostAnalysis { agent, message } => {

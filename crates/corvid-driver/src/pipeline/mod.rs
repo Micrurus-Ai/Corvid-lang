@@ -193,14 +193,14 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 resolved.display()
             ),
             hint: Some("check the import path relative to the importing `.cor` file".into()),
-            code: None,
+            code: "E0330",
         }],
         ModuleLoadError::ReadError { path, message } => vec![Diagnostic {
             origin: None,
             span: top,
             message: format!("failed to read imported module `{}`: {message}", path.display()),
             hint: None,
-            code: None,
+            code: "E0331",
         }],
         ModuleLoadError::LexError { path, source, errors } => errors
             .into_iter()
@@ -233,7 +233,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             hint: Some(format!(
                 "expected sha256:{expected}, actual sha256:{actual}; review the imported source before updating the pin"
             )),
-            code: None,
+            code: "E0332",
         }],
         ModuleLoadError::RemoteImportMissingHash {
             importing_file,
@@ -249,7 +249,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
             hint: Some(format!(
                 "remote Corvid imports must use `hash:sha256:<digest>`; refusing to fetch `{url}` without a pin"
             )),
-            code: None,
+            code: "E0333",
         }],
         ModuleLoadError::RemoteFetchError {
             importing_file,
@@ -264,7 +264,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 importing_file.display()
             ),
             hint: Some(format!("remote `{url}` failed before verification: {message}")),
-            code: None,
+            code: "E0334",
         }],
         ModuleLoadError::PackageLockMissing {
             importing_file,
@@ -280,7 +280,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 "add a `Corvid.lock` entry with uri, url, and sha256 before importing packages"
                     .into(),
             ),
-            code: None,
+            code: "E0335",
         }],
         ModuleLoadError::PackageLockError {
             importing_file,
@@ -294,7 +294,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 importing_file.display()
             ),
             hint: Some(message),
-            code: None,
+            code: "E0336",
         }],
         ModuleLoadError::PackageNotLocked {
             importing_file,
@@ -313,7 +313,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "Corvid.lock".to_string())
             )),
-            code: None,
+            code: "E0337",
         }],
         ModuleLoadError::Cycle { cycle } => {
             let path = cycle
@@ -328,7 +328,7 @@ fn module_load_error_diagnostics(error: ModuleLoadError) -> Vec<Diagnostic> {
                 hint: Some(
                     "break the cycle by moving shared declarations into a third module".into(),
                 ),
-            code: None,
+            code: "E0338",
         }]
         }
     }

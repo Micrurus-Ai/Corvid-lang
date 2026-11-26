@@ -27,7 +27,8 @@ on, so a code that depends on wording cannot be relied on.
    and approval, `E02xx` types, `E03xx` names, `E04xx` JSON and records,
    `E05xx` scalars (`Decimal`, time, currency, bytes), `E06xx` tables, `E07xx`
    actions and routes, `E08xx` connectors, `E09xx` streams and agents,
-   `E52xx` identity and access, as AGENTS.md already uses.
+   `E10xx` builds and targets, `E52xx` identity and access, as AGENTS.md
+   already uses. A warning takes `W` and its area's range (`W0251`).
 4. **`Diagnostic` carries its code** from the source that made it. The
    renderer prints it and never infers one, and `detect_error_code` is
    removed.

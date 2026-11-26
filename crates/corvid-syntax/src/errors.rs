@@ -37,6 +37,23 @@ pub enum ParseErrorKind {
     ExpectedBlock,
 }
 
+impl ParseErrorKind {
+    /// This parser error's code: `E005x`.
+    /// Declared, never inferred from the message; codes are unique across
+    /// every diagnostic kind ([diagnostic codes](../../../docs/proposals/diagnostic-codes.md)).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnexpectedEof { .. } => "E0055",
+            Self::UnexpectedToken { .. } => "E0056",
+            Self::ChainedComparison { .. } => "E0051",
+            Self::UnclosedParen { .. } => "E0052",
+            Self::UnclosedBracket { .. } => "E0057",
+            Self::EmptyBlock { .. } => "E0054",
+            Self::ExpectedBlock { .. } => "E0053",
+        }
+    }
+}
+
 impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -83,6 +100,22 @@ pub enum LexErrorKind {
 
     /// A number literal couldn't be parsed.
     InvalidNumber(String),
+}
+
+impl LexErrorKind {
+    /// This lexer error's code: `E00xx`.
+    /// Declared, never inferred from the message; codes are unique across
+    /// every diagnostic kind ([diagnostic codes](../../../docs/proposals/diagnostic-codes.md)).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnexpectedChar { .. } => "E0003",
+            Self::UnterminatedString { .. } => "E0001",
+            Self::InvalidEscape { .. } => "E0004",
+            Self::TabIndentation { .. } => "E0002",
+            Self::InconsistentDedent { .. } => "E0005",
+            Self::InvalidNumber { .. } => "E0006",
+        }
+    }
 }
 
 impl fmt::Display for LexErrorKind {

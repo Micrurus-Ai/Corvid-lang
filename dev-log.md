@@ -2,6 +2,19 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Diagnostic codes DC-2: every diagnostic declares its code
+
+Lexer, parser, resolver and warning kinds now declare codes, keeping every
+code the phrase matcher gave them. `UnclosedBracket`, which shared `E0052`
+with `UnclosedParen` through the word "unclosed", now has its own. The
+diagnostics the driver builds itself also carry codes: module-load errors
+(`E0330`–`E0338`), table schema (`E0650`, `E0651`) and the native build refusal
+(`E1001`, a new builds-and-targets range in the proposal). With every source
+covered, `Diagnostic::code` is required rather than optional, so a new
+diagnostic cannot be built without one, and `detect_error_code` is deleted.
+One test reads every `code()` match and every code the driver writes, and
+refuses a malformed or shared code across all of them.
+
 ### Tests the printed-result slice missed
 
 The printed-result slice (`4193f4e5`) reached `main` with four test files

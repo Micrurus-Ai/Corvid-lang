@@ -81,6 +81,26 @@ pub enum ResolveErrorKind {
     },
 }
 
+impl ResolveErrorKind {
+    /// This name-resolution error's code: `E03xx`.
+    /// Declared, never inferred from the message; codes are unique across
+    /// every diagnostic kind ([diagnostic codes](../../../docs/proposals/diagnostic-codes.md)).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UndefinedName { .. } => "E0301",
+            Self::DuplicateDecl { .. } => "E0302",
+            Self::ExtendTargetNotAType { .. } => "E0320",
+            Self::DuplicateMethod { .. } => "E0321",
+            Self::MethodFieldCollision { .. } => "E0322",
+            Self::BuiltinMethodName { .. } => "E0323",
+            Self::UnknownReplayPrompt { .. } => "E0324",
+            Self::UnknownReplayTool { .. } => "E0325",
+            Self::UnknownReplayApproval { .. } => "E0326",
+            Self::ReplayPatternKindMismatch { .. } => "E0327",
+        }
+    }
+}
+
 impl fmt::Display for ResolveErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

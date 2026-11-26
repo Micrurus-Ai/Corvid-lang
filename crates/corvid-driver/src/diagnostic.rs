@@ -24,10 +24,10 @@ pub struct Diagnostic {
     pub span: Span,
     pub message: String,
     pub hint: Option<String>,
-    /// The code the error's kind declares (`E0208`), or `None` for a
-    /// source that does not declare codes yet; the renderer then falls
-    /// back to the message (diagnostic codes DC-2 removes that).
-    pub code: Option<&'static str>,
+    /// The code the diagnostic's kind declares (`E0208`). Every source
+    /// declares one, never inferred from the message, so rewording a
+    /// message never changes its code.
+    pub code: &'static str,
 }
 
 impl Diagnostic {
@@ -60,7 +60,7 @@ impl From<LexError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
-            code: None,
+            code: e.kind.code(),
         }
     }
 }
@@ -72,7 +72,7 @@ impl From<ParseError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
-            code: None,
+            code: e.kind.code(),
         }
     }
 }
@@ -84,7 +84,7 @@ impl From<ResolveError> for Diagnostic {
             span: e.span,
             message: e.kind.to_string(),
             hint: None,
-            code: None,
+            code: e.kind.code(),
         }
     }
 }
@@ -98,7 +98,7 @@ impl From<TypeError> for Diagnostic {
             span: e.span,
             message,
             hint,
-            code: Some(e.kind.code()),
+            code: e.kind.code(),
         }
     }
 }
@@ -110,7 +110,7 @@ impl From<TypeWarning> for Diagnostic {
             span: w.span,
             message: w.kind.message(),
             hint: w.kind.hint(),
-            code: None,
+            code: w.kind.code(),
         }
     }
 }
@@ -159,4 +159,52 @@ pub fn summarize_diagnostics(
     }
     out.push_str(&format!("\n{} error(s) found.\n", diags.len()));
     out
+}
+
+#[cfg(test)]
+mod code_tests {
+    /// Every diagnostic kind's code, from each `code()` match and each code
+    /// the driver writes on a diagnostic it builds itself. A code names
+    /// exactly one kind across all of them, so it can be searched for.
+    #[test]
+    fn every_diagnostic_code_is_well_formed_and_names_one_kind() {
+        let sources = [
+            ("lexer and parser", include_str!("../../corvid-syntax/src/errors.rs")),
+            ("resolver", include_str!("../../corvid-resolve/src/errors.rs")),
+            ("checker errors", include_str!("../../corvid-types/src/errors/error_kind.rs")),
+            ("checker warnings", include_str!("../../corvid-types/src/errors/warning_kind.rs")),
+        ];
+        let mut seen = std::collections::BTreeMap::<String, String>::new();
+        let mut record = |code: &str, owner: String| {
+            let well_formed = code.len() == 5
+                && (code.starts_with('E') || code.starts_with('W'))
+                && code[1..].chars().all(|c| c.is_ascii_digit());
+            assert!(well_formed, "{owner}: `{code}`");
+            if let Some(other) = seen.insert(code.to_string(), owner.clone()) {
+                panic!("{other} and {owner} share {code}");
+            }
+        };
+        for (area, source) in sources {
+            let mut rest = source;
+            while let Some(start) = rest.find("pub fn code(&self)") {
+                let body = &rest[start..];
+                let body = &body[..body.find("\n    }\n").expect("end of code()")];
+                for line in body.lines().filter(|line| line.contains("=> \"")) {
+                    let kind = line.split_whitespace().next().unwrap();
+                    record(line.split('"').nth(1).unwrap(), format!("{area} {kind}"));
+                }
+                rest = &rest[start + body.len()..];
+            }
+        }
+        for (file, source) in [
+            ("pipeline", include_str!("pipeline/mod.rs")),
+            ("table_schema", include_str!("table_schema.rs")),
+            ("build", include_str!("build/mod.rs")),
+        ] {
+            for (n, piece) in source.split("code: \"").skip(1).enumerate() {
+                record(&piece[..5], format!("{file} diagnostic {n}"));
+            }
+        }
+        assert!(seen.len() > 170, "read the codes: {}", seen.len());
+    }
 }
