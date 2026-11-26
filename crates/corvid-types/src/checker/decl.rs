@@ -1188,9 +1188,21 @@ fn expr_reaches_approval(
         }
         | Expr::Lambda { body: target, .. }
         | Expr::TryPropagate { inner: target, .. }
-        | Expr::TrustBoundary { inner: target, .. }
-        | Expr::TryRetry { body: target, .. } => {
+        | Expr::TrustBoundary { inner: target, .. } => {
             expr_reaches_approval(target, bindings, agents, methods, types, visited_agents)
+        }
+        Expr::TryRetry { body, fallback, .. } => {
+            expr_reaches_approval(body, bindings, agents, methods, types, visited_agents)
+                || fallback.as_ref().is_some_and(|fallback| {
+                    expr_reaches_approval(
+                        fallback,
+                        bindings,
+                        agents,
+                        methods,
+                        types,
+                        visited_agents,
+                    )
+                })
         }
         Expr::Index { target, index, .. } | Expr::BinOp {
             left: target,
@@ -1579,8 +1591,14 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
                 collect_ident_spans_by_name_in_expr(item, name, spans);
             }
         }
-        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } => {
             collect_ident_spans_by_name_in_expr(body, name, spans)
+        }
+        Expr::TryRetry { body, fallback, .. } => {
+            collect_ident_spans_by_name_in_expr(body, name, spans);
+            if let Some(fallback) = fallback {
+                collect_ident_spans_by_name_in_expr(fallback, name, spans);
+            }
         }
         Expr::Replay {
             trace,

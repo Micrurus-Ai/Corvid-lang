@@ -123,8 +123,13 @@ fn walk_expr(expr: &IrExpr, visit: &mut dyn FnMut(&IrExpr)) {
         | IrExprKind::OptionSome { inner }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
-        | IrExprKind::TryRetry { body: inner, .. }
         | IrExprKind::TrustBoundary { inner } => walk_expr(inner, visit),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            walk_expr(body, visit);
+            if let Some(fallback) = fallback {
+                walk_expr(fallback, visit);
+            }
+        }
         IrExprKind::Replay { trace, arms, else_body } => {
             walk_expr(trace, visit);
             for IrReplayArm { body, .. } in arms {

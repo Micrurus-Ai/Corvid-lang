@@ -1189,7 +1189,12 @@ impl Resolver {
                 }
             }
             Expr::TryPropagate { inner, .. } => self.resolve_expr(inner),
-            Expr::TryRetry { body, .. } => self.resolve_expr(body),
+            Expr::TryRetry { body, fallback, .. } => {
+                self.resolve_expr(body);
+                if let Some(fallback) = fallback {
+                    self.resolve_expr(fallback);
+                }
+            }
             Expr::TrustBoundary { inner, .. } => self.resolve_expr(inner),
             Expr::Replay {
                 trace,

@@ -263,9 +263,10 @@ impl<'a> Checker<'a> {
             Expr::TryRetry {
                 body,
                 timeout_ms,
+                fallback,
                 span,
                 ..
-            } => self.check_try_retry(body, timeout_ms.is_some(), *span),
+            } => self.check_try_retry(body, timeout_ms.is_some(), fallback.as_deref(), *span),
             Expr::Replay {
                 trace,
                 arms,

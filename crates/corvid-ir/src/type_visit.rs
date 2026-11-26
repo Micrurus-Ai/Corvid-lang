@@ -189,8 +189,13 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
         | IrExprKind::OptionSome { inner }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
-        | IrExprKind::TryRetry { body: inner, .. }
         | IrExprKind::TrustBoundary { inner } => visit_expr(inner, visit),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            visit_expr(body, visit);
+            if let Some(fallback) = fallback {
+                visit_expr(fallback, visit);
+            }
+        }
         IrExprKind::Replay { trace, arms, else_body } => {
             visit_expr(trace, visit);
             for IrReplayArm { body, .. } in arms {

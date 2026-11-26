@@ -631,8 +631,13 @@ fn collect_expr_imports(
         | IrExprKind::TryPropagate { inner: target } => {
             collect_expr_imports(target, tools, prompts, plan, agent_name)
         }
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
-            collect_expr_imports(body, tools, prompts, plan, agent_name)
+        IrExprKind::TrustBoundary { inner: body, .. } => collect_expr_imports(body, tools, prompts, plan, agent_name),
+        IrExprKind::TryRetry { body, fallback, .. } => {
+            collect_expr_imports(body, tools, prompts, plan, agent_name)?;
+            match fallback {
+                Some(fallback) => collect_expr_imports(fallback, tools, prompts, plan, agent_name),
+                None => Ok(()),
+            }
         }
         IrExprKind::List { items } => {
             for item in items {

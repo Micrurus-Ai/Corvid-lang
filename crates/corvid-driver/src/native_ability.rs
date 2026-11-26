@@ -56,6 +56,9 @@ pub enum NotNativeReason {
     /// the compositional native `Result<T, E>` subset are the
     /// supported native forms today.
     TaggedUnionRetryNotNative,
+    /// `try ... else` (recoverable failures TE-2) runs on the interpreter
+    /// until native code catches outages (TE-3).
+    TryElseNotNative,
     StreamLoweringNotImplemented,
     TestFixtureNotNative {
         name: String,
@@ -114,6 +117,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::ToolCall { name } => write!(
                 f,
                 "program calls tool `{name}` - pass `--with-tools-lib <path>` pointing at your compiled `#[tool]` staticlib, or let auto-dispatch fall back to the interpreter"
+            ),
+            Self::TryElseNotNative => write!(
+                f,
+                "program uses `try ... else`, which runs on the interpreter until native code can catch outages (recoverable failures TE-3, on the roadmap)"
             ),
             Self::TaggedUnionRetryNotNative => write!(
                 f,
@@ -641,6 +648,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             }
         }
         IrExprKind::TrustBoundary { inner } => scan_expr(inner, current_return_ty, context),
+        IrExprKind::TryRetry { fallback: Some(_), .. } => Err(NotNativeReason::TryElseNotNative),
         IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, current_return_ty, context)?;
             if &body.ty == &expr.ty

@@ -177,8 +177,12 @@ impl<'a> Checker<'a> {
                     self.walk_deterministic_expr(agent, item);
                 }
             }
-            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
-                self.walk_deterministic_expr(agent, body)
+            Expr::TrustBoundary { inner: body, .. } => self.walk_deterministic_expr(agent, body),
+            Expr::TryRetry { body, fallback, .. } => {
+                self.walk_deterministic_expr(agent, body);
+                if let Some(fallback) = fallback {
+                    self.walk_deterministic_expr(agent, fallback);
+                }
             }
             Expr::Replay {
                 trace,
@@ -468,8 +472,14 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
                 collect_replayability_violations_in_expr(item, out);
             }
         }
-        Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
+        Expr::TrustBoundary { inner: body, .. } => {
             collect_replayability_violations_in_expr(body, out);
+        }
+        Expr::TryRetry { body, fallback, .. } => {
+            collect_replayability_violations_in_expr(body, out);
+            if let Some(fallback) = fallback {
+                collect_replayability_violations_in_expr(fallback, out);
+            }
         }
         Expr::Replay {
             trace,

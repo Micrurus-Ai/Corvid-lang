@@ -708,6 +708,7 @@ agent calc(a: Int, b: Float, name: String) -> Bool:
 
 agent postfixes(w: Wallet) -> Result<Float, String>:
     v = try compute() on error retry 3 times backoff exponential 250
+    u = try compute() timeout 2000 on error retry 2 times backoff linear 10 else 0
     x = helper()?
     total = w.balance + x
     return Ok(total)

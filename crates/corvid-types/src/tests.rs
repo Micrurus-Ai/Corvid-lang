@@ -10,6 +10,7 @@ mod currency;
 mod json_forms;
 mod json_error_type;
 mod typed_path_parameters;
+mod try_else;
 mod text_methods;
 mod bytes;
 mod hmac;

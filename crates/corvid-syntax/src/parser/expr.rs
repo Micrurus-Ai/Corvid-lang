@@ -742,60 +742,63 @@ impl<'a> Parser<'a> {
             None
         };
 
-        // The retry clause is optional when a timeout is present:
-        // `try slow_call() timeout 2000` stands alone.
-        if !matches!(self.peek(), TokKind::KwOn) {
-            let Some(timeout_ms) = timeout_ms else {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken {
-                        got: "a bare `try` with neither clause".into(),
-                        expected: "`timeout <ms>`, `on error retry ...`, or both".into(),
-                    },
-                    span: self.peek_span(),
-                });
+        // `on error retry N times backoff ...`, optional when a timeout
+        // or an `else` is present.
+        let (attempts, backoff) = if matches!(self.peek(), TokKind::KwOn) {
+            self.bump();
+            self.expect(TokKind::KwError, "`error` after `on` in retry expression")?;
+            self.expect(TokKind::KwRetry, "`retry` in retry expression")?;
+            let attempts = self.parse_u64_literal("retry attempt count")?;
+            self.expect(TokKind::KwTimes, "`times` after retry count")?;
+            self.expect(TokKind::KwBackoff, "`backoff` after retry count")?;
+            let backoff = match self.peek() {
+                TokKind::KwLinear => {
+                    self.bump();
+                    Backoff::Linear(self.parse_u64_literal("linear backoff delay in ms")?)
+                }
+                TokKind::KwExponential => {
+                    self.bump();
+                    Backoff::Exponential(self.parse_u64_literal("exponential backoff base delay in ms")?)
+                }
+                other => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(other),
+                            expected: "`linear <ms>` or `exponential <ms>`".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
             };
-            return Ok(Expr::TryRetry {
-                body: Box::new(body),
-                attempts: 0,
-                backoff: Backoff::Linear(0),
-                timeout_ms: Some(timeout_ms),
-                span: start.merge(self.prev_span()),
-            });
-        }
-        self.expect(TokKind::KwOn, "`on` after `try` body")?;
-        self.expect(TokKind::KwError, "`error` after `on` in retry expression")?;
-        self.expect(TokKind::KwRetry, "`retry` in retry expression")?;
-        let attempts = self.parse_u64_literal("retry attempt count")?;
-        self.expect(TokKind::KwTimes, "`times` after retry count")?;
-        self.expect(TokKind::KwBackoff, "`backoff` after retry count")?;
-
-        let backoff = match self.peek() {
-            TokKind::KwLinear => {
-                self.bump();
-                Backoff::Linear(self.parse_u64_literal("linear backoff delay in ms")?)
-            }
-            TokKind::KwExponential => {
-                self.bump();
-                Backoff::Exponential(
-                    self.parse_u64_literal("exponential backoff base delay in ms")?,
-                )
-            }
-            other => {
-                return Err(ParseError {
-                    kind: ParseErrorKind::UnexpectedToken {
-                        got: describe_token(other),
-                        expected: "`linear <ms>` or `exponential <ms>`".into(),
-                    },
-                    span: self.peek_span(),
-                });
-            }
+            (attempts, backoff)
+        } else {
+            (0, Backoff::Linear(0))
         };
 
+        // `else <fallback>`: the value when the last attempt failed with
+        // an outage.
+        let fallback = if matches!(self.peek(), TokKind::KwElse) {
+            self.bump();
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        if timeout_ms.is_none() && attempts == 0 && fallback.is_none() {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "a bare `try` with no clause".into(),
+                    expected: "`timeout <ms>`, `on error retry ...` or `else <fallback>`".into(),
+                },
+                span: self.peek_span(),
+            });
+        }
         Ok(Expr::TryRetry {
             body: Box::new(body),
             attempts,
             backoff,
             timeout_ms,
+            fallback,
             span: start.merge(self.prev_span()),
         })
     }

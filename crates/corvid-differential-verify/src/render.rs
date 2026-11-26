@@ -683,13 +683,28 @@ fn render_expr(expr: &Expr) -> String {
             body,
             attempts,
             backoff,
+            timeout_ms,
+            fallback,
             ..
-        } => format!(
-            "try {} on error retry {} times backoff {}",
-            render_expr(body),
-            attempts,
-            render_backoff(*backoff)
-        ),
+        } => {
+            // Render every clause the parser reads, in its order:
+            // `try X [timeout <ms>] [on error retry ...] [else Y]`.
+            let mut text = format!("try {}", render_expr(body));
+            if let Some(ms) = timeout_ms {
+                text.push_str(&format!(" timeout {ms}"));
+            }
+            if *attempts > 0 {
+                text.push_str(&format!(
+                    " on error retry {} times backoff {}",
+                    attempts,
+                    render_backoff(*backoff)
+                ));
+            }
+            if let Some(fallback) = fallback {
+                text.push_str(&format!(" else {}", render_expr(fallback)));
+            }
+            text
+        }
         Expr::Replay {
             trace,
             arms,

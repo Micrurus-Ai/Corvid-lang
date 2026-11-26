@@ -178,8 +178,12 @@ impl<'a> Checker<'a> {
                     self.walk_grounded_pure_expr(agent, item);
                 }
             }
-            Expr::TrustBoundary { inner: body, .. } | Expr::TryRetry { body, .. } => {
-                self.walk_grounded_pure_expr(agent, body)
+            Expr::TrustBoundary { inner: body, .. } => self.walk_grounded_pure_expr(agent, body),
+            Expr::TryRetry { body, fallback, .. } => {
+                self.walk_grounded_pure_expr(agent, body);
+                if let Some(fallback) = fallback {
+                    self.walk_grounded_pure_expr(agent, fallback);
+                }
             }
             Expr::Replay {
                 trace,

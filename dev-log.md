@@ -1422,6 +1422,36 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - `try ... else` on the interpreter (TE-2)
+
+`else <fallback>` joins `timeout` and `on error retry` as the last clause
+of `try`, and any one clause is enough. On the interpreter the fallback
+runs when the last attempt failed with an outage, by TE-1's rule, so a
+bug or a decision still propagates. The checker gives the form the
+body's type, of any kind, and requires the fallback to fit it. It
+refuses `else` inside `atomic:`, through the refusals the block already
+collects, and around a connector operation that declares `on failure`,
+naming the variant to match instead.
+
+About 45 functions walk a `try`, and most used `{ body, .. }`, so they
+compiled and would have skipped the fallback without a word: a tool in
+an `else` would be missed by effects, an `approve` by approval
+reachability, and a name by resolution. Every walker now visits the
+fallback, the Wasm import collector included. Native code and Wasm
+refuse `try ... else` by name; native is TE-3.
+
+Found and fixed:
+- **Retry cost was charged once.** A `retry 3 times` call cost one
+  attempt in cost analysis, so `@budget` passed calls that could spend
+  three times its estimate. It now counts every attempt, then the
+  fallback.
+- **The source renderer printed `retry 0 times` and dropped `timeout`**
+  for a timeout-only `try`. It now renders the clauses as the parser
+  reads them.
+- **The grammar reference listed only the retry form,** with no
+  `timeout`. It now gives the whole rule, and the drift test
+  exercises every clause.
+
 ---
 
 ## 2026-11-26 - One rule for what an outage is (TE-1)
