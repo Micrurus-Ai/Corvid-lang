@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Live L1: one evaluation per distinct live query
+
+Every open subscription used to re-run its whole query on each relevant
+commit, so fifty people watching one board ran fifty identical queries per
+write. `serve_cmd/live/shared.rs` now keeps one evaluation per distinct
+query and broadcasts its frames. Two subscriptions share when they name the
+same handler and path, and, only when the handler's body reads its `actor`
+local (found from the IR with `for_each_expr`), the same caller. A path or
+caller is keyed by each field's public JSON form, because the
+compiler-built records have no JSON form of their own and a field map has
+no order.
+
+A joiner takes the receiver and the current rows under one lock, so no
+frame falls between its snapshot and its first change. A subscriber more
+than 64 frames behind starts again from the current snapshot, as a lagged
+commit receiver already did. The last subscriber to leave removes the
+entry and stops the evaluation. A failed evaluation is sent to every
+subscriber and removed, so the next subscriber starts a fresh one.
+Authority is still checked per subscriber before it joins.
+
+Tests: fifty subscribers to one board take two evaluations for a snapshot
+and one commit, receive the same frames, and leave nothing running; a query
+that reads its caller is shared by two subscriptions of one caller and not
+with another.
+
+Simpler alternatives considered: keying on `Debug` text of the values
+(depends on a hash map's order), and sharing by path only (wrong for a query
+that filters by caller). No grammar change.
+
 ### Records cross the C ABI in the public JSON form
 
 The last place a record crossed in a second shape. A `pub extern "c"`

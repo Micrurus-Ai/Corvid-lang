@@ -40,6 +40,7 @@ impl AuthorizedSource for RouteSource {
             None => crate::serve_cmd::stub_actor_value(),
         };
         super::feed::subscribe(
+            &self.state.live_queries,
             self.state.ir.clone(),
             self.state.runtime.clone(),
             self.state.declared_types.clone(),

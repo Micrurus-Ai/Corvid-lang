@@ -111,6 +111,8 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     live_routes: live::Routes,
+    /// One evaluation per distinct live query, shared by its subscribers.
+    live_queries: Arc<live::SharedQueries>,
     live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
@@ -405,6 +407,7 @@ pub(crate) fn cmd_serve(
     }
     let state = Arc::new(ServeState {
         live_routes: live::Routes::new(&ir)?,
+        live_queries: Arc::default(),
         live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,

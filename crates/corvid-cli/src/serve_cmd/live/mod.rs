@@ -4,6 +4,8 @@ mod connection;
 mod feed;
 pub(super) use feed::share_commits;
 mod routes;
+mod shared;
+pub(super) use shared::SharedQueries;
 pub(super) use routes::Routes;
 pub(super) mod protocol;
 pub(super) mod source;
@@ -38,7 +40,7 @@ pub(super) trait AuthorizedSource: Send {
 
 pub(super) type Subscription = BoxStream<'static, Result<Delivery, Failure>>;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum Failure {
     Forbidden,
     InvalidSession,
