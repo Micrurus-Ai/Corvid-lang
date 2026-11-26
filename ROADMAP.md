@@ -2,9 +2,8 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-<<<<<<< HEAD
 - [ ] F18 independent application acceptance. Track the checkout and sketchbook trials, collaborative subscription dependency and independent developer report in the [F18 acceptance record](docs/proposals/frontend-application-acceptance.md).
-=======
+
 - [x] RT-4 / F08 live subscriptions. The generated TypeScript observer and
   Corvid child loop received a missed commit on reconnect and the next live
   edit over RT-3. Edge retained the unaffected row, input focus and selection.
@@ -14,7 +13,6 @@ Frontend implementation follows the [ordered browser frontend queue](docs/fronte
   The SDK rejects JSON number keys outside JavaScript's safe integer range.
   Agree a lossless key representation before accepting those subscriptions.
 - [ ] RT-3 live subscription transport. The socket and frame lifecycle are implemented. Serve resolves compiled RT-1 declarations and binds their path arguments. Serve reads the ordered query again on relevant RT-2 commits. Serve uses written row revisions from RT-2 for removals. Local session notifications wake idle sockets and the durable authority revision guards delivery across processes. Verify reconnect, idle revocation and multi-process delivery with the RT-3 browser check. [Integration boundary](docs/proposals/real-time.md#rt-3-integration-boundary)
->>>>>>> origin/main
 
 - [ ] F16 developer tooling. The [web starter and editor lookup](docs/proposals/frontend-web-starter.md) share existing project and package formats. Track browser acceptance in the frontend queue.
 

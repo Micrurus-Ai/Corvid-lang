@@ -1,10 +1,9 @@
 # Corvid — learnings
 
-<<<<<<< HEAD
 Entering zero for both products in the storefront returns an empty-cart page
 with a link back to the quantity fields. The packaged checkout accepts up to
 99 of each product. [F18 checkout and editor trials](docs/proposals/frontend-application-acceptance.md)
-=======
+
 A prompt that takes or returns a record, a list, an `Option`, a `Result`, a sum type, a `Decimal` or a time value now runs in native code; such a program used to run on the interpreter. Both tiers show the model the same text and schema, and record the same call. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)
 
 Write a duration as a number and a unit: `timeout = 30 seconds`, `deadline = now + 2 hours`, `attempts * 30 seconds`, `1.5 minutes`. The units run from `nanoseconds` to `hours`, singular or plural, and the number is read exactly. `30 days` is a compile error that explains why (a day in a time zone is 23, 24 or 25 hours) and suggests `24 hours` or `zoned.add_days(30)`. [Time](docs/reference/stdlib/time.md)
@@ -80,7 +79,6 @@ A program that reads the clock (`time_now`, `time_now_utc`, `time_monotonic_ms`)
 A program that calls a connector now runs as native code in `real` and `replay` modes: `corvid run` picks native code for it, and `corvid build` builds it. The binary records, replays and applies `[http] allow` exactly as the interpreter does, and writes the same trace. Run it on its own with `CORVID_CONNECTOR_MODE=real` (or `replay`) and `CORVID_HTTP_ALLOW=api.example.com`; without a mode it refuses to start. A connector with `circuit_breaker`, a streamed, file or provider-protocol operation, and `--mode mock` still run on the interpreter (`Response` operations joined native code in N4), and `corvid run` says why. A trace recorded natively replays natively, and an interpreter trace on the interpreter. [Native dispatch](docs/proposals/native-dispatch.md)
 
 Send a file to a provider with `POST "/files" body file`, where `file` is an `Upload` (sent with its own content type) or `Bytes` (sent as `application/octet-stream`), or send a form with files with `multipart receipt`, where `receipt` is a record: text fields become text parts, a `List` repeats its part, a `None` field is left out, and `Upload` or `Bytes` fields become file parts. The trace keeps a file's name, type, size and SHA-256, never its content, so an uploaded document stays out of every recording, and replay matches the same file by digest. [Connector grammar](docs/reference/grammar.md#connector-declarations)
->>>>>>> origin/main
 
 Stream a provider's answer by declaring `-> Stream<Delta>` and how its events arrive: `streams: server_sent_events` or `streams: json_lines`; add `until "[DONE]"` for providers that end a server-sent stream with that sentinel. Then `for delta in complete(prompt):` gets one typed `Delta` at a time as it arrives. The connector's `timeout` bounds the wait for each event, a stream that breaks ends with an error, and leaving the loop early closes the connection to the provider; a route that returns the stream relays it to the browser and closes the provider's connection when the browser leaves. Replay plays the recorded events back without a connection. In mock mode, the `mock:` is the list of events. [Connector grammar](docs/reference/grammar.md#connector-declarations)
 

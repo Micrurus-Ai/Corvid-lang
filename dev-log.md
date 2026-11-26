@@ -2,7 +2,6 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
-<<<<<<< HEAD
 ### F18 checkout and sketchbook boundaries
 
 The storefront now returns an empty-cart page when both quantities are zero.
@@ -15,7 +14,7 @@ Hosted Edge passed the responsive storefront and offline sketchbook checks at
 of the full canvas. F18 still needs F08 to merge, a workspace subscription to
 resume after disconnect, and the independent component report.
 [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45624130574)
-=======
+
 ### RT-4 live subscriptions verified over RT-3
 
 Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.
@@ -98,7 +97,6 @@ committed-stream verification await the backend inputs recorded in the
 [client implementation boundary](docs/proposals/real-time.md#rt-4-client-implementation-boundary).
 
 The frontend and backend now share a proposed implementation target for live declarations, ordered snapshots, committed changes and reconnect. Transport and grammar can start in parallel. [Protocol and ownership](docs/proposals/real-time.md#frontend-agreement-and-wire-protocol)
->>>>>>> origin/main
 
 ### F16 web starter and installed component tooling
 
