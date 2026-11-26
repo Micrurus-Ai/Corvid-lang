@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+An assistant can now call your actions. `corvid serve` answers `POST /mcp`, the Model Context Protocol, for every action with an `assistants: confirm "..."` line. The assistant works inside its person's signed-in session and sees only the offered actions that person may call. Its call does not run the action: it waits until the same person confirms it at `/__confirmations/<id>/confirm`, and then runs with that person as the `Caller`. An action offered to assistants needs an `identity` block. [CLI: assistants](docs/reference/cli.md#assistants)
+
 A native prompt now asks the model exactly what the interpreter asks: the prompt text and the reply's JSON schema, with no extra instructions, and it retries a reply that does not fit only as `with repair N` says, never on its own. A prompt without `with repair` stops with "unusable reply" after one unusable answer on both tiers, and a recording of a repaired call replays on either.
 
 Offer an action to assistants with one line, first in its body: `assistants: confirm "Move a card to another column."`. Without the line no assistant is offered the action. The description is required, `allow` waits for on-behalf-of authority (B11), and there is no `never`: leave the line out. The contract and OpenAPI carry it. Until assistants can call actions (B10-3b), `corvid serve` refuses to start a program with the line and names what is missing. [Shared actions](docs/proposals/shared-actions.md)

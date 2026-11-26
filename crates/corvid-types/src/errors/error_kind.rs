@@ -283,6 +283,9 @@ pub enum TypeErrorKind {
     ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
     /// A route declared at the path an action is served at.
     ActionPathTaken { action: String, path: String },
+    /// An action offered to assistants in a program with no identity
+    /// block: no person could sign in to confirm its calls.
+    AssistantsWithoutIdentity { action: String },
     /// An action reads its caller (a `Caller` parameter) but requires no
     /// sign-in, so no caller is ever verified.
     ActionCallerWithoutSignIn { action: String, param: String },
@@ -887,6 +890,9 @@ impl TypeErrorKind {
             Self::ActionPathTaken { action, path } => {
                 format!("route `{path}` takes the path action `{action}` is served at")
             }
+            Self::AssistantsWithoutIdentity { action } => format!(
+                "action `{action}` is offered to assistants, but no one can sign in to confirm an assistant's call"
+            ),
             Self::ActionCallerWithoutSignIn { action, param } => format!(
                 "action `{action}` reads its caller as `{param}`, but `requires anyone` verifies no caller"
             ),
@@ -1661,6 +1667,9 @@ impl TypeErrorKind {
             ),
             Self::ActorFromInput { .. } => Some(
                 "a `Caller` comes only from the verified session: give an action a `Caller` parameter of its own, or read `actor` in a route that requires a sign-in".into(),
+            ),
+            Self::AssistantsWithoutIdentity { .. } => Some(
+                "an assistant acts for a signed-in person, who confirms each call; add an `identity <name>:` block, or remove the `assistants:` line".into(),
             ),
             Self::ActionPathTaken { .. } => Some(
                 "every action is served at `POST /actions/<name>`; give the route another path, or call the action from it".into(),

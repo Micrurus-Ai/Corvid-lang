@@ -225,9 +225,13 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
     })
 }
 
-/// `POST /actions/<name>`: the input as JSON or a form, the result as JSON.
-fn action_operation(action: &ContractAction, contract: &ApplicationContract) -> Value {
-    let input = match &action.input_type {
+/// The JSON Schema of an action's input, by the `input_type` rule: the
+/// record's schema, or an object with one property per parameter. Its
+/// `$ref`s point into the OpenAPI document's `components/schemas`. The
+/// OpenAPI request body and the assistant endpoint's tool list both use
+/// it.
+pub fn action_input_schema(action: &ContractAction) -> Value {
+    match &action.input_type {
         Some(whole) => schema_for_type_name(whole),
         None => {
             let properties: Map<String, Value> = action
@@ -239,7 +243,12 @@ fn action_operation(action: &ContractAction, contract: &ApplicationContract) -> 
             let required: Vec<&str> = action.callable.inputs.iter().map(|p| p.name.as_str()).collect();
             json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false })
         }
-    };
+    }
+}
+
+/// `POST /actions/<name>`: the input as JSON or a form, the result as JSON.
+fn action_operation(action: &ContractAction, contract: &ApplicationContract) -> Value {
+    let input = action_input_schema(action);
     let mut responses = Map::new();
     responses.insert(
         "200".into(),

@@ -1653,6 +1653,36 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - Assistants call actions, and their person confirms (B10-3b)
+
+`corvid serve` answers `POST /mcp` (MCP over HTTP: `initialize`,
+`ping`, `tools/list`, `tools/call`) for actions with an `assistants:`
+line, as the proposal's B10-3b design decided. The endpoint
+authenticates as an action call does, so an assistant acts only inside
+its person's session. `tools/list` filters by the person's fresh roles
+without recording a decision; `tools/call` answers an unknown tool for
+anything not offered or not allowed, validates the input through the
+same `decode_json_input` the HTTP endpoint uses, and records a pending
+confirmation bound to the actor and tenant. `POST
+/__confirmations/<id>/confirm` from that person re-checks the action's
+`requires` and runs it through the same `execute` path, traced with
+`surface: "assistant"`; anyone else gets `403` and the confirmation
+stays. A serve test walks the whole flow.
+
+To share one path, `actions.rs` was split into the endpoint table
+(`catalog`), the decoders and `execute`, and `decode_json_input` now
+returns the refusal body so the assistant endpoint can return it as a
+tool error. OpenAPI's input schema is one public `action_input_schema`
+both use. Contract closure's `assistant_tools` is now `true`; an
+offered action needs an identity block (a compile error otherwise),
+since no one could sign in to confirm.
+
+Filed: pending confirmations are in memory and a restart drops them.
+Frontend roadmap: WebMCP registration and the confirmation prompt in
+the page, reading `tools/list`.
+
+---
+
 ## 2026-11-26 - The `assistants:` line (B10-3a)
 
 `assistants: confirm "Move a card to another column."` as an action's

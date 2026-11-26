@@ -232,6 +232,75 @@ server board:
         return retire(path.card, actor)
 "#;
 
+const ASSISTED: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        editor: "board.edit"
+        admin: "board.admin"
+
+action tag_card(card: Int, label: String, by: Caller) -> String requires permission("board.edit"):
+    assistants: confirm "Add a label to a card."
+    return by.id + " tagged " + card.to_string() + " " + label
+
+action wipe_board(board: Int) -> Int requires permission("board.edit"):
+    return board
+
+action audit(board: Int) -> Int requires permission("board.admin"):
+    assistants: confirm "Audit a board."
+    return board
+"#;
+
+fn mcp(app: &ServedApp, body: Value, headers: &[(String, String)]) -> (u16, Value) {
+    post_json(app, "/mcp", &body, headers)
+}
+
+#[test]
+fn an_assistant_sees_and_calls_only_what_its_person_may_and_the_person_confirms() {
+    let mut editor = Vec::new();
+    let mut viewer = Vec::new();
+    let app = serve(ASSISTED, |data| {
+        editor = seed_actor(data, "editor-1", Some("editor"));
+        viewer = seed_actor(data, "viewer-1", None);
+    });
+    let call = |name: &str, arguments: Value| json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+
+    let (status, _) = mcp(&app, json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}), &[]);
+    assert_eq!(status, 401, "an assistant acts only inside a signed-in session");
+
+    let (_, listed) = mcp(&app, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &editor);
+    let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["tag_card"], "only offered actions this person may call: {listed}");
+    let schema = &listed["result"]["tools"][0]["inputSchema"];
+    assert_eq!(schema["required"], json!(["card", "label"]), "the caller is never input: {schema}");
+
+    for hidden in ["wipe_board", "audit"] {
+        let (_, reply) = mcp(&app, call(hidden, json!({"board": 1})), &editor);
+        assert_eq!(reply["error"]["code"], -32602, "`{hidden}` is unknown, never refused: {reply}");
+    }
+    let (_, refused) = mcp(&app, call("tag_card", json!({"card": "x", "label": "urgent"})), &editor);
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+
+    let (_, proposed) = mcp(&app, call("tag_card", json!({"card": 3, "label": "urgent"})), &editor);
+    let pending = &proposed["result"]["structuredContent"];
+    assert_eq!(pending["status"], "confirmation_required", "the action does not run yet: {proposed}");
+    let confirm = pending["confirm"].as_str().unwrap().to_string();
+
+    let (status, _) = post_json(&app, &confirm, &json!({}), &viewer);
+    assert_eq!(status, 403, "only the person the assistant acts for confirms");
+    let (status, result) = post_json(&app, &confirm, &json!({}), &editor);
+    assert_eq!((status, &result), (200, &json!("editor-1 tagged 3 urgent")), "confirming runs it as that person");
+    let (status, _) = post_json(&app, &confirm, &json!({}), &editor);
+    assert_eq!(status, 404, "a confirmation runs once");
+
+    let (_, proposed) = mcp(&app, call("tag_card", json!({"card": 4, "label": "later"})), &editor);
+    let decline = proposed["result"]["structuredContent"]["decline"].as_str().unwrap().to_string();
+    let (status, declined) = post_json(&app, &decline, &json!({}), &editor);
+    assert_eq!((status, declined["status"].as_str()), (200, Some("declined")));
+}
+
 const APPROVED: &str = r#"identity users:
     provider google
     provisioning:

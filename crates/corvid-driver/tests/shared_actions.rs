@@ -225,18 +225,24 @@ fn an_action_takes_annotations_as_an_agent_does() {
 
 #[test]
 fn an_action_offered_to_assistants_says_how_and_why() {
-    let source = "action ping() -> String requires anyone:\n    assistants: confirm \"Check that the board answers.\"\n    return \"pong\"\n";
-    let contract = compile_to_application_contract_with_config(source, "app.cor", "test", None)
+    let source = format!("{IDENTITY}action ping() -> String requires anyone:\n    assistants: confirm \"Check that the board answers.\"\n    return \"pong\"\n");
+    let contract = compile_to_application_contract_with_config(&source, "app.cor", "test", None)
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
     let line = contract.actions[0].assistants.as_ref().expect("the contract carries the assistants line");
     assert_eq!((line.mode.as_str(), line.description.as_str()), ("confirm", "Check that the board answers."));
 
-    let ir = compile_to_ir(source).unwrap_or_else(|e| panic!("{e:#?}"));
-    let gaps = corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    let ir = compile_to_ir(&source).unwrap_or_else(|e| panic!("{e:#?}"));
+    let interpreter = corvid_driver::RuntimeCapabilities::interpreter_tier();
+    assert!(corvid_driver::check_contract_closure(&ir, interpreter).is_empty(), "serve answers assistant calls");
+    let without = corvid_driver::RuntimeCapabilities { assistant_tools: false, ..interpreter };
+    let gaps = corvid_driver::check_contract_closure(&ir, without);
     assert!(
-        gaps.iter().any(|gap| gap.message().contains("action ping") && gap.message().contains("B10-3b")),
-        "serve refuses to start until an assistant can actually call it: {gaps:?}"
+        gaps.iter().any(|gap| gap.message().contains("action ping")),
+        "a runtime without the assistant endpoint refuses to start: {gaps:?}"
     );
+
+    let found = errors("action ping() -> String requires anyone:\n    assistants: confirm \"Ping.\"\n    return \"pong\"\n");
+    assert!(found.iter().any(|m| m.contains("no one can sign in to confirm")), "{found:#?}");
 
     let unoffered = compile_to_application_contract_with_config(&format!("{IDENTITY}{BOARD}"), "app.cor", "test", None).unwrap();
     assert!(unoffered.actions.iter().all(|a| a.assistants.is_none()), "no line, no assistant");

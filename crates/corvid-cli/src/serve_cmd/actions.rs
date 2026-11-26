@@ -31,18 +31,21 @@ use corvid_vm::{decode_public_json, UnknownFields};
 
 use super::{
     approval_runtime, bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish,
-    invalid_body, reply_encoding, urlencoded_record, urlencoded_value, urlencoded_values, ServeState,
+    reply_encoding, urlencoded_record, urlencoded_value, urlencoded_values, EnforcedRouteActor,
+    ServeState,
 };
 
-/// What one action's endpoint needs at request time.
-struct ActionEndpoint {
-    name: String,
+/// What one action needs at request time, whichever surface calls it.
+pub(super) struct ActionEndpoint {
+    pub(super) name: String,
     agent: String,
-    path: String,
-    policy: IrRoutePolicy,
+    pub(super) path: String,
+    pub(super) policy: IrRoutePolicy,
     /// Who decides an `approve` the body reaches; the checker requires it
     /// whenever one can be reached.
     approval: Option<corvid_ast::ApprovalSpec>,
+    /// The `assistants:` line, when an assistant is offered the action.
+    pub(super) assistants: Option<corvid_ast::AssistantExposure>,
     /// The input parameters, callers left out.
     params: Vec<(String, Type)>,
     whole_input: Option<Type>,
@@ -50,12 +53,12 @@ struct ActionEndpoint {
     callers: Vec<bool>,
 }
 
-/// One `(path, handler)` per declared action.
-pub(super) fn endpoints(state: &ServeState) -> anyhow::Result<Vec<(String, MethodRouter<Arc<ServeState>>)>> {
-    let mut endpoints = Vec::new();
-    for action in &state.ir.actions {
-        let agent = state
-            .ir
+/// Every declared action, as the endpoints and the assistant endpoint
+/// call it.
+pub(super) fn catalog(ir: &corvid_ir::IrFile) -> anyhow::Result<Vec<Arc<ActionEndpoint>>> {
+    let mut catalog = Vec::new();
+    for action in &ir.actions {
+        let agent = ir
             .agents
             .iter()
             .find(|agent| agent.id == action.agent)
@@ -70,27 +73,40 @@ pub(super) fn endpoints(state: &ServeState) -> anyhow::Result<Vec<(String, Metho
             .filter(|p| !is_caller(&p.ty))
             .map(|p| (p.name.clone(), p.ty.clone()))
             .collect();
-        let endpoint = Arc::new(ActionEndpoint {
+        catalog.push(Arc::new(ActionEndpoint {
             name: action.name.clone(),
             agent: agent.name.clone(),
             path: format!("{ACTIONS_PATH}{}", action.name),
             policy: action.policy.clone(),
             approval: action.approval.clone(),
+            assistants: action.assistants.clone(),
             whole_input: whole_input_type(params.iter().map(|(_, ty)| ty)).cloned(),
             params,
             callers,
-        });
-        let path = endpoint.path.clone();
-        let handler = on(
-            MethodFilter::POST,
-            move |State(state): State<Arc<ServeState>>, headers: axum::http::HeaderMap, body: Bytes| {
-                let endpoint = endpoint.clone();
-                async move { run_action(state, endpoint, headers, body).await }
-            },
-        );
-        endpoints.push((path, handler));
+        }));
     }
-    Ok(endpoints)
+    Ok(catalog)
+}
+
+/// One `(path, handler)` per declared action.
+pub(super) fn endpoints(
+    catalog: &[Arc<ActionEndpoint>],
+) -> Vec<(String, MethodRouter<Arc<ServeState>>)> {
+    catalog
+        .iter()
+        .map(|endpoint| {
+            let endpoint = endpoint.clone();
+            let path = endpoint.path.clone();
+            let handler = on(
+                MethodFilter::POST,
+                move |State(state): State<Arc<ServeState>>, headers: axum::http::HeaderMap, body: Bytes| {
+                    let endpoint = endpoint.clone();
+                    async move { run_action(state, endpoint, headers, body).await }
+                },
+            );
+            (path, handler)
+        })
+        .collect()
 }
 
 async fn run_action(
@@ -107,39 +123,48 @@ async fn run_action(
     } else {
         None
     };
-    let actor = enforced.as_ref().map(|e| &e.actor);
-
     let types_by_id: HashMap<DefId, &IrType> = state.ir.types.iter().map(|t| (t.id, t)).collect();
     let inputs = match decode_input(&endpoint, &headers, &body, &types_by_id) {
         Ok(inputs) => inputs,
         Err(refused) => return refused,
     };
-    // Each caller parameter takes the verified actor; startup refused an
-    // action that reads its caller without requiring a sign-in.
+    execute(&state, &endpoint, enforced.as_ref(), inputs, serde_json::json!({ "surface": "http" })).await
+}
+
+/// Run an action with its decoded inputs, the same way for every surface:
+/// each caller parameter takes the verified actor, the `action` trace
+/// event records the surface, and the reply follows the route answers.
+/// Startup refused an action that reads its caller without a sign-in.
+pub(super) async fn execute(
+    state: &Arc<ServeState>,
+    endpoint: &ActionEndpoint,
+    enforced: Option<&EnforcedRouteActor>,
+    inputs: Vec<Value>,
+    trace: serde_json::Value,
+) -> Response {
     let mut inputs = inputs.into_iter();
     let args: Vec<Value> = endpoint
         .callers
         .iter()
-        .map(|caller| match (caller, &enforced) {
+        .map(|caller| match (caller, enforced) {
             (true, Some(enforced)) => enforced.value.clone(),
             _ => inputs.next().unwrap_or(Value::Nothing),
         })
         .collect();
-
-    state.runtime.emit_host_event(
-        "action",
-        serde_json::json!({
-            "action": endpoint.name,
-            "surface": "http",
-            "actor": actor.as_ref().map(|a| a.id.clone()),
-            "tenant": actor.as_ref().map(|a| a.tenant_id.clone()),
-        }),
-    );
+    let mut event = serde_json::json!({
+        "action": endpoint.name,
+        "actor": enforced.map(|e| e.actor.id.clone()),
+        "tenant": enforced.map(|e| e.actor.tenant_id.clone()),
+    });
+    if let (Some(event), Some(extra)) = (event.as_object_mut(), trace.as_object()) {
+        event.extend(extra.clone());
+    }
+    state.runtime.emit_host_event("action", event);
     let route = format!("POST {}", endpoint.path);
-    let runtime = approval_runtime(&state, enforced.as_ref(), endpoint.approval.as_ref(), route.clone());
+    let runtime = approval_runtime(state, enforced, endpoint.approval.as_ref(), route.clone());
     let outcome = run_ir_with_runtime(&state.ir, Some(&endpoint.agent), args.clone(), &runtime).await;
-    capture_pending_invocation_if_queued(&state, &endpoint.agent, &args, &outcome);
-    finish(outcome, RouteResponseKind::Json, &state.page_scripts, reply_encoding(&state, &endpoint.agent), route)
+    capture_pending_invocation_if_queued(state, &endpoint.agent, &args, &outcome);
+    finish(outcome, RouteResponseKind::Json, &state.page_scripts, reply_encoding(state, &endpoint.agent), route)
 }
 
 /// The action's arguments, in declaration order, from a JSON or form body.
@@ -164,6 +189,7 @@ fn decode_input(
                 serde_json::from_slice(body).map_err(|e| bad_request("invalid_json", &e.to_string()))?
             };
             decode_json_input(endpoint, &json, types_by_id)
+                .map_err(|refused| (StatusCode::BAD_REQUEST, Json(refused)).into_response())
         }
         "application/x-www-form-urlencoded" => {
             let text = std::str::from_utf8(body).map_err(|_| bad_request("invalid_form", "form body must be UTF-8"))?;
@@ -197,21 +223,28 @@ fn decode_input(
     }
 }
 
-fn decode_json_input(
+/// The action's inputs from a JSON value, or the refusal body naming the
+/// field or parameter. The HTTP endpoint answers it as `400`; the
+/// assistant endpoint returns it as a tool error.
+pub(super) fn decode_json_input(
     endpoint: &ActionEndpoint,
     json: &serde_json::Value,
     types_by_id: &HashMap<DefId, &IrType>,
-) -> Result<Vec<Value>, Response> {
+) -> Result<Vec<Value>, serde_json::Value> {
+    let refusal = |error: &str, detail: String| serde_json::json!({ "error": error, "detail": detail });
     if let Some(ty) = &endpoint.whole_input {
-        return decode_public_json(json, ty, types_by_id, UnknownFields::Reject)
-            .map(|value| vec![value])
-            .map_err(|e| invalid_body(&e));
+        return decode_public_json(json, ty, types_by_id, UnknownFields::Reject).map(|value| vec![value]).map_err(|e| {
+            let mut refused = e.to_json();
+            refused["error"] = serde_json::json!("invalid_body");
+            refused["detail"] = serde_json::json!(e.message());
+            refused
+        });
     }
     let Some(object) = json.as_object() else {
-        return Err(bad_request("invalid_input", "the input is a JSON object with one field per parameter"));
+        return Err(refusal("invalid_input", "the input is a JSON object with one field per parameter".into()));
     };
     if let Some(unknown) = object.keys().find(|key| !endpoint.params.iter().any(|(name, _)| name == *key)) {
-        return Err(bad_request("invalid_input", &format!("`{unknown}` is not a parameter of `{}`", endpoint.name)));
+        return Err(refusal("invalid_input", format!("`{unknown}` is not a parameter of `{}`", endpoint.name)));
     }
     endpoint
         .params
@@ -223,7 +256,7 @@ fn decode_json_input(
                 refused["error"] = serde_json::json!("invalid_input");
                 refused["parameter"] = serde_json::json!(name);
                 refused["detail"] = serde_json::json!(format!("parameter `{name}`: {}", e.message()));
-                (StatusCode::BAD_REQUEST, Json(refused)).into_response()
+                refused
             })
         })
         .collect()

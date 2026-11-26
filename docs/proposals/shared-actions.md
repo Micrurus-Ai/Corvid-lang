@@ -135,7 +135,7 @@ What frontend development owns here: the page script's CSRF fill, the fetch subm
 - [ ] B10-2b-5. The form binding, as amended above: `form_for(action, initial, label)` and `button_for(action, value, label)`, the hidden CSRF field and its server acceptance, and the `303` and HTML answers to a browser form. Posted for frontend review 2026-11-26; built after one working day unless frontend development objects.
 - [x] B10-2b-4. Action methods in the generated TypeScript client, typed by the contract: the record or one field per parameter, and `T | ApprovalPending` for an action with `@approval`. Built 2026-11-26.
 - [x] B10-3a. The `assistants: confirm "..."` line: parsed only as an action's first line, `allow` and `never` refused with what to write instead, an empty description refused, and the contract and OpenAPI carry the mode and description. Until an assistant can call the action, `corvid serve` refuses to start a program with the line (contract closure gap naming B10-3b), so no surface is advertised that nothing serves. Built 2026-11-26.
-- [ ] B10-3b. The assistant endpoint, decided as below. Backend: `POST /mcp` in `corvid serve`; frontend (with frontend development): WebMCP tools in the page from the same list.
+- [x] B10-3b. The assistant endpoint, as decided below: `POST /mcp` in `corvid serve` and the person's confirmations. Built 2026-11-26. Frontend development's half, WebMCP tools in the page from the same `tools/list` and the confirmation prompt, is on the frontend roadmap.
 
 ### B10-3b design: the assistant endpoint
 

@@ -66,6 +66,7 @@ use corvid_vm::{
 use libloading::{Library, Symbol};
 
 mod actions;
+mod assistant_endpoint;
 mod browser_asset;
 mod live_assets;
 mod live;
@@ -125,6 +126,8 @@ struct ServeState {
     /// handlers on the queued path; drained on either `/approve`
     /// (re-executed) or `/deny` (discarded).
     pending_invocations: Arc<Mutex<HashMap<String, PendingInvocation>>>,
+    /// Assistant calls waiting for their person's confirmation (B10-3b).
+    confirmations: assistant_endpoint::Confirmations,
     /// Tool handlers registered at startup — typically populated by
     /// the `--with-tools-cdylib <path>` loader, but could also carry
     /// handlers from future loader paths (e.g. 33Q1b's tools.py
@@ -410,6 +413,7 @@ pub(crate) fn cmd_serve(
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
+        confirmations: Arc::new(Mutex::new(HashMap::new())),
         host_tools,
         contract_json,
         openapi_json,
@@ -581,7 +585,13 @@ pub(crate) fn cmd_serve(
     }
     // B10-2: one `POST /actions/<name>` per action. The checker refuses a
     // route declared at an action's path, so the two never collide.
-    for (path, mr) in actions::endpoints(&state)? {
+    let action_catalog = actions::catalog(&state.ir)?;
+    for (path, mr) in actions::endpoints(&action_catalog) {
+        app = app.route(&path, mr);
+    }
+    // B10-3b: the assistant endpoint and the person's confirmations, for
+    // actions with an `assistants:` line.
+    for (path, mr) in assistant_endpoint::routes(&action_catalog, &contract) {
         app = app.route(&path, mr);
     }
 
@@ -644,6 +654,10 @@ pub(crate) fn cmd_serve(
         }
         for action in &state_for_banner.ir.actions {
             println!("  POST   {}{}", corvid_types::action_input::ACTIONS_PATH, action.name);
+        }
+        if state_for_banner.ir.actions.iter().any(|action| action.assistants.is_some()) {
+            println!("  POST   {:<28} -> assistant tools (MCP); each call waits for its person", assistant_endpoint::MCP_PATH);
+            println!("  POST   /__confirmations/<id>/confirm|decline -> the person decides their assistant's call");
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
