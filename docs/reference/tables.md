@@ -404,8 +404,11 @@ parameter-only binding.
 
 A query returns at most its `take` count of rows, so a `@budget` agent
 that loops over `Member.all().take(3)` is charged three times the loop's
-body. A loop over a query without a literal `take` has no bound the
-compiler can prove, and the budget check warns rather than guessing.
+body. The count may be a refined field, `take(search.limit)` with `limit:
+Int where between(1, 50)`, which charges fifty times: every value of a
+refined field holds its refinement, so the maximum is a real bound. A
+loop over a query whose count has no such bound has none the compiler
+can prove, and the budget check warns rather than guessing.
 
 ## Replay
 

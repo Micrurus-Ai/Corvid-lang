@@ -34,7 +34,7 @@ pub use determinism::{
     KNOWN_NONDETERMINISTIC_BUILTINS,
 };
 pub use effects::{
-    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost,
+    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost, compute_worst_case_cost_with_types,
     render_cost_tree, AgentEffectSummary, ComposedProfile, ConstraintViolation, CostEstimate,
     CostNodeKind, CostTreeNode, CostWarning, CostWarningKind, EffectProfile, EffectRegistry,
     ProvenanceViolation,
@@ -52,7 +52,7 @@ pub use builtin_methods::{
 };
 pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};
 pub use type_receiver::{type_receiver, TypeReceiver};
-pub use builtin_methods::CONFLICT_TYPE_ID;
+pub use builtin_methods::{CONFLICT_TYPE_ID, UNRESOLVED_DEF_ID};
 pub use types::{ConflictCase, ConflictCases, Type};
 
 #[cfg(test)]

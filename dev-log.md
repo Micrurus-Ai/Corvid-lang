@@ -861,6 +861,109 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Commits shared between server processes (B14 RT-6)
+
+An application served by several processes on one Postgres database
+needs a write through one process to reach live subscribers on the
+others. Every committed table write on Postgres now also sends
+`pg_notify('corvid_commits', …)`. An `atomic:` block sends its
+notification inside its transaction, so Postgres itself guarantees that
+a rolled-back block reaches nobody. `Runtime::share_table_commits`
+listens on one named connection and forwards other processes' commits
+into the local feed. Each runtime has a random 128-bit instance id and
+skips its own notifications, so a subscriber hears a commit once. A
+listener that loses its connection reconnects with backoff and then
+announces an empty table set, which means "any table may have changed",
+so subscribers re-run their queries instead of missing a commit.
+
+Found while building it: Postgres notification channels are
+database-wide, not per schema, so two applications in two schemas of one
+Postgres would have heard each other's commits. The server now stamps
+`current_schema()` into the payload, and each listener keeps only its
+own schema's commits. If a write commits but its notification cannot be
+sent, the run fails loudly and says the write committed, rather than a
+subscriber missing it.
+
+Considered and rejected:
+- **A polling table of commits.** It adds latency and a table to
+  migrate, where `NOTIFY` already has the transactional delivery rule
+  that is needed.
+- **Sending the notification after `COMMIT`.** A crash between the
+  two would lose it; sent inside the transaction, it commits or not
+  with the writes.
+
+Tested on Postgres, with two runtimes standing in for two processes:
+- a write and an `atomic:` block reach the other process;
+- a conflict and a rollback reach nobody;
+- no process hears its own commit twice;
+- sharing works in both directions;
+- after both listening connections are terminated, each reconnects,
+  announces "anything may have changed", and hears new commits.
+
+---
+
+## 2026-11-25 - The change feed for live subscriptions (B14 RT-2)
+
+A `live` subscriber needs to hear about committed writes and receive the
+difference. The runtime now has a commit feed: a broadcast of
+`TableCommit { database, tables }`. A table write outside an `atomic:`
+block announces its table once the write succeeds; inside a block the
+transaction collects the tables it wrote and announces them when it
+commits, so a rolled-back block announces nothing and a subscriber never
+sees an undone write. A conflict writes nothing and announces nothing.
+`TableRef` now carries its database's name so the announcement can say
+which database changed.
+
+The difference is `live_changes`, a pure function from the rows a
+subscriber holds and the new ordered result to the wire changes: removals
+first, then each row not already in place is added or updated at its
+destination index, so applying them in order yields the new result
+exactly. Tests apply every change list to the old rows with the client's
+algorithm and compare, across every reordering and dropped row of a small
+result; heavier churn than the result's size becomes a snapshot.
+
+The transport re-runs a live's snapshot query on each commit that
+touches its table, so the database stays the one judge of matching and
+order. Considered: matching each written row against the filter in
+memory, which is faster but is a second implementation of the query's
+semantics; it is filed as a later optimization, to be tested against the
+re-run.
+
+---
+
+## 2026-11-25 - Lowering's fallback id names no record
+
+IR lowering used `DefId(u32::MAX)` in eight places for a reference it
+could not resolve: a variant's owner, a struct literal's type, a test,
+a fixture and a mock target. The checker resolves each first, so a
+checked program never reaches them, but `u32::MAX` is `JsonError`'s
+reserved id, so had one been reached, the interpreter or native code
+would have looked up `JsonError` instead of failing. The fallback is now
+`UNRESOLVED_DEF_ID`, declared beside `RESERVED_TYPE_IDS` with a test
+that it is none of them, so any lookup through it reports the missing
+type. The Mac session found it while listing the reserved ids.
+
+---
+
+## 2026-11-25 - A refined field bounds a query loop (B09 Refine-3)
+
+`@budget` could bound a loop over a table query only when it ended in a
+literal `take(3)`. With every refined value now holding its refinement on
+both tiers, `take(search.limit)` with `limit: Int where between(1, 50)` is
+a real bound of fifty, so the cost analysis charges the body fifty times
+instead of warning. The analysis ran on the AST alone; it now receives the
+checker's type of every expression
+(`compute_worst_case_cost_with_types`), finds `search`'s record, and reads
+the field's `between` maximum. A `len_between` refinement or an unrefined
+count gives no bound, and a negative maximum bounds the rows at zero.
+
+Found on the way: the REPL's cost report called the untyped analysis, so
+it would have shown a refined `take` as unbounded while `@budget` charged
+fifty; it now type-checks the turn and reads the same types, so the two
+agree.
+
+---
+
 ## 2026-11-25 - A native build refuses by name, before linking
 
 Making `native` the default build target exposed a gap the Mac session

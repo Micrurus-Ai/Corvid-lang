@@ -1222,7 +1222,7 @@ impl Repl {
         }
 
         if let Some(estimate) =
-            corvid_types::compute_worst_case_cost(&turn.file, &turn.resolved, &registry, name)
+            corvid_types::compute_worst_case_cost_with_types(&turn.file, &turn.resolved, &registry, name, &corvid_types::typecheck(&turn.file, &turn.resolved).types)
         {
             let cost = estimate.dimensions.get("cost").copied().unwrap_or(0.0);
             let tokens = estimate.dimensions.get("tokens").copied().unwrap_or(0.0);
@@ -1505,7 +1505,7 @@ impl Repl {
             .collect();
         let registry = corvid_types::EffectRegistry::from_decls(&effect_decls);
         let Some(estimate) =
-            corvid_types::compute_worst_case_cost(&turn.file, &turn.resolved, &registry, name)
+            corvid_types::compute_worst_case_cost_with_types(&turn.file, &turn.resolved, &registry, name, &corvid_types::typecheck(&turn.file, &turn.resolved).types)
         else {
             writeln!(output, "no cost estimate available for `{name}`")?;
             output.flush()?;

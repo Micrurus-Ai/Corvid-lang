@@ -296,7 +296,7 @@ fn typecheck_with_everything(
         }
 
         if let Some(estimate) =
-            crate::effects::compute_worst_case_cost(file, resolved, &registry, &agent.name.name)
+            crate::effects::compute_worst_case_cost_with_types(file, resolved, &registry, &agent.name.name, &c.types)
         {
             for warning in estimate.warnings {
                 let crate::effects::CostWarningKind::UnboundedLoop { agent, message } =

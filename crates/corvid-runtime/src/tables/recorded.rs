@@ -13,6 +13,30 @@ use serde_json::Value as J;
 /// tool call named `table:<Table>.<op>`; a replay serves the recorded
 /// outcome and never opens the database.
 impl Runtime {
+    /// Every committed table write from now on, for live subscriptions
+    /// (B14): a write outside an `atomic:` block once it succeeds, and a
+    /// block's tables when it commits. A receiver that falls behind is
+    /// told it lagged and should take a fresh snapshot.
+    pub fn subscribe_table_commits(&self) -> tokio::sync::broadcast::Receiver<super::TableCommit> {
+        self.table_commits.subscribe()
+    }
+
+    pub(super) fn announce_commit(&self, database: &str, tables: std::collections::BTreeSet<String>) {
+        if !tables.is_empty() {
+            // No receiver is not an error: nobody is subscribed yet.
+            let _ = self.table_commits.send(super::TableCommit { database: database.to_string(), tables });
+        }
+    }
+
+    /// A write that changed its table is announced now, or noted for its
+    /// `atomic:` block's commit.
+    fn wrote(&self, table: &TableRef<'_>) {
+        match table.transaction {
+            Some(transaction) => transaction.written.note(table.name),
+            None => self.announce_commit(table.database, std::iter::once(table.name.to_string()).collect()),
+        }
+    }
+
     /// `Shelf.get(key)`.
     pub async fn table_get(&self, table: &TableRef<'_>, key: Vec<DbValue>) -> Result<Option<Row>, RuntimeError> {
         let outcome = self
@@ -32,10 +56,18 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "insert"), args, || async {
-                Ok(checked_write_json(self.table_insert_live(table, row).await?))
+                let outcome = self.table_insert_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
-        checked_write_outcome(table.name, "insert", &outcome)
+        let outcome = checked_write_outcome(table.name, "insert", &outcome)?;
+        if outcome.is_ok() {
+            self.wrote(table);
+        }
+        Ok(outcome)
     }
 
     /// `Shelf.save(row)`: `Ok` with the stored row and its new revision,
@@ -44,10 +76,18 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "save"), args, || async {
-                Ok(checked_write_json(self.table_save_live(table, row).await?))
+                let outcome = self.table_save_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
-        checked_write_outcome(table.name, "save", &outcome)
+        let outcome = checked_write_outcome(table.name, "save", &outcome)?;
+        if outcome.is_ok() {
+            self.wrote(table);
+        }
+        Ok(outcome)
     }
 
     /// `Shelf.delete(row)`: `Ok` with the deleted row, or the conflict
@@ -56,10 +96,18 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "delete"), args, || async {
-                Ok(checked_write_json(self.table_delete_live(table, row).await?))
+                let outcome = self.table_delete_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
-        checked_write_outcome(table.name, "delete", &outcome)
+        let outcome = checked_write_outcome(table.name, "delete", &outcome)?;
+        if outcome.is_ok() {
+            self.wrote(table);
+        }
+        Ok(outcome)
     }
 }
 
