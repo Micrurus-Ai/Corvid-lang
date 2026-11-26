@@ -26,13 +26,13 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 | 1 | ~~Path parameters take only `Int`; route query fields of most types reach the handler as text.~~ Done 2026-11-26: one typed reader for both, through the public JSON decoder. | Windows session | type hole, narrowing |
 | 2 | `try ... else`: a failing table, tool or prompt call stops the request instead of degrading. [Proposal](recoverable-failures.md) | Windows session | grammar |
 | 3 | Shared actions (B10): actions are named by strings, with no derived endpoint, form, tool or CLI. The defining feature, and it blocks B11, B13 and RT-5. [Proposal](shared-actions.md) | Windows session | grammar |
-| 4 | JSON key renaming for camelCase APIs. [Proposal](json-field-keys.md) | Windows session | grammar |
-| 5 | Variant payload fields take refinements, as record fields do. | Windows session | grammar |
-| 6 | The duration literal, `30 seconds`. | Windows session | grammar |
+| 4 | JSON key renaming for camelCase APIs. [Proposal](json-field-keys.md) | Mac session (started 2026-11-26) | grammar |
+| 5 | Variant payload fields take refinements, as record fields do. | Mac session (started 2026-11-26) | grammar |
+| 6 | The duration literal, `30 seconds`. | Mac session (started 2026-11-26) | grammar |
 | 7 | A connector call with the signed-in user's own credential (per-call bearer token). | Windows session | needs a proposal |
 | 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). | Windows session | needs a proposal |
 | 9 | Joins and aggregates in table queries and `live`. | Windows session | needs a proposal |
-| 10 | The TS client reads served streams, and serve's stream `error` event sends a typed failure, not Rust debug text. | Codex | frontend |
+| 10 | ~~The TS client reads served streams, and serve's stream `error` event sends a typed failure, not Rust debug text.~~ Done 2026-11-26 ([stream failures S2](stream-failures.md)): `chunk`, `completed` and a sanitized `failed`, read by the generated client's `api.route(...)`. | Mac session | frontend |
 | 11 | `corvid serve` refuses `live` until RT-3 lands. Unblocked on 2026-11-26 (session watching, removal revisions). | Codex | frontend |
 | 12 | Native gaps: streams, B06 types at tool and prompt boundaries (proposed, [native scalar boundaries](native-scalar-boundaries.md)), tables, `llm.usage` events in native runs. `find_regex` and `+=` on decimals and times landed on 2026-11-26, and a native prompt's `String` argument now renders as its JSON form, as on the interpreter (B1a); prompts exchange the public JSON form with a model on both tiers (B1); next is B1b, native prompts through the public plan for lists, records, `Option`, variants and text-held scalars. | Mac session | native |
 | 13 | Scale: incremental live matching, uploads held in memory, `verify_password` on the agent's thread. | Windows session | scale |
