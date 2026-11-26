@@ -16,6 +16,7 @@ mod dimension_artifact;
 mod dimension_registry;
 pub mod mcp_codegen;
 pub mod modules;
+pub mod public_failure;
 pub use corvid_codegen_wasm::FORM_CONTROLS_JS;
 pub mod skills;
 pub mod proof_replay;
@@ -23,7 +24,7 @@ mod import_integrity;
 mod package_conflicts;
 mod package_cache;
 mod package_lock;
-pub use package_lock::locked_artifact_paths;
+pub use package_lock::{installed_component_source, locked_artifact_paths};
 mod package_manifest;
 mod package_metadata;
 mod package_policy;
@@ -34,6 +35,8 @@ mod native_cache;
 mod render;
 pub mod spec_check;
 pub mod spec_site;
+mod table_schema;
+pub use table_schema::{declared_databases, table_schemas, DeclaredDatabase};
 
 pub use add_dimension::{
     add_dimension as install_dimension, add_dimension_with_registry as install_dimension_with_registry,
@@ -123,7 +126,6 @@ pub use pipeline::{
     compile, compile_to_abi_with_config, compile_to_application_contract_with_config,
     compile_to_ir, compile_to_ir_with_config,
     analyze_with_config_at_path, analyze_with_open_sources, compile_to_ir_with_config_at_path, compile_with_config,
-    compile_with_config_at_path,
     CompileResult,
 };
 pub(crate) use pipeline::{lower_driver_file, typecheck_driver_file};
@@ -135,7 +137,7 @@ pub use replay_job::replay_job_from_source;
 pub use trace_fresh::run_fresh_from_source_async;
 pub use build::{
     build_catalog_descriptor_for_source, build_native_to_disk, build_target_to_disk,
-    build_server_to_disk, build_to_disk, build_wasm_to_disk, wasm_output_dir_for, AbiBuildOutput, BuildOutput,
+    build_server_to_disk, build_wasm_to_disk, build_wasm_with_component_locations, wasm_output_dir_for, AbiBuildOutput,
     BuildTarget, NativeBuildOutput, ServerBuildOutput, SigningRequest, TargetBuildOutput,
     WasmBuildOutput,
 };
@@ -229,6 +231,9 @@ pub async fn run_ir_with_runtime(
         .iter()
         .find(|a| a.name == chosen_name)
         .expect("agent presence checked above");
+    if agent.is_none() && chosen.return_ty.mentions_secret() {
+        return Err(RunError::EntryReturnsSecret { agent: chosen.name.clone() });
+    }
     if args.is_empty() && !chosen.params.is_empty() {
         return Err(RunError::NeedsArgs {
             agent: chosen.name.clone(),

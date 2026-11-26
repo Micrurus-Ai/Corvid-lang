@@ -179,10 +179,12 @@ mod tests {
             source_path: "app.cor".into(),
             types: vec![],
             routes: vec![],
+            live: vec![],
             agents,
             prompts: vec![],
             identities: vec![],
             connectors: vec![],
+            connector_wire: Default::default(),
         }
     }
 

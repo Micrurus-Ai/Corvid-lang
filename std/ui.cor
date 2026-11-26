@@ -311,6 +311,13 @@ public fn browser_row(key: String, key_field: String, fields: Map<String, List<S
     editor = local_selection(browser_record(fields), stack(content), text(""))
     return keyed_item(key, key, [View("<div data-row-key-field=\"" + escaped(key_field) + "\">" + editor.html + "</div>")])
 
+# The compiler supplies the declaration and its checked positional arguments.
+public fn live_rows(server_name: String, subscription: String, arguments: List<String>, content: List<View>) -> View:
+    declaration = " data-server=\"" + escaped(server_name) + "\" data-live=\"" + escaped(subscription) + "\""
+    attrs = declaration + " data-arguments=\"" + escaped(arguments.to_json()) + "\""
+    rows = "<ol></ol><template><li>" + children(content) + "</li></template><span role=\"status\"></span>"
+    return View("<corvid-live" + attrs + ">" + rows + "</corvid-live><script type=\"module\" src=\"/target/wasm/live-element.js\"></script>")
+
 public fn browser_rows(label: String, rows: List<View>) -> View:
     return View("<div data-browser-rows><ol aria-label=\"" + escaped(label) + "\">" + children(rows) + "</ol><span role=\"status\"></span></div>")
 

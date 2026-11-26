@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use base64::Engine as _;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -55,7 +55,7 @@ pub fn verify_dsse_envelope(envelope_path: &Path, key_path: &Path) -> Result<Vec
                 .try_into()
                 .expect("length checked above"),
         );
-        if key.verify(&pae, &sig).is_ok() {
+        if corvid_crypto::verify_ed25519_signature(&key, &pae, &sig) {
             any_valid = true;
             break;
         }

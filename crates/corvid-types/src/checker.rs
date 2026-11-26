@@ -55,6 +55,12 @@ pub struct Checked {
     /// field types from here instead of resolving type references a
     /// second time, so the two layers cannot disagree about a type.
     pub type_refs: HashMap<Span, Type>,
+    /// The spans of the type references in [`Self::type_refs`] whose
+    /// type holds a `Secret`, directly, as a type argument or in a field
+    /// of a record it names. The application contract leaves these
+    /// positions out, so no client, SDK or frontend is offered a field
+    /// a secret would fill.
+    pub secret_type_refs: HashSet<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,7 +296,7 @@ fn typecheck_with_everything(
         }
 
         if let Some(estimate) =
-            crate::effects::compute_worst_case_cost(file, resolved, &registry, &agent.name.name)
+            crate::effects::compute_worst_case_cost_with_types(file, resolved, &registry, &agent.name.name, &c.types)
         {
             for warning in estimate.warnings {
                 let crate::effects::CostWarningKind::UnboundedLoop { agent, message } =
@@ -356,6 +362,8 @@ fn typecheck_with_everything(
     }
 
     c.record_signature_types(file);
+    c.check_secret_boundaries(file);
+    c.check_response_boundaries(file);
 
     Checked {
         types: c.types,
@@ -365,6 +373,7 @@ fn typecheck_with_everything(
         imported_calls: c.imported_calls,
         grounded_coercion_sites: c.grounded_coercion_sites,
         type_refs: c.type_refs,
+        secret_type_refs: c.secret_type_refs,
     }
 }
 
@@ -384,9 +393,15 @@ struct Checker<'a> {
     /// `Checked` so IR lowering can insert a visible `UnwrapGrounded`
     /// at each recorded span.
     grounded_coercion_sites: HashSet<Span>,
+    /// B06 — the span of the `Decimal` `/` being checked as the
+    /// receiver of a `round_<mode>` call, the one place such a division
+    /// is accepted. See `checker/decimal.rs`.
+    rounded_division: Option<Span>,
     /// Every root-file type reference resolved so far, by span. See
     /// [`Checked::type_refs`].
     type_refs: HashMap<Span, Type>,
+    /// [`Checked::secret_type_refs`], filled by `check_secret_boundaries`.
+    secret_type_refs: HashSet<Span>,
 
     /// Indexed declarations for O(1) lookup by DefId. Methods from
     /// `extend` blocks get inserted here too — a method `extend Order: agent
@@ -660,6 +675,12 @@ impl<'a> Checker<'a> {
                         types.insert(id, t);
                     }
                 }
+                Decl::Table(t) => {
+                    if let Some(id) = resolved.symbols.lookup_def(&t.record.name.name) {
+                        types.insert(id, &t.record);
+                    }
+                }
+                Decl::Database(_) => {}
                 Decl::Store(_) => {}
                 Decl::Import(_) => {}
                 Decl::Effect(_) => {}
@@ -721,7 +742,9 @@ impl<'a> Checker<'a> {
             warnings: Vec::new(),
             imported_calls: HashMap::new(),
             grounded_coercion_sites: HashSet::new(),
+            rounded_division: None,
             type_refs: HashMap::new(),
+            secret_type_refs: HashSet::new(),
             tools_by_id: tools,
             file,
             operations_by_id: operations,
@@ -816,6 +839,8 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Decl::Type(t) => self.check_field_refinements(t),
+                Decl::Table(t) => self.check_table(t),
+                Decl::Database(d) => self.check_database(d),
                 Decl::Identity(i) => self.check_identity(i),
                 Decl::Connector(c) => self.check_connector(c),
                 Decl::Tool(t) => self.check_retired_json_decoder_tool(t),
@@ -890,7 +915,15 @@ mod case;
 mod decl;
 mod decl_eval;
 mod decl_extern_c;
+mod decimal;
+mod bytes;
+mod crypto_arguments;
+mod secrets;
+mod response_boundaries;
+mod currency;
+mod time;
 mod form;
+mod live;
 mod decl_grounded_pure;
 mod decl_replayability;
 mod effect_decl;
@@ -898,10 +931,14 @@ mod lambda_check;
 mod fn_check;
 mod struct_literal_check;
 mod match_check;
+mod match_coverage;
 mod expr;
 mod import_call;
 mod json_methods;
+mod regex_methods;
+mod request_text;
 mod signature_types;
+mod tables;
 mod ops;
 mod prompt;
 mod stmt;

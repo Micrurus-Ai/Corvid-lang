@@ -1,0 +1,17 @@
+[package]
+name = "corvid-currency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Currency formatting for Corvid's Decimal with Unicode CLDR data: ISO 4217 currencies, BCP 47 locales and locale-correct formatting that never rounds. The checker, the interpreter and the native runtime all call this one implementation."
+
+[dependencies]
+corvid-decimal = { workspace = true }
+# ICU4X, the Unicode Consortium's CLDR implementation. The currency
+# formatter is in `icu_experimental`, whose API is not yet stable, so
+# it is pinned exactly and used only from this crate.
+icu_experimental = "=0.7.0"
+icu_locale = "2.4"
+icu_locale_core = "2.4"
+icu_provider = "2.4"
+fixed_decimal = "0.7"

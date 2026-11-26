@@ -36,6 +36,26 @@ pub use weak::{ListWeakValue, StructWeakValue, WeakValue};
 pub enum Value {
     Int(i64),
     Float(f64),
+    /// B06 — an exact decimal. Equality and hashing are numeric
+    /// (`1.0 == 1.00`); the scale is kept for display.
+    Decimal(corvid_decimal::Decimal),
+    /// B06 — an exact length of elapsed time.
+    Duration(corvid_time::Duration),
+    /// B06 — an exact point on the UTC timeline.
+    Instant(corvid_time::Instant),
+    /// B06 — an IANA time zone.
+    TimeZone(corvid_time::TimeZone),
+    /// B06 — an instant seen in a time zone.
+    ZonedTime(corvid_time::ZonedTime),
+    /// B06 — an ISO 4217 currency.
+    Currency(corvid_currency::Currency),
+    /// B06 — a BCP 47 locale with CLDR data.
+    Locale(Arc<corvid_currency::Locale>),
+    /// An immutable byte string. Equality is constant-time.
+    Bytes(corvid_crypto::Bytes),
+    /// Sensitive text. It displays as `<secret>`, serializes as
+    /// `<redacted>` and compares in constant time.
+    Secret(corvid_crypto::Secret),
     String(Arc<str>),
     Bool(bool),
     Nothing,
@@ -221,6 +241,15 @@ impl Clone for Value {
         match self {
             Value::Int(n) => Value::Int(*n),
             Value::Float(x) => Value::Float(*x),
+            Value::Decimal(d) => Value::Decimal(*d),
+            Value::Duration(d) => Value::Duration(*d),
+            Value::Instant(i) => Value::Instant(*i),
+            Value::TimeZone(z) => Value::TimeZone(*z),
+            Value::ZonedTime(z) => Value::ZonedTime(*z),
+            Value::Currency(c) => Value::Currency(*c),
+            Value::Locale(l) => Value::Locale(l.clone()),
+            Value::Bytes(b) => Value::Bytes(b.clone()),
+            Value::Secret(s) => Value::Secret(s.clone()),
             Value::String(s) => Value::String(s.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::Nothing => Value::Nothing,
@@ -257,10 +286,32 @@ impl Clone for Value {
 }
 
 impl Value {
+    /// A table write's conflict (B09): a sum-type value of the reserved
+    /// [`corvid_types::CONFLICT_TYPE_ID`], with `row` the payload of
+    /// `Changed` and `Taken` and absent for `Deleted`.
+    pub fn conflict(case: corvid_types::ConflictCase, row: Option<Value>) -> Value {
+        Value::Enum(EnumValue::new(
+            corvid_types::CONFLICT_TYPE_ID,
+            "Conflict".to_string(),
+            case.index(),
+            case.name().to_string(),
+            row.into_iter().collect(),
+        ))
+    }
+
     pub fn type_name(&self) -> String {
         match self {
             Value::Int(_) => "Int".into(),
             Value::Float(_) => "Float".into(),
+            Value::Decimal(_) => "Decimal".into(),
+            Value::Duration(_) => "Duration".into(),
+            Value::Instant(_) => "Instant".into(),
+            Value::TimeZone(_) => "TimeZone".into(),
+            Value::ZonedTime(_) => "ZonedTime".into(),
+            Value::Currency(_) => "Currency".into(),
+            Value::Locale(_) => "Locale".into(),
+            Value::Bytes(_) => "Bytes".into(),
+            Value::Secret(_) => "Secret".into(),
             Value::String(_) => "String".into(),
             Value::Bool(_) => "Bool".into(),
             Value::Nothing => "Nothing".into(),
@@ -328,6 +379,20 @@ impl PartialEq for Value {
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
             (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
+            (Value::Decimal(a), Value::Decimal(b)) => a == b,
+            (Value::Duration(a), Value::Duration(b)) => a == b,
+            (Value::Instant(a), Value::Instant(b)) => a == b,
+            (Value::TimeZone(a), Value::TimeZone(b)) => a == b,
+            (Value::ZonedTime(a), Value::ZonedTime(b)) => a == b,
+            (Value::Currency(a), Value::Currency(b)) => a == b,
+            (Value::Locale(a), Value::Locale(b)) => a == b,
+            // Constant-time, wherever the comparison happens: `==`, a
+            // record or list field, `contains`, a map key.
+            (Value::Bytes(a), Value::Bytes(b)) => a.constant_time_eq(b),
+            // Constant-time too, in every position, like `Bytes`.
+            (Value::Secret(a), Value::Secret(b)) => a.constant_time_eq(b),
+            (Value::Decimal(a), Value::Int(b)) => *a == corvid_decimal::Decimal::from_int(*b),
+            (Value::Int(a), Value::Decimal(b)) => corvid_decimal::Decimal::from_int(*a) == *b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nothing, Value::Nothing) => true,

@@ -28,6 +28,8 @@ public type Order:
     outcome: Result<Int, String>
     weight: Float
     gift: Bool
+    conflict: Conflict<Line>
+    gone: Conflict<Line>
 
 public agent echo(order: Order) -> Order:
     return order
@@ -72,11 +74,17 @@ ORDER = {
     "outcome": {"tag": "ok", "ok": 40},
     "weight": 2.5,
     "gift": True,
+    "conflict": {"tag": "variant", "type": "Conflict", "variant": "Taken", "fields": [{"sku": "c", "quantity": 1, "note": None}]},
+    "gone": {"tag": "variant", "type": "Conflict", "variant": "Deleted", "fields": []},
 }
 order = models.Order.from_json(ORDER)
 assert isinstance(order.shipment, models.Shipment.Shipped), order.shipment
 assert order.shipment.days == 3 and order.codes[2] == "two" and isinstance(order.outcome, models.Ok)
+assert isinstance(order.conflict, models.Conflict.Taken) and order.conflict.holder.sku == "c", order.conflict
+assert isinstance(order.gone, models.Conflict.Deleted), order.gone
 assert order.to_json() == ORDER, json.dumps(order.to_json())
+changed = models.from_json({"variant": "Changed", "fields": [{"sku": "d", "quantity": 4, "note": None}]}, "Conflict<Line>")
+assert isinstance(changed, models.Conflict.Changed) and changed.current.quantity == 4, changed
 
 pending = models.Shipment.from_json({"variant": "Pending"})
 assert pending.to_json() == {"tag": "variant", "type": "Shipment", "variant": "Pending", "fields": []}

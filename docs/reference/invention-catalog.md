@@ -209,6 +209,37 @@ Roadmap: [Phase 20e](../../ROADMAP.md)
 Proof: [minimum confidence tests](../../crates/corvid-types/src/tests.rs)
 Non-scope: Confidence only means something when model adapters report calibrated signals.
 
+#### Secrets That Never Reach a Trace, a Prompt or a Log
+
+A `Secret` is sensitive text, such as a webhook signing key, a password or an API token, that the program can use but never reveal. `secret(name)` from `std/secrets` reads one from the environment. Two secrets compare with `==` in constant time, a secret keys an HMAC (`body.utf8().hmac_sha256(key)`) without its text becoming a value, and a secret can be passed to the tool that needs it, alone or inside a record.
+
+Every other way the text could leave the program is a compile error that says why: no method returns it (`to_string`, `to_json`), it never mixes with text, it has no JSON form, and no route, store field, table column, prompt, connector operation, `ask`, `choose` or `main` signature may hold it, directly or in a record field. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the trace, approvals, the step debugger, replay and the exports built from the trace. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays although the trace never held the text. The application contract leaves every secret field out, so no client or SDK has one to read.
+
+A key the program issues is a `Secret` from the moment it exists: `random_token(32)` from `std/crypto` records `<redacted>`, the owner receives it through a tool that takes a `Secret`, and the program keeps only `hash_password(key, owasp_2023())`, an Argon2id hash at a declared cost. `presented.verify_password(hash)` checks one in constant time and is pure. Replay has no token to substitute, so it draws a fresh one and warns.
+
+```corvid
+import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+tool sign_webhook(key: Secret, body: String) -> String
+tool deliver_key(owner: String, key: Secret) -> Bool
+
+agent signature(body: String) -> Result<String, String>:
+    key = secret("WEBHOOK_KEY")?
+    return Ok(sign_webhook(key, body))
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    delivered = deliver_key(owner, key)
+    return hash_password(key, owasp_2023())
+```
+
+Spec: [Cryptography: secrets](../../docs/reference/cryptography.md#secrets)
+Tour: `corvid tour --topic secrets`
+Roadmap: [B04 cryptography, slices 2 to 4](../../docs/backend-ai-roadmap.md)
+Proof: [checker refusals](../../crates/corvid-types/src/tests/secrets.rs), [interpreter tests](../../crates/corvid-vm/src/tests/secrets.rs), [trace and replay end to end](../../crates/corvid-driver/tests/secret_values.rs), [webhook verification with a secret signing key](../../crates/corvid-driver/tests/webhook_verification.rs), [tokens and passwords end to end](../../crates/corvid-driver/tests/tokens_and_passwords.rs)
+Non-scope: in native code, a secret cannot yet reach a tool of the program's own, and a library's exported agents never take or return one; secrets come from the environment and `random_token`, not from a request body; a tool's own handling of the text it receives is outside the program. Showing a new key once in a route response is a roadmap item, and an encrypted table column is tracked in B09.
+
 ### AI-Native Ergonomics
 
 #### AI-Native Keywords
@@ -345,7 +376,7 @@ agent api_key() -> Result<String, String>:
 Spec: [`std.secrets` reference](../../docs/reference/stdlib/secrets.md)
 Tour: `corvid tour --topic replay-safe-secrets`
 Proof: [secrets + cache e2e tests](../../crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs)
-Non-scope: forwarding a secret into another tool's arguments records it in that tool's events — the structural `SecretHandle` taint is the tracked post-v1.0 deepening.
+Non-scope: `secret_read` returns the text as a `String`, so forwarding it into another tool's arguments records it in that tool's events; [`Secret`](#secrets-that-never-reach-a-trace-a-prompt-or-a-log), read with `secret(name)`, closes that channel.
 
 #### Provenance-Keyed Cache
 
@@ -616,34 +647,40 @@ Roadmap: [Phase 33S1](../../ROADMAP.md)
 Proof: [executing I/O tests](../../crates/corvid-runtime/tests/executing_io_tools.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs) + [path-confinement tests](../../crates/corvid-runtime/src/io.rs)
 Non-scope: Confines paths to the declared root; does not police what user code does with the contents.
 
-#### Executing HTTP-Client Surface
+#### Declared HTTP Client
 
-Corvid's `std/http` module ships two executing tools — `http_get`, `http_post_json` — that flow through typed effect rows (`http_egress_get`, `http_egress_post`) and a **two-layer security boundary**: an always-on structural SSRF block that refuses RFC1918 / loopback / link-local hosts regardless of allowlist, plus a required `[http] allow` allowlist that fails closed when unconfigured.
+A program calls another service through a `connector`, and every consequential choice about the request is written in source: how long it may take (`timeout: 10s`), which redirects it follows (`redirects: never | same_host | allowed_hosts`), and how its failures are typed (`on failure -> Unreachable`). Omitting the timeout or the redirect policy is a compile error. A `hosts: allowed_hosts` connector takes the URL as a parameter, for pages and callbacks a program learns at run time.
 
-The security boundary is **declared in `corvid.toml`** and signable: a signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement`, and `io_source.http_quarantine_on_replay` in its claim manifest, so a host can verify the binary refuses to reach private networks AND can only reach explicitly approved hosts AND cannot escape replay quarantine.
+Under every connector sits a **two-layer security boundary**: an always-on structural SSRF block that refuses RFC1918, loopback and link-local hosts regardless of allowlist, and the project's `[http] allow` list, which fails closed when unconfigured. A redirect never carries the credential to another host, and a `POST` is never silently re-sent as a `GET`. A signed cdylib carries `io_source.http_ssrf_structural_block`, `io_source.http_allowlist_enforcement` and `io_source.http_quarantine_on_replay` in its claim manifest.
 
 ```corvid
-import "std:http" use http_get, http_post_json, http_ok
+type FetchError:
+    | Unreachable(reason: String)
 
-agent ship_event(url: String, body: String) -> Result<Bool, String>:
-    response = http_post_json(url, body)?
-    return Ok(http_ok(response))
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s                          # omit → compile error
+    redirects: allowed_hosts              # never | same_host | allowed_hosts
+    published: no                         # yes lists it at /.well-known/corvid
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable         # refused, timed out, unreachable → a typed value
 ```
-
-Both tools return `Result` — policy refusals and transport failures are Err VALUES the program observes (an error HTTP status like 404 is still Ok; inspect `status`).
 
 ```toml
 [http]
 allow = ["hooks.example.com"]
 ```
 
-A URL whose host is not in `[http] allow` is refused with a structured diagnostic naming the host AND the configured allowlist. A URL whose host resolves to a private range is refused by the structural SSRF block before the allowlist is consulted — even a misconfigured `[http] allow = ["127.0.0.1"]` cannot reach loopback. Calls inside a `@deterministic` agent are rejected at typecheck. Calls during Substitute-mode replay either substitute from the recorded trace or diverge — the network is provably untouched.
+A URL whose host is not in `[http] allow` is refused with a diagnostic naming the host and the allowlist; a host in a private range is refused before the allowlist is consulted, so even `[http] allow = ["127.0.0.1"]` cannot reach loopback. The trace records every attempt and redirect with header names only, and replay answers from the recording without touching the network. The `http_get` and `http_post_json` tools this entry once described are replaced by connectors.
 
-Spec: [`std.http` reference](../../docs/reference/stdlib/http.md)
+Spec: [HTTP client proposal](../../docs/proposals/http-client.md) · [connector grammar](../../docs/reference/grammar.md#connector-declarations)
 Tour: `corvid tour --topic http-client`
-Roadmap: [Phase 33S2](../../ROADMAP.md)
-Proof: [end-to-end HTTP tests](../../crates/corvid-driver/tests/executing_http_through_driver.rs) + [policy tests](../../crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
-Non-scope: Enforces SSRF + allowlist + replay quarantine on the URL host; does not police response-body content or rewrite request headers.
+Roadmap: [B05 complete HTTP client](../../docs/backend-ai-roadmap.md)
+Proof: [any-host connectors and `on failure`](../../crates/corvid-driver/tests/connector_any_host.rs) + [redirect, timeout and policy tests](../../crates/corvid-runtime/src/http.rs) + [replay-quarantine corpus](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
+Non-scope: Enforces the declared timeout, redirect policy, SSRF block, allowlist and replay quarantine; does not police what the program does with a response, resolve hostnames before the SSRF check, or run on the native target yet.
 
 #### Executing SQLite Surface
 
@@ -824,7 +861,7 @@ Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the s
 
 #### The Backend Proves Its Own Contract, Or Refuses To Start
 
-Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (one `data:` event per yield, `event: done` to close); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
+Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (a `chunk` event per item, `completed` to close, `failed` with a sanitized `{error, detail}` on a server failure); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
 
 ```corvid
 server imports:
@@ -878,12 +915,15 @@ Non-scope: The login/session and route-authorization runtime is complete; durabl
 
 #### Protocol-Typed Connectors
 
-Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
+Declare an external API in source as a `connector` — base URL, `secret(...)` credentials (a bare-string credential is a parse error), and a reliability posture — and each `operation` is a callable tool with a declarative HTTP body. The mode is chosen at the boundary with **no default**: a connector declares the `modes` it may run in, the deployment picks one with `corvid run --mode`, and omitting `modes` (or selecting one the connector doesn't allow) is a compile error / startup refusal — a program can never reach a real provider by silence. How long a request may take and where a redirect may send it are declared the same way: `timeout:` and `redirects:` are required, and a redirect never carries the credential to another origin. The **same unchanged file** runs three ways: `mock` evaluates the compiled `mock:` payload, `real` makes the HTTP request (the credential resolves at dispatch into a header and never enters the IR, a trace, or an error), and `replay` serves a recorded interaction and never falls through to a real call. Because an operation IS a tool, the moat composes: a `dangerous` operation still needs `approve`, and `on status <code> -> Variant` turns an HTTP status into a typed `Result` error the compiler makes you handle.
 
 ```corvid
 connector github:
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
+    timeout: 10s                          # omit → compile error; no default
+    redirects: never                      # never | same_host | allowed_hosts
+    published: no                         # omit → compile error; no default
     rate_limit: 60 per 60s
     modes: [mock, replay, real]           # omit → compile error; no default
     operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:
@@ -941,3 +981,47 @@ Roadmap: [Phase 52 verified provider protocols](../../ROADMAP.md)
 Proof: [the durable lifecycle](../../crates/corvid-driver/tests/protocol_lifecycle.rs) + [the transition engine](../../crates/corvid-runtime/src/protocol.rs) + [the simulator](../../crates/corvid-runtime/src/protocol_simulate.rs)
 Non-scope: Validating that a provider's payload matches its declared shape once it arrives — live conformance and drift quarantine are a later 52i slice. The deadline and cadence are declared and checked, never defaulted.
 
+#### Typed Tables With Revision-Checked Writes
+
+A `table` is a record type stored in a database the program declares.
+The `database` block must name its engine, location and tables, so where
+data lives is always stated in source. Rows come back as typed records,
+so renaming a column is a compile error at every read, and SQL text never
+appears in source. Every row carries a database-maintained `revision`:
+`Shelf.save(row)` writes only if the stored row still has the revision
+the row was read at, and a conflict is an ordinary typed value holding
+the row stored now. A query, `Shelf.where(fn (s) -> s.owner == owner)`
+with optional `order_by`, `descending` and `take`, is a `List<Shelf>`
+run as one parameterized query, and a condition the database cannot run
+is a compile error. `corvid migrate plan` writes the migrations that
+create and change declared tables. A rename (`renamed from`) and a drop
+(`retired`) are declared, so the planner never mistakes one for the
+other, and a change that would lose data is refused by name.
+
+Money, time and bytes are columns the database compares exactly as
+Corvid does, on SQLite and Postgres: `10 == 10.0` for a `Decimal`, and
+instants in time order to the nanosecond. **Indexes follow the queries**:
+a table is private to its module, so the compiler sees every query it
+gets, and the planner creates the index each one needs (its equality
+columns, then the column it orders or compares by), replaces it when the
+query changes, and drops it when no query needs it. The migration names
+the agents each index serves, so nobody maintains an index list beside
+the code, and none goes stale.
+
+```corvid
+database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+
+table Shelf:
+    key shelf: Int
+    title: String
+
+agent store(renamed: Shelf) -> String:
+    return match Shelf.save(renamed):
+        Ok(saved) -> "saved revision " + saved.revision.to_string()
+        Err(Changed(current)) -> "someone else changed the shelf first"
+        Err(Deleted) -> "the shelf was removed"
+```
+
+Try it: `corvid tour --topic tables`. Reference: [Tables](./tables.md).

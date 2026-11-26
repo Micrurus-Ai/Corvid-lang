@@ -25,6 +25,9 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     modes: [real]
@@ -87,11 +90,9 @@ fn compile(dir: &std::path::Path, src: &str) -> corvid_ir::IrFile {
     compile_to_ir_with_config_at_path(src, &p, None).expect("protocol program compiles")
 }
 
-fn loopback_client(host: &str, server: &MockServer) -> reqwest::Client {
+fn loopback_client(host: &str, server: &MockServer) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .resolve(host, *server.address())
-        .build()
-        .expect("reqwest client builds")
 }
 
 /// The load-bearing test: one submit, the provider job id taken from the
@@ -146,7 +147,7 @@ async fn a_protocol_submits_once_binds_the_job_id_and_returns_only_on_terminal()
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -242,7 +243,7 @@ async fn resuming_the_same_job_never_submits_a_second_provider_job() {
         Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -327,7 +328,7 @@ async fn a_provider_retry_after_slows_the_declared_cadence() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -400,7 +401,7 @@ async fn a_transient_poll_failure_is_tolerated_and_the_protocol_still_completes(
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -456,7 +457,7 @@ async fn consecutive_failed_observations_trip_the_declared_circuit_breaker() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -535,7 +536,7 @@ async fn cancelling_a_job_compensates_through_the_declared_cancel_endpoint() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -589,7 +590,7 @@ async fn a_protocol_refuses_to_run_outside_a_durable_job() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -660,7 +661,7 @@ async fn the_intent_key_reaches_the_provider_on_the_submit() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -713,7 +714,7 @@ async fn an_intent_refuses_to_resume_against_a_different_provider() {
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -748,7 +749,7 @@ async fn an_intent_refuses_to_resume_against_a_different_provider() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["other.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "other.example.com",
             &server,
         )))
@@ -816,7 +817,7 @@ async fn a_restart_does_not_hand_the_protocol_a_fresh_deadline() {
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -862,7 +863,7 @@ async fn a_restart_does_not_hand_the_protocol_a_fresh_deadline() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -929,7 +930,7 @@ async fn the_protocol_lifecycle_is_recorded_as_evidence() {
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -1014,7 +1015,7 @@ async fn a_protocol_change_refuses_to_resume_an_in_flight_intent_and_never_resub
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -1064,7 +1065,7 @@ async fn a_protocol_change_refuses_to_resume_an_in_flight_intent_and_never_resub
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -1126,7 +1127,7 @@ async fn a_declared_resume_continues_an_in_flight_intent_across_a_protocol_chang
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -1159,7 +1160,7 @@ async fn a_declared_resume_continues_an_in_flight_intent_across_a_protocol_chang
     let runtime = Runtime::builder()
         .approver(Arc::new(ProgrammaticApprover::always_yes()))
         .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-        .http_client(HttpClient::with_reqwest_client(loopback_client(
+        .http_client(HttpClient::with_reqwest_builder(loopback_client(
             "api.example.com",
             &server,
         )))
@@ -1235,7 +1236,7 @@ async fn a_recorded_lifecycle_replays_without_touching_the_provider() {
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))
@@ -1348,7 +1349,7 @@ async fn a_lifecycle_replay_missing_an_observation_refuses_instead_of_calling_th
         let runtime = Runtime::builder()
             .approver(Arc::new(ProgrammaticApprover::always_yes()))
             .http_policy(HttpEgressPolicy::new(Some(&["api.example.com".to_string()])))
-            .http_client(HttpClient::with_reqwest_client(loopback_client(
+            .http_client(HttpClient::with_reqwest_builder(loopback_client(
                 "api.example.com",
                 &server,
             )))

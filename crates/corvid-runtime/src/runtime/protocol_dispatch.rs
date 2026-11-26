@@ -421,9 +421,7 @@ impl Runtime {
                         ts_ms: now_ms(),
                         run_id: self.tracer.run_id().to_string(),
                         tool: label.to_string(),
-                        result: serde_json::json!({
-                            crate::replay::CORVID_TOOL_ERROR_KEY: err.to_string(),
-                        }),
+                        result: crate::replay::recorded_failure(&err),
                     });
                 }
                 return Err(err);
@@ -544,19 +542,30 @@ impl Runtime {
     ) -> ConnectorHttpSpec {
         ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),
+            url_param: None,
+            response_text: false,
+            streams: None,
+            stream_until: None,
+            on_failure: None,
             method,
             path,
             param_names: Vec::new(),
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: spec.auth.clone(),
             error_map: Vec::new(),
             returns_result: false,
+            returns_response: false,
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,
+            timeout_secs: spec.timeout_secs,
+            redirects: spec.redirects,
         }
     }
 
@@ -584,22 +593,33 @@ impl Runtime {
         })?;
         Ok(ConnectorHttpSpec {
             extra_headers: Vec::new(),
+            effects: Vec::new(),
             connector: spec.connector.clone(),
             operation: spec.operation.clone(),
             base_url: spec.base_url.clone(),
+            url_param: None,
+            response_text: false,
+            streams: None,
+            stream_until: None,
+            on_failure: None,
             method: protocol.poll.method.as_str().to_string(),
             // Already bound; no placeholders remain, so no params.
             path,
             param_names: Vec::new(),
             body: None,
+            query: None,
+            headers: Vec::new(),
             auth: spec.auth.clone(),
             // A poll observes; it never maps statuses to typed errors and
             // never returns a Result envelope.
             error_map: Vec::new(),
             returns_result: false,
+            returns_response: false,
             retry: spec.retry,
             rate_limit: spec.rate_limit,
             circuit_breaker: spec.circuit_breaker,
+            timeout_secs: spec.timeout_secs,
+            redirects: spec.redirects,
         })
     }
 

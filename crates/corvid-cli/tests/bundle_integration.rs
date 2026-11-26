@@ -91,6 +91,9 @@ fn committed_sentiment_classifier_bundle_script_passes_on_linux() {
     let output = Command::new("bash")
         .arg(root.join("examples").join("sentiment_classifier_bundle").join("verify.sh"))
         .current_dir(&root)
+        // The scripts look for the corvid binary; hand them the one Cargo built,
+        // wherever CARGO_TARGET_DIR put it.
+        .env("CORVID_BIN", env!("CARGO_BIN_EXE_corvid"))
         .output()
         .expect("run sentiment classifier bundle verification");
     assert!(
@@ -120,6 +123,9 @@ fn committed_failing_bundle_scripts_report_expected_errors_on_linux() {
         let output = Command::new("bash")
             .arg(&script)
             .current_dir(&root)
+        // The scripts look for the corvid binary; hand them the one Cargo built,
+        // wherever CARGO_TARGET_DIR put it.
+        .env("CORVID_BIN", env!("CARGO_BIN_EXE_corvid"))
             .output()
             .unwrap_or_else(|err| panic!("run {}: {err}", script.display()));
         assert!(

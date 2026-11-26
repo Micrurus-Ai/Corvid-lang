@@ -44,10 +44,24 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_replace: FuncId,
     pub string_split: FuncId,
     pub string_parse_int: FuncId,
+    /// The B03 text encoders and decoders, by method.
+    pub text_methods: Vec<(corvid_types::BuiltinMethodKind, FuncId)>,
+    /// B06 `Decimal` operators and methods, by operation.
+    pub decimal_operations: HashMap<crate::decimal_methods::DecimalOperation, FuncId>,
+    /// B06 `Duration`, `Instant`, `TimeZone` and `ZonedTime` operators
+    /// and methods, by operation.
+    pub time_operations: HashMap<crate::time_methods::TimeOperation, FuncId>,
+    /// B06 `Currency`, `Locale` and `format_currency`, by operation.
+    pub currency_operations: HashMap<crate::currency_methods::CurrencyOperation, FuncId>,
+    /// B04 `Bytes` methods and `==`, by operation.
+    pub bytes_operations: HashMap<crate::bytes_methods::BytesOperation, FuncId>,
     /// `corvid_json_decode_typed`: `T.from_json` through a compiler-written decode plan.
     pub json_decode_typed: FuncId,
     /// `corvid_json_encode_typed`: `value.to_json()` through the same plan.
     pub json_encode_typed: FuncId,
+    /// `corvid_json_encode_tool_argument`: one argument of a runtime call
+    /// whose tool takes a secret, recorded (`<redacted>`) or revealed.
+    pub json_encode_tool_argument: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
@@ -69,6 +83,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// static string literals and List<String>'s elem_typeinfo slot.
     pub map_typeinfo: cranelift_module::DataId,
     pub string_typeinfo: cranelift_module::DataId,
+    /// Runtime-provided `corvid_typeinfo_Secret` (native dispatch N3).
+    pub secret_typeinfo: cranelift_module::DataId,
     pub weak_box_typeinfo: cranelift_module::DataId,
     // Entry helpers used by the codegen-emitted `main`.
     pub entry_init: FuncId,
@@ -101,6 +117,20 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub invoke_tool_string: FuncId,
     pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
+    /// `corvid_register_connectors(specs)`: install the embedded
+    /// connector specs before `corvid_runtime_init`.
+    pub register_connectors: FuncId,
+    /// `corvid_secret_eq(a, b) -> 1 | 0`: `==` on two secrets, in
+    /// constant time (native dispatch N3).
+    pub secret_eq: FuncId,
+    /// `corvid_int_to_string`, `corvid_float_to_string`,
+    /// `corvid_bool_to_string`: `to_string()` on the scalars.
+    pub int_to_string: FuncId,
+    pub float_to_string: FuncId,
+    pub bool_to_string: FuncId,
+    /// `corvid_response_header(headers, name) -> Option<String>`:
+    /// `response.header(name)` (native dispatch N4).
+    pub response_header: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,
@@ -130,6 +160,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_from_int: FuncId,
     pub string_from_bool: FuncId,
     pub string_from_float: FuncId,
+    /// `corvid_string_json_quote`: a String's JSON form, for a prompt
+    /// argument.
+    pub string_json_quote: FuncId,
     pub approve_sync: FuncId,
     // Typed prompt bridges, one per return type.
     pub prompt_call_int: FuncId,
@@ -252,6 +285,15 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// offsets, constructor arity checks, destructor lookup) without
     /// threading `&IrFile` through every call site.
     pub ir_types: HashMap<DefId, corvid_ir::IrType>,
+    /// The runtime-owned tools, by id: connector operations and the
+    /// tools the runtime implements (`is_native_runtime_tool`). Native code
+    /// calls them through `corvid_runtime_call`, which runs
+    /// `Runtime::call_tool` and so records, replays, redacts and applies
+    /// the HTTP policy exactly as the interpreter does.
+    pub runtime_call_ops: std::collections::HashSet<DefId>,
+    /// `corvid_runtime_call(name, args, arg_count, plan, plan_len,
+    /// typeinfos, payload) -> tag`: a runtime-owned call.
+    pub runtime_call: FuncId,
     /// Tool declarations, keyed by `DefId`. The codegen
     /// needs to know the declared signature (param types, return type)
     /// to emit a correctly-typed direct call to the `#[tool]` wrapper

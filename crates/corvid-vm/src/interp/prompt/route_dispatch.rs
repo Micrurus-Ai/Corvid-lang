@@ -1,14 +1,12 @@
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::interp::{ExprFlow, Interpreter};
 use crate::value::{ResumeTokenValue, Value};
-use crate::value_to_json;
 use corvid_ast::Span;
 use corvid_ir::{IrPrompt, IrRoutePattern};
 use corvid_resolve::DefId;
 use corvid_runtime::trace_text;
 use corvid_types::Type;
 
-use super::render_prompt;
 
 impl<'ir> Interpreter<'ir> {
     pub(super) async fn select_prompt_route_model(
@@ -80,13 +78,12 @@ impl<'ir> Interpreter<'ir> {
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
         
-        let rendered = super::render_prompt(prompt, arg_values);
-        let json_args: Vec<serde_json::Value> =
-            arg_values.iter().map(crate::conv::value_to_json).collect();
+        let rendered = self.render_prompt_text(prompt, arg_values, span)?;
+        let json_args = self.model_args(prompt, arg_values, span)?;
         let model = self.select_prompt_model(prompt, callee_name, &rendered, arg_values, span)
             .await?.unwrap_or_default();
         let sampling = self.resolve_sampling(prompt, &model);
-        let segments = super::build_message_segments(prompt, arg_values, &rendered, span)?;
+        let segments = super::build_message_segments(prompt, arg_values, &rendered, &self.types_by_id, span)?;
         let req = corvid_runtime::llm::LlmRequest {
             prompt: callee_name.to_string(),
             model,
@@ -273,12 +270,12 @@ impl<'ir> Interpreter<'ir> {
             ));
         }
 
-        let base_rendered = render_prompt(prompt, &token.args);
+        let base_rendered = self.render_prompt_text(prompt, &token.args, span)?;
         let delivered = token
             .delivered
             .iter()
-            .map(|chunk| trace_text(&value_to_json(&chunk.value)))
-            .collect::<Vec<_>>()
+            .map(|chunk| self.model_json(&chunk.value, &prompt.return_ty, span).map(|json| trace_text(&json)))
+            .collect::<Result<Vec<_>, _>>()?
             .join("\n");
         let continuation_rendered = if delivered.is_empty() {
             format!("{base_rendered}\n\nResume from interruption with no delivered elements.")

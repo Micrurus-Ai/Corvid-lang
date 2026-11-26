@@ -1,38 +1,21 @@
-"""Tool and prompt registries.
+"""The tool registry `corvid serve` and `corvid run` read.
 
-Users register tool implementations with `@tool("name")`. The compiler
-emits a `TOOLS` dict as metadata (name → {"effect", "arity"}); the
-user-provided Python functions supply the actual callable.
-
-Prompts are registered by generated code's `PROMPTS` dict: name → {"template",
-"params"}. This module holds the latest `PROMPTS` registered.
+A project's `tools.py` decorates its functions with `@tool("name")`.
+Loading the file fills `_TOOL_IMPLS`; the Rust runtime reads that dict
+and registers each function as the tool of that name, and calls it
+through `invoke_tool`, so tracing, approval and replay apply to it like
+to any other tool.
 """
 
 from __future__ import annotations
 
 from inspect import isawaitable
-from typing import Any, Callable, Iterable, TypeVar, TypedDict
-
-from .errors import UnknownPrompt, UnknownTool
-
-
-class ToolMetadata(TypedDict):
-    effect: str  # "safe" or "dangerous"
-    arity: int
-
-
-class PromptMetadata(TypedDict):
-    template: str
-    params: list[str]
-
+from typing import Any, Callable, Iterable, TypeVar
 
 ToolFunction = TypeVar("ToolFunction", bound=Callable[..., Any])
 
+# Read by `corvid_runtime::python_tools` in the Rust runtime.
 _TOOL_IMPLS: dict[str, Callable[..., Any]] = {}
-
-# Compiler-provided metadata. Populated by generated modules on import.
-_TOOL_META: dict[str, ToolMetadata] = {}
-_PROMPT_META: dict[str, PromptMetadata] = {}
 
 
 def tool(name: str) -> Callable[[ToolFunction], ToolFunction]:
@@ -46,48 +29,8 @@ def tool(name: str) -> Callable[[ToolFunction], ToolFunction]:
 
 
 async def invoke_tool(impl: Callable[..., Any], args: Iterable[Any]) -> Any:
+    """Call a tool with its arguments, awaiting it if it is async."""
     result = impl(*args)
     if isawaitable(result):
         return await result
     return result
-
-
-def register_tools(meta: dict[str, ToolMetadata]) -> None:
-    """Called by generated modules: merge tool metadata into the registry."""
-    _TOOL_META.update(meta)
-
-
-def register_prompts(meta: dict[str, PromptMetadata]) -> None:
-    """Called by generated modules: merge prompt metadata into the registry."""
-    _PROMPT_META.update(meta)
-
-
-def get_tool_impl(name: str) -> Callable[..., Any]:
-    try:
-        return _TOOL_IMPLS[name]
-    except KeyError as e:
-        raise UnknownTool(
-            f"no Python implementation registered for tool `{name}`.\n"
-            f"  help: decorate a function with `@tool(\"{name}\")` before running this agent."
-        ) from e
-
-
-def get_tool_meta(name: str) -> ToolMetadata | None:
-    return _TOOL_META.get(name)
-
-
-def get_prompt_meta(name: str) -> PromptMetadata:
-    try:
-        return _PROMPT_META[name]
-    except KeyError as e:
-        raise UnknownPrompt(
-            f"no prompt registered for `{name}`. The compiler should register "
-            f"it via `register_prompts({{...}})` when the generated module is imported."
-        ) from e
-
-
-def reset_for_testing() -> None:
-    """Wipe all registries. Test-only."""
-    _TOOL_IMPLS.clear()
-    _TOOL_META.clear()
-    _PROMPT_META.clear()

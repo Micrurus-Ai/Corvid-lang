@@ -52,6 +52,8 @@ program           ::= (decl | NEWLINE)* EOF
 decl              ::= visibility? (
                         type_decl
                       | store_decl
+                      | table_decl
+                      | database_decl
                       | tool_decl
                       | prompt_decl
                       | agent_decl
@@ -122,6 +124,22 @@ field_list        ::= IDENT ':' type_ref (',' IDENT ':' type_ref)*
 type_alias_body   ::= type_ref
 
 store_decl        ::= ('session' | 'memory') IDENT ':' INDENT type_field+ DEDENT
+
+# B09: a stored record type and the database that holds it.
+# `table`, `database`, `key`, `engine`, `location`, `tls`, `connections`,
+# `env`, `renamed`, `from`, `retired` and `unique` are contextual: they
+# stay ordinary identifiers elsewhere, and a field may be named `retired`
+# or `unique`. `in` names the database a table lives in; without it, the
+# table lives in its module's one `database` block.
+table_decl        ::= 'table' IDENT ('in' IDENT)? ':' INDENT (table_field | table_retired | table_unique)+ DEDENT
+table_field       ::= 'key'? IDENT ':' type_ref ('renamed' 'from' IDENT)? NEWLINE
+table_retired     ::= 'retired' IDENT (',' IDENT)* NEWLINE
+table_unique      ::= 'unique' IDENT (',' IDENT)* NEWLINE
+database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
+database_setting  ::= 'engine' ':' IDENT NEWLINE
+                    | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
+                    | 'tls' ':' IDENT NEWLINE                       # `required` or `disabled`; Postgres only
+                    | 'connections' ':' INT NEWLINE                 # 1 to 1000; Postgres only
 ```
 
 ## Type references
@@ -170,6 +188,15 @@ effect_name       ::= IDENT
 The prompt body is a single template string; parameters interpolate
 with `{param}` inside the string (any typed parameter renders as its
 JSON form) — in the single template and in every role block.
+
+The JSON form is the public one, the form `T.to_json()` writes and HTTP
+bodies carry: a `String` is quoted, an `Option` is its value or `null`,
+a sum type is `{"tag": "variant", "type": …, "variant": …, "fields":
+[...]}`, and a `Grounded<T>` argument shows its `T`. A structured reply
+is described to the model in the same form, and read in it: an `Option`
+field may be `null` or absent, and undeclared fields are ignored. A
+`Stream<Partial<T>>` reply gives each field as `{"tag": "complete",
+"value": …}` or `{"tag": "streaming"}`, with the value in the public form.
 
 ```ebnf
 prompt_decl       ::= 'prompt' IDENT params '->' type_ref uses_clause? ':' INDENT prompt_body DEDENT
@@ -285,13 +312,22 @@ The `zone` clause
 on schedules is mandatory.
 
 ```ebnf
-server_decl       ::= 'server' IDENT ':' INDENT route_decl+ DEDENT
+server_decl       ::= 'server' IDENT ':' INDENT (route_decl | live_decl)+ DEDENT
 
 route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
                       | approval_annotation NEWLINE (upload_annotation NEWLINE)?)?
-                      'route' http_method STRING_LITERAL
+                      'route' http_method route_path
                       (route_query route_payload? | route_payload route_query?)?
                       '->' ('json' type_ref | 'html') uses_clause? route_policy? ':' INDENT block DEDENT
+
+# B14: a `live` names one table query; a subscriber receives the rows it
+# matches, then each committed change. `live` is contextual: an ordinary
+# name everywhere but the start of a server-block declaration.
+live_decl         ::= 'live' route_path '->' type_ref route_policy? ':' INDENT block DEDENT
+
+# Inside either declaration's path string, {board} binds path.board as
+# String and {board: Int} binds it as Int. An explicit String is also valid.
+path_placeholder  ::= '{' IDENT (':' ('Int' | 'String'))? '}'
 
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref
@@ -305,7 +341,17 @@ approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
                     | 'expires_ms' ':' INT | 'max_cost_usd' ':' '$' (FLOAT | INT)
                     | 'irreversible' ':' ('true' | 'false')
 
-http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+http_method       ::= 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
+
+# A route or live path is a string literal whose `{...}` parts are
+# parameters, read as `path.board`: `{board}` is a String, and
+# `{board: T}` a T, where T is Int, Float, Bool, Decimal, Duration,
+# Instant, TimeZone, ZonedTime, Currency, Locale, Bytes or a type of
+# plain variants (read by the variant's name). The router and the
+# contract see the path as `{board}`; a segment that is not a T is
+# refused with a 400 naming the parameter before the handler runs.
+route_path        ::= '"' (PATH_TEXT | path_placeholder)* '"'
+path_placeholder  ::= '{' IDENT (':' IDENT)? '}'
 
 schedule_decl     ::= 'schedule' STRING_LITERAL 'zone' STRING_LITERAL
                       '->' IDENT '(' arg_list? ')' uses_clause? NEWLINE
@@ -347,23 +393,119 @@ A connector groups HTTP operations under a base URL. Declare the modes
 callers may use in `modes`. Credentials refer to named secrets. A request
 can send one operation parameter as a JSON body or a form.
 
+Every connector declares `timeout:` (1 to 3600 seconds, from connecting to
+the last byte of the response) and `redirects:`; omitting either is a
+compile error. `never` treats a 3xx as the answer, `same_host` follows only
+to the same scheme, host and port, and `allowed_hosts` follows to any host
+in `[http] allow`. Every policy stops after 10 hops, never sends the
+credential to another origin, and refuses a 301, 302 or 303 that would turn
+a request other than `GET` or `HEAD` into a `GET`. An operation may declare
+its own `timeout:`, which replaces the connector's for that operation.
+
+Every connector also declares `published: yes` or `published: no`, and
+omitting it is a compile error. `published: yes` lists the connector (its
+name, URL, operation paths and provider protocol) in the published
+Application Contract at `/.well-known/corvid`, and the generated
+TypeScript client gets its protocol types. `published: no` keeps it out of
+both: the backend still runs, checks and traces it as before.
+
+`query <param>` names a record parameter whose fields become the query
+string, through the public JSON mapping: a scalar field is one
+`name=value` pair, an `Option` field is left out when it is `None`, and a
+`List` field repeats its name. A query field has the types a route's
+`query` record has: a number, text, `Bool`, a decimal, time, zone,
+currency, locale, `Bytes` (base64url) or a type of plain variants (sent
+by the variant's name), or an `Option` or `List` of one. Each value is
+written exactly as a route reads it in.
+`header "Name": value` sends a `String` parameter or a fixed string. An
+operation cannot set `Authorization`, `Proxy-Authorization`, `Cookie`,
+`Host`, `Content-Type`, `Content-Length` or `Transfer-Encoding`, the
+header its connector's `auth:` uses, or its protocol's idempotency
+header, and sets each header at most once.
+
+A connector declares exactly one of `base_url` (one API, each operation
+a path) and `hosts: allowed_hosts` (each operation's request line names a
+`String` URL parameter, as in `GET url`, and any host `[http] allow`
+permits may be called; no `async:` protocol). `response: text` reads the
+body as text into a `String`, for pages. `on failure -> Variant` turns
+every failure without a mapped answer (a refused URL, a timeout, a
+network error, an unmapped status, a body that does not match the
+declared type) into that variant of the `Result`'s error type, which has
+no fields or one `String` field for the reason; without it a failure
+stops the program. It maps the failures of the request itself: building
+it (a missing credential or argument), the client rate limit, the SSRF
+block and allowlist, the timeout, a transport error, a refused redirect,
+an unmapped status and decoding, and an open `circuit_breaker`, which
+means the dependency is known to be down. A connector's breaker counts
+each failure, an `on failure` value included, and a success resets it.
+`on failure` does not map what governs the call around the request,
+which still stops the program: a denied approval, an exceeded budget,
+and a replay that diverges from its trace. An operation with an `async:` protocol cannot declare it,
+because a protocol fails through its deadline target and circuit breaker.
+
+`body file` sends a `Bytes` or `Upload` parameter as the body itself (an
+upload with its own content type, `Bytes` as `application/octet-stream`);
+any other `body` is sent as JSON and must have a JSON form. `form` sends a
+record of text fields. `multipart receipt` sends a record as
+`multipart/form-data`: a text part per scalar field, a part per `List`
+item, nothing for an absent `Option`, and a file part per `Upload` or
+`Bytes` field. A file is recorded by its name, type, size and SHA-256,
+never its content, and replay matches it by that digest.
+
+An operation returning `Stream<T>` declares how its events arrive:
+`streams: server_sent_events` (each event's `data:` lines are one JSON
+value) or `streams: json_lines` (one value per line). Each event decodes
+into `T` as it arrives, and the declared `timeout` bounds opening the
+response and then the wait for each event. `until "[DONE]"` names the
+event data that ends a server-sent stream cleanly, for providers that
+close with a sentinel that is not JSON. A failure ends the stream with an
+error, unless the operation returns `Stream<Result<T, E>>` and declares
+`on failure -> Variant`: then each event arrives as `Ok(T)`, and an
+outage (a failure to open, the per-event timeout, a broken connection, an
+event that is not JSON or does not decode, an open circuit breaker)
+arrives as one final `Err(Variant(reason))`, after which the stream
+ends, so a `for` loop over it never raises for an outage. A replay that
+diverges and a budget stop are still raised. The final `Err` is recorded
+with the delivered events and replays with them. A streamed operation
+declares no `response: text` or `async:`. Its mock is the `List<T>` of
+its events. A stream the
+program stops reading closes the upstream connection, and the trace
+records the events delivered, marked `cancelled`.
+
+`HEAD` and `OPTIONS` are connector methods; a route never declares them,
+because `corvid serve` answers `HEAD` from the route's `GET` and
+`OPTIONS` from its routes and CORS policy. An operation returning
+`Response<Body>` also gets the status and response headers; a `HEAD`
+operation returns `Response<Nothing>`. See [`Response`](functions.md#response).
+
 ```ebnf
 connector_decl    ::= 'connector' IDENT ':' INDENT connector_item+ DEDENT
 connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
+                    | 'hosts' ':' 'allowed_hosts' NEWLINE
                     | 'auth' ':' connector_auth NEWLINE
+                    | 'timeout' ':' INT 's' NEWLINE
+                    | 'redirects' ':' redirect_policy NEWLINE
+                    | 'published' ':' ('yes' | 'no') NEWLINE
                     | ('retry' | 'circuit_breaker') ':' INT NEWLINE
                     | 'rate_limit' ':' INT 'per' INT 's'? NEWLINE
                     | 'modes' ':' '[' (connector_mode (',' connector_mode)* ','?)? ']' NEWLINE
                     | operation_decl
 connector_mode    ::= 'mock' | 'replay' | 'real'
+redirect_policy   ::= 'never' | 'same_host' | 'allowed_hosts'
+stream_format     ::= 'server_sent_events' | 'json_lines'
 connector_auth    ::= 'bearer' '(' secret_ref ')'
                     | 'header' '(' STRING_LITERAL ',' secret_ref ')'
                     | 'basic' '(' secret_ref ',' secret_ref ')'
 secret_ref        ::= 'secret' '(' STRING_LITERAL ')'
 operation_decl    ::= 'operation' IDENT params '->' type_ref 'dangerous'? uses_clause? ':'
-                      INDENT http_method STRING_LITERAL (('body' | 'form') IDENT)? NEWLINE
+                      INDENT http_method (STRING_LITERAL | IDENT) ('query' IDENT)? (('body' | 'form' | 'multipart') IDENT)? NEWLINE
                       operation_item* DEDENT
 operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEWLINE
+                    | 'timeout' ':' INT 's' NEWLINE
+                    | 'header' STRING_LITERAL ':' (IDENT | STRING_LITERAL) NEWLINE
+                    | 'response' ':' 'text' NEWLINE
+                    | 'streams' ':' stream_format ('until' STRING_LITERAL)? NEWLINE
+                    | 'on' 'failure' '->' IDENT NEWLINE
                     | 'async' ':' INDENT protocol_item+ DEDENT
 protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE
                     | ('initial' | 'deadline_target') ':' IDENT NEWLINE
@@ -417,6 +559,7 @@ stmt              ::= return_stmt
                     | while_stmt
                     | destructure_stmt
                     | parallel_stmt
+                    | atomic_stmt
                     | approve_stmt
                     | break_stmt | continue_stmt | pass_stmt
                     | assign_stmt
@@ -540,6 +683,13 @@ destructure_stmt  ::= struct_literal '=' expr NEWLINE
 # error rule is arm-ordered. `parallel` is contextual, not
 # reserved.
 parallel_stmt     ::= 'parallel' ':' INDENT (IDENT '=' expr NEWLINE)+ DEDENT
+
+# `atomic:` (B09 P7a) — the block's table writes commit together when it
+# reaches its end, or are all undone when it is left through an error.
+# The checker refuses anything the database cannot undo inside it, any
+# `return`, `break` or `continue` that would leave it, nesting, and
+# tables in more than one database. `atomic` is contextual, not reserved.
+atomic_stmt       ::= 'atomic' ':' NEWLINE INDENT stmt+ DEDENT
 
 # `match` is exhaustiveness-checked: sum scrutinees must cover every
 # variant irrefutably (or carry a catch-all), Option needs Some+None,
@@ -675,6 +825,16 @@ Inside a function, write `browser state name = expression`. The initializer is e
 ### Keyed rows in view layouts
 
 Inside an indented child list, `for item in records by item.id:` builds one editable row per record in the input list, in source order. The key must be a unique nonempty string field. The loop variable is in scope inside the block, including in `bind item.field` expressions. A row accepts the same editable record fields as a browser record editor. Moving a row preserves its browser-local edits and input focus. Declare `browser state members = workspace.agents` to initialize a typed list of editable records. A typed list expression can also appear directly after `in`. The list is initialized when the page renders.
+
+### Live rows in view layouts
+
+Inside an indented child list, write `for row in ui.live(server.subscription, arguments...):`.
+The subscription belongs to a server declared in the module. Its path
+parameters determine the number, order and types of the arguments. The table
+supplies the complete key. In the child template, `ui.value(bind row.field)`
+projects a checked field into text. Nested field paths traverse records.
+The subscription belongs to the mounted list and is released on disconnect.
+[Browser guide](../book/19-browser-views.md#display-a-live-board-in-corvid)
 
 ### Conditions in view layouts
 

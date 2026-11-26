@@ -24,17 +24,25 @@ use crate::routing_report::{
     build_report, render_report as render_routing_report, RoutingReportOptions,
 };
 
-pub(crate) fn cmd_new(name: &str, with_python_tools: bool) -> Result<u8> {
+pub(crate) fn cmd_new(name: &str, with_python_tools: bool, web: bool) -> Result<u8> {
     let root = if with_python_tools {
         corvid_driver::scaffold_new_with_python(name).context("failed to scaffold project")?
     } else {
         scaffold_new(name).context("failed to scaffold project")?
     };
+    if web {
+        std::fs::write(root.join("src/main.cor"), include_str!("web_starter.cor"))?;
+    }
     println!("created new Corvid project at `{}`", root.display());
     println!("\nNext steps:");
     println!("  cd {name}");
     println!("  corvid check");
-    println!("  corvid run");
+    if web {
+        println!("  corvid test src/main.cor");
+        println!("  corvid serve src/main.cor --listen 127.0.0.1:8080");
+    } else {
+        println!("  corvid run");
+    }
     println!();
     if with_python_tools {
         println!("Try the Python tool defined in `tools.py`:");

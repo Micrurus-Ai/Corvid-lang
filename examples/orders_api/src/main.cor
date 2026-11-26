@@ -63,6 +63,9 @@ effect http_read:
 # and no credential. The deployment selects the mode with
 # `corvid serve --mode mock`.
 connector shipping:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://carrier.example.com"
     modes: [mock, real]
     operation quote_carrier(zip: String) -> Carrier uses http_read:

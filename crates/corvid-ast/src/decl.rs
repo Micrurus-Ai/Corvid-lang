@@ -20,6 +20,10 @@ pub enum Decl {
     Import(ImportDecl),
     Type(TypeDecl),
     Store(StoreDecl),
+    /// `table Name:` stored record type (B09).
+    Table(TableDecl),
+    /// `database name:` engine, location and tables (B09).
+    Database(DatabaseDecl),
     Tool(ToolDecl),
     Prompt(PromptDecl),
     Agent(AgentDecl),
@@ -56,6 +60,8 @@ impl Decl {
             Decl::Import(d) => d.span,
             Decl::Type(d) => d.span,
             Decl::Store(d) => d.span,
+            Decl::Table(d) => d.record.span,
+            Decl::Database(d) => d.span,
             Decl::Tool(d) => d.span,
             Decl::Prompt(d) => d.span,
             Decl::Agent(d) => d.span,
@@ -439,6 +445,14 @@ pub enum HttpMethod {
     Put,
     Patch,
     Delete,
+    /// A connector operation that reads a resource's status and headers
+    /// without its body. A route never declares it: `corvid serve`
+    /// answers `HEAD` from the route's `GET`.
+    Head,
+    /// A connector operation that asks what a resource allows. A route
+    /// never declares it: the server answers `OPTIONS` from its routes
+    /// and CORS policy.
+    Options,
 }
 
 /// A protocol-typed connector (slice 52g): a declarative, zero-glue
@@ -452,8 +466,11 @@ pub enum HttpMethod {
 pub struct ConnectorDecl {
     pub name: Ident,
     /// `base_url: "https://api.example.com"` — the API root every
-    /// operation path is joined to.
-    pub base_url: String,
+    /// operation path is joined to. `None` when the connector declares
+    /// `hosts: allowed_hosts` instead: each operation then takes its URL
+    /// as a parameter, and any host the project's `[http] allow` permits
+    /// may be called. The parser requires exactly one of the two.
+    pub base_url: Option<String>,
     /// `auth: ...` — how each request authenticates. `None` = an
     /// unauthenticated (public) API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -467,6 +484,24 @@ pub struct ConnectorDecl {
     /// `circuit_breaker: N` — trip after N consecutive failures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<u64>,
+    /// `timeout: <n>s` — how long one request may take, from connecting
+    /// to the last byte of the response. Required: there is no default
+    /// timeout, so omitting it is a compile error. An operation may
+    /// override it with its own `timeout:`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    /// `redirects: never | same_host | allowed_hosts` — which redirects
+    /// a request follows. Required, like `timeout`: where a request may
+    /// be sent next is a security decision, never a default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirects: Option<RedirectPolicy>,
+    /// `published: yes | no` — whether the published Application
+    /// Contract (`/.well-known/corvid`) lists this connector: its name,
+    /// URL, paths and protocol. Required: which outside services an app
+    /// calls, and where, is a security decision, never a default.
+    /// `None` only while the checker reports the missing line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<bool>,
     /// `modes: [mock, replay, real]` — the execution modes this
     /// connector is ALLOWED to run in (slice 52g-3b). There is no
     /// default: a connector must declare its allowed modes, and the
@@ -479,6 +514,69 @@ pub struct ConnectorDecl {
     #[serde(default)]
     pub visibility: Visibility,
     pub span: Span,
+}
+
+impl ConnectorDecl {
+    /// The timeout one of this connector's operations runs under: the
+    /// operation's own `timeout:` when it declares one, otherwise the
+    /// connector's. The one place the rule lives; IR lowering and the
+    /// Application Contract both call it.
+    pub fn operation_timeout_secs(&self, operation: &OperationDecl) -> Option<u64> {
+        operation.timeout_secs.or(self.timeout_secs)
+    }
+}
+
+/// How a streamed connector response frames its events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamFormat {
+    /// `text/event-stream`: each event's `data:` lines are one JSON value.
+    ServerSentEvents,
+    /// One JSON value per line (NDJSON).
+    JsonLines,
+}
+
+impl StreamFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ServerSentEvents => "server_sent_events",
+            Self::JsonLines => "json_lines",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::ServerSentEvents, Self::JsonLines].into_iter().find(|f| f.as_str() == name)
+    }
+}
+
+/// Which redirects a connector's requests follow. Every policy keeps the
+/// SSRF block, never sends the credential to another origin, and stops
+/// after a fixed number of hops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedirectPolicy {
+    /// A 3xx response is the provider's answer; nothing is followed.
+    Never,
+    /// Follow a redirect only to the request's own scheme, host and port.
+    SameHost,
+    /// Follow a redirect to any host the project's `[http] allow` permits.
+    AllowedHosts,
+}
+
+impl RedirectPolicy {
+    pub const ALL: [RedirectPolicy; 3] = [Self::Never, Self::SameHost, Self::AllowedHosts];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::SameHost => "same_host",
+            Self::AllowedHosts => "allowed_hosts",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|policy| policy.as_str() == name)
+    }
 }
 
 /// An execution mode a connector is allowed to run in (slice 52g-3b).
@@ -495,6 +593,11 @@ pub enum ConnectorMode {
 }
 
 impl ConnectorMode {
+    /// The mode a `--mode` flag or `CORVID_CONNECTOR_MODE` names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Mock, Self::Replay, Self::Real].into_iter().find(|m| m.as_str() == name)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Mock => "mock",
@@ -548,15 +651,53 @@ pub struct OperationDecl {
     pub method: HttpMethod,
     /// The request path, joined to the connector `base_url`. May contain
     /// `{param}` placeholders bound from the operation's parameters.
+    /// Empty when the request line names a URL parameter instead.
     pub path: String,
+    /// `GET url` — the `String` parameter holding the whole URL, on a
+    /// connector that declares `hosts: allowed_hosts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_param: Option<Ident>,
+    /// `response: text` — read the response body as text rather than
+    /// JSON, for pages and other non-JSON answers; the body type is
+    /// `String`.
+    #[serde(default)]
+    pub response_text: bool,
+    /// `streams: server_sent_events | json_lines` — how a `Stream<T>`
+    /// operation's response arrives, one event at a time. Required when
+    /// the operation returns a `Stream`, refused otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streams: Option<StreamFormat>,
+    /// `streams: server_sent_events until "[DONE]"` — the event data that
+    /// ends the stream cleanly, for providers that close with a sentinel
+    /// that is not JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_until: Option<String>,
     /// `body <param>` (JSON) or `form <param>` (form-encoded) — the
     /// parameter carrying the request body, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<OperationBody>,
+    /// `query <param>` — a record parameter whose fields become the
+    /// request's query parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<Ident>,
+    /// `header "Name": value` lines, in source order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OperationHeader>,
     /// `on status <code> -> Variant` — map a response status to a typed
     /// error variant instead of the success return.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_map: Vec<StatusErrorMapping>,
+    /// `on failure -> Variant` — every way the call can fail without an
+    /// answer the operation maps (a refused URL, a timeout, a network
+    /// error, an unmapped status, a response that does not match the
+    /// declared type) becomes this variant of the `Result`'s error type,
+    /// carrying the reason when the variant has one `String` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<Ident>,
+    /// `timeout: <n>s` on the operation — overrides the connector's
+    /// timeout for this operation only (a slow upload, a long report).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     /// `mock: <expr>` — the payload this operation returns in `mock`
     /// mode (slice 52g-3b). The expression must produce the operation's
     /// return type. When `mock` is one of the connector's allowed
@@ -910,6 +1051,24 @@ pub struct OperationBody {
     pub encoding: BodyEncoding,
 }
 
+/// One `header "Name": value` line on an operation: a request header
+/// whose value is a parameter or a fixed string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationHeader {
+    pub name: String,
+    pub value: OperationHeaderValue,
+    pub span: Span,
+}
+
+/// Where an operation header's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationHeaderValue {
+    /// `header "Idempotency-Key": key` — a `String` or `Secret` parameter.
+    Param(Ident),
+    /// `header "Accept": "application/json"` — the same text on every call.
+    Literal(String),
+}
+
 /// How an operation encodes its request body (slice 52g).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BodyEncoding {
@@ -917,6 +1076,9 @@ pub enum BodyEncoding {
     Json,
     /// `form <param>` — `application/x-www-form-urlencoded`.
     Form,
+    /// `multipart <param>` — `multipart/form-data`: a record whose
+    /// fields become parts, `Upload` and `Bytes` fields as file parts.
+    Multipart,
 }
 
 /// `on status <code> -> Variant` (slice 52g) — a response-status →
@@ -936,6 +1098,8 @@ impl HttpMethod {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::Head => "HEAD",
+            Self::Options => "OPTIONS",
         }
     }
 }
@@ -958,6 +1122,38 @@ pub struct RouteResponse {
 pub enum RouteResponseKind {
     Json,
     Html,
+    /// A `live` declaration (B14): `live "/boards/{board}/cards" -> Card`.
+    /// Its body returns one table query; a subscriber receives the
+    /// matching rows, then each committed change. The response type is
+    /// `List<Row>`, the snapshot, so the body is checked as a route's
+    /// is, and [`RouteResponse::live_row`] gives the declared `Row`.
+    Live,
+}
+
+impl RouteResponse {
+    /// The row type a `live` declaration delivers: `Card` in `-> Card`.
+    pub fn live_row(&self) -> Option<&TypeRef> {
+        match (&self.kind, &self.ty) {
+            (RouteResponseKind::Live, TypeRef::Generic { args, .. }) => args.first(),
+            _ => None,
+        }
+    }
+}
+
+impl HttpRouteDecl {
+    pub fn is_live(&self) -> bool {
+        self.response.kind == RouteResponseKind::Live
+    }
+
+    /// The name a `live` declaration is reached by, from the client and
+    /// the contract: its path's last fixed segment, `cards` in
+    /// `/boards/{board}/cards`.
+    pub fn live_name(&self) -> Option<&str> {
+        if !self.is_live() {
+            return None;
+        }
+        self.path.split('/').rev().find(|segment| !segment.is_empty() && !segment.starts_with('{'))
+    }
 }
 
 /// Visibility modifier on a method declared inside an `extend` block.
@@ -1247,6 +1443,107 @@ impl StoreKind {
             Self::Memory => "writes_memory",
         }
     }
+}
+
+/// A stored record type (B09):
+///
+/// ```text
+/// table Shelf:
+///     key shelf: Int
+///     title: String
+/// ```
+///
+/// The table is also the record type `Shelf`: `record` holds the
+/// declared fields followed by the database-maintained `revision:
+/// Int`, so every record mechanism applies to rows unchanged. `key`
+/// marks a field of the primary key: one field, or several whose values
+/// identify a row together (B09 P7b). A table without one is a checker
+/// error, because rows could not be saved with a revision check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableDecl {
+    pub record: TypeDecl,
+    /// `table Shelf in library:`: the database that holds its rows. Left
+    /// out, the table lives in its module's one `database` block (B09
+    /// P11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<Ident>,
+    /// The fields marked `key`, in declaration order.
+    pub keys: Vec<Ident>,
+    /// `title: String renamed from name`: columns whose stored name
+    /// was different. The migration planner renames the stored column
+    /// instead of dropping it and adding a new one (B09 P3).
+    pub renamed: Vec<TableRename>,
+    /// `retired legacy_note`: stored columns the table no longer has.
+    /// Dropping a column loses its data, so the planner drops only the
+    /// columns named here (B09 P3).
+    pub retired: Vec<Ident>,
+    /// `unique email` or `unique tenant, slug`: columns no two rows may
+    /// share, alone or together (B09 P10). Each line is one rule.
+    pub unique: Vec<Vec<Ident>>,
+}
+
+/// One `renamed from` clause: the declared field and the name its
+/// column was stored under.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TableRename {
+    pub field: Ident,
+    pub from: Ident,
+}
+
+impl TableDecl {
+    /// The name of the field every row carries for revision checks.
+    pub const REVISION_FIELD: &'static str = "revision";
+
+    pub fn name(&self) -> &Ident {
+        &self.record.name
+    }
+
+    /// The fields the source declares, without `revision`.
+    pub fn declared_fields(&self) -> &[Field] {
+        let fields = &self.record.fields;
+        &fields[..fields.len().saturating_sub(1)]
+    }
+}
+
+/// Where tables live (B09):
+///
+/// ```text
+/// database library:
+///     engine: sqlite
+///     location: env("LIBRARY_DATABASE")
+///     tables: Shelf, Book
+/// ```
+///
+/// Each setting is consequential (which engine, where the data is), so
+/// none has a default: the checker reports each missing one by name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DatabaseDecl {
+    pub name: Ident,
+    pub engine: Option<Ident>,
+    pub location: Option<DatabaseLocation>,
+    /// `tls: required` or `tls: disabled`: whether a networked engine's
+    /// connection is encrypted. Required for Postgres, refused for
+    /// SQLite (B09 P4).
+    pub tls: Option<Ident>,
+    /// `connections: 10`: how many connections a networked engine's pool
+    /// holds at most, with the span of the count. Required for Postgres,
+    /// refused for SQLite.
+    pub connections: Option<(i64, Span)>,
+    /// `public database library:` lets other modules import it and put
+    /// their tables in it with `table Shelf in library:` (B09 P11).
+    #[serde(default)]
+    pub visibility: Visibility,
+    pub span: Span,
+}
+
+/// Where a database is: a path, or the environment variable that holds
+/// one, so a deployment can choose it without editing source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DatabaseLocation {
+    /// `location: "library.sqlite"`
+    Path(String),
+    /// `location: env("LIBRARY_DATABASE")`
+    Env(String),
 }
 
 /// A tool declaration:

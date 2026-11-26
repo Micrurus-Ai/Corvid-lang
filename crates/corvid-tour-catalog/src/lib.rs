@@ -506,11 +506,11 @@ agent assistant(url: String) -> Result<String, String>:
         name: "replay-safe-secrets",
         title: "Replay-Safe Secret Access",
         category: "Executing I/O",
-        pitch: "secret_read is secret access with the trace problem actually solved: the program receives the real value, but the recorded ToolResult carries a redacted copy (traces NEVER persist secret values — a RuntimeChecked guarantee), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is Ok with present: false — absence is a modeled state, not a crash. The residual channel is stated, not hidden: forwarding a secret into another tool's arguments records it there; the structural SecretHandle taint is the tracked deepening.",
+        pitch: "secret_read is secret access with the trace problem actually solved: the program receives the real value, but the recorded ToolResult carries a redacted copy (traces NEVER persist secret values — a RuntimeChecked guarantee), and Substitute-mode replay re-reads the live environment instead of substituting, so a rotated credential diverges honestly instead of replaying a value the trace never stored. A missing secret is Ok with present: false — absence is a modeled state, not a crash. secret_read hands the program a plain String, so forwarding it into another tool's arguments records it there; `secret(name)` closes that channel by returning a `Secret` instead (see `corvid tour --topic secrets`).",
         spec: "docs/reference/stdlib/secrets.md",
         roadmap: "Slice 48a executing-secrets-and-cache",
         test: "crates/corvid-driver/tests/executing_secrets_cache_through_driver.rs + crates/corvid-runtime/tests/replay_quarantine_corpus.rs::replay_rereads_secret_from_live_environment",
-        non_scope: "Env-backed reads only; the opaque SecretHandle taint (a value that never serializes, accepted by consuming surfaces) is post-v1.0.",
+        non_scope: "Env-backed reads only. The text comes back as a String, so the program is responsible for where it goes; use `secret(name)` and the `Secret` type when it must never reach a trace, a prompt or a log.",
         source: r#"import "./std/secrets" use secret_read, SecretReadEnvelope
 
 agent api_key() -> Result<String, String>:
@@ -518,6 +518,45 @@ agent api_key() -> Result<String, String>:
     if not key.present:
         return Err("set ANTHROPIC_API_KEY")
     return Ok(key.value)
+"#,
+    },
+    TourTopic {
+        name: "secrets",
+        title: "Secrets That Never Reach a Trace, a Prompt or a Log",
+        category: "Safety at compile time",
+        pitch: "A webhook signing key, a password or an API token is a `Secret`: the program can use it but never reveal it. `secret(name)` from std/secrets reads one from the environment. Two secrets compare with `==`, in constant time, so checking a supplied token cannot leak it byte by byte; a secret can be handed to the tool that needs it, alone or inside a record. Everything else is a compile error that says why: no `to_string`, no `+`, no mixing with text, no JSON form, no route body or response, no store field or table column, no prompt parameter or result (no secret can reach a model), no `ask`/`choose`, and `main` may not return one. A tool that takes a `Secret` receives the text, while every record of the call holds `<redacted>` in that position: the ToolCall event, approvals, step events, replay and the exports built from the trace. A tool that echoes the secret back is scrubbed to `<redacted>` in the trace, not in what the program receives, and replaying that result warns. Replay re-reads the secret from the environment and matches the redacted argument, so a recorded run replays without the trace ever holding the text. The application contract leaves every secret field out, so no client or SDK has a field to read. `random_token(32)` from std/crypto issues a key that is a `Secret` from birth: the trace records `<redacted>`, the owner receives it once through a tool that takes a `Secret`, and only `hash_password(key, owasp_2023())` is kept; replay draws a fresh token and warns. `password.verify_password(hash)` checks one in constant time and is pure.",
+        spec: "docs/reference/cryptography.md#secrets",
+        roadmap: "B04 cryptography, slices 2 to 4",
+        test: "crates/corvid-types/src/tests/secrets.rs + crates/corvid-vm/src/tests/secrets.rs + crates/corvid-vm/src/tests/hmac.rs + crates/corvid-driver/tests/secret_values.rs + crates/corvid-driver/tests/webhook_verification.rs + crates/corvid-vm/src/tests/passwords.rs + crates/corvid-driver/tests/tokens_and_passwords.rs + crates/corvid-runtime/src/secret_arguments.rs tests",
+        non_scope: "Native code does everything with a secret except pass it to a tool of the program's own, which runs on the interpreter because native tool calls record their arguments without redaction. Environment-backed secrets only (no vault). A tool's own logging of the text it receives is outside the program's control. A route response cannot show a freshly issued key yet (deliver it through a tool); an encrypted table column is tracked in B09.",
+        source: r#"import "./std/secrets" use secret
+import "./std/crypto" use random_token, hash_password, owasp_2023
+
+type Delivery:
+    body: String
+    signature: String
+
+tool sign_webhook(key: Secret, body: String) -> String
+tool post_delivery(delivery: Delivery) -> Bool
+
+agent deliver(body: String) -> Result<Bool, String>:
+    key = secret("WEBHOOK_KEY")?
+    signature = sign_webhook(key, body)
+    return Ok(post_delivery(Delivery(body, signature)))
+
+agent token_matches(supplied: Secret) -> Result<Bool, String>:
+    expected = secret("API_TOKEN")?
+    return Ok(supplied == expected)
+
+tool deliver_key(owner: String, key: Secret) -> Bool
+
+agent issue_api_key(owner: String) -> String:
+    key = random_token(32)
+    delivered = deliver_key(owner, key)
+    return hash_password(key, owasp_2023())
+
+agent key_matches(presented: Secret, stored_hash: String) -> Bool:
+    return presented.verify_password(stored_hash)
 "#,
     },
     TourTopic {
@@ -646,6 +685,38 @@ agent typed_path(text: String) -> Result<Int, String>:
 "#,
     },
     TourTopic {
+        name: "tables",
+        title: "Typed Tables With Revision-Checked Writes",
+        category: "Executing I/O",
+        pitch: "A `table` is a record type stored in a database the program declares: a `database` block must name its engine, location and tables, because where data lives is a decision the source states. Rows come back as typed records, so a renamed column is a compile error at every read, and SQL text never appears in source. Every row carries a database-maintained `revision`; `Shelf.save(row)` writes only if the stored row still has the revision the row was read at, and a conflict comes back as a typed value holding the row stored now. A query such as `Shelf.where(fn (s) -> s.owner == owner).order_by(fn (s) -> s.title).take(10)` is a `List<Shelf>` run as one parameterized query, and a condition the database cannot run is a compile error. `corvid migrate plan` writes the migrations that create and change declared tables; a rename (`renamed from`) and a drop (`retired`) are declared, so the planner never mistakes one for the other or drops data silently. An `atomic:` block's writes commit together or not at all, and the compiler keeps out anything the database cannot undo. The tour declares a table and the agents that list, read and rename shelves.",
+        spec: "docs/reference/tables.md",
+        roadmap: "B09 typed persistence (P1 to P4, P7a, P7b)",
+        test: "crates/corvid-driver/tests/tables_e2e.rs + crates/corvid-driver/tests/tables_query.rs + crates/corvid-driver/tests/tables_atomic.rs + crates/corvid-cli/tests/tables_migrate.rs + crates/corvid-types/src/checker/tables.rs tests",
+        non_scope: "SQLite and Postgres through the interpreter only; comparisons inside JSON-stored columns, MySQL and the native target are later B09 slices; table operations replay from the trace.",
+        source: r#"database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+
+table Shelf:
+    key shelf: Int
+    owner: String
+    title: String
+
+agent shelves_of(owner: String) -> List<Shelf>:
+    return Shelf.where(fn (s) -> s.owner == owner).order_by(fn (s) -> s.title).take(10)
+
+agent rename(shelf_id: Int, title: String) -> String:
+    return match Shelf.get(shelf_id):
+        None -> "there is no such shelf"
+        Some(shelf) -> store(Shelf { title: title, ..shelf })
+
+agent store(renamed: Shelf) -> String:
+    return match Shelf.save(renamed):
+        Ok(saved) -> "saved revision " + saved.revision.to_string()
+        Err(current) -> "someone else changed the shelf first"
+"#,
+    },
+    TourTopic {
         name: "sqlite",
         title: "Executing SQLite Surface",
         category: "Executing I/O",
@@ -666,22 +737,34 @@ agent record_user(email: String) -> Result<Int, String>:
     },
     TourTopic {
         name: "http-client",
-        title: "Executing HTTP-Client Surface",
+        title: "Declared HTTP Client",
         category: "Executing I/O",
-        pitch: "Corvid's std/http tools perform real HTTP requests through a two-layer security boundary: an always-on structural SSRF block that refuses private / loopback / link-local hosts regardless of allowlist, plus a required [http] allow allowlist that fails closed when unconfigured. Calls from @deterministic agents are rejected at typecheck; Substitute-mode replay refuses every executing HTTP call regardless of allowlist contents. Transport failures and policy refusals return honest Err values (error HTTP statuses like 404 are still Ok envelopes — inspect `status`). The allowlist is declared in corvid.toml (or overridden by CORVID_HTTP_ALLOW) and signable through the cdylib's claim manifest. The same source compiles, type-checks, and runs identically whether the configured network endpoint is real or a loopback test responder — production behavior never branches on a test-only flag.",
-        spec: "docs/reference/stdlib/http.md",
-        roadmap: "Phase 33S2 executing HTTP-client surface",
-        test: "crates/corvid-driver/tests/executing_http_through_driver.rs + crates/corvid-runtime/src/http.rs HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs replay_blocks_executing_http_* fixtures",
-        non_scope: "Enforces SSRF + allowlist + replay quarantine on the URL host; does not police what user code does with the response body, and does not inspect or rewrite request headers.",
-        source: r#"import "./std/http" use http_get, http_post_json, http_ok, HttpResponseEnvelope
+        pitch: "Every HTTP request goes through a `connector` that declares how long it may take, which redirects it follows and how its failures are typed; omitting the timeout or the redirect policy is a compile error. A `hosts: allowed_hosts` connector takes the URL as a parameter and reaches any host the project's [http] allow permits, under an always-on structural SSRF block that refuses private, loopback and link-local addresses whatever the allowlist says. `on failure -> Unreachable` turns a refused URL, a timeout, a network error, an error status or a body that does not match the declared type into a typed Err value carrying the reason. A redirect never carries the credential to another host, the trace records every attempt without a header value or body text, and replay answers each call from the recording without touching the network.",
+        spec: "docs/proposals/http-client.md",
+        roadmap: "B05 complete HTTP client",
+        test: "crates/corvid-driver/tests/connector_any_host.rs + connector_modes.rs + connector_json_bodies.rs + connector_responses.rs + crates/corvid-runtime/src/http.rs redirect, timeout and HttpEgressPolicy tests + crates/corvid-runtime/tests/replay_quarantine_corpus.rs connector fixtures",
+        non_scope: "Enforces the declared timeout, redirect policy, SSRF block, allowlist and replay quarantine; it does not police what the program does with a response, resolve a hostname before the SSRF check, or run on the native target yet.",
+        source: r#"effect http_read:
+    cost: $0.0
 
-agent fetch_status(url: String) -> Result<Int, String>:
-    response: HttpResponseEnvelope = http_get(url)?
-    return Ok(response.status)
+type FetchError:
+    | Unreachable(reason: String)
 
-agent ship_event(url: String, body: String) -> Result<Bool, String>:
-    response: HttpResponseEnvelope = http_post_json(url, body)?
-    return Ok(http_ok(response))
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    published: no
+    modes: [real, replay]
+    operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+
+agent status_of(url: String) -> Int uses http_read:
+    return match page(url):
+        Ok(answer) -> answer.status()
+        Err(e) -> 0
 "#,
     },
     TourTopic {
@@ -737,7 +820,7 @@ tool echo_stream(m: String) -> Stream<String>
         first_login: open
         tenant: fixed("public")
 
-type Secret:
+type Classified:
     value: String
 
 server secure_api:
@@ -745,8 +828,8 @@ server secure_api:
     # caller's session to a verified `actor` and enforces the policy
     # before the handler runs — an unauthenticated request is a 401,
     # never the classified body.
-    route GET "/secret" -> json Secret requires authenticated:
-        return Secret("classified")
+    route GET "/secret" -> json Classified requires authenticated:
+        return Classified("classified")
 "#,
     },
     TourTopic {
@@ -853,6 +936,9 @@ type GithubError:
     | RateLimited
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     retry: 3
@@ -886,6 +972,9 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]

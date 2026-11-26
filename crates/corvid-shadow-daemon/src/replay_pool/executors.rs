@@ -107,15 +107,9 @@ impl ShadowReplayExecutor for InterpreterShadowExecutor {
             ))
         })?;
 
-        let writer = recorded_writer(&recorded_events).unwrap_or_default();
-        if writer != WRITER_INTERPRETER {
-            return Err(ShadowExecutorError::Runtime(
-                RuntimeError::CrossTierReplayUnsupported {
-                    recorded_writer: writer,
-                    replay_writer: WRITER_INTERPRETER.into(),
-                },
-            ));
-        }
+        // Either tier's recording replays here (native dispatch N5):
+        // replay compares each substituted call exactly and reports a
+        // divergence where the tiers differ.
 
         let (agent_name, run_args_json) = recorded_events
             .iter()
@@ -252,15 +246,9 @@ impl ShadowReplayExecutor for NativeShadowExecutor {
             ))
         })?;
 
-        let writer = recorded_writer(&recorded_events).unwrap_or_default();
-        if writer != WRITER_NATIVE {
-            return Err(ShadowExecutorError::Runtime(
-                RuntimeError::CrossTierReplayUnsupported {
-                    recorded_writer: writer,
-                    replay_writer: WRITER_NATIVE.into(),
-                },
-            ));
-        }
+        // Either tier's recording replays here (native dispatch N5):
+        // replay compares each substituted call exactly and reports a
+        // divergence where the tiers differ.
 
         let (agent_name, run_args_json) = recorded_events
             .iter()
@@ -402,13 +390,6 @@ impl ShadowReplayExecutor for NativeShadowExecutor {
             error,
         })
     }
-}
-
-fn recorded_writer(events: &[TraceEvent]) -> Option<String> {
-    events.iter().find_map(|event| match event {
-        TraceEvent::SchemaHeader { writer, .. } => Some(writer.clone()),
-        _ => None,
-    })
 }
 
 fn native_arg_from_json(value: &serde_json::Value) -> Result<String, ShadowExecutorError> {

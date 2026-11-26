@@ -44,6 +44,8 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::ResumeToken(inner)
         | Type::Upload(inner)
         | Type::Page(inner)
+        | Type::Response(inner)
+        | Type::Conflict(inner, _)
         | Type::Weak(inner, _) => rewrite(inner),
         Type::Map(a, b) | Type::Result(a, b) => rewrite(a) | rewrite(b),
         Type::Function { params, ret, .. } => {
@@ -71,6 +73,16 @@ fn rewrite(ty: &mut Type) -> bool {
         | Type::DbHandle
         | Type::JsonValue
         | Type::JsonBuilder
+        | Type::RegexMatch
+        | Type::Decimal
+        | Type::Duration
+        | Type::Instant
+        | Type::TimeZone
+        | Type::ZonedTime
+        | Type::Currency
+        | Type::Locale
+        | Type::Bytes
+        | Type::Secret
         | Type::Unknown => false,
     }
 }

@@ -45,21 +45,30 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod equality;
+mod number_text;
+mod secret_object;
+mod response_exports;
 mod approval_exports;
+mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.
 // The actual extern "C" entry points land in 33S1 (io), 33S2
 // (http), 33S3 (db). The modules exist now so the per-surface
 // slices have a settled home and the `SurfaceNotImplemented`
 // helper is reachable from regression tests.
+mod currency;
 mod db_exports;
+mod decimal;
 mod http_exports;
 mod io_exports;
 mod json_exports;
 mod llm_dispatch;
+mod native_scalar;
 mod prompt_exports;
 mod replay_exports;
 mod state;
 mod strings;
+mod text;
+mod time;
 mod tokio_handle;
 mod tool_iter;
 mod typed_json;
@@ -190,13 +199,12 @@ pub unsafe extern "C" fn corvid_tool_call_sync_int(name_ptr: *const u8, name_len
 // consumed by compile-time-generated code.
 // ------------------------------------------------------------
 
-fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
+pub(crate) fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
     if matches!(
         err,
         RuntimeError::ReplayTraceLoad { .. }
             | RuntimeError::ReplayDivergence(_)
             | RuntimeError::InvalidReplayMutation { .. }
-            | RuntimeError::CrossTierReplayUnsupported { .. }
     ) {
         panic!("{context}: {err}");
     }

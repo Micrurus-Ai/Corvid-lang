@@ -13,6 +13,7 @@
 //! they differ only on `Option`, `Result` and `Grounded`.
 
 use crate::value::{BoxedValue, EnumValue, ListValue, MapValue, StructValue, Value};
+use corvid_public_json::text_scalar::TextScalar;
 use corvid_ir::IrType;
 use corvid_resolve::DefId;
 use corvid_types::Type;
@@ -55,6 +56,39 @@ pub fn decode_public_json(
     unknown_fields: UnknownFields,
 ) -> Result<Value, JsonDecodeError> {
     corvid_public_json::decode(json, expected, types_by_id, unknown_fields, &mut InterpreterValues)
+}
+
+/// Read request text (a path segment or one query value) as a value of
+/// type `expected`, through the public mapping's decoder. `None` when
+/// the type cannot be written as request text, which the checker
+/// already refuses. The error reads "`raw` is not ...".
+pub fn decode_request_text(
+    raw: &str,
+    expected: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+) -> Option<Result<Value, String>> {
+    let shape = corvid_types::text_parameters::text_shape(expected, &|ty| has_plain_variants(ty, types_by_id))?;
+    let json = match corvid_public_json::request_text::request_text_json(raw, shape) {
+        Ok(json) => json,
+        Err(problem) => return Some(Err(problem)),
+    };
+    Some(decode_public_json(&json, expected, types_by_id, UnknownFields::Reject).map_err(|error| {
+        format!("`{raw}` is not {}", error.expected)
+    }))
+}
+
+/// Whether `ty` is a sum type whose variants all have no fields, as
+/// the IR declares it: the server's answer to the question the checker
+/// answers from the source.
+pub fn has_plain_variants(ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> bool {
+    let id = match ty {
+        Type::Struct(id) => *id,
+        Type::ImportedStruct(imported) => imported.def_id,
+        _ => return false,
+    };
+    types_by_id
+        .get(&id)
+        .is_some_and(|t| !t.variants.is_empty() && t.variants.iter().all(|v| v.fields.is_empty()))
 }
 
 /// Decode JSON `text` into a value of type `expected`: the
@@ -120,6 +154,39 @@ impl corvid_public_json::ValueBuilder for InterpreterValues {
     fn json(&mut self, json: &J) -> Value {
         Value::JsonValue(Arc::new(json.clone()))
     }
+    fn text_scalar(&mut self, value: TextScalar) -> Value {
+        value_of_text_scalar(value)
+    }
+}
+
+/// B06 — the interpreter value of a parsed text scalar. Tool and prompt
+/// JSON (`conv.rs`) and the public mapping both go through this pair.
+pub(crate) fn value_of_text_scalar(value: TextScalar) -> Value {
+    match value {
+        TextScalar::Decimal(d) => Value::Decimal(d),
+        TextScalar::Duration(d) => Value::Duration(d),
+        TextScalar::Instant(i) => Value::Instant(i),
+        TextScalar::TimeZone(z) => Value::TimeZone(z),
+        TextScalar::ZonedTime(z) => Value::ZonedTime(z),
+        TextScalar::Currency(c) => Value::Currency(c),
+        TextScalar::Locale(l) => Value::Locale(Arc::new(l)),
+        TextScalar::Bytes(b) => Value::Bytes(b),
+    }
+}
+
+/// B06 — the text scalar an interpreter value holds, if it is one.
+pub(crate) fn text_scalar_of_value(value: &Value) -> Option<TextScalar> {
+    Some(match value {
+        Value::Decimal(d) => TextScalar::Decimal(*d),
+        Value::Duration(d) => TextScalar::Duration(*d),
+        Value::Instant(i) => TextScalar::Instant(*i),
+        Value::TimeZone(z) => TextScalar::TimeZone(*z),
+        Value::ZonedTime(z) => TextScalar::ZonedTime(*z),
+        Value::Currency(c) => TextScalar::Currency(*c),
+        Value::Locale(l) => TextScalar::Locale((**l).clone()),
+        Value::Bytes(b) => TextScalar::Bytes(b.clone()),
+        _ => return None,
+    })
 }
 
 /// Encode `value`, of type `ty`, as compact public JSON text with sorted
@@ -237,6 +304,9 @@ impl corvid_public_json::ValueReader for InterpreterValues {
             Value::JsonValue(json) => Ok((**json).clone()),
             other => Err(mismatch("JsonValue", other)),
         }
+    }
+    fn text_scalar(&mut self, ty: &Type, value: &Value) -> Result<TextScalar, String> {
+        text_scalar_of_value(value).ok_or_else(|| mismatch(&ty.display_name(), value))
     }
 }
 

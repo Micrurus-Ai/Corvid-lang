@@ -76,6 +76,8 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Import(d) => d.alias.as_ref().map(|a| a.name.as_str()),
         Decl::Type(d) => Some(&d.name.name),
         Decl::Store(d) => Some(&d.name.name),
+        Decl::Table(d) => Some(&d.record.name.name),
+        Decl::Database(d) => Some(&d.name.name),
         Decl::Tool(d) => Some(&d.name.name),
         Decl::Prompt(d) => Some(&d.name.name),
         Decl::Agent(d) => Some(&d.name.name),
@@ -144,6 +146,19 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
                 collect_typeref_dep(&field.ty, resolved, deps);
             }
         }
+        Decl::Table(table) => {
+            for field in &table.record.fields {
+                collect_typeref_dep(&field.ty, resolved, deps);
+            }
+            if let Some(database) = &table.database {
+                if let Some(crate::Binding::Decl(id)) = resolved.bindings.get(&database.span) {
+                    deps.insert(*id);
+                }
+            }
+        }
+        // A database declares no dependencies; a table that names its
+        // database with `in` orders after it (handled with the table).
+        Decl::Database(_) => {}
         Decl::Server(server) => {
             for route in &server.routes {
                 for param in &route.path_params {
@@ -282,6 +297,9 @@ fn collect_stmt_deps(stmt: &Stmt, resolved: &Resolved, deps: &mut HashSet<DefId>
         }
         Stmt::For { iter, body, .. } => {
             collect_expr_deps(iter, resolved, deps);
+            collect_block_deps(body, resolved, deps);
+        }
+        Stmt::Atomic { body, .. } => {
             collect_block_deps(body, resolved, deps);
         }
         Stmt::While { cond, body, .. } => {

@@ -146,6 +146,8 @@ fn decl_kind_name(decl: &Decl) -> String {
         Decl::Import(_) => "import".into(),
         Decl::Type(_) => "type".into(),
         Decl::Store(store) => store.kind.as_str().into(),
+        Decl::Table(_) => "table".into(),
+        Decl::Database(_) => "database".into(),
         Decl::Tool(_) => "tool".into(),
         Decl::Prompt(_) => "prompt".into(),
         Decl::Agent(_) => "agent".into(),

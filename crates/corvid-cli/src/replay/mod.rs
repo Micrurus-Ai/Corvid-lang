@@ -161,6 +161,7 @@ fn run_id_of(events: &[TraceEvent]) -> Option<&str> {
         | TraceEvent::HumanChoiceRequest { run_id, .. }
         | TraceEvent::HumanChoiceResponse { run_id, .. }
         | TraceEvent::HostEvent { run_id, .. }
+        | TraceEvent::HttpExchange { run_id, .. }
         | TraceEvent::SeedRead { run_id, .. }
         | TraceEvent::ClockRead { run_id, .. }
         | TraceEvent::ModelSelected { run_id, .. }
@@ -199,6 +200,7 @@ mod tests {
                 writer: WRITER_INTERPRETER.into(),
                 commit_sha: None,
                 source_path: Some("demo.cor".into()),
+                tzdb_version: None,
                 ts_ms: 1,
                 run_id: run_id.into(),
             },

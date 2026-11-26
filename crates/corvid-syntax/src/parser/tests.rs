@@ -30,7 +30,17 @@ use corvid_ast::{Backoff, BackpressurePolicy, BinaryOp, Expr, Literal, ToolDecl,
     #[test]
     fn float_literal() {
         match parse("3.14") {
-            Expr::Literal { value: Literal::Float(f), .. } => assert!((f - 3.14).abs() < 1e-9),
+            Expr::Literal { value: Literal::Float { value: f, .. }, .. } => assert!((f - 3.14).abs() < 1e-9),
+            other => panic!("expected float, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn float_literal_keeps_its_source_digits() {
+        // B06 — a literal typed `Decimal` is read from these digits, so
+        // trailing zeros and long fractions survive the `f64`.
+        match parse("2.50") {
+            Expr::Literal { value: Literal::Float { text, .. }, .. } => assert_eq!(text, "2.50"),
             other => panic!("expected float, got {other:?}"),
         }
     }
@@ -3760,9 +3770,151 @@ fn parses_provisioning_invited_from_invitation() {
     assert!(matches!(prov.tenant, corvid_ast::TenantAssignment::FromInvitation));
 }
 
+/// A connector declares its timeout and redirect policy; an operation
+/// may declare its own timeout.
+#[test]
+fn parses_connector_timeout_and_redirect_policy() {
+    let src = "connector files:
+    base_url: \"https://files.example.com\"
+    timeout: 10s
+    redirects: same_host
+    published: no
+    modes: [real]
+    operation upload(id: String) -> String:
+        POST \"/files/{id}\"
+        timeout: 120s
+    operation ping() -> String:
+        GET \"/ping\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.timeout_secs, Some(10));
+    assert_eq!(c.redirects, Some(corvid_ast::RedirectPolicy::SameHost));
+    assert_eq!(c.operations[0].timeout_secs, Some(120));
+    assert_eq!(c.operations[1].timeout_secs, None);
+    assert_eq!(c.operation_timeout_secs(&c.operations[0]), Some(120));
+    assert_eq!(c.operation_timeout_secs(&c.operations[1]), Some(10));
+}
+
+/// The seconds unit is required, an unknown redirect policy names the
+/// three it accepts, and each item appears once.
+#[test]
+fn connector_policy_items_reject_unclear_forms() {
+    let connector = |items: &str| {
+        format!(
+            "connector svc:\n    base_url: \"https://svc.example.com\"\n{items}    modes: [real]\n    operation ping() -> String:\n        GET \"/ping\"\n"
+        )
+    };
+    let first_error = |src: String| {
+        let (_, errors) = parse_file_errs(&src);
+        errors.first().map(|e| format!("{:?}", e.kind)).unwrap_or_default()
+    };
+
+    let missing_unit = first_error(connector("    timeout: 10\n    redirects: never\n    published: no\n"));
+    assert!(missing_unit.contains("timeout: 10s"), "{missing_unit}");
+
+    let unknown = first_error(connector("    timeout: 10s\n    redirects: follow\n"));
+    assert!(unknown.contains("`never`, `same_host`, or `allowed_hosts`"), "{unknown}");
+
+    let twice = first_error(connector("    timeout: 10s\n    timeout: 20s\n    redirects: never\n    published: no\n"));
+    assert!(twice.contains("second `timeout:`"), "{twice}");
+
+    let maybe = first_error(connector("    timeout: 10s\n    redirects: never\n    published: maybe\n"));
+    assert!(maybe.contains("`published: yes`") && maybe.contains("`published: no`"), "{maybe}");
+
+    let published_twice =
+        first_error(connector("    timeout: 10s\n    redirects: never\n    published: no\n    published: yes\n"));
+    assert!(published_twice.contains("second `published:`"), "{published_twice}");
+
+    let (file, errors) =
+        parse_file_errs(&connector("    timeout: 10s\n    redirects: never\n    published: yes\n"));
+    assert!(errors.is_empty(), "{errors:?}");
+    let Decl::Connector(c) = &file.decls[0] else { panic!("a connector") };
+    assert_eq!(c.published, Some(true));
+}
+
+/// `query <param>` sits on the request line before any body, and
+/// `header` lines take a parameter or a fixed string.
+#[test]
+fn parses_operation_query_and_headers() {
+    let src = "connector payments:
+    base_url: \"https://api.payments.example\"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation charge(filter: ChargeQuery, new: NewCharge, key: String) -> Charge:
+        POST \"/v1/charges\" query filter body new
+        header \"Idempotency-Key\": key
+        header \"Accept\": \"application/json\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    let op = &c.operations[0];
+    assert_eq!(op.query.as_ref().map(|q| q.name.as_str()), Some("filter"));
+    assert_eq!(op.body.as_ref().map(|b| b.param.name.as_str()), Some("new"));
+    assert_eq!(op.headers.len(), 2);
+    assert_eq!(op.headers[0].name, "Idempotency-Key");
+    assert!(matches!(&op.headers[0].value, corvid_ast::OperationHeaderValue::Param(p) if p.name == "key"));
+    assert!(matches!(&op.headers[1].value, corvid_ast::OperationHeaderValue::Literal(t) if t == "application/json"));
+
+    let (_, errors) = parse_file_errs(&src.replace("query filter body new", "body new query filter"));
+    assert!(format!("{:?}", errors.first().map(|e| &e.kind)).contains("before `body` or `form`"), "{errors:?}");
+}
+
+/// `hosts: allowed_hosts` replaces `base_url`; an operation then names
+/// its URL parameter, and `response: text` reads a page.
+#[test]
+fn parses_an_any_host_connector() {
+    let src = "connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: allowed_hosts
+    published: no
+    modes: [real]
+    operation fetch(url: String) -> Response<String>:
+        GET url
+        response: text
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.base_url, None);
+    let op = &c.operations[0];
+    assert_eq!(op.url_param.as_ref().map(|u| u.name.as_str()), Some("url"));
+    assert!(op.response_text);
+
+    let (_, both) = parse_file_errs(&src.replace("hosts: allowed_hosts", "hosts: allowed_hosts\n    base_url: \"https://a.example\""));
+    assert!(format!("{:?}", both.first().map(|e| &e.kind)).contains("both `base_url` and `hosts`"), "{both:?}");
+    let (_, neither) = parse_file_errs(&src.replace("    hosts: allowed_hosts\n", ""));
+    assert!(format!("{:?}", neither.first().map(|e| &e.kind)).contains("without `base_url` or `hosts`"), "{neither:?}");
+}
+
+#[test]
+fn parses_a_streamed_operation_and_its_end_marker() {
+    let src = "connector provider:
+    base_url: \"https://p.example\"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation deltas(q: String) -> Stream<Delta>:
+        POST \"/v1/complete\" body q
+        streams: server_sent_events until \"[DONE]\"
+";
+    let file = parse_file_src(src);
+    let Some(Decl::Connector(c)) = file.decls.first() else { panic!("expected a connector") };
+    assert_eq!(c.operations[0].streams, Some(corvid_ast::StreamFormat::ServerSentEvents));
+    assert_eq!(c.operations[0].stream_until.as_deref(), Some("[DONE]"));
+    let (_, errors) = parse_file_errs(&src.replace("server_sent_events until \"[DONE]\"", "websockets"));
+    assert!(format!("{:?}", errors.first().map(|e| &e.kind)).contains("`server_sent_events` or `json_lines`"), "{errors:?}");
+}
+
 #[test]
 fn parses_connector_with_config_and_operations() {
     let src = "connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     retry: 3
@@ -3787,7 +3939,7 @@ fn parses_connector_with_config_and_operations() {
         })
         .unwrap();
     assert_eq!(c.name.name, "github");
-    assert_eq!(c.base_url, "https://api.github.com");
+    assert_eq!(c.base_url.as_deref(), Some("https://api.github.com"));
     assert!(matches!(
         c.auth.as_ref().unwrap(),
         corvid_ast::ConnectorAuth::Bearer(s) if s.name == "GITHUB_TOKEN"
@@ -3832,6 +3984,9 @@ fn parses_optional_protocol_cancel_endpoint() {
     // compensation possible (absent → a submitted intent can only
     // detach). Unlike `poll` it may mutate, since cancelling is an action.
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3872,6 +4027,9 @@ fn parses_optional_protocol_cancel_endpoint() {
 #[test]
 fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3910,6 +4068,9 @@ fn a_protocol_without_a_cancel_endpoint_parses_with_none() {
 #[test]
 fn parses_verified_async_provider_protocol() {
     let src = r#"connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -3960,6 +4121,9 @@ fn parses_verified_async_provider_protocol() {
 fn a_protocol_without_a_resume_posture_is_a_compile_error() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4010,6 +4174,9 @@ fn a_cosmetically_edited_protocol_keeps_its_fingerprint() {
     let original = protocol_of(
         r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4036,6 +4203,9 @@ connector video:
     let reformatted = protocol_of(
         r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4076,6 +4246,9 @@ connector video:
 fn a_protocol_without_an_idempotency_transport_is_a_compile_error() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4113,6 +4286,9 @@ connector video:
 fn an_unknown_resume_posture_is_rejected() {
     let src = r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("KEY"))
     modes: [real]
@@ -4144,6 +4320,9 @@ connector video:
 #[test]
 fn parses_connector_header_and_basic_auth() {
     let src = "connector svc:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://svc.example.com\"
     auth: header(\"X-Api-Key\", secret(\"API_KEY\"))
     operation ping() -> Pong:
@@ -4172,6 +4351,9 @@ fn connector_secret_must_not_be_a_literal() {
     // A bare string where a `secret(...)` is required is a parse error —
     // credentials are never literals.
     let src = "connector svc:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://svc.example.com\"
     auth: bearer(\"raw-token\")
     operation ping() -> Pong:

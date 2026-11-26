@@ -278,6 +278,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            Stmt::Atomic { body, span } => self.check_atomic(body, *span),
             Stmt::While { cond, body, .. } => {
                 // Same Grounded<Bool> acceptance rule as `if`: the
                 // branch consumes the bool, it does not launder it.
@@ -407,7 +408,7 @@ impl<'a> Checker<'a> {
                     // operands, which can duplicate a diagnostic on an
                     // already-invalid target — accepted trade-off to
                     // keep ONE operator type table.
-                    Some(op) => self.check_binop(*op, target, value, s.span()),
+                    Some(op) => self.check_binop(*op, target, value, s.span(), None),
                     None => self.check_expr_as(value, Some(&target_ty)),
                 };
                 if !result_ty.is_assignable_to(&target_ty) {

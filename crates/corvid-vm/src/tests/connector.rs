@@ -25,6 +25,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, replay, real]
@@ -59,6 +62,9 @@ type NewIssue:
     title: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]

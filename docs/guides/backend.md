@@ -82,6 +82,20 @@ Notes on the shape:
   shape; `uses transfer_money` declares the effect row the route
   carries; the body block can reference the parsed body as
   `body`.
+- `route GET "/refunds/{refund: Int}" -> json RefundStatus: ...` — a
+  `{...}` part of the path is a parameter, read as `path.refund`.
+  `{refund: Int}` makes it an `Int`; `Float`, `Bool`, `Decimal`,
+  `Instant`, `Duration`, a time zone, currency, locale, `Bytes`, or a
+  type of plain variants (`{status: Status}`, read by the variant's
+  name) work the same way. `{refund}` alone is a `String`. A request
+  whose segment is not its type is answered with a 400 naming the
+  parameter before the handler runs. The contract and the generated
+  clients carry the type, and `live` paths read parameters the same way.
+- `query Search` reads the query string into the record `Search`, with
+  the same types per field, plus `Option` (left out of the URL when
+  absent, `None` in the handler) and `List` (the name repeated:
+  `?status=Open&status=Closed`). A value is read exactly as it would be
+  in a JSON body, so `?total=19.90` keeps its digits.
 
 The typechecker enforces:
 

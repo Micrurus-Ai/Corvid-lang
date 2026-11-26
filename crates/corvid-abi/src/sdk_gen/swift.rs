@@ -18,6 +18,7 @@ pub(super) fn emit_swift(contract: &ApplicationContract) -> String {
     let mut out = format!("// {}\n\n", NOTE_SCAFFOLD.replace('\n', "\n// "));
     out.push_str(PRELUDE);
     out.push_str(&page_model());
+    out.push_str(&conflict_model());
     let json_error: Vec<(String, TypeName)> = corvid_types::json_error_fields()
         .iter()
         .map(|(name, ty)| (name.to_string(), TypeName::parse(&ty.display_name())))
@@ -150,6 +151,52 @@ fn page_model() -> String {
     )
 }
 
+/// A table write's conflict (B09): a generic enum with one case per
+/// `corvid_types::ConflictCase`, travelling as the sum type it is.
+fn conflict_model() -> String {
+    let cases = corvid_types::ConflictCase::ALL;
+    let mut out = String::from("/// Why a table write did not happen.\npublic enum CorvidConflict<Row: Codable>: Codable {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        match case.field() {
+            Some(field) => out.push_str(&format!("    case {name}({field}: Row)\n")),
+            None => out.push_str(&format!("    case {name}\n")),
+        }
+    }
+    let names = cases.iter().map(|case| case.name()).collect::<Vec<_>>().join(", ");
+    out.push_str("\n    public init(from decoder: Decoder) throws {\n        let c = try decoder.container(keyedBy: CorvidVariantKeys.self)\n        let variant = try c.decode(String.self, forKey: .variant)\n        switch variant {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        out.push_str(&format!("        case {:?}:\n", case.name()));
+        match case.field() {
+            Some(field) => out.push_str(&format!(
+                "            var fields = try c.nestedUnkeyedContainer(forKey: .fields)\n            try corvidArity(fields, 1, {:?}, c)\n            self = .{name}({field}: try fields.decode(Row.self))\n",
+                case.name()
+            )),
+            None => out.push_str(&format!("            self = .{name}\n")),
+        }
+    }
+    out.push_str(&format!(
+        "        default:\n            throw DecodingError.dataCorruptedError(forKey: .variant, in: c, debugDescription: \"expected one of {names}, found \\(variant)\")\n        }}\n    }}\n\n"
+    ));
+    out.push_str("    public func encode(to encoder: Encoder) throws {\n        var c = encoder.container(keyedBy: CorvidVariantKeys.self)\n        try c.encode(\"variant\", forKey: .tag)\n        try c.encode(\"Conflict\", forKey: .type)\n        switch self {\n");
+    for case in cases {
+        let name = lower_first(case.name());
+        match case.field() {
+            Some(field) => out.push_str(&format!(
+                "        case let .{name}({field}):\n            try c.encode({:?}, forKey: .variant)\n            var fields = c.nestedUnkeyedContainer(forKey: .fields)\n            try fields.encode({field})\n",
+                case.name()
+            )),
+            None => out.push_str(&format!(
+                "        case .{name}:\n            try c.encode({:?}, forKey: .variant)\n            _ = c.nestedUnkeyedContainer(forKey: .fields)\n",
+                case.name()
+            )),
+        }
+    }
+    out.push_str("        }\n    }\n}\n\n");
+    out
+}
+
 /// The payload of an `Option` field, which decodes when present.
 fn optional_payload(ty: &TypeName) -> Option<&TypeName> {
     match (ty.head.as_str(), ty.args.len()) {
@@ -165,6 +212,9 @@ fn swift_type(ty: &TypeName) -> String {
         ("Int", 0) => "Int".into(),
         ("Float", 0) => "Double".into(),
         ("String" | "TraceId", 0) => "String".into(),
+        // B06 — exact canonical text, the one mapping every SDK can hold
+        // without losing digits, scale or nanoseconds.
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "String".into(),
         ("Bool", 0) => "Bool".into(),
         ("Nothing", 0) => "CorvidNothing".into(),
         ("JsonValue", 0) => "CorvidJSONValue".into(),
@@ -173,6 +223,7 @@ fn swift_type(ty: &TypeName) -> String {
         ("Stream" | "Tainted", 1) => swift_type(ty.arg(0)),
         ("Grounded", 1) => format!("CorvidGrounded<{}>", swift_type(ty.arg(0))),
         ("Page", 1) => format!("CorvidPage<{}>", swift_type(ty.arg(0))),
+        ("Conflict", 1) => format!("CorvidConflict<{}>", swift_type(ty.arg(0))),
         ("Upload", 1) => "Data".into(),
         ("Map", 2) if ty.arg(0).head == "String" => format!("[String: {}]", swift_type(ty.arg(1))),
         ("Map", 2) => format!("CorvidPairs<{}, {}>", swift_type(ty.arg(0)), swift_type(ty.arg(1))),

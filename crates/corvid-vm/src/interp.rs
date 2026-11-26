@@ -25,8 +25,23 @@ mod run_validate;
 mod stmt;
 #[path = "interp/stream_ops.rs"]
 mod stream_ops;
+mod tables;
 #[path = "interp/test_runner.rs"]
 mod test_runner;
+#[path = "interp/text_methods.rs"]
+mod text_methods;
+#[path = "interp/decimal.rs"]
+mod decimal;
+#[path = "interp/time.rs"]
+mod time;
+#[path = "interp/currency.rs"]
+mod currency;
+#[path = "interp/crypto.rs"]
+mod crypto;
+#[path = "interp/secret_tools.rs"]
+mod secret_tools;
+#[path = "interp/connector_json.rs"]
+mod connector_json;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 
@@ -148,6 +163,10 @@ struct Interpreter<'ir> {
     /// from live timing. `None` for completed/errored arms and outside
     /// replay.
     replay_cancel_after: Option<usize>,
+    /// The open `atomic:` block's transaction (B09 P7a), shared with
+    /// the agents it calls so their table operations join it. `None`
+    /// outside an `atomic:` block.
+    table_transaction: Option<Arc<corvid_runtime::tables::TableTransaction>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -188,6 +207,7 @@ impl<'ir> Interpreter<'ir> {
             parallel_cancel: None,
             dispatch_count: None,
             replay_cancel_after: None,
+            table_transaction: None,
         }
     }
 
@@ -286,7 +306,6 @@ impl<'ir> Interpreter<'ir> {
         tool: &'ir IrTool,
         callee_name: &str,
         arg_values: Vec<Value>,
-        json_args: &[serde_json::Value],
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
@@ -326,27 +345,48 @@ impl<'ir> Interpreter<'ir> {
                 // response, every transition checkpointed) instead of a
                 // one-shot request. It never treats the submit response
                 // as completion.
+                // The provider sees public JSON: an `Option` is its value
+                // or `null`, as `T.to_json()` writes it.
+                let payload_param = op.body.as_ref().and_then(|b| {
+                    let file = tool.params.iter().any(|p| {
+                        p.name == b.param_name && matches!(p.ty, Type::Bytes | Type::Upload(_))
+                    });
+                    (file || b.encoding == corvid_ast::BodyEncoding::Multipart).then_some(b.param_name.as_str())
+                });
+                let wire_args = connector_json::connector_arguments(
+                    &tool.params,
+                    &arg_values,
+                    &self.types_by_id,
+                    payload_param,
+                )
+                .map_err(|e| {
+                    InterpError::new(
+                        InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
+                        span,
+                    )
+                })?;
+                if let (Some(_), Type::Stream(event_ty)) = (op.streams, result_decode_ty) {
+                    return self
+                        .open_connector_stream(callee_name, wire_args, event_ty, op.on_failure.as_deref(), tool.breaker.is_some(), span)
+                        .await;
+                }
+                let revealed = wire_args.revealed();
+                let wire_args = wire_args.recorded;
                 if let Some(protocol) = &op.protocol {
                     match self
                         .runtime
-                        .call_protocol_operation(callee_name, protocol, json_args.to_vec())
+                        .call_protocol_operation(callee_name, protocol, wire_args)
                         .await
                     {
-                        Ok(result) => json_to_value(result, result_decode_ty, &self.types_by_id)
-                            .map_err(|e| {
-                                InterpError::new(
-                                    InterpErrorKind::Marshal(format!(
-                                        "connector `{callee_name}`: {e}"
-                                    )),
-                                    span,
-                                )
-                            }),
+                        Ok(result) => self.decode_connector_result(callee_name, None, result, result_decode_ty, span),
                         Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
                     }
                 } else {
                     self.dispatch_connector_via_runtime(
                         callee_name,
-                        json_args,
+                        op.on_failure.as_deref(),
+                        wire_args,
+                        revealed,
                         result_decode_ty,
                         span,
                     )
@@ -359,16 +399,12 @@ impl<'ir> Interpreter<'ir> {
         // effects / outcome — NEVER the arguments or the response
         // payload. Emitted as a host event, which replay classifies as
         // dispatch metadata and skips, so it never perturbs replay.
-        let outcome = if outcome_result.is_ok() { "ok" } else { "error" };
-        self.runtime.emit_host_event(
-            "connector.invocation",
-            serde_json::json!({
-                "connector": connector.name,
-                "operation": op.name,
-                "mode": mode.as_str(),
-                "effects": tool.effect_names,
-                "outcome": outcome,
-            }),
+        self.runtime.record_connector_invocation(
+            &connector.name,
+            &op.name,
+            mode,
+            &tool.effect_names,
+            outcome_result.is_ok(),
         );
         outcome_result
     }
@@ -410,7 +446,7 @@ impl<'ir> Interpreter<'ir> {
                 if let Some(protocol) = &op.protocol {
                     self.validate_protocol_mock(protocol, connector, op, &value, span)?;
                 }
-                Ok(value)
+                Ok(connector_json::mock_response(value, &tool.return_ty))
             }
             Err(_propagated) => Err(InterpError::new(
                 InterpErrorKind::Other(format!(
@@ -479,21 +515,113 @@ impl<'ir> Interpreter<'ir> {
     async fn dispatch_connector_via_runtime(
         &self,
         callee_name: &str,
-        json_args: &[serde_json::Value],
+        on_failure: Option<&str>,
+        wire_args: Vec<serde_json::Value>,
+        revealed: Option<corvid_runtime::RevealedToolArguments>,
         result_decode_ty: &Type,
         span: Span,
     ) -> Result<Value, InterpError> {
-        let result = self
+        // A file body is recorded by digest and sent by its bytes.
+        let result = match revealed {
+            Some(revealed) => self.runtime.call_tool_revealing_secrets(callee_name, wire_args, revealed).await,
+            None => self.runtime.call_tool(callee_name, wire_args).await,
+        };
+        let result = result
+            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
+        self.decode_connector_result(callee_name, on_failure, result, result_decode_ty, span)
+    }
+
+    /// A streamed connector call: open the runtime's event stream and
+    /// decode each event into `T` as it arrives, through the public JSON
+    /// mapping. Dropping the returned stream aborts the producer, which
+    /// drops the HTTP response and closes the upstream connection.
+    /// With `on failure` over `Result` events (decision 7), an event that
+    /// does not decode becomes the stream's final `Err` event, as the
+    /// runtime makes an outage one. With a circuit breaker, a stream that
+    /// ends with an `Err` event counts as one consecutive failure and a
+    /// stream that ends cleanly resets the count, the rule a request
+    /// follows.
+    async fn open_connector_stream(
+        &self,
+        callee_name: &str,
+        wire_args: connector_json::ConnectorArguments,
+        event_ty: &Type,
+        on_failure: Option<&str>,
+        counts_for_breaker: bool,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        let events = self
             .runtime
-            .call_tool(callee_name, json_args.to_vec())
+            .call_connector_stream(callee_name, wire_args.recorded, wire_args.implementation)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-        json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
-            InterpError::new(
-                InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")),
-                span,
-            )
-        })
+        let (sender, stream) = crate::value::StreamValue::channel(effect_compose::default_stream_backpressure());
+        let types: std::sync::Arc<Vec<IrType>> = std::sync::Arc::new(self.ir.types.clone());
+        let event_ty = event_ty.clone();
+        let name = callee_name.to_string();
+        let on_failure = on_failure.map(str::to_string);
+        let breaker = counts_for_breaker.then(|| self.breaker_state.clone());
+        stream.spawn_producer(async move {
+            let types_by_id: HashMap<DefId, &IrType> = types.iter().map(|t| (t.id, t)).collect();
+            let mut events = events;
+            let mut ended_in_failure = false;
+            while let Some(item) = futures::StreamExt::next(&mut events).await {
+                let next = match item {
+                    Ok(json) => match connector_json::connector_result(json, &event_ty, &types_by_id) {
+                        Ok(value) => Ok(value),
+                        Err(problem) => match &on_failure {
+                            Some(variant) => connector_json::failure_value(variant, &problem, &event_ty, &types_by_id)
+                                .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)),
+                            None => Err(InterpError::new(InterpErrorKind::UnusableReply(format!("connector `{name}`: {problem}")), span)),
+                        },
+                    },
+                    Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
+                };
+                // An `Err` event ends the stream: the runtime yields an
+                // outage last, and an undecodable event ends it here.
+                let final_err = matches!(next, Ok(Value::ResultErr(_)));
+                ended_in_failure = final_err || next.is_err();
+                let stop = next.is_err() || (on_failure.is_some() && final_err);
+                if !sender.send(next).await || stop {
+                    break;
+                }
+            }
+            if let Some(state) = breaker {
+                let mut state = state.lock().expect("breaker state poisoned");
+                let count = state.entry(name.clone()).or_insert(0);
+                if ended_in_failure {
+                    *count += 1;
+                } else {
+                    *count = 0;
+                }
+            }
+        });
+        Ok(Value::Stream(stream))
+    }
+
+    /// Read a connector result through the public JSON mapping; a
+    /// response that does not match the declared type names the path.
+    fn decode_connector_result(
+        &self,
+        callee_name: &str,
+        on_failure: Option<&str>,
+        result: serde_json::Value,
+        result_decode_ty: &Type,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        match connector_json::connector_result(result, result_decode_ty, &self.types_by_id) {
+            Ok(value) => Ok(value),
+            // A response that does not match the declared type is a
+            // failure too: with `on failure`, the typed error says why.
+            Err(problem) => match on_failure {
+                Some(variant) => connector_json::failure_value(variant, &problem, result_decode_ty, &self.types_by_id)
+                    .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span)),
+                None => Err(InterpError::new(
+                    InterpErrorKind::UnusableReply(format!("connector `{callee_name}`: {problem}")),
+                    span,
+                )),
+            },
+        }
     }
 
     fn env_snapshot(&self) -> step::EnvSnapshot {
@@ -597,6 +725,11 @@ impl<'ir> Interpreter<'ir> {
                             .map(ExprFlow::Value);
                     }
                 }
+                // B06 — a replay warns when this operation's zone rules
+                // may differ from the recording's tz database.
+                if let Some((operation, zone)) = time::zone_rules_use(*kind, &recv, &arg_vals) {
+                    self.runtime.note_zone_rules_use(operation, &zone);
+                }
                 Ok(ExprFlow::Value(eval_builtin_method(
                     *kind, recv, arg_vals, expr.span, &self.types_by_id,
                 )?))
@@ -646,6 +779,13 @@ impl<'ir> Interpreter<'ir> {
                         slot.1 = v;
                     } else {
                         out.push((fname.clone(), v));
+                    }
+                }
+                if let Some(record) = self.types_by_id.get(def_id).copied() {
+                    for (name, value) in &out {
+                        if let Some(field) = record.fields.iter().find(|f| f.name == *name) {
+                            hold_refinement(type_name, field, value, expr.span)?;
+                        }
                     }
                 }
                 Ok(ExprFlow::Value(Value::new_struct(
@@ -1189,6 +1329,30 @@ impl<'ir> Interpreter<'ir> {
                 Ok(ExprFlow::Value(Value::Struct(page)))
             },
 
+            IrExprKind::TableOp { op, table, args } => {
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args {
+                    match self.eval_expr(arg).await?.into_value() {
+                        Ok(v) => values.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    }
+                }
+                self.eval_table_op(*op, table, values, expr.span).await.map(ExprFlow::Value)
+            },
+
+            IrExprKind::TableQuery { table, filter, order, descending, take } => {
+                let mut operands = Vec::new();
+                for operand in corvid_ir::table_query_operands(filter, take) {
+                    match self.eval_expr(operand).await?.into_value() {
+                        Ok(v) => operands.push(v),
+                        Err(v) => return Ok(ExprFlow::Propagate(v)),
+                    }
+                }
+                self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span)
+                    .await
+                    .map(ExprFlow::Value)
+            },
+
             IrExprKind::TryPropagate { inner } => {
                 let inner = match self.eval_expr(inner).await? {
                     ExprFlow::Value(v) => v,
@@ -1273,6 +1437,10 @@ impl<'ir> Interpreter<'ir> {
                         }
                         Ok((ExprFlow::Value(v), _)) => return Ok(ExprFlow::Value(v)),
                         Ok((ExprFlow::Propagate(v), _)) => return Ok(ExprFlow::Propagate(v)),
+                        // Only an outage is worth another attempt: a bug
+                        // fails the same way again, and a denied approval
+                        // or an exceeded budget is a decision to respect.
+                        Err(err) if !err.is_outage() => return Err(err),
                         Err(err) => last_runtime_error = Some(err),
                     }
                 }
@@ -1620,6 +1788,22 @@ impl<'ir> Interpreter<'ir> {
                         .expect("breaker state poisoned")
                         .get(callee_name)
                         .is_some_and(|count| *count >= threshold);
+                    // An open breaker means the dependency is known to be
+                    // down: an outage, like a timeout. A connector
+                    // operation with `on failure` answers with its typed
+                    // error, the reason naming the breaker.
+                    let on_failure = self
+                        .connector_ops_by_id
+                        .get(def_id)
+                        .and_then(|(_, op)| op.on_failure.as_deref());
+                    if let (true, Some(variant)) = (open, on_failure) {
+                        let reason = format!(
+                            "circuit breaker open for `{callee_name}` after {threshold} consecutive failures; not called again this run"
+                        );
+                        let value = connector_json::failure_value(variant, &reason, &tool.return_ty, &self.types_by_id)
+                            .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{callee_name}`: {e}")), span))?;
+                        return Ok(ExprFlow::Value(value));
+                    }
                     if open {
                         return Err(InterpError::new(
                             InterpErrorKind::Other(format!(
@@ -1750,6 +1934,9 @@ impl<'ir> Interpreter<'ir> {
                 }
 
                 let start = std::time::Instant::now();
+                // Kept to scrub a secret the tool echoes out of the step
+                // event below; the program's value is never scrubbed.
+                let mut echo_scrub: Option<corvid_runtime::RevealedToolArguments> = None;
                 let result_value = if let Some((connector, op)) =
                     self.connector_ops_by_id.get(def_id).copied()
                 {
@@ -1758,17 +1945,34 @@ impl<'ir> Interpreter<'ir> {
                     // Tool arm, so the effect / approval / budget / taint
                     // / provenance / trace pipeline still brackets it —
                     // the operation IS a tool.
-                    self.dispatch_connector_operation(
-                        connector,
-                        op,
-                        tool,
-                        callee_name,
-                        arg_values,
-                        &json_args,
-                        result_decode_ty,
-                        span,
-                    )
-                    .await?
+                    let outcome = self
+                        .dispatch_connector_operation(
+                            connector,
+                            op,
+                            tool,
+                            callee_name,
+                            arg_values,
+                            result_decode_ty,
+                            span,
+                        )
+                        .await;
+                    // Circuit-breaker accounting for a connector, by the
+                    // rule other tools follow: an error, or an `Err`
+                    // result (a mapped status or an `on failure`
+                    // variant), counts as one consecutive failure.
+                    // A stream counts when it ends, in its producer
+                    // (`open_connector_stream`), not when it opens.
+                    if tool.breaker.is_some() && !matches!(&outcome, Ok(Value::Stream(_))) {
+                        let failed = matches!(&outcome, Err(_) | Ok(Value::ResultErr(_)));
+                        let mut state = self.breaker_state.lock().expect("breaker state poisoned");
+                        let count = state.entry(callee_name.to_string()).or_insert(0);
+                        if failed {
+                            *count += 1;
+                        } else {
+                            *count = 0;
+                        }
+                    }
+                    outcome?
                 } else if let Some(mock) = self.mock_tools.get(def_id).copied() {
                     self.eval_mock_body(mock, callee_name, arg_values, span).await?
                 } else if is_stdlib_db_tool(callee_name) {
@@ -1811,9 +2015,20 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                     .await?
+                } else if corvid_runtime::runtime::is_stdlib_secret_value_tool(callee_name) {
+                    secret_tools::dispatch_secret_value_tool(self.runtime, callee_name, json_args, &tool.return_ty, span).await?
                 } else {
+                    // A `Secret` argument reaches the implementation as its
+                    // text; every record of the call holds `json_args`.
+                    let revealed =
+                        secret_tools::revealed_arguments(tool, &json_args, &arg_values, &self.types_by_id, span)?;
+                    echo_scrub = revealed.clone();
                     let outcome = if let Some((module, member)) = &tool.python {
-                        self.runtime.call_imported_python(module, member, &tool.effect_names, json_args).await
+                        self.runtime
+                            .call_imported_python(module, member, &tool.effect_names, json_args, revealed)
+                            .await
+                    } else if let Some(revealed) = revealed {
+                        self.runtime.call_tool_revealing_secrets(callee_name, json_args, revealed).await
                     } else {
                         self.runtime.call_tool(callee_name, json_args).await
                     }
@@ -1839,13 +2054,17 @@ impl<'ir> Interpreter<'ir> {
                     let result = outcome?;
                     json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
-                            InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                            InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                             span,
                         )
                     })?
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
                 let result = value_to_json(&result_value);
+                let result = match &echo_scrub {
+                    Some(revealed) => revealed.scrub_json(result),
+                    None => result,
+                };
 
                 if self.should_yield_boundary() {
                     let action = self
@@ -1921,6 +2140,8 @@ impl<'ir> Interpreter<'ir> {
                 sub.parallel_cancel = self.parallel_cancel.clone();
                 sub.dispatch_count = self.dispatch_count.clone();
                 sub.replay_cancel_after = self.replay_cancel_after;
+                // An agent called inside an `atomic:` block writes inside it.
+                sub.table_transaction = self.table_transaction.clone();
                 // Propagate the step controller into sub-agent calls so
                 // step-through continues across agent boundaries.
                 if let Some(ref stepper) = self.stepper {
@@ -1980,6 +2201,17 @@ impl<'ir> Interpreter<'ir> {
             }
             // Sum-variant construction (45h): positional payload,
             // variant metadata from the owning IrType.
+            // A table write's conflict (B09): compiler-known, so its
+            // cases come from `ConflictCase` rather than a declaration.
+            IrCallKind::EnumConstructor { def_id, variant_index } if *def_id == corvid_types::CONFLICT_TYPE_ID => {
+                let case = corvid_types::ConflictCase::ALL.get(*variant_index as usize).copied().ok_or_else(|| {
+                    InterpError::new(
+                        InterpErrorKind::DispatchFailed(format!("conflict case {variant_index} does not exist")),
+                        span,
+                    )
+                })?;
+                Ok(ExprFlow::Value(Value::conflict(case, arg_values.into_iter().next())))
+            }
             IrCallKind::EnumConstructor {
                 def_id,
                 variant_index,
@@ -2014,6 +2246,9 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     ));
                 }
+                for (field, value) in variant.fields.iter().zip(&arg_values) {
+                    hold_refinement(&variant.name, field, value, span)?;
+                }
                 Ok(ExprFlow::Value(Value::Enum(crate::value::EnumValue::new(
                     ir_type.id,
                     ir_type.name.clone(),
@@ -2043,6 +2278,9 @@ impl<'ir> Interpreter<'ir> {
                         )),
                         span,
                     ));
+                }
+                for (field, value) in ir_type.fields.iter().zip(&arg_values) {
+                    hold_refinement(&ir_type.name, field, value, span)?;
                 }
                 let fields: Vec<(String, Value)> = ir_type
                     .fields
@@ -2183,7 +2421,7 @@ async fn dispatch_stdlib_db_tool(
                     let ok_value =
                         json_to_value(json, ok_decode_ty, types_by_id).map_err(|e| {
                             InterpError::new(
-                                InterpErrorKind::Marshal(format!("tool `{callee_name}`: {e}")),
+                                InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                                 span,
                             )
                         })?;
@@ -2607,7 +2845,8 @@ pub(crate) fn prompt_segments_for_test(
     args: &[Value],
 ) -> Result<crate::interp::prompt::MessageSegments, InterpError> {
     let rendered = String::new();
-    prompt::build_message_segments(prompt, args, &rendered, corvid_ast::Span::new(0, 0))
+    let types = std::collections::HashMap::new();
+    prompt::build_message_segments(prompt, args, &rendered, &types, corvid_ast::Span::new(0, 0))
 }
 
 pub(crate) fn pattern_matches(
@@ -2690,5 +2929,28 @@ pub(crate) fn pattern_matches(
             }
             true
         }
+    }
+}
+
+/// Stop the run when a value built or assigned in code breaks its
+/// field's refinement (B09): every value of a refined field holds it.
+/// The rule is `conv::refinement_breach`, the one decoding uses.
+pub(crate) fn hold_refinement(
+    type_name: &str,
+    field: &corvid_ir::IrField,
+    value: &Value,
+    span: corvid_ast::Span,
+) -> Result<(), InterpError> {
+    match crate::conv::refinement_breach(field, value) {
+        Some(shown) => Err(InterpError::new(
+            InterpErrorKind::RefinementViolated {
+                type_name: type_name.to_string(),
+                field: field.name.clone(),
+                refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+                value: shown,
+            },
+            span,
+        )),
+        None => Ok(()),
     }
 }

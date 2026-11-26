@@ -69,6 +69,9 @@ impl<'a> Checker<'a> {
                 self.walk_deterministic_expr(agent, iter);
                 self.walk_deterministic_block(agent, body);
             }
+            Stmt::Atomic { body, .. } => {
+                self.walk_deterministic_block(agent, body);
+            }
             Stmt::While { cond, body, .. } => {
                 self.walk_deterministic_expr(agent, cond);
                 self.walk_deterministic_block(agent, body);
@@ -107,6 +110,20 @@ impl<'a> Checker<'a> {
     fn walk_deterministic_expr(&mut self, agent: &str, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, span } => {
+                // A query chain reads the database; report it once, at
+                // its outermost call.
+                if let Some(query) = crate::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings) {
+                    self.errors.push(TypeError::with_guarantee(
+                        TypeErrorKind::NonDeterministicCall {
+                            agent: agent.into(),
+                            call: format!("{} query", query.table.name().name),
+                            call_kind: "database operation".into(),
+                        },
+                        *span,
+                        "replay.deterministic_pure_path",
+                    ));
+                    return;
+                }
                 self.classify_deterministic_call(agent, callee, *span);
                 self.walk_deterministic_expr(agent, callee);
                 for arg in args {
@@ -196,6 +213,15 @@ impl<'a> Checker<'a> {
             None => return,
         };
 
+        // A database read can return different rows on each run.
+        if crate::table_call_target(callee, self.file, self.symbols, self.bindings).is_some() {
+            self.errors.push(TypeError::with_guarantee(
+                TypeErrorKind::NonDeterministicCall {
+                    agent: agent.into(), call: name, call_kind: "database operation".into(),
+                }, span, "replay.deterministic_pure_path",
+            ));
+            return;
+        }
         if crate::effects::python_call_target(callee, self.file, self.symbols, self.bindings).is_some() {
             self.errors.push(TypeError::with_guarantee(
                 TypeErrorKind::NonDeterministicCall {
@@ -255,6 +281,18 @@ impl<'a> Checker<'a> {
                 // `fn`s (45r) are statically effect-free — always
                 // callable from `@deterministic` bodies.
                 DeclKind::Fn => None,
+                // A tool or prompt brought in with `import ... use`,
+                // such as `random_int` or `uuid_v4` from the stdlib,
+                // is as nondeterministic as a local one.
+                DeclKind::ImportedUse => match self
+                    .module_resolution
+                    .and_then(|modules| modules.lookup_imported_use(&name))
+                    .map(|target| target.export.kind)
+                {
+                    Some(DeclKind::Tool) => Some("tool"),
+                    Some(DeclKind::Prompt) => Some("prompt"),
+                    _ => None,
+                },
                 _ => None,
             };
             if let Some(kind) = call_kind {
@@ -333,6 +371,9 @@ fn collect_replayability_violations_in_stmt(stmt: &Stmt, out: &mut Vec<Replayabi
         }
         Stmt::For { iter, body, .. } => {
             collect_replayability_violations_in_expr(iter, out);
+            collect_replayability_violations_in_block(body, out);
+        }
+        Stmt::Atomic { body, .. } => {
             collect_replayability_violations_in_block(body, out);
         }
         Stmt::While { cond, body, .. } => {

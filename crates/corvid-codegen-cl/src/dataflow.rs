@@ -57,6 +57,8 @@ use corvid_types::Type;
 use std::collections::BTreeMap;
 
 mod cfg;
+mod loop_carried;
+pub(crate) use loop_carried::loop_carried_locals;
 mod liveness;
 mod ownership_plan;
 
@@ -65,7 +67,7 @@ pub(crate) use cfg::collect_reads;
 pub use cfg::{BlockId, Cfg, CfgBlock, CfgStmt, LocalRead, ProgramPoint, ReadKind, StmtPos};
 use liveness::compute_liveness;
 pub use liveness::Liveness;
-use ownership_plan::{build_branch_drops, build_plan};
+use ownership_plan::{build_branch_drops, build_loop_entry_drops, build_plan};
 pub use ownership_plan::{BranchDrops, IrNavStep, IrPath, OwnershipPlan};
 
 use crate::ownership::is_refcounted;
@@ -122,9 +124,14 @@ pub fn analyze_agent_full(agent: &IrAgent) -> (Cfg, Liveness, OwnershipPlan) {
         }
         liveness = compute_liveness(&cfg, &param_locals);
     }
-    let mut plan = build_plan(&cfg, &liveness, &param_locals);
+    let if_branch_points = if_cfg_coords
+        .values()
+        .map(|coords| (coords.cond_block, coords.branch_pos))
+        .collect();
+    let (mut plan, cond_deaths) = build_plan(&cfg, &liveness, &param_locals, &if_branch_points);
     plan.ir_paths = ir_paths;
-    plan.branch_drops = build_branch_drops(&cfg, &liveness, &if_cfg_coords, &param_locals);
+    plan.branch_drops = build_branch_drops(&liveness, &if_cfg_coords, &cond_deaths);
+    plan.loop_entry_drops = build_loop_entry_drops(&liveness, &built.loop_bodies);
     (cfg, liveness, plan)
 }
 

@@ -100,10 +100,10 @@ impl<'a> Parser<'a> {
                     span: start,
                 })
             }
-            TokKind::Float(v) => {
+            TokKind::Float { value: v, text } => {
                 self.bump();
                 Ok(Pattern::Literal {
-                    value: Literal::Float(v),
+                    value: Literal::Float { value: v, text },
                     span: start,
                 })
             }
@@ -118,10 +118,10 @@ impl<'a> Parser<'a> {
                             span: start.merge(self.prev_span()),
                         })
                     }
-                    TokKind::Float(v) => {
+                    TokKind::Float { value: v, text } => {
                         self.bump();
                         Ok(Pattern::Literal {
-                            value: Literal::Float(-v),
+                            value: Literal::Float { value: -v, text: format!("-{text}") },
                             span: start.merge(self.prev_span()),
                         })
                     }

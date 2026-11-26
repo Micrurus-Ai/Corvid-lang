@@ -44,7 +44,8 @@ use crate::doctor_cmd::cmd_doctor_v2;
 use crate::format::{
     approval_summary_value, approvals_inspect_summary, approvals_queue_summary, audit_event_value,
 };
-use crate::migrate_cmd::{cmd_migrate, cmd_migrate_down};
+use crate::migrate_target::{self, MigrateRequest};
+use crate::migrate_plan_cmd::cmd_migrate_plan;
 use crate::package_cmd::{
     cmd_add_package, cmd_package_metadata, cmd_package_publish, cmd_package_verify_lock,
     cmd_package_verify_registry, cmd_remove_package, cmd_update_package,
@@ -74,8 +75,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
     match cli.command {
         Some(Command::New {
             name,
+            web,
             with_python_tools,
-        }) => cmd_new(&name, with_python_tools),
+        }) => cmd_new(&name, with_python_tools, web),
         Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
         Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {
@@ -561,25 +563,24 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             UpgradeCommand::Assist { path, json } => upgrade_cmd::run_assist(&path, json),
         },
         Some(Command::Migrate { command }) => match command {
-            MigrateCommand::Status {
-                dir,
-                state,
-                database,
-                dry_run,
-            } => cmd_migrate("status", &dir, &state, &database, dry_run),
-            MigrateCommand::Up {
-                dir,
-                state,
-                database,
-                dry_run,
-            } => cmd_migrate("up", &dir, &state, &database, dry_run),
-            MigrateCommand::Down {
-                dir,
-                down_dir,
-                state,
-                database,
-                dry_run,
-            } => cmd_migrate_down(&dir, &down_dir, &state, &database, dry_run),
+            MigrateCommand::Plan { source, dir, dry_run, scratch } => {
+                cmd_migrate_plan(&source, &dir, dry_run, scratch.as_deref())
+            }
+            MigrateCommand::Status { dir, state, database, dry_run, program } => migrate_target::run(
+                MigrateRequest { action: "status", dir: &dir, down_dir: None, state: &state, dry_run },
+                &database,
+                program.as_deref(),
+            ),
+            MigrateCommand::Up { dir, state, database, dry_run, program } => migrate_target::run(
+                MigrateRequest { action: "up", dir: &dir, down_dir: None, state: &state, dry_run },
+                &database,
+                program.as_deref(),
+            ),
+            MigrateCommand::Down { dir, down_dir, state, database, dry_run, program } => migrate_target::run(
+                MigrateRequest { action: "down", dir: &dir, down_dir: Some(&down_dir), state: &state, dry_run },
+                &database,
+                program.as_deref(),
+            ),
         },
         Some(Command::Schedule { command }) => match command {
             crate::cli::schedule::ScheduleCommand::Run {

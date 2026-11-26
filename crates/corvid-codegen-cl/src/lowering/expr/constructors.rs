@@ -62,6 +62,7 @@ pub fn lower_struct_constructor(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
+    owner: &str,
     fields: &[corvid_ir::IrField],
     typeinfo: cranelift_module::DataId,
     tag: Option<u32>,
@@ -91,6 +92,8 @@ pub fn lower_struct_constructor(
             builder.declare_value_needs_stack_map(value);
             runtime.return_temporaries.borrow_mut().push(value);
         }
+        // Every value of a refined field holds its refinement (B09).
+        super::hold_refinement(builder, module, runtime, owner, field, value, span)?;
         values.push(value);
     }
     runtime.return_temporaries.borrow_mut().truncate(outer_temporaries);

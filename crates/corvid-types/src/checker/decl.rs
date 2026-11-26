@@ -152,11 +152,27 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_server(&mut self, server: &ServerDecl) {
         let mut seen = HashSet::new();
+        let mut live_names = HashSet::new();
         for route in &server.routes {
+            if route.is_live() {
+                self.check_http_route(server, route);
+                self.check_live(route, &mut live_names);
+                continue;
+            }
             let key = (route.method, route.path.clone());
             if !seen.insert(key) {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::DuplicateServerRoute {
+                        server: server.name.name.clone(),
+                        method: route.method.as_str().into(),
+                        path: route.path.clone(),
+                    },
+                    route.span,
+                ));
+            }
+            if matches!(route.method, HttpMethod::Head | HttpMethod::Options) {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::RouteMethodAnsweredByServer {
                         server: server.name.name.clone(),
                         method: route.method.as_str().into(),
                         path: route.path.clone(),
@@ -174,6 +190,62 @@ impl<'a> Checker<'a> {
                 ));
             }
             self.check_http_route(server, route);
+        }
+    }
+
+    /// A `live` declaration (B14): its body is one `return` of a table
+    /// query on the row type it delivers, without `take`, and its name,
+    /// the path's last fixed segment, is unique in the server. The body
+    /// is otherwise checked as a GET route's is, so `path`, `actor` and
+    /// `requires` mean what they mean on a route.
+    fn check_live(&mut self, route: &corvid_ast::HttpRouteDecl, names: &mut HashSet<String>) {
+        let invalid = |checker: &mut Self, problem: String| {
+            checker.errors.push(TypeError::new(
+                TypeErrorKind::LiveDeclarationInvalid { path: route.path.clone(), problem },
+                route.span,
+            ));
+        };
+        match route.live_name() {
+            None => invalid(self, "has no fixed path segment to name it by; end the path with one, as in `/boards/{board}/cards`".into()),
+            Some(name) if !names.insert(name.to_string()) => {
+                invalid(self, format!("is named `{name}`, the same as another `live` in this server; give one a different last path segment"))
+            }
+            Some(_) => {}
+        }
+        let row_name = match route.response.live_row() {
+            Some(corvid_ast::TypeRef::Named { name, .. }) => name.name.clone(),
+            _ => {
+                invalid(self, "must deliver a table's rows, as in `-> Card`".into());
+                return;
+            }
+        };
+        let is_table = self.file.decls.iter().any(|decl| matches!(decl, corvid_ast::Decl::Table(t) if t.name().name == row_name));
+        if !is_table {
+            invalid(self, format!("delivers `{row_name}`, which is not a table; a `live` delivers the rows of a `table` declaration"));
+            return;
+        }
+        let returned = match route.body.stmts.as_slice() {
+            [corvid_ast::Stmt::Return { value: Some(value), .. }] => value,
+            _ => {
+                invalid(self, "must be one `return` of a table query".into());
+                return;
+            }
+        };
+        let query = match returned {
+            corvid_ast::Expr::Call { callee, args, .. } => {
+                crate::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings)
+            }
+            _ => None,
+        };
+        let Some(query) = query else {
+            invalid(self, "must return a table query, such as `Card.where(fn (c) -> ...)` or `Card.all()`".into());
+            return;
+        };
+        if query.table.name().name != row_name {
+            invalid(self, format!("delivers `{row_name}` but queries `{}`", query.table.name().name));
+        }
+        if query.take.is_some() {
+            invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
         }
     }
 
@@ -434,14 +506,13 @@ impl<'a> Checker<'a> {
         };
 
         // `base_url` must be an absolute `http(s)://` URL.
-        if !(decl.base_url.starts_with("https://") || decl.base_url.starts_with("http://")) {
-            self.errors.push(invalid(
-                format!(
-                    "`base_url` must be an absolute `http(s)://` URL, got `{}`",
-                    decl.base_url
-                ),
-                decl.span,
-            ));
+        if let Some(base_url) = &decl.base_url {
+            if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
+                self.errors.push(invalid(
+                    format!("`base_url` must be an absolute `http(s)://` URL, got `{base_url}`"),
+                    decl.span,
+                ));
+            }
         }
 
         // Auth credentials are `secret(...)` references — their names must
@@ -517,6 +588,37 @@ impl<'a> Checker<'a> {
         }
         let mock_allowed = decl.modes.contains(&ConnectorMode::Mock);
 
+        // How long a request may take and where a redirect may send it
+        // are consequential choices with more than one reasonable answer,
+        // so the source declares both; silence is a compile error naming
+        // the decision and its values, never a default.
+        match decl.timeout_secs {
+            None => self.errors.push(invalid(
+                "a connector must declare `timeout: <n>s`, the longest one request may take from connecting to the last byte of the response (for example `timeout: 10s`). There is no default timeout; an operation may override it with its own `timeout:`".into(),
+                decl.span,
+            )),
+            Some(secs) => {
+                if let Some(message) = connector_timeout_problem("the connector", secs) {
+                    self.errors.push(invalid(message, decl.span));
+                }
+            }
+        }
+        if decl.redirects.is_none() {
+            self.errors.push(invalid(
+                "a connector must declare `redirects:` — `never` (a 3xx is the answer), `same_host` (follow only to the same scheme, host and port), or `allowed_hosts` (follow to any host in `[http] allow`). There is no default: where a request may be sent next is a security decision".into(),
+                decl.span,
+            ));
+        }
+        if decl.published.is_none() {
+            self.errors.push(invalid(
+                format!(
+                    "connector `{}` must declare whether the published contract lists it: add `published: no` (backend only) or `published: yes` (its name, URL, paths and protocol are listed at /.well-known/corvid). There is no default: which outside services an app calls, and where, is a security decision",
+                    decl.name.name
+                ),
+                decl.span,
+            ));
+        }
+
         // Each operation: a unique name, a path that starts with `/`, and
         // `{placeholders}` that name declared parameters.
         let mut seen = HashSet::new();
@@ -527,7 +629,8 @@ impl<'a> Checker<'a> {
                     op.span,
                 ));
             }
-            if !op.path.starts_with('/') {
+            self.check_operation_target(decl, op);
+            if op.url_param.is_none() && !op.path.starts_with('/') {
                 self.errors.push(invalid(
                     format!("operation `{}` path must start with `/`, got `{}`", op.name.name, op.path),
                     op.span,
@@ -560,6 +663,19 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            self.check_operation_query_and_headers(decl, op, &param_names);
+            self.check_operation_response_shape(decl, op);
+            self.check_operation_on_failure(decl, op);
+            self.check_operation_stream(decl, op);
+            self.check_operation_body(decl, op);
+
+            if let Some(secs) = op.timeout_secs {
+                let subject = format!("operation `{}`", op.name.name);
+                if let Some(message) = connector_timeout_problem(&subject, secs) {
+                    self.errors.push(invalid(message, op.span));
+                }
+            }
+
             if let Some(protocol) = &op.protocol {
                 for (message, span) in validate_provider_protocol(op, protocol) {
                     self.errors.push(invalid(message, span));
@@ -575,12 +691,14 @@ impl<'a> Checker<'a> {
             match &op.mock {
                 Some(mock_expr) => {
                     self.bind_params(&op.params);
-                    let ret_ty = self.type_ref_to_type(&op.return_ty);
+                    // A `Response<Body>` operation's mock is the body: mock
+                    // mode answers with status 200 and no headers.
+                    let ret_ty = mock_payload_type(self.type_ref_to_type(&op.return_ty));
                     let got = self.check_expr_as(mock_expr, Some(&ret_ty));
                     if !got.is_assignable_to(&ret_ty) {
                         self.errors.push(invalid(
                             format!(
-                                "operation `{}` mock has type `{}`, but the operation returns `{}`",
+                                "operation `{}` mock has type `{}`, but the operation's mock is `{}`",
                                 op.name.name,
                                 got.display_name(),
                                 ret_ty.display_name()
@@ -706,11 +824,28 @@ impl<'a> Checker<'a> {
         let path_fields = route
             .path_params
             .iter()
-            .map(|param| (param.name.name.clone(), self.type_ref_to_type(&param.ty)))
+            .map(|param| {
+                let ty = self.type_ref_to_type(&param.ty);
+                // A path segment is text the server reads before the
+                // handler runs, through the shape the server reads too.
+                let plain = |ty: &Type| self.has_plain_variants(ty);
+                if ty != Type::Unknown && crate::text_parameters::text_shape(&ty, &plain).is_none() {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::RoutePathParamType {
+                            path: route.path.clone(),
+                            param: param.name.name.clone(),
+                            ty: ty.display_name(),
+                        },
+                        param.ty.span(),
+                    ));
+                }
+                (param.name.name.clone(), ty)
+            })
             .collect();
         self.bind_route_local_by_name(&route.body, "path", Type::RouteParams(path_fields));
         if let Some(query_ty) = &route.query_ty {
             let ty = self.type_ref_to_type(query_ty);
+            self.check_route_query_fields(route, &ty, query_ty.span());
             self.bind_route_local_by_name(&route.body, "query", ty);
         }
         if let Some(body_ty) = &route.body_ty {
@@ -934,6 +1069,7 @@ fn stmt_reaches_approval(
                     visited_agents,
                 )
         }
+        Stmt::Atomic { body, .. } => block_reaches_approval(body, bindings, agents, methods, types, visited_agents),
         Stmt::While { cond, body, .. } => {
             expr_reaches_approval(cond, bindings, agents, methods, types, visited_agents)
                 || block_reaches_approval(
@@ -1361,6 +1497,9 @@ fn collect_ident_spans_by_name_in_stmt(stmt: &Stmt, name: &str, spans: &mut Vec<
             collect_ident_spans_by_name_in_expr(iter, name, spans);
             collect_ident_spans_by_name_in_block(body, name, spans);
         }
+        Stmt::Atomic { body, .. } => {
+            collect_ident_spans_by_name_in_block(body, name, spans);
+        }
         Stmt::While { cond, body, .. } => {
             collect_ident_spans_by_name_in_expr(cond, name, spans);
             collect_ident_spans_by_name_in_block(body, name, spans);
@@ -1454,6 +1593,570 @@ fn collect_ident_spans_by_name_in_expr(expr: &Expr, name: &str, spans: &mut Vec<
                 collect_ident_spans_by_name_in_expr(&arm.body, name, spans);
             }
             collect_ident_spans_by_name_in_expr(else_body, name, spans);
+        }
+    }
+}
+
+/// The longest timeout a connector or operation may declare: one hour.
+/// A longer wait is durable work (a job or a provider protocol), not one
+/// request.
+pub(crate) const MAX_CONNECTOR_TIMEOUT_SECS: u64 = 3600;
+
+/// Why a declared connector or operation timeout is unusable, if it is.
+fn connector_timeout_problem(subject: &str, secs: u64) -> Option<String> {
+    if secs == 0 {
+        return Some(format!(
+            "{subject} declares `timeout: 0s`, which would fail every request; give a positive number of seconds"
+        ));
+    }
+    if secs > MAX_CONNECTOR_TIMEOUT_SECS {
+        return Some(format!(
+            "{subject} declares `timeout: {secs}s`, longer than the {MAX_CONNECTOR_TIMEOUT_SECS}s limit for one request; work that takes longer belongs in a durable job or an `async:` provider protocol"
+        ));
+    }
+    None
+}
+
+/// Headers an operation cannot set with `header`: the credential headers
+/// (`auth:` owns `Authorization`, and a cookie is a credential), and the
+/// ones the transport writes from the request itself.
+const CONNECTOR_MANAGED_HEADERS: [(&str, &str); 7] = [
+    ("authorization", "the connector's `auth:` sets it"),
+    ("proxy-authorization", "it carries a credential"),
+    ("cookie", "it carries a credential"),
+    ("host", "the request's URL sets it"),
+    ("content-type", "the operation's `body` or `form` sets it"),
+    ("content-length", "the transport sets it from the body"),
+    ("transfer-encoding", "the transport sets it"),
+];
+
+/// A multipart text part's value: one scalar written as text. A query
+/// field is checked through `text_parameters` instead; a multipart body
+/// is its own form, where `Bytes` is a file part, not text.
+fn is_multipart_scalar(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Decimal
+            | Type::Duration
+            | Type::Instant
+            | Type::ZonedTime
+            | Type::TimeZone
+            | Type::Currency
+            | Type::Locale
+    )
+}
+
+/// Whether `name` is an HTTP header token (RFC 9110 `tchar`s).
+fn is_header_token(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+}
+
+impl<'a> Checker<'a> {
+    /// `query <param>` names a record of scalar, optional or list fields,
+    /// and each `header` line names a header the operation may set, once,
+    /// with a `String` parameter or a fixed value.
+    fn check_operation_query_and_headers(
+        &mut self,
+        connector: &ConnectorDecl,
+        op: &corvid_ast::OperationDecl,
+        param_names: &HashSet<&str>,
+    ) {
+        let invalid = |message: String, span| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid {
+                    connector: connector.name.name.clone(),
+                    message,
+                },
+                span,
+            )
+        };
+        let operation = &op.name.name;
+        let param_type = |checker: &mut Self, name: &str| {
+            op.params
+                .iter()
+                .find(|p| p.name.name == name)
+                .map(|p| checker.type_ref_to_type(&p.ty))
+        };
+
+        if let Some(query) = &op.query {
+            let used_elsewhere = op.body.as_ref().is_some_and(|b| b.param.name == query.name)
+                || path_placeholders(&op.path).iter().any(|p| p == &query.name);
+            if !param_names.contains(query.name.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` query references `{}`, which is not a declared parameter", query.name),
+                    query.span,
+                ));
+            } else if used_elsewhere {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` sends `{}` both as its query and in its path or body; a parameter goes in one place", query.name),
+                    query.span,
+                ));
+            } else {
+                match param_type(self, &query.name) {
+                    Some(Type::Struct(id)) if self.types_by_id.get(&id).is_some_and(|d| d.variants.is_empty()) => {
+                        let fields: Vec<(String, corvid_ast::TypeRef)> = self.types_by_id[&id]
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.name.clone(), f.ty.clone()))
+                            .collect();
+                        for (field, field_ty) in fields {
+                            let ty = self.type_ref_to_type(&field_ty);
+                            // The shape a route reads its query through, so
+                            // a value goes out as a route would read it in.
+                            let plain = |ty: &Type| self.has_plain_variants(ty);
+                            let ok = crate::text_parameters::query_field_shape(&ty, &plain).is_some();
+                            if !ok {
+                                self.errors.push(invalid(
+                                    format!(
+                                        "operation `{operation}` query field `{field}` is `{}`; a query field is one of {}, an `Option` of one (omitted when `None`) or a `List` of one (the name repeated)",
+                                        self.json_type_name(&ty),
+                                        crate::text_parameters::TEXT_TYPES
+                                    ),
+                                    field_ty.span(),
+                                ));
+                            }
+                        }
+                    }
+                    _ => self.errors.push(invalid(
+                        format!("operation `{operation}` query `{}` must be a record whose fields become the query parameters", query.name),
+                        query.span,
+                    )),
+                }
+            }
+        }
+
+        let auth_header = match &connector.auth {
+            Some(ConnectorAuth::Header { name, .. }) => Some(name.to_ascii_lowercase()),
+            _ => None,
+        };
+        let idempotency_header = op.protocol.as_ref().map(|p| match &p.idempotency.transport {
+            corvid_ast::ProtocolIdempotencyTransport::Header(name) => name.to_ascii_lowercase(),
+        });
+        let mut seen = HashSet::new();
+        for header in &op.headers {
+            let lower = header.name.to_ascii_lowercase();
+            if !is_header_token(&header.name) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` header name `{}` is not a valid HTTP header name (letters, digits and `-`, no spaces or `:`)", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if let Some((_, why)) = CONNECTOR_MANAGED_HEADERS.iter().find(|(name, _)| *name == lower) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: {why}", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if auth_header.as_deref() == Some(lower.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: the connector's `auth:` sends its credential in it", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if idempotency_header.as_deref() == Some(lower.as_str()) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` cannot set `{}` with `header`: its `async:` protocol sends the intent key in it", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            if !seen.insert(lower) {
+                self.errors.push(invalid(
+                    format!("operation `{operation}` sets header `{}` twice", header.name),
+                    header.span,
+                ));
+                continue;
+            }
+            match &header.value {
+                corvid_ast::OperationHeaderValue::Literal(text) => {
+                    if text.is_empty() || text.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+                        self.errors.push(invalid(
+                            format!("operation `{operation}` header `{}` needs a non-empty value on one line", header.name),
+                            header.span,
+                        ));
+                    }
+                }
+                corvid_ast::OperationHeaderValue::Param(param) => {
+                    match param_type(self, &param.name) {
+                        None => self.errors.push(invalid(
+                            format!("operation `{operation}` header `{}` references `{}`, which is not a declared parameter", header.name, param.name),
+                            param.span,
+                        )),
+                        Some(Type::String) => {}
+                        Some(other) => self.errors.push(invalid(
+                            format!(
+                                "operation `{operation}` header `{}` takes `{}`, which is `{}`; a header's value is a `String` parameter or a fixed string",
+                                header.name, param.name, self.json_type_name(&other)
+                            ),
+                            param.span,
+                        )),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What an operation's `mock:` must produce: its return type, with a
+/// `Response<Body>` replaced by its body (inside a `Result` too) and a
+/// `Stream<T>` by the `List<T>` of events mock mode streams.
+fn mock_payload_type(ret: Type) -> Type {
+    match ret {
+        Type::Response(body) => *body,
+        // A streamed operation's mock is its events, in order.
+        Type::Stream(event) => Type::List(event),
+        Type::Result(ok, err) => match *ok {
+            Type::Response(body) => Type::Result(body, err),
+            ok => Type::Result(Box::new(ok), err),
+        },
+        other => other,
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A `Response` is an operation's whole result or its `Result`'s
+    /// success type, and its body holds no `Response`. A `HEAD` answer
+    /// has no body, so a `HEAD` operation returns `Response<Nothing>`.
+    fn check_operation_response_shape(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.return_ty.span(),
+            )
+        };
+        let operation = &op.name.name;
+        let ret = self.type_ref_to_type(&op.return_ty);
+        let (response_body, rest_mentions) = match &ret {
+            Type::Response(body) => (Some(body.as_ref()), body.mentions_response()),
+            Type::Result(ok, err) => match ok.as_ref() {
+                Type::Response(body) => (Some(body.as_ref()), body.mentions_response() || err.mentions_response()),
+                ok => (None, ok.mentions_response() || err.mentions_response()),
+            },
+            other => (None, other.mentions_response()),
+        };
+        if rest_mentions {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` returns `{}`; a `Response` is the operation's whole result or its `Result`'s success type, never inside another type",
+                ret.display_name()
+            )));
+        }
+        if matches!(op.method, corvid_ast::HttpMethod::Head) && !matches!(response_body, Some(Type::Nothing)) {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` is a HEAD request, whose answer has no body, so it returns `Response<Nothing>` (or a `Result` of one), not `{}`",
+                ret.display_name()
+            )));
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A `base_url` connector's operations name paths; a `hosts:
+    /// allowed_hosts` connector's operations name a `String` URL
+    /// parameter, carry no `async:` protocol (its poll path is relative to
+    /// one base URL), and declare `response: text` only for a `String`
+    /// body.
+    fn check_operation_target(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String, span| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                span,
+            )
+        };
+        let operation = &op.name.name;
+        match (&connector.base_url, &op.url_param) {
+            (Some(_), Some(url)) => self.errors.push(invalid(
+                format!(
+                    "operation `{operation}` names its URL with `{}`, but the connector has a `base_url`; give a path such as `\"/v1/items\"`, or declare `hosts: allowed_hosts` instead of `base_url`",
+                    url.name
+                ),
+                url.span,
+            )),
+            (None, None) => self.errors.push(invalid(
+                format!(
+                    "operation `{operation}` gives a path, but the connector declares `hosts: allowed_hosts`, so its operations take the whole URL as a parameter: `GET url`"
+                ),
+                op.span,
+            )),
+            (None, Some(url)) => {
+                match op.params.iter().find(|p| p.name.name == url.name) {
+                    None => self.errors.push(invalid(
+                        format!("operation `{operation}` takes its URL from `{}`, which is not a declared parameter", url.name),
+                        url.span,
+                    )),
+                    Some(param) => {
+                        let ty = self.type_ref_to_type(&param.ty);
+                        if ty != Type::String {
+                            self.errors.push(invalid(
+                                format!(
+                                    "operation `{operation}` takes its URL from `{}`, which is `{}`; a URL is a `String`",
+                                    url.name,
+                                    self.json_type_name(&ty)
+                                ),
+                                url.span,
+                            ));
+                        }
+                    }
+                }
+                if op.protocol.is_some() {
+                    self.errors.push(invalid(
+                        format!(
+                            "operation `{operation}` declares an `async:` protocol, whose poll path is relative to one base URL; a `hosts: allowed_hosts` connector has none"
+                        ),
+                        op.span,
+                    ));
+                }
+            }
+            (Some(_), None) => {}
+        }
+        if op.response_text {
+            let body = match self.type_ref_to_type(&op.return_ty) {
+                Type::Response(body) => *body,
+                Type::Result(ok, _) => match *ok {
+                    Type::Response(body) => *body,
+                    ok => ok,
+                },
+                other => other,
+            };
+            if body != Type::String {
+                self.errors.push(invalid(
+                    format!(
+                        "operation `{operation}` reads its response as text, so its body is a `String`, not `{}`",
+                        self.json_type_name(&body)
+                    ),
+                    op.return_ty.span(),
+                ));
+            }
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// `on failure -> Variant` turns every failure into a typed error, so
+    /// the operation returns a `Result` whose error type declares the
+    /// variant, with no fields or one `String` field for the reason.
+    fn check_operation_on_failure(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let Some(variant) = &op.on_failure else { return };
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                variant.span,
+            )
+        };
+        let operation = &op.name.name;
+        // A protocol's submit and polls fail through its own lifecycle
+        // (deadline target, circuit breaker), not a single request, so
+        // `on failure` would map only some of its failures. Refused
+        // rather than applied partly.
+        if op.protocol.is_some() {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` has an `async:` protocol, which handles its failures through its deadline target and circuit breaker; `on failure` maps one request's failures and cannot apply to it"
+            )));
+            return;
+        }
+        // A streamed operation maps failures into its events: each event
+        // is `Ok`, and an outage is one final `Err` (decision 7).
+        let returned = self.type_ref_to_type(&op.return_ty);
+        let (streamed, mapped) = match (&op.streams, returned) {
+            (Some(_), Type::Stream(item)) => (true, *item),
+            (_, returned) => (false, returned),
+        };
+        let Type::Result(_, err) = mapped else {
+            self.errors.push(invalid(if streamed {
+                format!(
+                    "operation `{operation}` streams and maps failures to `{}`, so each event is a `Result` whose error type declares that variant: `Stream<Result<Event, Error>>`",
+                    variant.name
+                )
+            } else {
+                format!(
+                    "operation `{operation}` maps failures to `{}`, so it returns a `Result` whose error type declares that variant",
+                    variant.name
+                )
+            }));
+            return;
+        };
+        let decl = match err.as_ref() {
+            Type::Struct(id) => self.types_by_id.get(id).copied(),
+            _ => None,
+        };
+        let Some(found) = decl.and_then(|d| d.variants.iter().find(|v| v.name.name == variant.name)) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` maps failures to `{}`, which is not a variant of its error type `{}`",
+                variant.name,
+                self.json_type_name(&err)
+            )));
+            return;
+        };
+        let fields: Vec<Type> = found.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>()
+            .iter().map(|ty| self.type_ref_to_type(ty)).collect();
+        if !(fields.is_empty() || fields == [Type::String]) {
+            self.errors.push(invalid(format!(
+                "`{}` receives failures, so it has no fields or one `String` field for the reason",
+                variant.name
+            )));
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A streamed operation returns `Stream<T>` as its whole result and
+    /// declares how events are framed; nothing else declares `streams:`.
+    /// Its failures end the stream with an error, or with a final `Err`
+    /// event when it declares `on failure` over `Stream<Result<T, E>>`;
+    /// it cannot also read text or run an `async:` protocol.
+    fn check_operation_stream(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.span,
+            )
+        };
+        let operation = &op.name.name;
+        let ret = self.type_ref_to_type(&op.return_ty);
+        let streams_whole = matches!(ret, Type::Stream(_));
+        let nested = match &ret {
+            Type::Stream(inner) => mentions_stream(inner),
+            other => mentions_stream(other),
+        };
+        if nested {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` returns `{}`; a `Stream` is an operation's whole result, never inside another type",
+                self.json_type_name(&ret)
+            )));
+        }
+        match (streams_whole, op.streams) {
+            (true, None) => self.errors.push(invalid(format!(
+                "operation `{operation}` returns a `Stream`, so it declares how events arrive: `streams: server_sent_events` or `streams: json_lines`"
+            ))),
+            (false, Some(_)) => self.errors.push(invalid(format!(
+                "operation `{operation}` declares `streams:` but returns `{}`, not a `Stream`",
+                self.json_type_name(&ret)
+            ))),
+            _ => {}
+        }
+        if op.streams.is_some() {
+            if op.stream_until.as_deref() == Some("") {
+                self.errors.push(invalid(format!("operation `{operation}` ends its stream `until` an empty event, which every keep-alive would match")));
+            }
+            if op.stream_until.is_some() && op.streams == Some(corvid_ast::StreamFormat::JsonLines) {
+                self.errors.push(invalid(format!(
+                    "operation `{operation}` declares `until` on `json_lines`; an end marker belongs to `server_sent_events`, whose events can carry one"
+                )));
+            }
+            let conflicts = [
+                (op.response_text, "`response: text`"),
+                (op.protocol.is_some(), "an `async:` protocol"),
+            ];
+            for (present, what) in conflicts {
+                if present {
+                    self.errors.push(invalid(format!("operation `{operation}` streams its response, so it cannot also declare {what}")));
+                }
+            }
+        }
+    }
+}
+
+fn mentions_stream(ty: &Type) -> bool {
+    match ty {
+        Type::Stream(_) => true,
+        Type::List(inner) | Type::Option(inner) | Type::Response(inner) => mentions_stream(inner),
+        Type::Result(a, b) | Type::Map(a, b) => mentions_stream(a) || mentions_stream(b),
+        _ => false,
+    }
+}
+
+/// A multipart field's value: a scalar part, or an `Upload` or `Bytes`
+/// file part.
+fn is_multipart_value(ty: &Type) -> bool {
+    is_multipart_scalar(ty) || matches!(ty, Type::Upload(_) | Type::Bytes)
+}
+
+impl<'a> Checker<'a> {
+    /// What an operation sends and reads has a wire form: a `body` is a
+    /// `Bytes` or `Upload` sent as itself, or a value with a JSON form;
+    /// a `form` carries no files; a `multipart` body is a record of flat
+    /// fields, files included; a response is read through JSON unless it
+    /// is `response: text`.
+    fn check_operation_body(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                op.span,
+            )
+        };
+        let operation = &op.name.name;
+        if let Some(body) = &op.body {
+            let Some(param) = op.params.iter().find(|p| p.name.name == body.param.name) else { return };
+            let ty = self.type_ref_to_type(&param.ty);
+            let file = matches!(ty, Type::Upload(_) | Type::Bytes);
+            match body.encoding {
+                corvid_ast::BodyEncoding::Json if file => {}
+                corvid_ast::BodyEncoding::Json => {
+                    if let Some(problem) = self.json_wire_problem(&ty, true) {
+                        self.errors.push(invalid(format!(
+                            "operation `{operation}` sends `{}` as its JSON body, but {problem}",
+                            body.param.name
+                        )));
+                    }
+                }
+                corvid_ast::BodyEncoding::Form if file => self.errors.push(invalid(format!(
+                    "operation `{operation}` sends `{}` as a form, which carries text fields only; send a file as `body {}` or inside a `multipart` record",
+                    body.param.name, body.param.name
+                ))),
+                corvid_ast::BodyEncoding::Form => {}
+                corvid_ast::BodyEncoding::Multipart => match ty {
+                    Type::Struct(id) if self.types_by_id.get(&id).is_some_and(|d| d.variants.is_empty()) => {
+                        let fields: Vec<(String, corvid_ast::TypeRef)> = self.types_by_id[&id]
+                            .fields
+                            .iter()
+                            .map(|f| (f.name.name.clone(), f.ty.clone()))
+                            .collect();
+                        for (field, field_ty) in fields {
+                            let ty = self.type_ref_to_type(&field_ty);
+                            let ok = match &ty {
+                                Type::Option(inner) | Type::List(inner) => is_multipart_value(inner),
+                                other => is_multipart_value(other),
+                            };
+                            if !ok {
+                                self.errors.push(invalid(format!(
+                                    "operation `{operation}` multipart field `{field}` is `{}`; a part is a number, text, `Bool`, a decimal or time value, an `Upload` or `Bytes`, or an `Option` or `List` of one",
+                                    self.json_type_name(&ty)
+                                )));
+                            }
+                        }
+                    }
+                    other => self.errors.push(invalid(format!(
+                        "operation `{operation}` sends `{}` as multipart, so it is a record whose fields become the parts, not `{}`",
+                        body.param.name,
+                        self.json_type_name(&other)
+                    ))),
+                },
+            }
+        }
+        if !op.response_text {
+            let read = match self.type_ref_to_type(&op.return_ty) {
+                Type::Result(ok, _) => *ok,
+                other => other,
+            };
+            let read = match read {
+                Type::Response(body) | Type::Stream(body) => *body,
+                other => other,
+            };
+            if let Some(problem) = self.json_wire_problem(&read, false) {
+                self.errors.push(invalid(format!(
+                    "operation `{operation}` reads its response as `{}`, but {problem}",
+                    self.json_type_name(&read)
+                )));
+            }
         }
     }
 }

@@ -98,6 +98,11 @@ pub fn parse_block(tokens: &[Token]) -> (Block, Vec<ParseError>) {
     }
 }
 
+struct RowBinding {
+    name: String,
+    live: Option<(Expr, Expr)>,
+}
+
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
@@ -110,7 +115,7 @@ struct Parser<'a> {
     /// Cleared by every `bump`, so the credit only survives when the
     /// block expression IS the end of the statement.
     block_expr_terminated: bool,
-    row_bindings: Vec<String>,
+    row_bindings: Vec<RowBinding>,
     generated: Vec<Decl>,
     components: Vec<Component>,
     browser_callbacks: Vec<Span>,
@@ -382,7 +387,7 @@ fn describe_token(t: &TokKind) -> String {
     match t {
         TokKind::Ident(s) => format!("identifier `{s}`"),
         TokKind::Int(n) => format!("integer `{n}`"),
-        TokKind::Float(f) => format!("float `{f}`"),
+        TokKind::Float { value: f, .. } => format!("float `{f}`"),
         TokKind::StringLit(s) => format!("string `\"{s}\"`"),
         TokKind::Eof => "end of input".into(),
         other => format!("{other:?}"),
@@ -395,6 +400,7 @@ mod decl;
 mod effect_row;
 mod expr;
 mod literals;
+mod live;
 mod prompt;
 mod match_expr;
 mod replay_expr;

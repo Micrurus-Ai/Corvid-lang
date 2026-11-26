@@ -36,6 +36,11 @@ pub struct ApplicationContract {
     pub types: Vec<ContractType>,
     /// Declared HTTP routes.
     pub routes: Vec<ContractRoute>,
+    /// Declared `live` subscriptions (B14): a client subscribes by name
+    /// and receives the matching rows, then each committed change.
+    /// Empty when the program declares none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub live: Vec<ContractLive>,
     /// Public agents (agent invocations, not ordinary REST).
     pub agents: Vec<ContractCallable>,
     /// Public prompts exposed to callers.
@@ -50,10 +55,15 @@ pub struct ApplicationContract {
     /// to run in, and the operations it exposes. This is the static
     /// advertised surface (what the app CAN do); the mode a given
     /// deployment actually SELECTED is recorded in the runtime's
-    /// `connector.mode_selected` startup event, not here. Empty when the
-    /// program declares no connectors.
+    /// `connector.mode_selected` startup event, not here. Only connectors
+    /// that declare `published: yes` are listed; a `published: no`
+    /// connector is backend only. Empty when none is published.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<ContractConnector>,
+    /// What the connector operations send and read. Never serialized:
+    /// see [`ConnectorWire`] for why it stays out of every published copy.
+    #[serde(skip)]
+    pub connector_wire: ConnectorWire,
 }
 
 /// A declared `connector` in the contract (slice 52g-3d). Credentials
@@ -63,12 +73,60 @@ pub struct ApplicationContract {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConnector {
     pub name: String,
-    pub base_url: String,
+    /// The API root, for a connector that calls one API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// `allowed_hosts` for a connector whose operations take a URL and may
+    /// call any host the project's `[http] allow` permits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosts: Option<String>,
     /// The execution modes this connector is allowed to run in
     /// (`mock`/`replay`/`real`). The deployment selects exactly one at
     /// start; there is no default.
     pub modes: Vec<String>,
+    /// The declared `redirects:` policy (`never`, `same_host` or
+    /// `allowed_hosts`), so a client or an assistant can see where a
+    /// request may be sent next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirects: Option<String>,
     pub operations: Vec<ContractOperation>,
+}
+
+/// What a program's connector operations send and read: each
+/// operation's body, query and return types, its header names, and the
+/// declared types they reach, described as the contract describes its
+/// public types.
+///
+/// It is NOT part of the published contract. `corvid serve` publishes
+/// the contract at `/.well-known/corvid` and `/openapi.json`, which
+/// clients, generated SDKs and assistants read, and a connector's
+/// request and response records are backend detail the source never
+/// chose to publish ("nothing is exposed by default"). The field holding
+/// this is never serialized, so no output can carry it; the backend's
+/// own tooling and tests read it in process, and
+/// [`crate::openapi::component_schemas`] turns its types into the same
+/// JSON Schema routes get.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectorWire {
+    pub operations: Vec<ConnectorWireOperation>,
+    pub types: Vec<ContractType>,
+}
+
+/// One connector operation's wire shape; see [`ConnectorWire`].
+#[derive(Debug, Clone)]
+pub struct ConnectorWireOperation {
+    pub connector: String,
+    pub operation: String,
+    /// The request body's type, named as routes name theirs, and how it
+    /// is sent (`json` or `form`).
+    pub body_type: Option<String>,
+    pub body_encoding: Option<String>,
+    /// The record whose fields become the query string.
+    pub query_type: Option<String>,
+    /// What the operation returns, as declared.
+    pub response_type: String,
+    /// The request headers its `header` lines set, by name.
+    pub headers: Vec<String>,
 }
 
 /// One `operation` of a connector in the contract (slice 52g-3d).
@@ -77,6 +135,10 @@ pub struct ContractOperation {
     pub name: String,
     pub method: String,
     pub path: String,
+    /// The longest one request to this operation may take, in seconds:
+    /// its own `timeout:` or the connector's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<String>,
     /// Whether the operation is `dangerous` (requires an `approve`).
@@ -330,6 +392,22 @@ pub struct ContractRoute {
     pub policy: Option<ContractRoutePolicy>,
 }
 
+/// A `live` declaration in the contract (B14). A client reaches it by
+/// `name`, with `path_params` filling the path, and receives `row_type`
+/// rows: a snapshot, then `Added`, `Updated` and `Removed` changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractLive {
+    pub server: String,
+    pub name: String,
+    pub path: String,
+    pub path_params: Vec<ContractParam>,
+    pub row_type: String,
+    /// Fields identifying one row, in table declaration order.
+    pub key_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ContractRoutePolicy>,
+}
+
 /// A route's authentication/authorization policy (slice 51h).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractRoutePolicy {
@@ -434,16 +512,20 @@ pub fn emit_application_contract(
     registry: &EffectRegistry,
     opts: &ContractOptions<'_>,
 ) -> ApplicationContract {
+    let names = ContractTypes::new(file, checked);
+    // An alias names no type of its own: every use of it is advertised
+    // as the type it stands for.
     let types = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
-                Some(contract_type(t))
+            Decl::Type(t) if t.visibility.is_callable_from_outside_file() && t.alias.is_none() => {
+                Some(contract_type(t, &names))
             }
             _ => None,
         })
         .collect();
+    let connector_wire = connector_wire(file, &names);
 
     let routes = file
         .decls
@@ -452,28 +534,62 @@ pub fn emit_application_contract(
             Decl::Server(server) => Some(server),
             _ => None,
         })
-        .flat_map(|server| server.routes.iter().map(contract_route))
+        .flat_map(|server| server.routes.iter().filter(|route| !route.is_live()).map(|route| contract_route(route, &names)))
+        .collect();
+    let tables: std::collections::HashMap<_, _> = file.decls.iter().filter_map(|decl| match decl {
+        Decl::Table(table) => Some((table.name().name.as_str(), table)),
+        _ => None,
+    }).collect();
+    let live = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Server(server) => Some(server),
+            _ => None,
+        })
+        .flat_map(|server| server.routes.iter().map(move |route| (server, route)))
+        .filter_map(|(server, route)| {
+            let row = names.name(route.response.live_row()?);
+            let table = tables[row.as_str()];
+            Some(ContractLive {
+                server: server.name.name.clone(),
+                name: route.live_name()?.into(),
+                path: route.path.clone(),
+                path_params: contract_path_params(route, &names),
+                row_type: row,
+                key_fields: table.keys.iter().map(|key| key.name.clone()).collect(),
+                policy: contract_policy(route),
+            })
+        })
         .collect();
 
     // `compute_worst_case_cost` is available for a tighter
     // per-body bound; the contract advertises the callable's
     // COMPOSED EFFECT-ROW surface (what a frontend should budget for),
     // which composes downstream effects through the call graph.
-    let _ = (resolved, checked, compute_worst_case_cost);
+    let _ = (resolved, compute_worst_case_cost);
 
     let agents = file
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Agent(a) if a.visibility.is_callable_from_outside_file() => Some(
+            // A public agent whose signature holds a `Secret` is
+            // server-only: no client could supply or receive one.
+            Decl::Agent(a)
+                if a.visibility.is_callable_from_outside_file()
+                    && !signature_holds_secret(&a.params, &a.return_ty, checked) =>
+            {
+                Some(
                 contract_callable(
                     &a.name.name,
                     &a.params,
                     &a.return_ty,
                     &a.effect_row,
                     registry,
+                    &names,
                 ),
-            ),
+                )
+            }
             _ => None,
         })
         .collect();
@@ -489,6 +605,7 @@ pub fn emit_application_contract(
                     &p.return_ty,
                     &p.effect_row,
                     registry,
+                    &names,
                 ),
             ),
             _ => None,
@@ -508,7 +625,9 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Connector(c) => Some(contract_connector(c)),
+            // Only a connector that declares `published: yes` is listed;
+            // the private wire description below keeps every connector.
+            Decl::Connector(c) if c.published == Some(true) => Some(contract_connector(c)),
             _ => None,
         })
         .collect();
@@ -520,10 +639,12 @@ pub fn emit_application_contract(
         source_path: opts.source_path.to_string(),
         types,
         routes,
+        live,
         agents,
         prompts,
         identities,
         connectors,
+        connector_wire,
     }
 }
 
@@ -534,7 +655,9 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
     ContractConnector {
         name: c.name.name.clone(),
         base_url: c.base_url.clone(),
+        hosts: c.base_url.is_none().then(|| "allowed_hosts".to_string()),
         modes: c.modes.iter().map(|m| m.as_str().to_string()).collect(),
+        redirects: c.redirects.map(|policy| policy.as_str().to_string()),
         operations: c
             .operations
             .iter()
@@ -542,6 +665,7 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
                 name: op.name.name.clone(),
                 method: op.method.as_str().to_string(),
                 path: op.path.clone(),
+                timeout_secs: c.operation_timeout_secs(op),
                 effects: op
                     .effect_row
                     .effects
@@ -561,6 +685,108 @@ fn contract_connector(c: &corvid_ast::ConnectorDecl) -> ContractConnector {
             })
             .collect(),
     }
+}
+
+/// The declared type of an operation parameter, named as routes name
+/// their types.
+fn param_type_name(op: &corvid_ast::OperationDecl, param: &str, names: &ContractTypes<'_>) -> Option<String> {
+    op.params.iter().find(|p| p.name.name == param).map(|p| names.name(&p.ty))
+}
+
+/// The names of the declared types a connector sends or reads: its
+/// operations' body, query and return types and every type their fields
+/// reach.
+fn connector_type_names(file: &File) -> std::collections::BTreeSet<String> {
+    let decls: std::collections::HashMap<&str, &corvid_ast::TypeDecl> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Type(t) => Some((t.name.name.as_str(), t)),
+            _ => None,
+        })
+        .collect();
+    let mut pending: Vec<&TypeRef> = Vec::new();
+    for decl in &file.decls {
+        let Decl::Connector(connector) = decl else { continue };
+        for op in &connector.operations {
+            pending.push(&op.return_ty);
+            let sent = op.body.iter().map(|b| &b.param.name).chain(op.query.iter().map(|q| &q.name));
+            for name in sent {
+                if let Some(param) = op.params.iter().find(|p| &p.name.name == name) {
+                    pending.push(&param.ty);
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(ty) = pending.pop() {
+        match ty {
+            TypeRef::Named { name, .. } => {
+                if let Some(decl) = decls.get(name.name.as_str()) {
+                    if let Some(target) = &decl.alias {
+                        // An alias is advertised as the type it stands
+                        // for, so that type is what the connector sends.
+                        pending.push(target);
+                    } else if seen.insert(name.name.clone()) {
+                        pending.extend(decl.fields.iter().map(|f| &f.ty));
+                        pending.extend(decl.variants.iter().flat_map(|v| v.fields.iter().map(|f| &f.ty)));
+                    }
+                }
+            }
+            TypeRef::Generic { args, .. } => pending.extend(args.iter()),
+            _ => {}
+        }
+    }
+    seen
+}
+
+/// What each connector operation sends and reads, for the backend's own
+/// tooling, never for a client. [`ConnectorWire`] explains why it is
+/// kept apart from the published contract.
+fn connector_wire(file: &File, names: &ContractTypes<'_>) -> ConnectorWire {
+    let sent = connector_type_names(file);
+    let types = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Type(t) if sent.contains(&t.name.name) => Some(contract_type(t, names)),
+            _ => None,
+        })
+        .collect();
+    let operations = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Connector(c) => Some(c),
+            _ => None,
+        })
+        .flat_map(|c| {
+            c.operations.iter().map(move |op| ConnectorWireOperation {
+                connector: c.name.name.clone(),
+                operation: op.name.name.clone(),
+                body_type: op.body.as_ref().and_then(|b| param_type_name(op, &b.param.name, names)),
+                body_encoding: op.body.as_ref().map(|b| {
+                    let raw = op.params.iter().any(|p| {
+                        p.name.name == b.param.name && {
+                            let name = type_ref_name(&p.ty);
+                            name == "Bytes" || name.starts_with("Upload<")
+                        }
+                    });
+                    match b.encoding {
+                        corvid_ast::BodyEncoding::Json if raw => "raw",
+                        corvid_ast::BodyEncoding::Json => "json",
+                        corvid_ast::BodyEncoding::Form => "form",
+                        corvid_ast::BodyEncoding::Multipart => "multipart",
+                    }
+                    .to_string()
+                }),
+                query_type: op.query.as_ref().and_then(|q| param_type_name(op, &q.name, names)),
+                response_type: names.name(&op.return_ty),
+                headers: op.headers.iter().map(|h| h.name.clone()).collect(),
+            })
+        })
+        .collect();
+    ConnectorWire { operations, types }
 }
 
 fn contract_provider_protocol(protocol: &corvid_ast::ProviderProtocolDecl) -> ContractProviderProtocol {
@@ -723,18 +949,34 @@ fn mandatory_auth_safeguards() -> Vec<String> {
     .collect()
 }
 
-fn contract_type(t: &corvid_ast::TypeDecl) -> ContractType {
+/// A public type's contract entry. A field that holds a `Secret` never
+/// leaves the server, so the contract, and every client and SDK
+/// generated from it, has no such field.
+fn contract_type(t: &corvid_ast::TypeDecl, names: &ContractTypes<'_>) -> ContractType {
     ContractType {
         name: t.name.name.clone(),
-        fields: t.fields.iter().map(contract_field).collect(),
-        variants: t.variants.iter().map(contract_variant).collect(),
+        fields: public_fields(&t.fields, names),
+        variants: t.variants.iter().map(|v| contract_variant(v, names)).collect(),
     }
 }
 
-fn contract_variant(v: &corvid_ast::SumVariant) -> ContractVariant {
+fn public_fields(fields: &[corvid_ast::Field], names: &ContractTypes<'_>) -> Vec<ContractField> {
+    fields
+        .iter()
+        .filter(|field| !names.checked.secret_type_refs.contains(&field.ty.span()))
+        .map(|field| contract_field(field, names))
+        .collect()
+}
+
+/// Whether a signature holds a `Secret`, as the checker found it.
+fn signature_holds_secret(params: &[corvid_ast::Param], return_ty: &TypeRef, checked: &Checked) -> bool {
+    params.iter().map(|param| &param.ty).chain(std::iter::once(return_ty)).any(|ty| checked.secret_type_refs.contains(&ty.span()))
+}
+
+fn contract_variant(v: &corvid_ast::SumVariant, names: &ContractTypes<'_>) -> ContractVariant {
     ContractVariant {
         name: v.name.name.clone(),
-        fields: v.fields.iter().map(contract_field).collect(),
+        fields: public_fields(&v.fields, names),
         status: v.status,
         ui: ui_hints_map(&v.ui),
     }
@@ -754,16 +996,16 @@ fn ui_hints_map(hints: &[corvid_ast::UiHint]) -> std::collections::BTreeMap<Stri
     map
 }
 
-fn contract_field(f: &corvid_ast::Field) -> ContractField {
+fn contract_field(f: &corvid_ast::Field, names: &ContractTypes<'_>) -> ContractField {
     let mut field = ContractField {
         name: f.name.name.clone(),
-        type_name: type_ref_name(&f.ty),
+        type_name: names.name(&f.ty),
         minimum: None,
         maximum: None,
         min_length: None,
         max_length: None,
         ui: ui_hints_map(&f.ui),
-        upload: contract_upload(&f.ty, f.upload.as_ref()),
+        upload: names.upload(&f.ty, f.upload.as_ref()),
     };
     match f.refinement {
         Some(Refinement::Between { min, max }) => {
@@ -842,47 +1084,18 @@ pub fn default_mime_for_format(format: &str) -> Vec<String> {
     mimes.iter().map(|m| m.to_string()).collect()
 }
 
-/// Pagination surface for a callable/route output type: `Page<Item>`
-/// is cursor pagination; `Stream<Item>` is stream pagination.
-fn pagination_for(ty: &TypeRef) -> Option<Pagination> {
-    match ty {
-        TypeRef::Generic { name, args, .. } if name.name == "Page" && args.len() == 1 => {
-            Some(Pagination {
-                style: PaginationStyle::Cursor,
-                item_type: type_ref_name(&args[0]),
-                cursor_param: Some("cursor".to_string()),
-            })
-        }
-        TypeRef::Generic { name, args, .. } if name.name == "Stream" && args.len() == 1 => {
-            Some(Pagination {
-                style: PaginationStyle::Stream,
-                item_type: type_ref_name(&args[0]),
-                cursor_param: None,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
+fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> ContractRoute {
     ContractRoute {
         method: r.method.as_str().to_string(),
         path: r.path.clone(),
-        path_params: r
-            .path_params
-            .iter()
-            .map(|p| ContractParam {
-                name: p.name.name.clone(),
-                type_name: type_ref_name(&p.ty),
-            })
-            .collect(),
-        query_type: r.query_ty.as_ref().map(type_ref_name),
-        body_type: r.body_ty.as_ref().map(type_ref_name),
+        path_params: contract_path_params(r, names),
+        query_type: r.query_ty.as_ref().map(|ty| names.name(ty)),
+        body_type: r.body_ty.as_ref().map(|ty| names.name(ty)),
         request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
         upload: r
             .body_ty
             .as_ref()
-            .and_then(|ty| contract_upload(ty, r.upload.as_ref())),
+            .and_then(|ty| names.upload(ty, r.upload.as_ref())),
         approval: r.approval.as_ref().map(|policy| ContractApprovalPolicy {
             role: policy.role.clone(),
             risk: policy.risk.clone(),
@@ -891,11 +1104,11 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             max_cost_usd: policy.max_cost_usd,
             irreversible: policy.irreversible,
         }),
-        response_type: type_ref_name(&r.response.ty),
+        response_type: names.name(&r.response.ty),
         response_media_type: match r.response.kind {
             corvid_ast::RouteResponseKind::Html => Some("text/html".into()),
-            corvid_ast::RouteResponseKind::Json if type_ref_head_is(&r.response.ty, "Stream") => Some("text/event-stream".into()),
-            corvid_ast::RouteResponseKind::Json => None,
+            corvid_ast::RouteResponseKind::Json if names.is_stream(&r.response.ty) => Some("text/event-stream".into()),
+            corvid_ast::RouteResponseKind::Json | corvid_ast::RouteResponseKind::Live => None,
         },
         // A route inherits the permission surface of its effect row;
         // 51h wires named permissions. For 51a we surface the effect
@@ -906,15 +1119,24 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl) -> ContractRoute {
             .iter()
             .map(|e| e.name.name.clone())
             .collect(),
-        pagination: pagination_for(&r.response.ty),
-        policy: r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| {
-            ContractRoutePolicy {
-                authenticated: true,
-                roles: p.roles.clone(),
-                permissions: p.permissions.clone(),
-            }
-        }),
+        pagination: names.pagination(&r.response.ty),
+        policy: contract_policy(r),
     }
+}
+
+fn contract_path_params(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> Vec<ContractParam> {
+    r.path_params.iter().map(|p| ContractParam {
+        name: p.name.name.clone(),
+        type_name: names.name(&p.ty),
+    }).collect()
+}
+
+fn contract_policy(r: &corvid_ast::HttpRouteDecl) -> Option<ContractRoutePolicy> {
+    r.policy.as_ref().filter(|p| p.requires_auth()).map(|p| ContractRoutePolicy {
+        authenticated: true,
+        roles: p.roles.clone(),
+        permissions: p.permissions.clone(),
+    })
 }
 
 /// Collect the file's effect declarations to build the registry the
@@ -935,16 +1157,17 @@ fn contract_callable(
     return_ty: &TypeRef,
     effect_row: &corvid_ast::EffectRow,
     registry: &EffectRegistry,
+    names: &ContractTypes<'_>,
 ) -> ContractCallable {
     let inputs = params
         .iter()
         .map(|p| ContractParam {
             name: p.name.name.clone(),
-            type_name: type_ref_name(&p.ty),
+            type_name: names.name(&p.ty),
         })
         .collect::<Vec<_>>();
 
-    let tainted_input = params.iter().any(|p| type_ref_is_tainted(&p.ty));
+    let tainted_input = params.iter().any(|p| names.is_tainted(&p.ty));
 
     let composed = registry.compose(
         &effect_row
@@ -977,24 +1200,22 @@ fn contract_callable(
     ContractCallable {
         name: name.to_string(),
         inputs,
-        output_type: type_ref_name(return_ty),
+        output_type: names.name(return_ty),
         capabilities: Capabilities {
-            streaming: type_ref_head_is(return_ty, "Stream"),
-            grounded: type_ref_head_is(return_ty, "Grounded"),
+            streaming: names.is_stream(return_ty),
+            grounded: names.is_grounded(return_ty),
             tainted_input,
             approvals_possible,
             confidence_min,
             max_cost_usd,
             latency_class,
-            pagination: pagination_for(return_ty),
+            pagination: names.pagination(return_ty),
         },
     }
 }
 
-/// A frontend-facing name for a `TypeRef`. Named types keep their
-/// name (referencing the `types` section); generics render their
-/// head + inner recursively so `Stream<Answer>` and `Grounded<Doc>`
-/// read the way a client expects.
+/// A type reference named as written. [`ContractTypes::name`] expands
+/// aliases first.
 fn type_ref_name(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Named { name, .. } => name.name.clone(),
@@ -1009,6 +1230,95 @@ fn type_ref_name(ty: &TypeRef) -> String {
     }
 }
 
+/// Names the contract's types, with every alias expanded to the type it
+/// stands for: a field typed `orders: Orders` with `type Orders =
+/// List<Order>` is advertised as `List<Order>`, which every client and
+/// SDK declares, never as `Orders`, which none does. Streaming,
+/// grounding, tainted inputs and pagination are read from the expanded
+/// type too, so an alias of a `Stream` streams.
+///
+/// The expansion walks the contract file's own declarations rather than
+/// reading the checker's table of resolved types, because the driver
+/// first copies the records a contract exchanges in from other modules
+/// and gives each its contract name (`Customer_2` when two modules both
+/// declare `Customer`). Those copies keep their own module's source
+/// positions, which the checker's table, keyed by position in the root
+/// file, cannot tell apart from the root's. The test
+/// `contract_names_agree_with_the_checker` holds the two in step.
+struct ContractTypes<'a> {
+    checked: &'a Checked,
+    /// Each alias the file declares and the type it stands for. A
+    /// declaration the driver copied in is later in the file and
+    /// carries the contract names, so a later one wins.
+    aliases: std::collections::HashMap<&'a str, &'a TypeRef>,
+}
+
+impl<'a> ContractTypes<'a> {
+    fn new(file: &'a File, checked: &'a Checked) -> Self {
+        let aliases = file
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::Type(t) => t.alias.as_ref().map(|target| (t.name.name.as_str(), target)),
+                _ => None,
+            })
+            .collect();
+        Self { checked, aliases }
+    }
+
+    /// `ty` with every alias replaced by the type it stands for. The
+    /// checker refuses an alias cycle, so the depth bound is only a
+    /// guard.
+    fn expand(&self, ty: &TypeRef) -> TypeRef {
+        self.expand_within(ty, 0)
+    }
+
+    fn expand_within(&self, ty: &TypeRef, depth: usize) -> TypeRef {
+        match ty {
+            TypeRef::Named { name, .. } if depth < 32 => match self.aliases.get(name.name.as_str()) {
+                Some(target) => self.expand_within(target, depth + 1),
+                None => ty.clone(),
+            },
+            TypeRef::Generic { name, args, span } => TypeRef::Generic {
+                name: name.clone(),
+                args: args.iter().map(|arg| self.expand_within(arg, depth)).collect(),
+                span: *span,
+            },
+            TypeRef::Weak { inner, effects, span } => TypeRef::Weak {
+                inner: Box::new(self.expand_within(inner, depth)),
+                effects: *effects,
+                span: *span,
+            },
+            other => other.clone(),
+        }
+    }
+
+    /// The frontend-facing name of a type reference.
+    fn name(&self, ty: &TypeRef) -> String {
+        type_ref_name(&self.expand(ty))
+    }
+
+    fn is_stream(&self, ty: &TypeRef) -> bool {
+        type_ref_head_is(&self.expand(ty), "Stream")
+    }
+
+    fn is_grounded(&self, ty: &TypeRef) -> bool {
+        type_ref_head_is(&self.expand(ty), "Grounded")
+    }
+
+    fn is_tainted(&self, ty: &TypeRef) -> bool {
+        type_ref_is_tainted(&self.expand(ty))
+    }
+
+    fn pagination(&self, ty: &TypeRef) -> Option<Pagination> {
+        pagination_for(&self.expand(ty))
+    }
+
+    fn upload(&self, ty: &TypeRef, spec: Option<&corvid_ast::UploadSpec>) -> Option<ContractUpload> {
+        contract_upload(&self.expand(ty), spec)
+    }
+}
+
 fn type_ref_head_is(ty: &TypeRef, head: &str) -> bool {
     matches!(ty, TypeRef::Generic { name, .. } if name.name == head)
 }
@@ -1018,6 +1328,24 @@ fn type_ref_is_tainted(ty: &TypeRef) -> bool {
         TypeRef::Generic { name, .. } if name.name == "Tainted" => true,
         TypeRef::Generic { args, .. } => args.iter().any(type_ref_is_tainted),
         _ => false,
+    }
+}
+
+/// Pagination surface for a callable/route output type: `Page<Item>`
+/// is cursor pagination; `Stream<Item>` is stream pagination.
+fn pagination_for(ty: &TypeRef) -> Option<Pagination> {
+    match ty {
+        TypeRef::Generic { name, args, .. } if name.name == "Page" && args.len() == 1 => Some(Pagination {
+            style: PaginationStyle::Cursor,
+            item_type: type_ref_name(&args[0]),
+            cursor_param: Some("cursor".to_string()),
+        }),
+        TypeRef::Generic { name, args, .. } if name.name == "Stream" && args.len() == 1 => Some(Pagination {
+            style: PaginationStyle::Stream,
+            item_type: type_ref_name(&args[0]),
+            cursor_param: None,
+        }),
+        _ => None,
     }
 }
 
@@ -1065,6 +1393,9 @@ type GithubError:
     | NotFound
 
 connector github:
+    timeout: 10s
+    redirects: same_host
+    published: yes
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     modes: [mock, replay, real]
@@ -1072,6 +1403,10 @@ connector github:
         GET \"/repos/{owner}/{repo}\"
         on status 404 -> NotFound
         mock: Ok(Repo(\"corvid\"))
+    operation export(owner: String) -> Repo uses http_read:
+        GET \"/export/{owner}\"
+        timeout: 300s
+        mock: Repo(\"export\")
 ",
         );
         let c = contract
@@ -1079,9 +1414,15 @@ connector github:
             .iter()
             .find(|c| c.name == "github")
             .expect("github connector in contract");
-        assert_eq!(c.base_url, "https://api.github.com");
+        assert_eq!(c.base_url.as_deref(), Some("https://api.github.com"));
+        assert_eq!(c.hosts, None);
         assert_eq!(c.modes, vec!["mock", "replay", "real"]);
-        assert_eq!(c.operations.len(), 1);
+        // The declared bounds are part of the advertised surface: where a
+        // request may be redirected, and how long each operation may take.
+        assert_eq!(c.redirects.as_deref(), Some("same_host"));
+        assert_eq!(c.operations.len(), 2);
+        assert_eq!(c.operations[0].timeout_secs, Some(10));
+        assert_eq!(c.operations[1].timeout_secs, Some(300));
         let op = &c.operations[0];
         assert_eq!(op.name, "get_repo");
         assert_eq!(op.method, "GET");
@@ -1098,9 +1439,34 @@ connector github:
         assert!(!json.contains("bearer"), "no auth scheme in the contract");
     }
 
+    /// `published: no` keeps a connector out of the published contract:
+    /// no name, URL, paths or protocol. The private wire description the
+    /// backend's own checks read still carries it.
+    #[test]
+    fn an_unpublished_connector_is_absent_from_the_published_contract() {
+        let src = |published: &str| {
+            format!(
+                "effect http_read:\n    cost: 0.0\n\ntype Repo:\n    name: String\n\nconnector vault:\n    timeout: 10s\n    redirects: never\n    published: {published}\n    base_url: \"https://vault.internal.example\"\n    modes: [real]\n    operation read(id: String) -> Repo uses http_read:\n        GET \"/secrets/{{id}}\"\n"
+            )
+        };
+        let hidden = contract_for(&src("no"));
+        assert!(hidden.connectors.is_empty(), "an unpublished connector is not listed");
+        let json = serde_json::to_string(&hidden).expect("contract serializes");
+        assert!(!json.contains("vault"), "no trace of the connector in the published JSON: {json}");
+        assert!(!json.contains("/secrets/"), "no operation path in the published JSON");
+        assert_eq!(hidden.connector_wire.operations[0].connector, "vault", "the backend still knows the connector");
+
+        let listed = contract_for(&src("yes"));
+        assert_eq!(listed.connectors.len(), 1);
+        assert_eq!(listed.connectors[0].name, "vault");
+    }
+
     #[test]
     fn a_verified_provider_protocol_is_frontend_consumable_contract_data() {
         let contract = contract_for(r#"connector video:
+    timeout: 10s
+    redirects: never
+    published: yes
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -1154,6 +1520,39 @@ public agent support(question: String) -> Answer uses ask:
         assert!(!agent.capabilities.streaming);
         assert_eq!(agent.capabilities.latency_class.as_deref(), Some("fast"));
         assert_eq!(agent.capabilities.max_cost_usd, Some(0.05));
+    }
+
+    #[test]
+    fn a_secret_never_appears_in_the_contract() {
+        let contract = contract_for(
+            "\
+public type Credentials:
+    user: String
+    password: Secret
+
+public type Account:
+    name: String
+    credentials: Credentials
+
+tool check(credentials: Credentials) -> Bool
+
+public agent log_in(credentials: Credentials) -> Bool:
+    return check(credentials)
+
+public agent greet(name: String) -> String:
+    return name
+",
+        );
+        let credentials = contract.types.iter().find(|t| t.name == "Credentials").unwrap();
+        let names: Vec<&str> = credentials.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["user"], "the secret field is server-only");
+        let account = contract.types.iter().find(|t| t.name == "Account").unwrap();
+        let names: Vec<&str> = account.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["name"], "a field holding a record with a secret is server-only too");
+        let agents: Vec<&str> = contract.agents.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(agents, ["greet"], "an agent taking a secret is server-only");
+        let json = serde_json::to_string(&contract).unwrap();
+        assert!(!json.contains("Secret") && !json.contains("password"), "{json}");
     }
 
     #[test]
@@ -1358,6 +1757,83 @@ tool stream_answer(m: String) -> Stream<String>
         assert_eq!(pg.item_type, "String");
         assert!(pg.cursor_param.is_none());
         assert!(agent.capabilities.streaming);
+    }
+
+    /// An alias is advertised as the type it stands for, at every depth
+    /// and in every position, so no client meets a name it cannot find;
+    /// the alias itself is not a contract type.
+    #[test]
+    fn a_type_written_through_an_alias_is_named_as_the_type_it_stands_for() {
+        let contract = contract_for(
+            "public type Order:
+    id: String
+
+public type Orders = List<Order>
+public type Answers = Stream<Order>
+public type Label = String
+
+public type Shelf:
+    orders: Orders
+    maybe: Option<Orders>
+    label: Label
+
+tool stream_orders(label: Label) -> Answers
+
+public agent watch(label: Label) -> Answers:
+    return stream_orders(label)
+",
+        );
+        assert!(contract.types.iter().all(|t| !["Orders", "Answers", "Label"].contains(&t.name.as_str())));
+        let shelf = contract.types.iter().find(|t| t.name == "Shelf").expect("Shelf");
+        let named: Vec<(&str, &str)> = shelf.fields.iter().map(|f| (f.name.as_str(), f.type_name.as_str())).collect();
+        assert_eq!(named, [("orders", "List<Order>"), ("maybe", "Option<List<Order>>"), ("label", "String")]);
+        let agent = contract.agents.iter().find(|a| a.name == "watch").unwrap();
+        assert_eq!(agent.inputs[0].type_name, "String");
+        assert_eq!(agent.output_type, "Stream<Order>");
+        assert!(agent.capabilities.streaming, "an alias of a stream still streams");
+        assert_eq!(agent.capabilities.pagination.as_ref().map(|p| p.item_type.as_str()), Some("Order"));
+    }
+
+    /// The contract expands aliases over its own declarations
+    /// ([`ContractTypes`] says why); the checker resolves every type
+    /// reference too. The two must name every field the same way.
+    #[test]
+    fn contract_names_agree_with_the_checker() {
+        let src = "public type Order:
+    id: String
+    total: Decimal
+
+public type Orders = List<Order>
+public type Ledger = Map<String, Orders>
+public type Label = String
+
+public type Shelf:
+    orders: Orders
+    ledger: Ledger
+    maybe: Option<Orders>
+    outcome: Result<Label, String>
+    sealed: Grounded<Order>
+    label: Label
+";
+        let tokens = corvid_syntax::lex(src).expect("lex");
+        let (file, perr) = corvid_syntax::parse_file(&tokens);
+        assert!(perr.is_empty(), "parse: {perr:?}");
+        let resolved = corvid_resolve::resolve(&file);
+        let checked = corvid_types::typecheck(&file, &resolved);
+        assert!(checked.errors.is_empty(), "check: {:?}", checked.errors);
+        let names = ContractTypes::new(&file, &checked);
+        let symbols = &resolved.symbols;
+        let mut compared = 0;
+        for decl in &file.decls {
+            let Decl::Type(t) = decl else { continue };
+            for field in &t.fields {
+                let resolved_type = &checked.type_refs[&field.ty.span()];
+                let from_checker = resolved_type.display_name_with(&|id| Some(symbols.get(id).name.clone()));
+                assert_eq!(names.name(&field.ty), from_checker, "field `{}.{}`", t.name.name, field.name.name);
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 8);
     }
 
     #[test]
@@ -1815,7 +2291,7 @@ server admin_api:
     #[test]
     fn a_valid_connector_compiles() {
         let errors = check_errors_of(
-            "connector github:\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
+            "connector github:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
         );
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
@@ -1823,7 +2299,7 @@ server admin_api:
     #[test]
     fn connector_non_absolute_base_url_is_rejected() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -1838,7 +2314,7 @@ server admin_api:
     #[test]
     fn connector_path_placeholder_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -1853,7 +2329,7 @@ server admin_api:
     #[test]
     fn connector_duplicate_operation_and_zero_retry_rejected() {
         let dup = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
         );
         assert!(
             dup.iter().any(|e| matches!(
@@ -1864,7 +2340,7 @@ server admin_api:
             "expected a duplicate-operation rejection, got {dup:?}"
         );
         let retry = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             retry.iter().any(|e| matches!(
@@ -1879,7 +2355,7 @@ server admin_api:
     #[test]
     fn connector_body_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
         );
         assert!(
             errors.iter().any(|e| matches!(

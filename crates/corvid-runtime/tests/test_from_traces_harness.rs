@@ -51,6 +51,7 @@ fn trace_file(dir: &Path, name: &str, writer: &str) -> PathBuf {
             writer: writer.to_string(),
             commit_sha: None,
             source_path: None,
+            tzdb_version: None,
             ts_ms: 1,
             run_id: format!("run-{name}"),
         },
@@ -160,6 +161,7 @@ async fn fake_runner(
                     writer: WRITER_INTERPRETER.to_string(),
                     commit_sha: None,
                     source_path: Some("current.cor".into()),
+                    tzdb_version: None,
                     ts_ms: 1,
                     run_id: "promoted".into(),
                 },
@@ -455,16 +457,16 @@ async fn harness_malformed_trace_mid_run_surfaces_as_errored_verdict_not_panic()
 }
 
 #[tokio::test]
-async fn harness_cross_tier_trace_is_errored_not_panic() {
+async fn harness_trace_load_error_is_errored_not_panic() {
     let dir = tempfile::tempdir().unwrap();
     let trace = trace_file(dir.path(), "native", WRITER_NATIVE);
     let state = Arc::new(Mutex::new(RunnerState::default()));
     state.lock().unwrap().set(
         &trace,
         "replay",
-        Scenario::Error(RuntimeError::CrossTierReplayUnsupported {
-            recorded_writer: WRITER_NATIVE.into(),
-            replay_writer: WRITER_INTERPRETER.into(),
+        Scenario::Error(RuntimeError::ReplayTraceLoad {
+            path: trace.clone(),
+            message: "unreadable".into(),
         }),
     );
 

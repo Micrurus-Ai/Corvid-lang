@@ -316,6 +316,9 @@ fn rename_local_in_block(block: &mut Block, resolved: &Resolved, target: LocalId
                 rename_local_in_expr(iter, resolved, target, fresh);
                 rename_local_in_block(body, resolved, target, fresh);
             }
+            Stmt::Atomic { body, .. } => {
+                rename_local_in_block(body, resolved, target, fresh);
+            }
             Stmt::While { cond, body, .. } => {
                 rename_local_in_expr(cond, resolved, target, fresh);
                 rename_local_in_block(body, resolved, target, fresh);
@@ -473,7 +476,7 @@ fn extract_from_stmt(
         Stmt::For { iter, .. } => extract_expr_to_let(iter, allocator, reserved),
         Stmt::While { cond, .. } => extract_expr_to_let(cond, allocator, reserved),
         Stmt::Destructure { value, .. } => extract_expr_to_let(value, allocator, reserved),
-        Stmt::Parallel { .. } => None,
+        Stmt::Parallel { .. } | Stmt::Atomic { .. } => None,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => None,
         Stmt::Expr { expr, .. } => extract_expr_to_let(expr, allocator, reserved),
         Stmt::Approve { action, .. } => extract_expr_to_let(action, allocator, reserved),
@@ -610,7 +613,7 @@ fn direct_local_use(stmt: &Stmt, resolved: &Resolved, local: LocalId) -> bool {
         Stmt::For { iter, .. } => is_direct_local_expr(iter, resolved, local),
         Stmt::While { cond, .. } => is_direct_local_expr(cond, resolved, local),
         Stmt::Destructure { value, .. } => is_direct_local_expr(value, resolved, local),
-        Stmt::Parallel { .. } => false,
+        Stmt::Parallel { .. } | Stmt::Atomic { .. } => false,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
         Stmt::Approve { action, .. } => is_direct_local_expr(action, resolved, local),
         Stmt::Expr { expr, .. } => is_direct_local_expr(expr, resolved, local),
@@ -664,7 +667,7 @@ fn apply_inline_to_stmt(stmt: &mut Stmt, resolved: &Resolved, replacement: Expr)
                 *value = replacement;
             }
         }
-        Stmt::Parallel { .. } => {}
+        Stmt::Parallel { .. } | Stmt::Atomic { .. } => {}
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => {}
         Stmt::Approve { action, .. } => {
             if matches!(action, Expr::Ident { .. }) {
@@ -988,7 +991,7 @@ fn fold_constants_in_stmt(stmt: &mut Stmt) -> bool {
         Stmt::For { iter, .. } => fold_constants_in_expr(iter),
         Stmt::While { cond, .. } => fold_constants_in_expr(cond),
         Stmt::Destructure { value, .. } => fold_constants_in_expr(value),
-        Stmt::Parallel { .. } => false,
+        Stmt::Parallel { .. } | Stmt::Atomic { .. } => false,
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass { .. } => false,
     }
 }
@@ -1211,6 +1214,15 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
                     names.insert(field.name.name.clone());
                 }
             }
+            Decl::Table(table) => {
+                names.insert(table.record.name.name.clone());
+                for field in &table.record.fields {
+                    names.insert(field.name.name.clone());
+                }
+            }
+            Decl::Database(database) => {
+                names.insert(database.name.name.clone());
+            }
             Decl::Store(store) => {
                 names.insert(store.name.name.clone());
                 for field in &store.fields {
@@ -1413,6 +1425,9 @@ test lookup_trace from_trace "traces/lookup.jsonl":
     fn renders_and_reparses_verified_provider_protocols() {
         let source = r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:

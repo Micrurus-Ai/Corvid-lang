@@ -133,6 +133,50 @@ pub fn emit_type_description(
         Type::JsonError => TypeDescription::Struct {
             name: "JsonError".to_string(),
         },
+        // B03 — a `RegexMatch` has no JSON form, so no projection
+        // describes its fields; like `Map`, it is a named opaque
+        // struct so signed manifests stay total.
+        Type::RegexMatch => TypeDescription::Struct {
+            name: "RegexMatch".to_string(),
+        },
+        // B06 — `Decimal` has no C ABI form: native code holds it as
+        // its exact text internally, and extern-c boundaries refuse it.
+        // Named opaque, like `RegexMatch`, so signed manifests stay
+        // total.
+        Type::Decimal => TypeDescription::Struct {
+            name: "Decimal".to_string(),
+        },
+        // B06 — the same for durations and instants until their JSON slice.
+        Type::Duration => TypeDescription::Struct {
+            name: "Duration".to_string(),
+        },
+        Type::Instant => TypeDescription::Struct {
+            name: "Instant".to_string(),
+        },
+        Type::TimeZone => TypeDescription::Struct {
+            name: "TimeZone".to_string(),
+        },
+        Type::ZonedTime => TypeDescription::Struct {
+            name: "ZonedTime".to_string(),
+        },
+        Type::Currency => TypeDescription::Struct {
+            name: "Currency".to_string(),
+        },
+        Type::Locale => TypeDescription::Struct {
+            name: "Locale".to_string(),
+        },
+        // `Bytes` is named the same way: the contract's projections read
+        // its base64url JSON form from `corvid_public_json::text_scalar`.
+        Type::Bytes => TypeDescription::Struct {
+            name: "Bytes".to_string(),
+        },
+        // The ABI descriptor names a `Secret` parameter's type so a
+        // host sees the declaration; no value of it ever crosses the
+        // boundary (native code refuses `Secret`, see
+        // `corvid_codegen_cl::secret_boundary`, and it has no JSON form).
+        Type::Secret => TypeDescription::Struct {
+            name: "Secret".to_string(),
+        },
         // Slice 51f — `Upload<Format>` and `Page<Item>` are
         // HTTP-boundary types described by the application contract
         // and its OpenAPI projection, not by the native cdylib ABI
@@ -141,6 +185,15 @@ pub fn emit_type_description(
         // upload marshals as its bytes; a page as its element type.
         Type::Upload(_) => TypeDescription::Scalar {
             scalar: ScalarTypeName::String,
+        },
+        // The checker keeps a connector `Response` off every exported
+        // signature; were one described, its body is the data it carries.
+        Type::Response(inner) => emit_type_description(inner, resolved, names),
+        // B09 — a table write's conflict is named, like `JsonError`;
+        // tables and their conflicts run on the interpreter, so no
+        // native signature carries one.
+        Type::Conflict(_, _) => TypeDescription::Struct {
+            name: "Conflict".to_string(),
         },
         Type::Page(inner) => TypeDescription::List {
             list: AbiListType {

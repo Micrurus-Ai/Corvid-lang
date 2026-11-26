@@ -253,6 +253,15 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_field(&mut self) -> Result<Field, ParseError> {
+        let field = self.parse_field_before_newline()?;
+        self.expect_newline()?;
+        Ok(field)
+    }
+
+    /// A field up to, not including, its line's end, so a declaration
+    /// that allows more after a field (a table's `renamed from`) can
+    /// read it.
+    pub(super) fn parse_field_before_newline(&mut self) -> Result<Field, ParseError> {
         let start = self.peek_span();
         // Leading field attributes (`@ui(...)` display hints, slice
         // 51d; `@upload(...)` constraints, slice 51f) in any order.
@@ -274,7 +283,6 @@ impl<'a> Parser<'a> {
         let ty = self.parse_type_ref()?;
         let refinement = self.parse_field_refinement()?;
         let end = self.prev_span();
-        self.expect_newline()?;
         Ok(Field {
             name: Ident::new(name, name_span),
             ty,

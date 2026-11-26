@@ -144,7 +144,7 @@ impl EffectRegistry {
 
         // Phase 33S0: seven built-in executing-I/O effects —
         // `io_read` / `io_write` / `io_list` (file surface),
-        // `http_get` / `http_post` (HTTP client surface),
+        // `http_egress_get` / `http_egress_post` (network egress),
         // `db_query` / `db_execute` (SQLite surface). The runtime
         // side wires up in 33S1/2/3; registering the effects here
         // means user code can declare `uses io_read` etc. and have
@@ -367,9 +367,9 @@ impl EffectRegistry {
     /// `http_egress_get` / `http_egress_post` when the 33S2a tools
     /// `http_get` / `http_post_json` collided with the effect names
     /// in the resolver's name table (effects and tools share a
-    /// namespace at the resolver level). The user-facing tool
-    /// names are load-bearing API; the effect names are
-    /// implementation detail.
+    /// namespace at the resolver level). Those tools were replaced
+    /// by connectors in B05; the effects remain the built-in
+    /// network-egress effects any connector operation may declare.
     ///
     /// `http_egress_get` (reversible from the caller's perspective;
     /// the server-side log/billing/rate-limit side-effects are not
@@ -642,7 +642,7 @@ use compose::{
     infer_composition_rule,
 };
 pub use cost::{
-    compute_worst_case_cost, cost_path_for_dimension, format_numeric_dimension,
+    compute_worst_case_cost, compute_worst_case_cost_with_types, cost_path_for_dimension, format_numeric_dimension,
     numeric_constraint_value, render_cost_tree,
 };
 pub use grounded::{
@@ -746,10 +746,10 @@ mod tests {
 
     /// 33S0 — all seven built-in I/O effects are in the registry
     /// with the right io_source value and reversibility. The read-
-    /// shape three (io_read, io_list, http_get, db_query) inherit
-    /// reversible=true from the dimension default and don't carry
-    /// an explicit reversible value; the write-shape three
-    /// (io_write, http_post, db_execute) carry reversible=false
+    /// shape three (io_read, io_list, http_egress_get, db_egress_read)
+    /// inherit reversible=true from the dimension default and don't
+    /// carry an explicit reversible value; the write-shape three
+    /// (io_write, http_egress_post, db_egress_write) carry reversible=false
     /// explicitly so the LeastReversible composition picks them up.
     #[test]
     fn io_http_db_effects_are_registered_with_correct_io_source_and_reversibility() {

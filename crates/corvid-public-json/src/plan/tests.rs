@@ -66,6 +66,17 @@ fn a_type_without_a_plan_form_is_refused_by_name() {
     assert!(error.contains("Stream<Int>"), "{error}");
 }
 
+#[test]
+fn every_text_scalar_type_has_a_plan_form() {
+    for name in crate::text_scalar::NAMES {
+        let ty = corvid_types::Type::compiler_known(name).expect("a text scalar is a compiler-known type");
+        let root = Type::List(Box::new(Type::Option(Box::new(ty))));
+        let plan = DecodePlan { root: root.clone(), types: vec![], shapes: BTreeMap::new(), owning_maps: vec![] };
+        let read = DecodePlan::from_text(&plan.to_text().expect("writes")).expect("reads");
+        assert_eq!(read.root, root);
+    }
+}
+
 /// Records each shape the decoder asks for.
 #[derive(Default)]
 struct Recording(Vec<Shape>);
@@ -86,6 +97,7 @@ impl ValueBuilder for Recording {
     fn record(&mut self, record: &IrType, _: Vec<()>) { self.0.push(Shape::Record(record.id)) }
     fn variant(&mut self, sum: &IrType, index: usize, _: Vec<()>) { self.0.push(Shape::Variant(sum.id, index as u32)) }
     fn json(&mut self, _: &J) {}
+    fn text_scalar(&mut self, _: crate::text_scalar::TextScalar) {}
 }
 
 #[test]

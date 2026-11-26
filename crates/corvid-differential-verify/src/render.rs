@@ -1,4 +1,4 @@
-﻿use corvid_ast::{
+use corvid_ast::{
     AgentDecl, Backoff, BackpressurePolicy, BinaryOp, Block, Decl, DimensionValue, Effect,
     EffectConstraint, EvalAssert, Expr, ExtendMethod, ExtendMethodKind, File, FixtureDecl,
     ImportSource, Literal, MockDecl, Param, PromptDecl, Stmt, ToolDecl, TypeRef, UnaryOp,
@@ -22,6 +22,12 @@ pub fn render_file(file: &File) -> String {
 
 fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
     match decl {
+        Decl::Table(_) | Decl::Database(_) => {
+            // Never synthesized by rewrite passes; placeholder keeps
+            // the renderer total.
+            push_indent(indent, out);
+            out.push_str("<table or database decl>\n");
+        }
         Decl::Fn(_) => {
             // Never synthesized by rewrite passes; placeholder keeps
             // the renderer total.
@@ -195,10 +201,24 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                     out.push('\n');
                 }
                 push_indent(indent + 1, out);
+                if route.is_live() {
+                    // `live "/path" -> Row`, the form it was written in.
+                    out.push_str("live ");
+                    out.push_str(&render_string_literal(&written_path(route)));
+                    out.push_str(" -> ");
+                    out.push_str(&route.response.live_row().map(render_type_ref).unwrap_or_default());
+                    if let Some(policy) = &route.policy {
+                        render_route_policy(policy, out);
+                    }
+                    out.push_str(":
+");
+                    render_block(&route.body, indent + 2, out);
+                    continue;
+                }
                 out.push_str("route ");
                 out.push_str(route.method.as_str());
                 out.push(' ');
-                out.push_str(&render_string_literal(&route.path));
+                out.push_str(&render_string_literal(&written_path(route)));
                 if let Some(query_ty) = &route.query_ty {
                     out.push_str(" query ");
                     out.push_str(&render_type_ref(query_ty));
@@ -209,7 +229,7 @@ fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
                 }
                 match route.response.kind {
                     corvid_ast::RouteResponseKind::Html => out.push_str(" -> html"),
-                    corvid_ast::RouteResponseKind::Json => {
+                    corvid_ast::RouteResponseKind::Json | corvid_ast::RouteResponseKind::Live => {
                         out.push_str(" -> json ");
                         out.push_str(&render_type_ref(&route.response.ty));
                     }
@@ -563,6 +583,11 @@ fn render_stmt(stmt: &Stmt, indent: usize, out: &mut String) {
             out.push_str(":\n");
             render_block(body, indent + 1, out);
         }
+        Stmt::Atomic { body, .. } => {
+            push_indent(indent, out);
+            out.push_str("atomic:\n");
+            render_block(body, indent + 1, out);
+        }
         Stmt::While { cond, body, .. } => {
             push_indent(indent, out);
             out.push_str("while ");
@@ -760,10 +785,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
     out.push_str(":\n");
 
     push_indent(indent + 1, out);
-    out.push_str(&format!(
-        "base_url: {}\n",
-        render_string_literal(&connector.base_url)
-    ));
+    match &connector.base_url {
+        Some(base_url) => out.push_str(&format!("base_url: {}\n", render_string_literal(base_url))),
+        None => out.push_str("hosts: allowed_hosts\n"),
+    }
     let secret = |s: &corvid_ast::SecretRef| format!("secret({})", render_string_literal(&s.name));
     if let Some(auth) = &connector.auth {
         push_indent(indent + 1, out);
@@ -780,6 +805,18 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
                 secret(password)
             )),
         }
+    }
+    if let Some(secs) = connector.timeout_secs {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("timeout: {secs}s\n"));
+    }
+    if let Some(redirects) = connector.redirects {
+        push_indent(indent + 1, out);
+        out.push_str(&format!("redirects: {}\n", redirects.as_str()));
+    }
+    if let Some(published) = connector.published {
+        push_indent(indent + 1, out);
+        out.push_str(if published { "published: yes\n" } else { "published: no\n" });
     }
     if let Some(retry) = connector.retry {
         push_indent(indent + 1, out);
@@ -821,17 +858,53 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             HttpMethod::Put => "PUT",
             HttpMethod::Patch => "PATCH",
             HttpMethod::Delete => "DELETE",
+            HttpMethod::Head => "HEAD",
+            HttpMethod::Options => "OPTIONS",
         };
         out.push_str(method);
         out.push(' ');
-        out.push_str(&render_string_literal(&op.path));
+        match &op.url_param {
+            Some(url) => out.push_str(&url.name),
+            None => out.push_str(&render_string_literal(&op.path)),
+        }
+        if let Some(query) = &op.query {
+            out.push_str(&format!(" query {}", query.name));
+        }
         if let Some(body) = &op.body {
             match body.encoding {
                 BodyEncoding::Json => out.push_str(&format!(" body {}", body.param.name)),
                 BodyEncoding::Form => out.push_str(&format!(" form {}", body.param.name)),
+                BodyEncoding::Multipart => out.push_str(&format!(" multipart {}", body.param.name)),
             }
         }
         out.push('\n');
+        if op.response_text {
+            push_indent(indent + 2, out);
+            out.push_str("response: text\n");
+        }
+        if let Some(format) = op.streams {
+            push_indent(indent + 2, out);
+            match &op.stream_until {
+                Some(until) => out.push_str(&format!("streams: {} until {}\n", format.as_str(), render_string_literal(until))),
+                None => out.push_str(&format!("streams: {}\n", format.as_str())),
+            }
+        }
+        if let Some(variant) = &op.on_failure {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("on failure -> {}\n", variant.name));
+        }
+        for header in &op.headers {
+            push_indent(indent + 2, out);
+            let value = match &header.value {
+                corvid_ast::OperationHeaderValue::Param(param) => param.name.clone(),
+                corvid_ast::OperationHeaderValue::Literal(text) => render_string_literal(text),
+            };
+            out.push_str(&format!("header {}: {value}\n", render_string_literal(&header.name)));
+        }
+        if let Some(secs) = op.timeout_secs {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("timeout: {secs}s\n"));
+        }
         for mapping in &op.error_map {
             push_indent(indent + 2, out);
             out.push_str(&format!(
@@ -956,7 +1029,7 @@ fn render_type_ref(ty: &TypeRef) -> String {
 fn render_literal(literal: &Literal) -> String {
     match literal {
         Literal::Int(value) => value.to_string(),
-        Literal::Float(value) => render_float(*value),
+        Literal::Float { value, .. } => render_float(*value),
         Literal::String(value) => render_string_literal(value),
         Literal::Bool(value) => value.to_string(),
         Literal::Nothing => "nothing".into(),
@@ -1045,6 +1118,20 @@ fn render_float(value: f64) -> String {
     } else {
         format!("{text}.0")
     }
+}
+
+/// A route's path as its source writes it: the parsed path holds
+/// `{board}`, and a typed placeholder is written back as `{board: Int}`.
+fn written_path(route: &corvid_ast::HttpRouteDecl) -> String {
+    let mut path = route.path.clone();
+    for param in &route.path_params {
+        let ty = render_type_ref(&param.ty);
+        if ty != "String" {
+            let plain = format!("{{{}}}", param.name.name);
+            path = path.replacen(&plain, &format!("{{{}: {ty}}}", param.name.name), 1);
+        }
+    }
+    path
 }
 
 fn render_string_literal(value: &str) -> String {

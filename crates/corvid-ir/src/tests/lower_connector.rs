@@ -26,6 +26,9 @@ type GithubError:
     | ValidationFailed
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     retry: 3
@@ -74,7 +77,7 @@ fn connector_dispatch_metadata_is_carried_and_keyed_to_the_tools() {
     assert_eq!(ir.connectors.len(), 1);
     let c = &ir.connectors[0];
     assert_eq!(c.name, "github");
-    assert_eq!(c.base_url, "https://api.github.com");
+    assert_eq!(c.base_url.as_deref(), Some("https://api.github.com"));
     assert_eq!(c.retry, Some(3));
     assert_eq!(
         c.rate_limit.map(|r| (r.limit, r.window_secs)),

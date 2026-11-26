@@ -69,6 +69,15 @@ impl DbHandleInner {
             writer: None,
         }
     }
+
+    /// Take this file's writer turn and keep it until the guard drops.
+    /// An `atomic:` block (B09 P7a) holds it from `BEGIN IMMEDIATE` to
+    /// its commit or rollback, so other writers wait in the queue rather
+    /// than on SQLite's lock, where they could deadlock against it.
+    /// `None` for an in-memory database, which has no other writers.
+    pub(crate) async fn hold_writer_turn(&self) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        Some(self.writer.clone()?.lock_owned().await)
+    }
 }
 
 impl Drop for DbHandleInner {
@@ -210,6 +219,9 @@ impl DbHandleRegistry {
                 RuntimeError::Other(format!("std.db sqlite open `{path}` failed: {err}"))
             })?
         };
+        // Table columns of money and time compare through these (B09 P8a).
+        crate::tables::register_sqlite_collations(&conn)
+            .map_err(|err| RuntimeError::Other(format!("std.db sqlite open `{path}` could not register collations: {err}")))?;
         let writer = if path == ":memory:" {
             None
         } else {
@@ -247,6 +259,29 @@ impl DbHandleRegistry {
         sql: &str,
         params: &[DbValue],
     ) -> Result<DbQueryRows, RuntimeError> {
+        self.query_converting(handle_id, sql, params, db_value_from_ref)
+    }
+
+    /// [`Self::query`] for table reads (B09), which keep a blob's bytes
+    /// for a `Bytes` column instead of redacting it. Tables decode each
+    /// column by its declared type, so the bytes never reach an agent
+    /// as raw query output.
+    pub fn query_table_rows(
+        &self,
+        handle_id: u64,
+        sql: &str,
+        params: &[DbValue],
+    ) -> Result<DbQueryRows, RuntimeError> {
+        self.query_converting(handle_id, sql, params, table_value_from_ref)
+    }
+
+    fn query_converting(
+        &self,
+        handle_id: u64,
+        sql: &str,
+        params: &[DbValue],
+        convert: fn(rusqlite::types::ValueRef<'_>) -> DbValue,
+    ) -> Result<DbQueryRows, RuntimeError> {
         let conn = self.lookup(handle_id)?;
         let conn = conn.lock().map_err(|err| {
             RuntimeError::Other(format!("std.db connection mutex poisoned: {err}"))
@@ -266,7 +301,7 @@ impl DbHandleRegistry {
                 let mut cells = BTreeMap::new();
                 for (index, name) in column_names.iter().enumerate() {
                     let value = row.get_ref(index)?;
-                    let db_value = db_value_from_ref(value);
+                    let db_value = convert(value);
                     cells.insert(
                         name.clone(),
                         DbCell {
@@ -403,6 +438,10 @@ pub enum DbValue {
     Float(f64),
     Text(String),
     Bool(bool),
+    /// B09 P8c — a `Bytes` table column's value. Only table reads
+    /// produce one (see [`DbRegistry::query_table_rows`]); `std.db`
+    /// queries still report a blob as redacted text.
+    Bytes(Vec<u8>),
 }
 
 impl DbValue {
@@ -413,6 +452,7 @@ impl DbValue {
             Self::Float(_) => "Float",
             Self::Text(_) => "String",
             Self::Bool(_) => "Bool",
+            Self::Bytes(_) => "Bytes",
         }
     }
 }
@@ -649,16 +689,18 @@ fn db_value_to_sql_value(value: &DbValue) -> rusqlite::types::Value {
         DbValue::Float(value) => rusqlite::types::Value::Real(*value),
         DbValue::Text(value) => rusqlite::types::Value::Text(value.clone()),
         DbValue::Bool(value) => rusqlite::types::Value::Integer(i64::from(*value)),
+        DbValue::Bytes(value) => rusqlite::types::Value::Blob(value.clone()),
     }
 }
 
 #[derive(Debug)]
-enum PostgresParam {
+pub(crate) enum PostgresParam {
     Null(Option<String>),
     Integer(i64),
     Float(f64),
     Text(String),
     Bool(bool),
+    Bytes(Vec<u8>),
 }
 
 impl postgres::types::ToSql for PostgresParam {
@@ -673,6 +715,7 @@ impl postgres::types::ToSql for PostgresParam {
             Self::Float(value) => value.to_sql(ty, out),
             Self::Text(value) => value.to_sql(ty, out),
             Self::Bool(value) => value.to_sql(ty, out),
+            Self::Bytes(value) => value.to_sql(ty, out),
         }
     }
 
@@ -683,17 +726,18 @@ impl postgres::types::ToSql for PostgresParam {
     postgres::types::to_sql_checked!();
 }
 
-fn db_value_to_postgres_param(value: &DbValue) -> PostgresParam {
+pub(crate) fn db_value_to_postgres_param(value: &DbValue) -> PostgresParam {
     match value {
         DbValue::Null => PostgresParam::Null(None),
         DbValue::Integer(value) => PostgresParam::Integer(*value),
         DbValue::Float(value) => PostgresParam::Float(*value),
         DbValue::Text(value) => PostgresParam::Text(value.clone()),
         DbValue::Bool(value) => PostgresParam::Bool(*value),
+        DbValue::Bytes(value) => PostgresParam::Bytes(value.clone()),
     }
 }
 
-fn postgres_cell_value(row: &postgres::Row, name: &str) -> DbValue {
+pub(crate) fn postgres_cell_value(row: &postgres::Row, name: &str) -> DbValue {
     if let Ok(value) = row.try_get::<_, Option<String>>(name) {
         return value.map(DbValue::Text).unwrap_or(DbValue::Null);
     }
@@ -711,6 +755,9 @@ fn postgres_cell_value(row: &postgres::Row, name: &str) -> DbValue {
     if let Ok(value) = row.try_get::<_, Option<bool>>(name) {
         return value.map(DbValue::Bool).unwrap_or(DbValue::Null);
     }
+    if let Ok(value) = row.try_get::<_, Option<Vec<u8>>>(name) {
+        return value.map(DbValue::Bytes).unwrap_or(DbValue::Null);
+    }
     DbValue::Text("<unsupported:redacted>".to_string())
 }
 
@@ -723,6 +770,14 @@ fn db_value_from_ref(value: rusqlite::types::ValueRef<'_>) -> DbValue {
             DbValue::Text(String::from_utf8_lossy(value).to_string())
         }
         rusqlite::types::ValueRef::Blob(_) => DbValue::Text("<blob:redacted>".to_string()),
+    }
+}
+
+/// A cell as a table read sees it: a blob keeps its bytes.
+fn table_value_from_ref(value: rusqlite::types::ValueRef<'_>) -> DbValue {
+    match value {
+        rusqlite::types::ValueRef::Blob(bytes) => DbValue::Bytes(bytes.to_vec()),
+        other => db_value_from_ref(other),
     }
 }
 

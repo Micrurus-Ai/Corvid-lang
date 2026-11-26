@@ -60,16 +60,20 @@ The PR behavior-diff reviewer shipped in §14.8 is itself a `@deterministic` age
 Every run writes a newline-delimited JSON (`.jsonl`) trace. The first line is always a `SchemaHeader` carrying the `SCHEMA_VERSION` + run metadata; subsequent lines are event records.
 
 ```json
-{"type":"SchemaHeader","schema_version":3,"run_id":"2026-04-22-ab12","ts_ms":1745000000000,"source_path":"src/classify.cor"}
+{"kind":"schema_header","version":3,"writer":"corvid-vm","run_id":"2026-04-22-ab12","ts_ms":1745000000000,"source_path":"src/classify.cor","tzdb_version":"2025b"}
 {"type":"RunStarted","ts_ms":1745000000001,"run_id":"2026-04-22-ab12","agent":"classify_inbox","args":["hello"]}
 {"type":"LlmCall","ts_ms":1745000000002,"run_id":"2026-04-22-ab12","prompt":"classify","model":"claude-sonnet-4-6","args":["hello"]}
 {"type":"LlmResult","ts_ms":1745000000010,"run_id":"2026-04-22-ab12","prompt":"classify","model":"claude-sonnet-4-6","result":"positive"}
 {"type":"RunCompleted","ts_ms":1745000000011,"run_id":"2026-04-22-ab12","ok":true,"result":"positive"}
 ```
 
+`tzdb_version` (schema v3, B06) names the IANA time zone database the recording binary was built with. Zone-dependent results, such as a local hour, a calendar move or reading a local time, are pure functions of that database, so replay recomputes them rather than reading them from the trace. When the replaying binary's database differs from the recording's, or the trace predates the field, replay still runs. The first time each zone-dependent operation runs in each zone, it prints a warning naming the operation, the zone and both versions, and `Runtime::replay_zone_rules_warnings` returns the same list. A trace that touches no zone produces no warning, whatever its database. Native binaries report the same operations from their runtime entry points, so a native replay warns the same way; a native binary whose program needs no runtime records and replays no trace.
+
 `SCHEMA_VERSION` is monotonically increasing; the runtime's `validate_supported_schema` rejects traces older than `MIN_SUPPORTED_SCHEMA_VERSION` with a typed error so a future compiler can refuse to replay a stale trace instead of mis-substituting. Implementation reference: [crates/corvid-trace-schema/src/event.rs](../../crates/corvid-trace-schema/src/event.rs).
 
 Event variants that can substitute during replay: `ToolCall`, `ToolResult`, `LlmCall`, `LlmResult`, `ApprovalRequest`, `ApprovalResponse`, `ApprovalDecision`, `SeedRead`, `ClockRead`. `ProvenanceEdge` records provenance graph structure (§14.9) but does not substitute.
+
+`HttpExchange` (B05) records one HTTP request the runtime sent: one hop of one attempt, so a retried call has an event per attempt and a followed redirect an event per hop. It names the connector and operation (or the standard library tool), the method, the URL, the attempt and hop, the status, elapsed time and an outcome (`response`, `redirected`, `timeout`, `refused` or `transport_error`, with a `detail` for the last three). Request and response headers appear by name only and the request body by its SHA-256 and size, so no credential, cookie or body text is recorded; the tracer's redaction also replaces any known secret inside the URL or the detail. It is evidence, like `HostEvent`: replay substitutes the enclosing `ToolCall` / `ToolResult` and steps past every `HttpExchange`, so a replayed run never reaches the network.
 
 ## 14.4 Replay modes (slices 21-inv-B / 21-inv-D)
 
@@ -172,7 +176,7 @@ execution_tier = "native"
 alert_log = "target/shadow/alerts.jsonl"
 ```
 
-`execution_tier = "interpreter"` is the default. `execution_tier = "native"` builds or reuses the native binary for `ir_path`, replays native traces through the native writer, and preserves the same differential and mutation report paths as interpreter shadow replay. Cross-tier replay is intentionally rejected: an interpreter-recorded trace must replay under the interpreter executor, and a native-recorded trace must replay under the native executor. That keeps replay equivalence honest instead of masking backend-specific behavior.
+`execution_tier = "interpreter"` is the default. `execution_tier = "native"` builds or reuses the native binary for `ir_path`, replays native traces through the native writer, and preserves the same differential and mutation report paths as interpreter shadow replay. Either executor replays a trace from either tier (native dispatch N5). Replay stays honest without a writer check: every substituted call is compared exactly (a tool call's name and arguments; a prompt call's name, model, model version, rendered text and arguments; an approval's label and arguments; each seed and clock read), so where the tiers would record a run differently, replay stops with a divergence at the first event that differs instead of masking it. Parity tests replay connector calls, the runtime's tools, secrets and passwords, responses, and a program with a tool, an approval and a prompt across tiers in both directions.
 
 ## 14.9 Provenance DAG (slices 21-inv-C-1, 21-inv-C-2)
 

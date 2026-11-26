@@ -1,6 +1,9 @@
 """Build the storefront and drive the extracted package in a real browser."""
 import argparse
+import base64
 from contextlib import nullcontext
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -8,7 +11,7 @@ import subprocess
 import tarfile
 from tempfile import TemporaryDirectory
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from verify_reading_list import read, serve
 from storefront_editor import check_editor
@@ -134,7 +137,10 @@ def check_rebuild(cli, project, installed, rebuilt):
     old_wasm = (installed / "target/wasm/events.wasm").read_bytes()
     for name in ("events.cor", "main.cor"):
         source = project / "src" / name
-        source.write_text(source.read_text(encoding="utf-8").replace("450", "475"), encoding="utf-8")
+        updated = source.read_text(encoding="utf-8").replace("450", "475")
+        if name == "events.cor":
+            updated = updated.replace("return quantity * 125", "units = quantity\n    return units * 125")
+        source.write_text(updated, encoding="utf-8")
     subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
     with tarfile.open(project / "target/web.tar") as archive:
         archive.extractall(rebuilt, filter="data")
@@ -143,6 +149,32 @@ def check_rebuild(cli, project, installed, rebuilt):
         assert "475 cents each" in cart and 'src="/target/wasm/events.quantity.js"' in cart
         slim = read(url + "/target/wasm/events.quantity.js")
         assert "adjusted_units" not in slim and "registerControlTool" not in slim
+        digest = hashlib.sha256(slim.encode()).digest()
+        assert f'integrity="sha256-{base64.b64encode(digest).decode()}"' in cart
+        runtime = (rebuilt / "target/wasm/events.js").read_bytes()
+        pinned = "./events.js?v=" + hashlib.sha256(runtime).hexdigest()
+        assert pinned in slim
+        for module in (slim, runtime.decode()):
+            encoded = module.split("//# sourceMappingURL=data:application/json;base64,")[1]
+            source_map = json.loads(base64.b64decode(encoded))
+            assert source_map["version"] == 3 and "src/events.cor" in source_map["sources"]
+            assert source_map["mappings"].strip(";")
+        runtime_url = url + "/target/wasm/" + pinned[2:]
+        with urlopen(runtime_url, timeout=5) as response:
+            assert response.read() == runtime and "immutable" in response.headers["Cache-Control"]
+            etag = response.headers["ETag"]
+        old_runtime = (installed / "target/wasm/events.js").read_bytes()
+        stale_url = url + "/target/wasm/events.js?v=" + hashlib.sha256(old_runtime).hexdigest()
+        for request, status in ((Request(runtime_url, headers={"If-None-Match": etag}), 304),
+                                (stale_url, 404)):
+            try:
+                urlopen(request, timeout=5)
+            except HTTPError as error:
+                assert error.code == status
+                if status == 404:
+                    assert error.headers["Cache-Control"] == "no-store"
+            else:
+                raise AssertionError(f"expected HTTP {status}")
         assert 'src="/target/wasm/events.js"' in read(url + "/notebook")
         assert "Total: 5825 cents" in read(url + "/checkout", b"notebook=12&pencil=1")
         for name, mime in (("events.quantity.js", "text/javascript"), ("events.js", "text/javascript"), ("events.wasm", "application/wasm")):
@@ -156,14 +188,72 @@ def check_rebuild(cli, project, installed, rebuilt):
     print("Rebuilt notebook price, checkout and served JS/Wasm assets passed")
 
 
+def check_browser_imports(cli, project):
+    events = project / "src/events.cor"
+    source = events.read_bytes()
+    helper = project / "src/pricing.cor"
+    helper.write_text('import "std:secrets.cor" as secrets\n\n'
+                      'public fn price() -> Int:\n    return 1\n', encoding="utf-8")
+    try:
+        events.write_bytes(b'import "./pricing" use price\n' + source)
+        build = subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project,
+                               capture_output=True, text=True, encoding="utf-8")
+        assert build.returncode and "pricing.cor:1:" in build.stderr and "server-only" in build.stderr, build.stderr
+    finally:
+        events.write_bytes(source)
+        helper.unlink()
+
+
+def check_static_catalog(cli, project):
+    entry = project / "src/static_catalog.cor"
+    entry.write_text('''import "std:io" use io_write_text
+import "std:ui" as ui
+import "./layout" use shop_page
+
+agent main() -> Result<String, String>:
+    catalog = shop_page("Catalog", [ui.h1("Catalog"), ui.link("Open cart", "/cart")])
+    io_write_text("catalog.html", catalog)?
+    return Ok("catalog.html")
+''', encoding="utf-8")
+    try:
+        subprocess.run([cli, "run", "--target", "interp", "src/static_catalog.cor"],
+                       env={**os.environ, "CORVID_IO_ROOT": str(project.resolve())}, cwd=project, check=True)
+        markup = (project / "catalog.html").read_text(encoding="utf-8")
+        assert 'href="/cart"' in markup and "<script" not in markup
+    finally:
+        entry.unlink()
+
+
+def check_component_locations(cli, root):
+    project = root / "reading_counter"
+    subprocess.run([cli, "new", project.name], cwd=root, check=True)
+    shutil.copyfile(ROOT / "examples/reading_counter/src/main.cor", project / "src/main.cor")
+    subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
+    with tarfile.open(project / "target/web.tar") as archive:
+        loader = archive.extractfile("target/wasm/events.js").read().decode()
+        encoded = loader.split("//# sourceMappingURL=data:application/json;base64,")[1]
+        assert json.loads(base64.b64decode(encoded))["sources"] == ["src/main.cor"]
+        assert '"__click_ReadingCounter_1","src/main.cor:6:5"' in loader
+        assert '"__click_ReadingCounter_2","src/main.cor:9:5"' in loader
+
+
 def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
     if work_dir is not None:
         work_dir.mkdir(parents=True, exist_ok=False)
     with (nullcontext(work_dir) if work_dir is not None else TemporaryDirectory()) as tmp:
         root = Path(tmp)
+        check_component_locations(cli, root)
         subprocess.run([cli, "new", "storefront"], cwd=root, check=True)
         project = root / "storefront"
         shutil.copytree(ROOT / "examples/storefront/src", project / "src", dirs_exist_ok=True)
+        check_static_catalog(cli, project)
+        main = project / "src/main.cor"
+        main.write_text(main.read_text(encoding="utf-8").replace("server shop:", '''server shop:
+    route GET "/cart-note" -> html:
+        quantity = ui.quantity_field("Quantity", "quantity", 1, "pencil_cents", "Total", 125)
+        note = ui.portal("notice", [ui.text("Cart note")])
+        return ui.interactive_page("Cart", [quantity, note])
+'''), encoding="utf-8")
         with (project / "src/events.cor").open("a", encoding="utf-8") as source:
             source.write("\npublic agent adjusted_units(units: Int, offset: Int) -> Int:\n"
                          "    return (units + offset) * 2 - units\n")
@@ -175,10 +265,18 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
         installed = root / "installed"
         with tarfile.open(project / "target/web.tar") as archive:
             archive.extractall(installed, filter="data")
+        subprocess.run(["node", ROOT / "scripts/check_storefront_source_maps.mjs", installed], check=True)
+        archive_path = project / "target/web.tar"
+        first_build = archive_path.read_bytes()
+        subprocess.run([cli, "build", "src/main.cor", "--target", "web"], cwd=project, check=True)
+        assert archive_path.read_bytes() == first_build
+        check_browser_imports(cli, project)
+        assert archive_path.read_bytes() == first_build
         check_rebuild(cli, project, installed, root / "rebuilt")
         with serve(cli, installed, os.environ.copy()) as url:
             assert 'href="/cart"' in read(url)
             assert 'action="/checkout"' in read(url + "/cart")
+            assert 'src="/target/wasm/events.js"' in read(url + "/cart-note")
             assert "Total: 5525 cents" in read(url + "/checkout", b"notebook=12&pencil=1")
             for path, label, initial in (("notebook", "Cover", "Ocean"), ("pencil", "Barrel", "Clay")):
                 assert f"{label} color: {initial}" in read(f"{url}/{path}")
@@ -196,12 +294,16 @@ def verify(cli, channel, http_only, work_dir, engine="chromium", lsp=None):
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as playwright:
-                run_browser(playwright, url, channel, engine)
+                with serve(cli, root / "rebuilt", os.environ.copy()) as rebuilt_url:
+                    run_browser(playwright, url, channel, engine, rebuilt_url)
 
 
-def run_browser(playwright, url, channel, engine="chromium"):
+def run_browser(playwright, url, channel, engine="chromium", rebuilt_url=None):
     browser = getattr(playwright, engine).launch(channel=channel)
     try:
+        check_quantity_mismatch(browser, url)
+        if rebuilt_url:
+            check_split_runtime(browser, rebuilt_url)
         with browser.new_page() as page:
             page.goto(url)
             observed = page.evaluate("""async () => {
@@ -248,9 +350,68 @@ def run_browser(playwright, url, channel, engine="chromium"):
         browser.close()
 
 
+def check_split_runtime(browser, url):
+    from playwright.sync_api import expect
+
+    for wasm_allowed in (True, False):
+        with browser.new_page() as page:
+            def serve_cart(route):
+                response = route.fetch()
+                policy = "script-src 'self'" + (" 'wasm-unsafe-eval'" if wasm_allowed else "")
+                route.fulfill(response=response, headers={**response.headers, "content-security-policy": policy})
+
+            page.route("**/cart", serve_cart)
+            with page.expect_request("**/events.js?v=*"):
+                page.goto(url + "/cart")
+            page.get_by_label("Notebook quantity").fill("2")
+            expect(page.get_by_text("950", exact=True)).to_be_visible()
+            pencil = page.locator('[data-corvid-key="pencil"]')
+            page.get_by_label("Pencil quantity").fill("3")
+            if wasm_allowed:
+                expect(pencil.get_by_text("375", exact=True)).to_be_visible()
+            else:
+                expect(pencil.get_by_role("alert")).to_contain_text("Could not load Corvid event handlers")
+            page.get_by_role("button", name="Checkout").press("Enter")
+            expect(page.get_by_text("Total: 1325 cents", exact=True)).to_be_visible()
+
+
+def check_quantity_mismatch(browser, url):
+    from playwright.sync_api import expect
+
+    with browser.new_page() as page:
+        def serve_cart(route):
+            response = route.fetch()
+            markup = response.text().replace("<output>450</output>", "", 1)
+            assert markup != response.text()
+            route.fulfill(body=markup, content_type="text/html; charset=utf-8",
+                          headers={"content-security-policy": "script-src 'self'; object-src 'none'"})
+
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.route("**/cart", serve_cart)
+        page.goto(url + "/cart")
+        damaged = page.locator('[data-corvid-key="notebook"]')
+        expect(damaged.get_by_role("alert")).to_contain_text("src/events.cor:")
+        page.get_by_label("Pencil quantity").fill("3")
+        expect(page.get_by_text("375", exact=True)).to_be_visible()
+        checkout(page, 1, 3)
+        assert not errors, errors
+
+    # A tab obtained its HTML before the cached entry module changed.
+    with browser.new_page() as page:
+        page.route("**/events.quantity.js", lambda route: route.fulfill(
+            content_type="text/javascript", body="document.body.dataset.wrongBuild = 'yes'"))
+        with page.expect_request("**/events.quantity.js"):
+            page.goto(url + "/cart")
+        assert page.locator("body").get_attribute("data-wrong-build") is None
+        page.get_by_label("Notebook quantity").fill("2")
+        checkout(page, 2, 1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cli", type=Path)
+    parser.add_argument("cli", nargs="?", type=Path)
+    parser.add_argument("--cli", dest="cli_option", type=Path)
     parser.add_argument("--browser", choices=("chromium", "firefox", "webkit"))
     parser.add_argument("--channel", help="Chromium distribution (defaults to Edge when --browser is omitted)")
     parser.add_argument("--http-only", action="store_true")
@@ -260,5 +421,8 @@ if __name__ == "__main__":
     if args.channel and args.browser in ("firefox", "webkit"):
         parser.error("--channel requires a Chromium browser")
     channel = args.channel or ("msedge" if args.browser is None else None)
-    verify(args.cli.resolve(), channel, args.http_only, args.work_dir, args.browser or "chromium",
+    cli = args.cli_option or args.cli
+    if cli is None:
+        parser.error("supply --cli PATH")
+    verify(cli.resolve(), channel, args.http_only, args.work_dir, args.browser or "chromium",
            args.lsp.resolve() if args.lsp else None)

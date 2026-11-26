@@ -80,7 +80,8 @@ impl<'a> Checker<'a> {
                     | DeclKind::Effect
                     | DeclKind::Model
                     | DeclKind::Server
-                    | DeclKind::Identity => {
+                    | DeclKind::Identity
+                    | DeclKind::Database => {
                         for a in args {
                             let _ = self.check_expr(a);
                         }
@@ -497,6 +498,8 @@ impl<'a> Checker<'a> {
                 Type::Option(Box::new(final_inner_ty))
             }
             BuiltIn::BrowserFieldKey => self.check_browser_field_key(name, args, false),
+            BuiltIn::LiveArguments => self.check_live_arguments(name, args),
+            BuiltIn::LiveField => self.check_live_field(name, args),
             BuiltIn::BrowserRowKey => self.check_browser_field_key(name, args, true),
             BuiltIn::BrowserFields => self.check_browser_fields(name, args),
             BuiltIn::FormFor => self.check_form_for(name, args),
@@ -654,6 +657,36 @@ impl<'a> Checker<'a> {
                 Type::Unknown
             }
             BuiltIn::Page => self.check_page_call(name, args),
+            // `Changed(current)` and `Taken(holder)` build a conflict
+            // that can be any case, as a written `Conflict<Row>` can.
+            BuiltIn::Changed | BuiltIn::Taken => {
+                if args.len() != 1 {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ArityMismatch { callee: name.name.clone(), expected: 1, got: args.len() },
+                        name.span,
+                    ));
+                    for arg in args {
+                        let _ = self.check_expr(arg);
+                    }
+                    return Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL);
+                }
+                let row_hint = match expected {
+                    Some(Type::Conflict(row, _)) => Some(&**row),
+                    _ => None,
+                };
+                let row = self.check_expr_as(&args[0], row_hint);
+                Type::Conflict(Box::new(row), crate::types::ConflictCases::ALL)
+            }
+            BuiltIn::Deleted => {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::NotCallable { got: "the conflict case `Deleted`, which carries no row".into() },
+                    name.span,
+                ));
+                for arg in args {
+                    let _ = self.check_expr(arg);
+                }
+                Type::Unknown
+            }
             _ => {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::NotCallable {
@@ -750,7 +783,9 @@ impl<'a> Checker<'a> {
         }
 
         self.bump_effect(WeakEffect::Human);
-        self.type_expr_to_type(&args[1])
+        let answer = self.type_expr_to_type(&args[1]);
+        self.refuse_secret_for_person("ask", &answer, args[1].span());
+        answer
     }
 
     fn check_choose_call(&mut self, name: &Ident, args: &[Expr]) -> Type {
@@ -771,7 +806,10 @@ impl<'a> Checker<'a> {
 
         self.bump_effect(WeakEffect::Human);
         match self.check_expr(&args[0]) {
-            Type::List(inner) => *inner,
+            Type::List(inner) => {
+                self.refuse_secret_for_person("choose", &inner, args[0].span());
+                *inner
+            }
             Type::Unknown => Type::Unknown,
             other => {
                 self.errors.push(TypeError::new(
@@ -803,6 +841,15 @@ impl<'a> Checker<'a> {
         match self.bindings.get(&name.span) {
             Some(Binding::BuiltIn(BuiltIn::Int)) => Type::Int,
             Some(Binding::BuiltIn(BuiltIn::Float)) => Type::Float,
+            Some(Binding::BuiltIn(BuiltIn::Decimal)) => Type::Decimal,
+            Some(Binding::BuiltIn(BuiltIn::Duration)) => Type::Duration,
+            Some(Binding::BuiltIn(BuiltIn::Instant)) => Type::Instant,
+            Some(Binding::BuiltIn(BuiltIn::TimeZone)) => Type::TimeZone,
+            Some(Binding::BuiltIn(BuiltIn::ZonedTime)) => Type::ZonedTime,
+            Some(Binding::BuiltIn(BuiltIn::Currency)) => Type::Currency,
+            Some(Binding::BuiltIn(BuiltIn::Locale)) => Type::Locale,
+            Some(Binding::BuiltIn(BuiltIn::Bytes)) => Type::Bytes,
+            Some(Binding::BuiltIn(BuiltIn::Secret)) => Type::Secret,
             Some(Binding::BuiltIn(BuiltIn::String)) => Type::String,
             Some(Binding::BuiltIn(BuiltIn::Bool)) => Type::Bool,
             Some(Binding::BuiltIn(BuiltIn::Nothing)) => Type::Nothing,
@@ -936,12 +983,25 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         span: Span,
     ) -> Type {
+        // `Shelf.where(...).take(n)`: a query over a stored table (B09 P2).
+        if let Some(ty) = self.check_table_query_call(target, method_name, args, span) {
+            return ty;
+        }
+        // `Shelf.save(row)`: an operation of a stored table (B09).
+        if let Some(ty) = self.check_table_method_call(target, method_name, args, span) {
+            return ty;
+        }
+        // `Instant.from_epoch_milliseconds(n)`: a compiler-known type name.
+        if let Some(ty) = self.check_builtin_type_method_call(target, method_name, args, span) {
+            return ty;
+        }
         // `Order.from_json(text)`: the receiver is a type, not a value.
         if let Some(ty) = self.check_type_method_call(target, method_name, args, span) {
             return ty;
         }
-        // 1. Typecheck the receiver and require a struct type.
-        let recv_ty = self.check_expr(target);
+        // 1. Typecheck the receiver and require a struct type. A
+        // `Decimal` `/` is accepted here when the method rounds it (B06).
+        let recv_ty = self.check_method_receiver(target, method_name);
         if method_name.name == "split_by" {
             return self.check_stream_split_by_method(target, &recv_ty, method_name, args);
         }
@@ -966,6 +1026,11 @@ impl<'a> Checker<'a> {
                 return (**inner).clone();
             }
         }
+        // A `Secret` has no method that returns its text; the table's
+        // methods on it return another secret or a `Bool`.
+        if let Some(ty) = self.refuse_secret_method(&recv_ty, method_name, args) {
+            return ty;
+        }
         // Builtin-method table (slice 45c): methods on built-in
         // receiver types resolve here — one shared table drives the
         // checker, the lowerer, and the interpreter.
@@ -982,6 +1047,12 @@ impl<'a> Checker<'a> {
                 for a in args {
                     let _ = self.check_expr(a);
                 }
+                return sig.ret;
+            }
+            // Cryptography (B04): an HMAC key is `Bytes` or a `Secret`,
+            // which one table parameter cannot say.
+            if sig.kind.is_hmac() {
+                self.check_hmac_key(&method_name.name, &args[0]);
                 return sig.ret;
             }
             // Sequential signature refinement (45j): `fold`'s
@@ -1044,6 +1115,16 @@ impl<'a> Checker<'a> {
             // keep taint on the encoded text.
             if sig.kind == BuiltinMethodKind::JsonEncode {
                 sig.ret = self.to_json_result(&recv_ty, span);
+            }
+            // Regular expressions (B03): the pattern must be a literal
+            // the regex parser accepts.
+            if sig.kind.is_regex() {
+                self.check_regex_arguments(sig.kind, &method_name.name, args);
+            }
+            // Exact decimals (B06): a literal `places` is 0 to 28.
+            self.check_decimal_method_arguments(sig.kind, args);
+            if sig.kind == BuiltinMethodKind::SecretDecodeBase64After {
+                self.check_secret_key_prefix(args);
             }
             return sig.ret;
         }
@@ -1150,6 +1231,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = variant.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {
@@ -1197,7 +1279,11 @@ impl<'a> Checker<'a> {
             return Type::Unknown;
         }
 
-        if args.len() != ty_decl.fields.len() {
+        // A table row built in code may leave out its trailing
+        // `revision`; it is then 0, a row never stored (B09).
+        let omits_revision =
+            args.len() + 1 == ty_decl.fields.len() && crate::table_decl(self.file, ty_decl.span).is_some();
+        if args.len() != ty_decl.fields.len() && !omits_revision {
             self.errors.push(TypeError::new(
                 TypeErrorKind::ArityMismatch {
                     callee: name.to_string(),
@@ -1209,6 +1295,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter().enumerate() {
             if let Some(field) = ty_decl.fields.get(i) {
+                self.check_constant_refinement(name, field, arg);
                 let field_ty = self.type_ref_to_type(&field.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&field_ty));
                 if !arg_ty.is_assignable_to(&field_ty) {

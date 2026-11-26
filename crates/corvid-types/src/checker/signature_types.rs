@@ -63,13 +63,19 @@ impl<'a> Checker<'a> {
                         self.record(&field.ty);
                     }
                 }
+                Decl::Table(table) => {
+                    for field in &table.record.fields {
+                        self.record(&field.ty);
+                    }
+                }
                 Decl::Import(_)
                 | Decl::Effect(_)
                 | Decl::Model(_)
                 | Decl::Eval(_)
                 | Decl::Test(_)
                 | Decl::Schedule(_)
-                | Decl::Identity(_) => {}
+                | Decl::Identity(_)
+                | Decl::Database(_) => {}
             }
         }
         self.errors.truncate(mark);

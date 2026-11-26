@@ -276,6 +276,15 @@ pub enum BuiltinMethodKind {
     /// `Upload<Format>.size() -> Int` — the byte length of the upload.
     UploadSize,
 
+    // ----- Response<Body> accessors (B05) -------------------------
+    /// `Response<Body>.status() -> Int` — the HTTP status.
+    ResponseStatus,
+    /// `Response<Body>.body() -> Body` — the decoded body.
+    ResponseBody,
+    /// `Response<Body>.header(name) -> Option<String>` — the first
+    /// response header with that name, compared without case.
+    ResponseHeader,
+
     // ----- typed JSON (B01) ---------------------------------------
     //
     // One public JSON mapping (`corvid_vm::public_json`) serves HTTP
@@ -295,7 +304,479 @@ pub enum BuiltinMethodKind {
     /// non-finite Float, which has no JSON form. A receiver that
     /// contains `Tainted` data returns `Tainted<String>`.
     JsonEncode,
+
+    // ----- text encoding and UUIDs (B03) --------------------------
+    //
+    // Pure String methods over the text's UTF-8 bytes, implemented
+    // once in `corvid-text` for both tiers. Encoders never fail;
+    // decoders return `Result<String, String>` naming the first
+    // problem and its character position, and also fail when the
+    // decoded bytes are not UTF-8. Decoders accept base64 with or
+    // without padding and nothing else that is non-canonical.
+    /// `String.encode_base64() -> String` — RFC 4648 standard
+    /// alphabet, padded.
+    StringEncodeBase64,
+    /// `String.decode_base64() -> Result<String, String>`.
+    StringDecodeBase64,
+    /// `String.encode_base64_url() -> String` — RFC 4648 URL-safe
+    /// alphabet, unpadded.
+    StringEncodeBase64Url,
+    /// `String.decode_base64_url() -> Result<String, String>`.
+    StringDecodeBase64Url,
+    /// `String.encode_hex() -> String` — lowercase.
+    StringEncodeHex,
+    /// `String.decode_hex() -> Result<String, String>` — either case.
+    StringDecodeHex,
+    /// `String.encode_url_component() -> String` — percent-encodes
+    /// every byte outside the RFC 3986 unreserved set.
+    StringEncodeUrlComponent,
+    /// `String.decode_url_component() -> Result<String, String>` —
+    /// `+` stays `+`.
+    StringDecodeUrlComponent,
+    /// `String.parse_uuid() -> Result<String, String>` — the canonical
+    /// lowercase hyphenated form of any common UUID spelling.
+    StringParseUuid,
+
+    // ----- regular expressions (B03) ------------------------------
+    //
+    // The pattern (always the first argument) must be a string literal;
+    // the checker validates it with `corvid_text::regex::check_pattern`,
+    // the parser the runtime compiles it with, so no invalid pattern
+    // reaches either tier. Positions count characters. All are pure.
+    /// `String.contains_regex(pattern: String) -> Bool`.
+    StringContainsRegex,
+    /// `String.find_regex(pattern: String) -> Option<RegexMatch>`.
+    StringFindRegex,
+    /// `String.find_all_regex(pattern: String) -> List<RegexMatch>`.
+    StringFindAllRegex,
+    /// `String.replace_regex(pattern: String, replacement: String) ->
+    /// String` with a literal replacement: a template whose `$1` and
+    /// `${name}` references the checker validated.
+    StringReplaceRegex,
+    /// The same call with a replacement computed at run time, which is
+    /// inserted exactly as written. The IR lowerer selects this kind
+    /// through [`refine_builtin_method_kind`]; the table never returns
+    /// it.
+    StringReplaceRegexVerbatim,
+    /// `String.split_regex(pattern: String) -> List<String>` — the
+    /// checker refuses patterns that can match the empty string.
+    StringSplitRegex,
+
+    // ----- exact decimals (B06) ------------------------------------
+    //
+    // Every Decimal method calls `corvid_decimal`, the code the
+    // checker parses literals with, so the tiers cannot disagree on a
+    // digit. Results are exact or the call traps; only the rounding
+    // methods drop digits, and each names its mode.
+    /// `Decimal.round_<mode>(places: Int) -> Decimal` — exactly
+    /// `places` fractional digits, rounded with `mode`.
+    DecimalRound(corvid_decimal::RoundingMode),
+    /// `(a / b).round_<mode>(places)` on `Decimal` values. Not in the
+    /// method table: IR lowering fuses a rounded `/` into this kind
+    /// with `a` as the receiver and `b`, `places` as the arguments, so
+    /// the quotient is rounded once and never exists unrounded.
+    DecimalDivideRound(corvid_decimal::RoundingMode),
+    /// `Decimal.abs() -> Decimal`.
+    DecimalAbs,
+    /// `Decimal.scale() -> Int` — the number of fractional digits.
+    DecimalScale,
+    /// `Decimal.to_string() -> String` — plain notation with every
+    /// fractional digit the value has (`2.50`), never an exponent.
+    DecimalToString,
+    /// `Decimal.to_float() -> Float` — the nearest Float; the only
+    /// lossy direction, named so the loss is visible.
+    DecimalToFloat,
+    /// `Decimal.to_int_truncated() -> Int` — toward zero; traps out
+    /// of the Int range.
+    DecimalToIntTruncated,
+    /// `Int.to_decimal() -> Decimal` — exact.
+    IntToDecimal,
+    /// `Float.to_decimal() -> Decimal` — the shortest decimal that
+    /// reads back as the same Float (the digits `to_string` shows);
+    /// traps on NaN and infinity.
+    FloatToDecimal,
+    /// `String.parse_decimal() -> Result<Decimal, String>` — trims
+    /// whitespace like `parse_int`; the Err names the problem and its
+    /// position.
+    StringParseDecimal,
+
+    // ----- exact time (B06) ----------------------------------------
+    //
+    // Every rule is `corvid_time`'s, the code the native runtime will
+    // call. Readings truncate toward zero and trap outside the Int
+    // range; nothing reads the clock here (that is the `time_now` tool).
+    /// `Duration.whole_<unit>() -> Int` — whole units, truncated toward zero.
+    DurationWhole(corvid_time::TimeUnit),
+    /// `Duration.abs() -> Duration`.
+    DurationAbs,
+    /// `Duration.to_string() -> String` — ISO 8601 (`PT1H30M`).
+    DurationToString,
+    /// `Instant.epoch_milliseconds() -> Int` — rounded toward negative
+    /// infinity, as JavaScript's `Date` reads it.
+    InstantEpochMilliseconds,
+    /// `Instant.to_string() -> String` — RFC 3339 in UTC.
+    InstantToString,
+    /// `Instant.from_epoch_milliseconds(n: Int) -> Instant`, a method
+    /// of the type itself; traps outside years 1 to 9999.
+    InstantFromEpochMilliseconds,
+    /// `String.parse_duration() -> Result<Duration, String>` — ISO 8601.
+    StringParseDuration,
+    /// `String.parse_instant() -> Result<Instant, String>` — RFC 3339.
+    StringParseInstant,
+    /// `Instant.in_zone(zone: TimeZone) -> ZonedTime` — always succeeds.
+    InstantInZone,
+    /// `ZonedTime.<field>() -> Int` — `year`, `month`, `day`, `hour`,
+    /// `minute`, `second`, `nanosecond`, `weekday` (1 = Monday) and
+    /// `offset_seconds`, from `corvid_time::ZonedField`.
+    ZonedTimeField(corvid_time::ZonedField),
+    /// `ZonedTime.time_zone() -> TimeZone` (`zone` is a keyword).
+    ZonedTimeZone,
+    /// `ZonedTime.instant() -> Instant`.
+    ZonedTimeInstant,
+    /// `ZonedTime.add_days(n: Int) -> ZonedTime` — the same local time
+    /// on another calendar day.
+    ZonedTimeAddDays,
+    /// `ZonedTime.add_months(n: Int) -> ZonedTime` — clamped to the
+    /// month's last day.
+    ZonedTimeAddMonths,
+    /// `ZonedTime.add_years(n: Int) -> ZonedTime`.
+    ZonedTimeAddYears,
+    /// `ZonedTime.with_zone(zone: TimeZone) -> ZonedTime` — the same
+    /// instant in another zone.
+    ZonedTimeWithZone,
+    /// `ZonedTime.to_string() -> String` — RFC 9557.
+    ZonedTimeToString,
+    /// `TimeZone.to_string() -> String` — the IANA name.
+    TimeZoneToString,
+    /// `String.parse_time_zone() -> Result<TimeZone, String>`.
+    StringParseTimeZone,
+    /// `String.parse_zoned_time() -> Result<ZonedTime, String>` — RFC 9557.
+    StringParseZonedTime,
+    /// `String.parse_local_time(zone: TimeZone) -> Result<ZonedTime,
+    /// String>` — a wall-clock time; a skipped or repeated local time
+    /// is an `Err` naming both offsets.
+    StringParseLocalTime,
+
+    // ----- currency formatting (B06) -------------------------------
+    //
+    // Every rule is `corvid_currency`'s, over Unicode CLDR data.
+    // Formatting never rounds: an amount with more digits than the
+    // currency shows traps and asks for a declared rounding first.
+    /// `Decimal.format_currency(currency: Currency, locale: Locale) ->
+    /// String` — `$1,234.50` in en-US, `1.234,50 €` in de-DE.
+    DecimalFormatCurrency,
+    /// `Currency.minor_digits() -> Int` — 2 for USD, 0 for JPY.
+    CurrencyMinorDigits,
+    /// `Currency.to_string() -> String` — the ISO 4217 code.
+    CurrencyToString,
+    /// `Locale.to_string() -> String` — the canonical BCP 47 tag.
+    LocaleToString,
+    /// `String.parse_currency() -> Result<Currency, String>`.
+    StringParseCurrency,
+    /// `String.parse_locale() -> Result<Locale, String>`.
+    StringParseLocale,
+
+    // ----- byte strings and hashing --------------------------------
+    //
+    // Every rule is `corvid_crypto`'s. Encodings are always explicit:
+    // text becomes bytes only through `utf8()`, and bytes become text
+    // only through a named encoding.
+    /// `String.utf8() -> Bytes` — the string's UTF-8 encoding.
+    StringUtf8,
+    /// `Bytes.to_utf8() -> Result<String, String>` — the Err names the
+    /// first byte that starts an invalid sequence.
+    BytesToUtf8,
+    /// `Bytes.length() -> Int` — the number of bytes.
+    BytesLength,
+    /// `Bytes.to_hex() -> String` — two lowercase digits per byte.
+    BytesToHex,
+    /// `Bytes.to_base64() -> String` — the standard alphabet, padded.
+    BytesToBase64,
+    /// `Bytes.to_base64_url() -> String` — the URL-safe alphabet,
+    /// unpadded; also the JSON form.
+    BytesToBase64Url,
+    /// `Bytes.from_hex(text: String) -> Result<Bytes, String>`, a method
+    /// of the type itself; either case.
+    BytesFromHex,
+    /// `Bytes.from_base64(text: String) -> Result<Bytes, String>`;
+    /// padding optional.
+    BytesFromBase64,
+    /// `Bytes.from_base64_url(text: String) -> Result<Bytes, String>`;
+    /// padding optional.
+    BytesFromBase64Url,
+    /// `Bytes.sha256() -> Bytes` — the 32-byte digest.
+    BytesSha256,
+    /// `Bytes.sha384() -> Bytes` — the 48-byte digest.
+    BytesSha384,
+    /// `Bytes.sha512() -> Bytes` — the 64-byte digest.
+    BytesSha512,
+    /// `Bytes.hmac_sha256(key) -> Bytes` — the 32-byte HMAC-SHA256 tag.
+    /// The key is `Bytes` or a `Secret` (see [`is_hmac_key_type`]).
+    BytesHmacSha256,
+    /// `Bytes.hmac_sha512(key) -> Bytes` — the 64-byte HMAC-SHA512 tag;
+    /// the same keys.
+    BytesHmacSha512,
+    /// `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) ->
+    /// Bool` — whether `signature` is the receiver's Ed25519 signature
+    /// under `public_key`, verified strictly; `false` for a signature
+    /// that is not 64 bytes or a key that is not 32.
+    BytesVerifyEd25519,
+    /// `Secret.decode_base64_after(prefix: String) -> Result<Secret,
+    /// String>` — the key written in base64 after a literal prefix, as
+    /// a new secret.
+    SecretDecodeBase64After,
+    /// `Secret.verify_password(hash: String) -> Bool` — whether the
+    /// secret is the password the Argon2id PHC string was made from;
+    /// `false` for a malformed hash. Pure, and constant-time.
+    SecretVerifyPassword,
 }
+
+impl BuiltinMethodKind {
+    /// The B03 text methods that take no arguments and return
+    /// `Result<String, String>`: every decoder and `parse_uuid`.
+    pub fn is_text_decoder(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringDecodeBase64
+                | StringDecodeBase64Url
+                | StringDecodeHex
+                | StringDecodeUrlComponent
+                | StringParseUuid
+        )
+    }
+
+    /// The B03 text encoders: no arguments, `String` result.
+    pub fn is_text_encoder(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringEncodeBase64 | StringEncodeBase64Url | StringEncodeHex | StringEncodeUrlComponent
+        )
+    }
+
+    /// The B06 methods that take or produce a `Decimal`.
+    pub fn is_decimal(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DecimalRound(_)
+                | DecimalDivideRound(_)
+                | DecimalAbs
+                | DecimalScale
+                | DecimalToString
+                | DecimalToFloat
+                | DecimalToIntTruncated
+                | IntToDecimal
+                | FloatToDecimal
+                | StringParseDecimal
+        )
+    }
+
+    /// The B06 methods that take or produce a `Duration` or an `Instant`.
+    pub fn is_time(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DurationWhole(_)
+                | DurationAbs
+                | DurationToString
+                | InstantEpochMilliseconds
+                | InstantToString
+                | InstantFromEpochMilliseconds
+                | StringParseDuration
+                | StringParseInstant
+                | InstantInZone
+                | ZonedTimeField(_)
+                | ZonedTimeZone
+                | ZonedTimeInstant
+                | ZonedTimeAddDays
+                | ZonedTimeAddMonths
+                | ZonedTimeAddYears
+                | ZonedTimeWithZone
+                | ZonedTimeToString
+                | TimeZoneToString
+                | StringParseTimeZone
+                | StringParseZonedTime
+                | StringParseLocalTime
+        )
+    }
+
+    /// The B06 currency-formatting methods.
+    pub fn is_currency(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            DecimalFormatCurrency
+                | CurrencyMinorDigits
+                | CurrencyToString
+                | LocaleToString
+                | StringParseCurrency
+                | StringParseLocale
+        )
+    }
+
+    /// The byte-string, hashing, HMAC, signature, secret-key and password
+    /// methods.
+    pub fn is_crypto(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringUtf8
+                | BytesToUtf8
+                | BytesLength
+                | BytesToHex
+                | BytesToBase64
+                | BytesToBase64Url
+                | BytesFromHex
+                | BytesFromBase64
+                | BytesFromBase64Url
+                | BytesSha256
+                | BytesSha384
+                | BytesSha512
+                | BytesHmacSha256
+                | BytesHmacSha512
+                | BytesVerifyEd25519
+                | SecretDecodeBase64After
+                | SecretVerifyPassword
+        )
+    }
+
+    /// The HMAC methods, whose key is `Bytes` or a `Secret`.
+    pub fn is_hmac(self) -> bool {
+        matches!(self, BuiltinMethodKind::BytesHmacSha256 | BuiltinMethodKind::BytesHmacSha512)
+    }
+
+    /// The B03 regular-expression methods, whose first argument is a
+    /// pattern literal.
+    pub fn is_regex(self) -> bool {
+        use BuiltinMethodKind::*;
+        matches!(
+            self,
+            StringContainsRegex
+                | StringFindRegex
+                | StringFindAllRegex
+                | StringReplaceRegex
+                | StringReplaceRegexVerbatim
+                | StringSplitRegex
+        )
+    }
+}
+
+/// Whether a value of type `ty` can key an HMAC: `Bytes`, or a
+/// `Secret`, which keys it with its bytes without revealing them. The
+/// method table can give a parameter only one type, so the HMAC
+/// entries name `Bytes` and the checker accepts either through this
+/// function.
+pub fn is_hmac_key_type(ty: &Type) -> bool {
+    ty.is_assignable_to(&Type::Bytes) || ty.is_assignable_to(&Type::Secret)
+}
+
+/// The rounding mode a `Decimal` rounding method names:
+/// `round_half_even` names `HalfEven`. The checker, the method table
+/// and IR lowering all read method names through this one function.
+pub fn decimal_rounding_mode(method: &str) -> Option<corvid_decimal::RoundingMode> {
+    method.strip_prefix("round_").and_then(corvid_decimal::RoundingMode::from_suffix)
+}
+
+/// The unit a `Duration` reading names: `whole_seconds` names `Seconds`.
+pub fn duration_reading_unit(method: &str) -> Option<corvid_time::TimeUnit> {
+    method.strip_prefix("whole_").and_then(corvid_time::TimeUnit::from_name)
+}
+
+/// A method called on a compiler-known type name rather than a value:
+/// `Instant.from_epoch_milliseconds(n)`, `Bytes.from_hex(text)`. The
+/// checker and IR lowering both look the call up here.
+pub fn builtin_type_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
+    use BuiltinMethodKind::*;
+    let sig = |kind, params, ret| Some(BuiltinMethodSig { kind, params, ret });
+    let bytes_result = || Type::Result(Box::new(Type::Bytes), Box::new(Type::String));
+    match (receiver, name) {
+        (Type::Instant, "from_epoch_milliseconds") => {
+            sig(InstantFromEpochMilliseconds, vec![Type::Int], Type::Instant)
+        }
+        (Type::Bytes, "from_hex") => sig(BytesFromHex, vec![Type::String], bytes_result()),
+        (Type::Bytes, "from_base64") => sig(BytesFromBase64, vec![Type::String], bytes_result()),
+        (Type::Bytes, "from_base64_url") => sig(BytesFromBase64Url, vec![Type::String], bytes_result()),
+        _ => None,
+    }
+}
+
+/// The compiler-known type a bare type name denotes when it is a
+/// method receiver (`Instant` in `Instant.from_epoch_milliseconds`,
+/// `Bytes` in `Bytes.from_hex`).
+pub fn builtin_type_receiver(
+    target: &corvid_ast::Expr,
+    bindings: &std::collections::HashMap<corvid_ast::Span, corvid_resolve::Binding>,
+) -> Option<Type> {
+    let corvid_ast::Expr::Ident { name, .. } = target else { return None };
+    match bindings.get(&name.span)? {
+        corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Instant) => Some(Type::Instant),
+        corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Bytes) => Some(Type::Bytes),
+        _ => None,
+    }
+}
+
+/// The source digits of a number literal, which `corvid_decimal` reads
+/// when the checker types the literal `Decimal`. The checker and the IR
+/// lowerer both read literal digits here.
+pub fn number_literal_text(value: &corvid_ast::Literal) -> Option<String> {
+    match value {
+        corvid_ast::Literal::Int(n) => Some(n.to_string()),
+        corvid_ast::Literal::Float { text, .. } => Some(text.clone()),
+        _ => None,
+    }
+}
+
+/// The value of a string-literal argument, which is the only form a
+/// regex pattern or a replacement template may take. The checker and
+/// the IR lowerer both decide literal-ness here.
+pub fn string_literal_argument(arg: &corvid_ast::Expr) -> Option<&str> {
+    match arg {
+        corvid_ast::Expr::Literal { value: corvid_ast::Literal::String(text), .. } => Some(text),
+        _ => None,
+    }
+}
+
+/// The kind a call executes as, given its arguments, when the table's
+/// kind depends on them: `replace_regex` with a replacement computed at
+/// run time inserts it verbatim instead of expanding `$` references.
+pub fn refine_builtin_method_kind(kind: BuiltinMethodKind, args: &[corvid_ast::Expr]) -> BuiltinMethodKind {
+    match kind {
+        BuiltinMethodKind::StringReplaceRegex
+            if args.get(1).is_some_and(|replacement| string_literal_argument(replacement).is_none()) =>
+        {
+            BuiltinMethodKind::StringReplaceRegexVerbatim
+        }
+        other => other,
+    }
+}
+
+/// The fields of the compiler-known `RegexMatch` record, in display
+/// order. The checker types `m.start` from this list and both tiers
+/// build `RegexMatch` values from it.
+pub fn regex_match_fields() -> [(&'static str, Type); 4] {
+    [
+        ("text", Type::String),
+        ("start", Type::Int),
+        ("end", Type::Int),
+        ("groups", Type::List(Box::new(Type::Option(Box::new(Type::String))))),
+    ]
+}
+
+/// The type id runtime `RegexMatch` records carry, reserved like
+/// [`JSON_ERROR_TYPE_ID`].
+pub const REGEX_MATCH_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1);
+
+/// The type id runtime `Response` records carry, reserved like
+/// [`JSON_ERROR_TYPE_ID`].
+pub const RESPONSE_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 2);
+
+/// The fields of a runtime `Response` record, in order: the status, the
+/// response headers as `[name, value]` pairs with lower-cased names, and
+/// the decoded body. Programs read them through the accessors, never as
+/// fields; the interpreter builds and reads records from this one list.
+pub const RESPONSE_FIELDS: [&str; 3] = ["status", "headers", "body"];
 
 /// The fields of the compiler-known `JsonError` record, in display
 /// order. The checker types `error.path` from this list and the
@@ -312,6 +793,67 @@ pub fn json_error_fields() -> [(&'static str, Type); 4] {
 /// The type id runtime `JsonError` records carry. `JsonError` is
 /// compiler-known, so it has no declaration id; this one is reserved.
 pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX);
+
+/// The type id a table write's conflict carries at run time (B09).
+/// `Conflict` is compiler-known, so it has no declaration id. Its
+/// variants are [`crate::ConflictCase::ALL`], each case's index its
+/// variant index.
+pub const CONFLICT_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 3);
+
+/// The id IR lowering gives a reference it could not resolve: a
+/// variant's owner, a struct literal's type, a test or a mock target.
+/// A checked program never needs it, because the checker resolved each
+/// of them first. It names no record, so a lookup through it fails
+/// loudly ("missing from the IR") instead of finding a compiler-known
+/// record such as `JsonError`, whose id `u32::MAX` it used to share.
+pub const UNRESOLVED_DEF_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1000);
+
+/// Every type id reserved for a compiler-known record, by name. A new
+/// compiler-known record takes the next free id below these and joins
+/// this list; the test beside it fails if two share an id, which would
+/// make the interpreter mistake one record for the other.
+pub const RESERVED_TYPE_IDS: [(&str, corvid_resolve::DefId); 4] = [
+    ("JsonError", JSON_ERROR_TYPE_ID),
+    ("RegexMatch", REGEX_MATCH_TYPE_ID),
+    ("Response", RESPONSE_TYPE_ID),
+    ("Conflict", CONFLICT_TYPE_ID),
+];
+
+/// The ids native code gives the record it holds a `Response<Body>`
+/// as, one per distinct body type (native dispatch N4). The band sits
+/// below the reserved ids above and far above any id the resolver
+/// assigns, which counts up from zero.
+pub const RESPONSE_RECORD_IDS: std::ops::Range<u32> = (u32::MAX - 4 - 65_536)..(u32::MAX - 4);
+
+#[cfg(test)]
+mod reserved_type_id_tests {
+    use super::{RESERVED_TYPE_IDS, RESPONSE_RECORD_IDS};
+
+    #[test]
+    fn the_response_record_band_holds_no_reserved_id() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert!(!RESPONSE_RECORD_IDS.contains(&id.0), "`{name}`'s id {id:?} is inside the Response record band");
+        }
+        assert!(RESPONSE_RECORD_IDS.start > 1 << 24, "the band must sit far above resolver-assigned ids");
+    }
+
+    /// Lowering's fallback id is none of the reserved ones.
+    #[test]
+    fn the_unresolved_id_names_no_reserved_record() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert_ne!(id, super::UNRESOLVED_DEF_ID, "the unresolved id must not be `{name}`'s");
+        }
+    }
+
+    #[test]
+    fn every_reserved_type_id_is_distinct() {
+        for (i, (name, id)) in RESERVED_TYPE_IDS.iter().enumerate() {
+            for (other, other_id) in &RESERVED_TYPE_IDS[i + 1..] {
+                assert_ne!(id, other_id, "`{name}` and `{other}` share the reserved type id {id:?}");
+            }
+        }
+    }
+}
 
 /// Look up `T.name(...)` where the receiver is the type `target`
 /// itself rather than a value. Only the JSON decoders are type
@@ -338,6 +880,11 @@ pub struct BuiltinMethodSig {
     pub kind: BuiltinMethodKind,
     pub params: Vec<Type>,
     pub ret: Type,
+}
+
+/// `Result<String, String>`, the result of every text decoder.
+fn text_result() -> Type {
+    Type::Result(Box::new(Type::String), Box::new(Type::String))
 }
 
 /// Look up `receiver.name(...)` in the builtin-method table.
@@ -376,6 +923,107 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Float, "to_string") => sig(FloatToString, vec![], Type::String),
         (Type::Bool, "to_string") => sig(BoolToString, vec![], Type::String),
         (Type::Int, "to_float") => sig(IntToFloat, vec![], Type::Float),
+        (Type::Int, "to_decimal") => sig(IntToDecimal, vec![], Type::Decimal),
+        (Type::Float, "to_decimal") => sig(FloatToDecimal, vec![], Type::Decimal),
+        (Type::String, "parse_decimal") => sig(
+            StringParseDecimal,
+            vec![],
+            Type::Result(Box::new(Type::Decimal), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_duration") => sig(
+            StringParseDuration,
+            vec![],
+            Type::Result(Box::new(Type::Duration), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_instant") => sig(
+            StringParseInstant,
+            vec![],
+            Type::Result(Box::new(Type::Instant), Box::new(Type::String)),
+        ),
+        (Type::Duration, "abs") => sig(DurationAbs, vec![], Type::Duration),
+        (Type::Duration, "to_string") => sig(DurationToString, vec![], Type::String),
+        (Type::Duration, method) if duration_reading_unit(method).is_some() => sig(
+            DurationWhole(duration_reading_unit(method).expect("checked by the guard")),
+            vec![],
+            Type::Int,
+        ),
+        (Type::Instant, "epoch_milliseconds") => sig(InstantEpochMilliseconds, vec![], Type::Int),
+        (Type::Instant, "to_string") => sig(InstantToString, vec![], Type::String),
+        (Type::Instant, "in_zone") => sig(InstantInZone, vec![Type::TimeZone], Type::ZonedTime),
+        (Type::ZonedTime, method) if corvid_time::ZonedField::from_name(method).is_some() => sig(
+            ZonedTimeField(corvid_time::ZonedField::from_name(method).expect("checked by the guard")),
+            vec![],
+            Type::Int,
+        ),
+        (Type::ZonedTime, "time_zone") => sig(ZonedTimeZone, vec![], Type::TimeZone),
+        (Type::ZonedTime, "instant") => sig(ZonedTimeInstant, vec![], Type::Instant),
+        (Type::ZonedTime, "add_days") => sig(ZonedTimeAddDays, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "add_months") => sig(ZonedTimeAddMonths, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "add_years") => sig(ZonedTimeAddYears, vec![Type::Int], Type::ZonedTime),
+        (Type::ZonedTime, "with_zone") => sig(ZonedTimeWithZone, vec![Type::TimeZone], Type::ZonedTime),
+        (Type::ZonedTime, "to_string") => sig(ZonedTimeToString, vec![], Type::String),
+        (Type::TimeZone, "to_string") => sig(TimeZoneToString, vec![], Type::String),
+        (Type::String, "parse_time_zone") => sig(
+            StringParseTimeZone,
+            vec![],
+            Type::Result(Box::new(Type::TimeZone), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_zoned_time") => sig(
+            StringParseZonedTime,
+            vec![],
+            Type::Result(Box::new(Type::ZonedTime), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_local_time") => sig(
+            StringParseLocalTime,
+            vec![Type::TimeZone],
+            Type::Result(Box::new(Type::ZonedTime), Box::new(Type::String)),
+        ),
+        (Type::Decimal, "format_currency") => sig(
+            DecimalFormatCurrency,
+            vec![Type::Currency, Type::Locale],
+            Type::String,
+        ),
+        (Type::Currency, "minor_digits") => sig(CurrencyMinorDigits, vec![], Type::Int),
+        (Type::Currency, "to_string") => sig(CurrencyToString, vec![], Type::String),
+        (Type::Locale, "to_string") => sig(LocaleToString, vec![], Type::String),
+        (Type::String, "parse_currency") => sig(
+            StringParseCurrency,
+            vec![],
+            Type::Result(Box::new(Type::Currency), Box::new(Type::String)),
+        ),
+        (Type::String, "parse_locale") => sig(
+            StringParseLocale,
+            vec![],
+            Type::Result(Box::new(Type::Locale), Box::new(Type::String)),
+        ),
+        (Type::String, "utf8") => sig(StringUtf8, vec![], Type::Bytes),
+        (Type::Bytes, "to_utf8") => sig(BytesToUtf8, vec![], text_result()),
+        (Type::Bytes, "length") => sig(BytesLength, vec![], Type::Int),
+        (Type::Bytes, "to_hex") => sig(BytesToHex, vec![], Type::String),
+        (Type::Bytes, "to_base64") => sig(BytesToBase64, vec![], Type::String),
+        (Type::Bytes, "to_base64_url") => sig(BytesToBase64Url, vec![], Type::String),
+        (Type::Bytes, "sha256") => sig(BytesSha256, vec![], Type::Bytes),
+        (Type::Bytes, "sha384") => sig(BytesSha384, vec![], Type::Bytes),
+        (Type::Bytes, "sha512") => sig(BytesSha512, vec![], Type::Bytes),
+        (Type::Bytes, "hmac_sha256") => sig(BytesHmacSha256, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "hmac_sha512") => sig(BytesHmacSha512, vec![Type::Bytes], Type::Bytes),
+        (Type::Bytes, "verify_ed25519") => sig(BytesVerifyEd25519, vec![Type::Bytes, Type::Bytes], Type::Bool),
+        (Type::Secret, "decode_base64_after") => sig(
+            SecretDecodeBase64After,
+            vec![Type::String],
+            Type::Result(Box::new(Type::Secret), Box::new(Type::String)),
+        ),
+        (Type::Secret, "verify_password") => sig(SecretVerifyPassword, vec![Type::String], Type::Bool),
+        (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
+        (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
+        (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),
+        (Type::Decimal, "to_float") => sig(DecimalToFloat, vec![], Type::Float),
+        (Type::Decimal, "to_int_truncated") => sig(DecimalToIntTruncated, vec![], Type::Int),
+        (Type::Decimal, method) if decimal_rounding_mode(method).is_some() => sig(
+            DecimalRound(decimal_rounding_mode(method).expect("checked by the guard")),
+            vec![Type::Int],
+            Type::Decimal,
+        ),
         (Type::Float, "to_int_truncated") => sig(FloatToIntTruncated, vec![], Type::Int),
         (Type::String, "parse_int") => sig(
             StringParseInt,
@@ -386,6 +1034,40 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             StringParseFloat,
             vec![],
             Type::Result(Box::new(Type::Float), Box::new(Type::String)),
+        ),
+        (Type::String, "encode_base64") => sig(StringEncodeBase64, vec![], Type::String),
+        (Type::String, "encode_base64_url") => sig(StringEncodeBase64Url, vec![], Type::String),
+        (Type::String, "encode_hex") => sig(StringEncodeHex, vec![], Type::String),
+        (Type::String, "encode_url_component") => {
+            sig(StringEncodeUrlComponent, vec![], Type::String)
+        }
+        (Type::String, "decode_base64") => sig(StringDecodeBase64, vec![], text_result()),
+        (Type::String, "decode_base64_url") => sig(StringDecodeBase64Url, vec![], text_result()),
+        (Type::String, "decode_hex") => sig(StringDecodeHex, vec![], text_result()),
+        (Type::String, "decode_url_component") => {
+            sig(StringDecodeUrlComponent, vec![], text_result())
+        }
+        (Type::String, "parse_uuid") => sig(StringParseUuid, vec![], text_result()),
+        (Type::String, "contains_regex") => sig(StringContainsRegex, vec![Type::String], Type::Bool),
+        (Type::String, "find_regex") => sig(
+            StringFindRegex,
+            vec![Type::String],
+            Type::Option(Box::new(Type::RegexMatch)),
+        ),
+        (Type::String, "find_all_regex") => sig(
+            StringFindAllRegex,
+            vec![Type::String],
+            Type::List(Box::new(Type::RegexMatch)),
+        ),
+        (Type::String, "replace_regex") => sig(
+            StringReplaceRegex,
+            vec![Type::String, Type::String],
+            Type::String,
+        ),
+        (Type::String, "split_regex") => sig(
+            StringSplitRegex,
+            vec![Type::String],
+            Type::List(Box::new(Type::String)),
         ),
         (Type::List(_), "length") => sig(ListLength, vec![], Type::Int),
         (Type::List(elem), "append") => sig(ListAppend, vec![(**elem).clone()], Type::Nothing),
@@ -485,6 +1167,13 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
         (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
         (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
         (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),
+
+        // ----- Response<Body> accessors (B05) ---------------------
+        (Type::Response(_), "status") => sig(ResponseStatus, vec![], Type::Int),
+        (Type::Response(body), "body") => sig(ResponseBody, vec![], (**body).clone()),
+        (Type::Response(_), "header") => {
+            sig(ResponseHeader, vec![Type::String], Type::Option(Box::new(Type::String)))
+        }
 
         // Every receiver is offered `to_json`; the checker then
         // refuses types with no JSON form (it can see record fields,

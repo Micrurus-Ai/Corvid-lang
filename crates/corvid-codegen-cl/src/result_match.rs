@@ -18,8 +18,14 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::UnOp { operand, .. } | IrExprKind::WrappingUnOp { operand, .. } => {
             operand_supported(operand)
         }
-        IrExprKind::BinOp { left, right, .. } | IrExprKind::WrappingBinOp { left, right, .. }
-            if (left.ty == Type::Int && right.ty == Type::Int) || (left.ty == Type::String && right.ty == Type::String) => {
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if (left.ty == Type::Int && right.ty == Type::Int) || (left.ty == Type::String && right.ty == Type::String)
+                || crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty)
+                || crate::time_methods::time_binary(*op, &left.ty, &right.ty).is_some()
+                || crate::currency_methods::currency_binary(*op, &left.ty, &right.ty).is_some()
+                || crate::bytes_methods::bytes_binary(*op, &left.ty, &right.ty).is_some()
+                || (matches!(op, corvid_ast::BinaryOp::Eq | corvid_ast::BinaryOp::NotEq)
+                    && matches!(crate::text_scalar::scalar_of(&left.ty), Type::Secret)) => {
                 operand_supported(left) && operand_supported(right)
             }
         IrExprKind::Index { target, index } => operand_supported(target) && operand_supported(index),
@@ -27,12 +33,19 @@ fn operand_supported(expr: &IrExpr) -> bool {
         IrExprKind::FieldAccess { target, .. } => operand_supported(target),
         IrExprKind::BuiltinMethod { receiver, args, kind } => {
             use corvid_types::BuiltinMethodKind::*;
-            (crate::native_string_method(*kind) || crate::native_numeric_conversion(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode))
+            (crate::native_string_method(*kind) || crate::native_text_method(*kind) || crate::is_native_decimal_method(*kind) || crate::is_native_time_method(*kind) || crate::is_native_currency_method(*kind) || crate::is_native_bytes_method(*kind) || crate::native_numeric_conversion(*kind) || crate::native_scalar_to_string(*kind) || matches!(kind, ListLength | ListAppend | ListFirst | ListLast | MapKeys | MapValues | MapLength | JsonEncode | ResponseStatus | ResponseBody | ResponseHeader))
                 && operand_supported(receiver)
                 && args.iter().all(operand_supported)
         }
+        // A tool or prompt call lowers in an arm as anywhere: each call
+        // releases its own temporaries before it returns, so nothing it
+        // allocates outlives the arm that made it.
         IrExprKind::Call {
-            kind: corvid_ir::IrCallKind::Agent { .. } | corvid_ir::IrCallKind::StructConstructor { .. } | corvid_ir::IrCallKind::EnumConstructor { .. },
+            kind: corvid_ir::IrCallKind::Agent { .. }
+                | corvid_ir::IrCallKind::StructConstructor { .. }
+                | corvid_ir::IrCallKind::EnumConstructor { .. }
+                | corvid_ir::IrCallKind::Tool { .. }
+                | corvid_ir::IrCallKind::Prompt { .. },
             args,
             ..
         } => args.iter().all(operand_supported),

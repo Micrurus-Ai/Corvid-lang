@@ -45,6 +45,7 @@ pub mod catalog;
 pub mod catalog_c_api;
 pub mod citation;
 pub mod connectors;
+pub mod number_text;
 pub mod db;
 pub mod protocol;
 pub mod protocol_simulate;
@@ -63,6 +64,7 @@ pub mod ffi_bridge;
 pub mod grounded_handles;
 pub mod human;
 pub mod http;
+pub mod http_events;
 pub mod browser;
 pub mod io;
 pub mod json;
@@ -111,6 +113,8 @@ pub mod replay;
 pub mod replay_dispatch;
 pub mod review_queue;
 pub mod runtime;
+pub mod tables;
+pub mod secret_arguments;
 pub mod secrets;
 pub mod string;
 pub mod store;
@@ -191,7 +195,7 @@ pub use auth::{
     JwtVerificationContract, OAuthCallbackResolution, OAuthStateCreate, OAuthStatePurpose,
     OAuthStateRecord, PermissionRequirement, ProvisioningOutcome, ProvisioningRequest,
     RouteAuthzOutcome, RoutePolicyRequirement, SessionAuthRuntime, SessionCreate, SessionRecord,
-    SessionResolution, TenantSource,
+    SessionResolution, SessionState, TenantSource,
 };
 pub use calibration::{CalibrationObservation, CalibrationStats};
 pub use cache::{
@@ -292,6 +296,7 @@ pub use review_queue::{
     ReviewStatus,
 };
 pub use runtime::{Runtime, RuntimeBuilder};
+pub use secret_arguments::{RevealedToolArguments, CORVID_SECRET_SCRUBBED_KEY, DECODED_KEY_TO_TOOL, REDACTED_SECRET};
 pub use secrets::{SecretAuditMetadata, SecretRead, SecretRuntime};
 #[cfg(feature = "python")]
 pub use python_ffi::{PythonRuntime, PythonSandboxProfile};

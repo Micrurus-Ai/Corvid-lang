@@ -1,4 +1,5 @@
 use crate::errors::RuntimeError;
+use crate::replay::is_dispatch_metadata;
 use corvid_trace_schema::{read_events_from_path, validate_supported_schema, TraceEvent};
 use std::path::Path;
 
@@ -37,7 +38,6 @@ pub struct ReplayDispatchMatch {
 
 pub fn find_first_replay_match(
     path: impl AsRef<Path>,
-    replay_writer: &'static str,
     arms: &[ReplayDispatchArm],
 ) -> Result<Option<ReplayDispatchMatch>, RuntimeError> {
     let path = path.as_ref();
@@ -55,14 +55,9 @@ pub fn find_first_replay_match(
         path: path.to_path_buf(),
         message: err.to_string(),
     })?;
+    // Either tier's trace is matched; the writer is not checked.
     match events.first() {
-        Some(TraceEvent::SchemaHeader { writer, .. }) if writer == replay_writer => {}
-        Some(TraceEvent::SchemaHeader { writer, .. }) => {
-            return Err(RuntimeError::CrossTierReplayUnsupported {
-                recorded_writer: writer.clone(),
-                replay_writer: replay_writer.to_string(),
-            });
-        }
+        Some(TraceEvent::SchemaHeader { .. }) => {}
         Some(_) => {
             return Err(RuntimeError::ReplayTraceLoad {
                 path: path.to_path_buf(),
@@ -159,25 +154,6 @@ fn next_non_dispatch_metadata(events: &[TraceEvent], mut index: usize) -> Option
         }
     }
     None
-}
-
-fn is_dispatch_metadata(event: &TraceEvent) -> bool {
-    matches!(
-        event,
-        TraceEvent::ModelSelected { .. }
-            | TraceEvent::HostEvent { .. }
-            | TraceEvent::ProgressiveEscalation { .. }
-            | TraceEvent::ProgressiveExhausted { .. }
-            | TraceEvent::StreamUpgrade { .. }
-            | TraceEvent::PromptCache { .. }
-            | TraceEvent::ApprovalTokenIssued { .. }
-            | TraceEvent::ApprovalScopeViolation { .. }
-            | TraceEvent::AbVariantChosen { .. }
-            | TraceEvent::EnsembleVote { .. }
-            | TraceEvent::AdversarialPipelineCompleted { .. }
-            | TraceEvent::AdversarialContradiction { .. }
-            | TraceEvent::ProvenanceEdge { .. }
-    )
 }
 
 fn malformed_pair<T>(

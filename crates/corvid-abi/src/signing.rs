@@ -22,7 +22,7 @@
 //! caller-supplied accept list.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use ed25519_dalek::{ed25519::signature::Signer, Signature, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{ed25519::signature::Signer, Signature, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 /// One signature entry inside a DSSE envelope.
@@ -258,7 +258,7 @@ pub fn verify_envelope(
         }
         let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().expect("checked length");
         let sig = Signature::from_bytes(&sig_arr);
-        if key.verify(&pae_bytes, &sig).is_ok() {
+        if corvid_crypto::verify_ed25519_signature(&key, &pae_bytes, &sig) {
             any_valid = true;
             break;
         }

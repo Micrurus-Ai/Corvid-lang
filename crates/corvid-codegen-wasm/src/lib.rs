@@ -25,6 +25,7 @@ mod allocator;
 mod companions;
 mod error;
 mod integer_handlers;
+mod javascript_source_map;
 mod string_pool;
 
 pub use companions::WasmArtifacts;
@@ -366,6 +367,9 @@ fn intern_string_literals(block: &IrBlock, pool: &mut StringPool) {
                 intern_expr_literals(iter, pool);
                 intern_string_literals(body, pool);
             }
+            IrStmt::Atomic { body, .. } => {
+                intern_string_literals(body, pool);
+            }
             IrStmt::While { cond, body, .. } => {
                 intern_expr_literals(cond, pool);
                 intern_string_literals(body, pool);
@@ -485,6 +489,11 @@ fn collect_block_imports(
                     "parallel blocks are interpreter-only in 46e".to_string(),
                 ));
             }
+            IrStmt::Atomic { .. } => {
+                return Err(WasmCodegenError::unsupported(
+                    "atomic blocks run on the interpreter (B09)".to_string(),
+                ));
+            }
             IrStmt::Approve { label, args, .. } => {
                 for arg in args {
                     collect_expr_imports(arg, tools, prompts, plan, agent_name)?;
@@ -545,6 +554,9 @@ fn collect_expr_imports(
             collect_expr_imports(next_cursor, tools, prompts, plan, agent_name)?;
             Ok(())
         }
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => Err(WasmCodegenError::unsupported(
+            "table operations run on the interpreter (B09)".to_string(),
+        )),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             collect_expr_imports(receiver, tools, prompts, plan, agent_name)?;
             for arg in args {
@@ -1012,6 +1024,7 @@ fn emit_block(
             | IrStmt::While { .. }
             | IrStmt::Destructure { .. }
             | IrStmt::Parallel { .. }
+            | IrStmt::Atomic { .. }
             | IrStmt::Break { .. }
             | IrStmt::Continue { .. } => {
                 return Err(WasmCodegenError::unsupported(format!(
@@ -1088,6 +1101,11 @@ fn emit_expr(
                 "Page<Item> is interpreter-only in 52c-2".to_string(),
             ));
         }
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => {
+            return Err(WasmCodegenError::unsupported(
+                "table operations run on the interpreter (B09)".to_string(),
+            ));
+        }
         IrExprKind::MapLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
                 "Map<K, V> is interpreter-only in 45g".to_string(),
@@ -1108,6 +1126,21 @@ fn emit_expr(
         }
         IrExprKind::Literal(IrLiteral::Bool(value)) => {
             function.instruction(&Instruction::I32Const(i32::from(*value)));
+        }
+        IrExprKind::Literal(IrLiteral::Currency(_) | IrLiteral::Locale(_)) => {
+            return Err(WasmCodegenError::unsupported(
+                "`Currency` and `Locale` have no WebAssembly form yet; they run on the interpreter and native tiers",
+            ));
+        }
+        IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
+            return Err(WasmCodegenError::unsupported(
+                "`TimeZone` has no WebAssembly form yet; it runs on the interpreter and native tiers",
+            ));
+        }
+        IrExprKind::Literal(IrLiteral::Decimal(_)) => {
+            return Err(WasmCodegenError::unsupported(
+                "`Decimal` has no WebAssembly form yet; it runs on the interpreter and native tiers",
+            ));
         }
         IrExprKind::Literal(IrLiteral::String(value)) => {
             // Slice 20n-B-2b: lower a string literal as a `(ptr, len)`

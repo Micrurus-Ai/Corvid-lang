@@ -1,22 +1,37 @@
 # `std.secrets` — Executing secret access with a replay-safe trace contract
 
-> **Status:** executing. One tool reads environment-backed secrets
+> **Status:** executing. Two tools read environment-backed secrets
 > through `secrets::SecretRuntime`; one RuntimeChecked guarantee
 > (`secrets.trace_never_carries_value`) governs what reaches traces.
 
 ## Quick reference
 
 ```corvid
-import "std:secrets" use secret_read
+import "std:secrets" use secret
+
+tool call_service(key: Secret) -> Bool
 
 agent main() -> Result<Bool, String>:
-    key = secret_read("EXAMPLE_SERVICE_KEY")?
-    return Ok(key.present)
+    key = secret("EXAMPLE_SERVICE_KEY")?
+    return Ok(call_service(key))
 ```
+
+### `secret(name: String) -> Result<Secret, String> uses secrets_read`
+
+Reads the environment variable `name` as a `Secret`: text the program
+can compare with `==` (in constant time) and pass to the tools that
+need it, and that the compiler keeps out of every place its text could
+leave the program. An empty name, an unreadable variable and a missing
+variable are `Err`, because there is no secret to return. A tool that
+takes a `Secret` receives the text, and every record of the call holds
+`<redacted>` in that position. [Cryptography: secrets](../cryptography.md#secrets)
+has the rules.
 
 ### `secret_read(name: String) -> Result<SecretReadEnvelope, String> uses secrets_read`
 
-Reads the environment variable `name`. A MISSING secret is `Ok` with
+Reads the environment variable `name` and returns its text as a plain
+`String` in the envelope. Prefer `secret(name)`: a `String` can reach a
+log, a prompt or another tool's trace, which a `Secret` cannot. A MISSING secret is `Ok` with
 `present: false` — absence is a modeled state, not an error. Err is
 reserved for recoverable failures (empty name, unreadable variable).
 
@@ -31,32 +46,34 @@ Three properties hold together, and each is test-pinned:
 1. **The program receives the real value** — `envelope.value` is the
    live secret, because programs need it to work.
 2. **The trace never does** — the recorded ToolResult carries a
-   redacted copy: `value` replaced by the `<redacted:XY>` marker
-   (final two characters — enough to correlate, never enough to
-   recover) and `value_redacted: true`.
+   redacted copy. For `secret_read`, `value` is replaced by the
+   `<redacted:XY>` marker (final two characters — enough to
+   correlate, never enough to recover) and `value_redacted: true`.
+   For `secret`, the result is `<redacted>` with no characters kept.
 3. **Replay re-reads the live environment** — Substitute-mode replay
    re-executes the env read instead of substituting (there is
    nothing usable in the trace to substitute). The same
    read-passthrough rule `db_query` follows: env reads are
    process-internal inputs and cannot escape. If the environment
    differs at replay time, the run diverges HONESTLY instead of
-   replaying a value the trace never stored.
+   replaying a value the trace never stored. Replay steps past the
+   recorded read, so the calls after it stay aligned with the trace.
 
-## Residual channel — explicit non-scope
+## Forwarding a secret to another tool
 
-A secret the program forwards into ANOTHER tool's arguments (an HTTP
-header, a request body) is recorded by that tool's own trace events.
-The structural fix — an opaque `SecretHandle` value that never
-serializes (the `DbHandle` pattern), accepted by consuming surfaces —
-is the tracked post-v1.0 deepening. Until then: pass secrets to as
-few tools as possible, and prefer host-side injection for transport
-credentials.
+A secret read with `secret` and passed into another tool's arguments
+is recorded as `<redacted>` in that tool's trace events, and replay
+matches the redacted argument against whatever secret it re-reads.
+The text of a secret read with `secret_read` is an ordinary `String`,
+so a program that forwards it records it in that tool's events; use
+`secret` for any value that must stay out of traces.
 
 ## Related references
 
 - [`core-semantics.md`](../core-semantics.md) — the
   `secrets.trace_never_carries_value` guarantee row.
-- `corvid tour --topic replay-safe-secrets` — runnable demo.
+- `corvid tour --topic secrets` and `corvid tour --topic replay-safe-secrets` — runnable demos.
+- [`cryptography.md`](../cryptography.md#secrets) — the `Secret` type.
 - `crates/corvid-runtime/src/secrets.rs` — `SecretRuntime` + the
   guarantee anchor.
 - `std/secrets.cor` — the tool declaration + envelope.

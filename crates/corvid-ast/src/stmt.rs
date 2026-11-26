@@ -63,6 +63,16 @@ pub enum Stmt {
         span: Span,
     },
 
+    /// `atomic:` block (B09 P7a): the table writes in `body` commit
+    /// together when the block reaches its end, or are all undone when
+    /// it is left through an error. The checker keeps out anything the
+    /// database cannot undo (tools, prompts, approvals) and any
+    /// `return`, `break` or `continue` that would leave the block.
+    Atomic {
+        body: crate::stmt::Block,
+        span: Span,
+    },
+
     /// Destructuring binding (slice 45n): `Decision { refund,
     /// amount, .. } = compute()`. The pattern must be IRREFUTABLE —
     /// shorthand field bindings, renamed bindings (`field: name`),
@@ -134,6 +144,7 @@ impl Stmt {
             | Stmt::If { span, .. }
             | Stmt::For { span, .. }
             | Stmt::Parallel { span, .. }
+            | Stmt::Atomic { span, .. }
             | Stmt::Destructure { span, .. }
             | Stmt::While { span, .. }
             | Stmt::Break { span }

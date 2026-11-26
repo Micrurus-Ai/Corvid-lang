@@ -7,6 +7,7 @@ impl Parser<'_> {
         state: &str,
         initial: u64,
         ui: &str,
+        event_line_spans: &mut Vec<Span>,
     ) -> Result<(String, String, Option<corvid_ast::Expr>), ParseError> {
         let canvas = self.peek_ident_is("canvas");
         self.bump();
@@ -32,6 +33,7 @@ impl Parser<'_> {
         };
         self.expect(TokKind::RParen, ")")?;
         self.expect_newline()?;
+        let handler_span = self.peek_span();
         self.expect(TokKind::KwOn, "on drag")?;
         self.expect_contextual_ident("drag")?;
         self.expect(TokKind::LParen, "(")?;
@@ -55,6 +57,7 @@ impl Parser<'_> {
             }
             self.expect_newline()?;
         }
+        event_line_spans.extend([handler_span, self.peek_span()]);
         self.expect_contextual_ident(state)?;
         let increment = matches!(self.peek(), TokKind::PlusEq);
         if increment {

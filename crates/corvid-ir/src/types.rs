@@ -48,7 +48,9 @@ pub struct IrFile {
 pub struct IrConnector {
     pub name: String,
     /// Absolute `http(s)://` base URL. Operation paths are appended.
-    pub base_url: String,
+    /// `None` for a `hosts: allowed_hosts` connector, whose operations
+    /// take the whole URL as a parameter.
+    pub base_url: Option<String>,
     /// Credential material, always as `secret(...)` reference NAMES —
     /// never literal values (the parser rejects literals). Resolved to
     /// live secrets by the runtime at dispatch, never embedded in a
@@ -60,6 +62,13 @@ pub struct IrConnector {
     pub rate_limit: Option<IrRateLimit>,
     /// Circuit-breaker consecutive-failure threshold (slice 52g-4).
     pub circuit_breaker: Option<u64>,
+    /// The connector's declared `timeout:` in seconds. Always present in
+    /// a checked program (the checker requires it); `None` only in IR
+    /// built from unchecked source, which the runtime refuses to send.
+    pub timeout_secs: Option<u64>,
+    /// The connector's declared `redirects:` policy. Present in every
+    /// checked program, as `timeout_secs` is.
+    pub redirects: Option<corvid_ast::RedirectPolicy>,
     /// The execution modes this connector is allowed to run in (slice
     /// 52g-3b). Never empty (the checker rejects an undeclared set).
     /// The deployment selects exactly one at start.
@@ -99,9 +108,27 @@ pub struct IrOperation {
     /// The request body: which param supplies it and how it encodes.
     /// `None` = no body (e.g. a GET).
     pub body: Option<IrOperationBody>,
+    /// The record parameter whose fields become the query, if any.
+    pub query: Option<String>,
+    /// `header "Name": value` lines, in source order.
+    pub headers: Vec<IrOperationHeader>,
+    /// The `String` parameter holding the whole URL, on a `hosts:
+    /// allowed_hosts` connector; `path` is empty then.
+    pub url_param: Option<String>,
+    /// `response: text` — the body is read as text, not JSON.
+    pub response_text: bool,
+    /// `streams:` — how a `Stream<T>` operation's events are framed.
+    pub streams: Option<corvid_ast::StreamFormat>,
+    /// `until "..."` — the event data that ends the stream cleanly.
+    pub stream_until: Option<String>,
+    /// `on failure -> Variant`: the error variant every failure becomes.
+    pub on_failure: Option<String>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
+    /// This operation's timeout in seconds: its own `timeout:` when it
+    /// declares one, otherwise the connector's.
+    pub timeout_secs: Option<u64>,
     /// The `mock:` payload expression, lowered (slice 52g-3b). In
     /// `mock` mode the runtime evaluates this to produce the operation
     /// response. `None` when the connector's allowed modes exclude
@@ -110,6 +137,22 @@ pub struct IrOperation {
     /// The exact temporal graph accepted by the checker.
     pub protocol: Option<corvid_ast::ProviderProtocolDecl>,
     pub span: Span,
+}
+
+/// One `header` line of an operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrOperationHeader {
+    pub name: String,
+    pub value: IrOperationHeaderValue,
+}
+
+/// Where an operation header's value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrOperationHeaderValue {
+    /// The named `String` parameter.
+    Param(String),
+    /// The same text on every call.
+    Literal(String),
 }
 
 /// Which param supplies an operation's request body, and its encoding.
@@ -755,6 +798,16 @@ pub enum IrStmt {
         span: Span,
     },
 
+    /// `atomic:` (B09 P7a): the body's table writes commit together,
+    /// or are all undone when the body is left through an error.
+    /// `database` is the one database the body's tables live in, or
+    /// `None` when the body touches no table.
+    Atomic {
+        database: Option<IrDatabase>,
+        body: IrBlock,
+        span: Span,
+    },
+
     /// `approve Label(args)` — authorizes matching dangerous tool calls.
     Approve {
         label: String,
@@ -1088,6 +1141,114 @@ pub enum IrExprKind {
         items: Box<IrExpr>,
         next_cursor: Box<IrExpr>,
     },
+
+    /// `Shelf.get(key)`, `Shelf.insert(row)`, `Shelf.save(row)` or
+    /// `Shelf.delete(row)` (B09). `args` are the key's values for `get`,
+    /// one per key field in declaration order, and the one row otherwise;
+    /// the call's type is the operation's result.
+    TableOp {
+        op: corvid_types::TableOp,
+        table: IrTable,
+        args: Vec<IrExpr>,
+    },
+
+    /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
+    /// `Shelf.all()`, then optional `order_by`, `descending` and `take`.
+    /// It runs as one database query and has type `List<Shelf>`.
+    TableQuery {
+        table: IrTable,
+        /// `None` for `all()`.
+        filter: Option<IrTableFilter>,
+        /// The column `order_by` reads.
+        order: Option<String>,
+        descending: bool,
+        take: Option<Box<IrExpr>>,
+    },
+}
+
+/// The expressions a query chain evaluates before it runs, in
+/// evaluation order: the `where` values, then the `take` count.
+/// IR walkers visit a `TableQuery` through this.
+pub fn table_query_operands<'a>(filter: &'a Option<IrTableFilter>, take: &'a Option<Box<IrExpr>>) -> Vec<&'a IrExpr> {
+    let mut operands = filter.as_ref().map(IrTableFilter::values).unwrap_or_default();
+    operands.extend(take.as_deref());
+    operands
+}
+
+/// A `where` condition as the database runs it (B09 P2). The values
+/// compared with columns are evaluated by the agent before the query.
+#[derive(Debug, Clone)]
+pub enum IrTableFilter {
+    Const(bool),
+    /// A `Bool` column read on its own.
+    Column(String),
+    And(Box<IrTableFilter>, Box<IrTableFilter>),
+    Or(Box<IrTableFilter>, Box<IrTableFilter>),
+    Not(Box<IrTableFilter>),
+    Compare { column: String, op: corvid_types::table_ops::QueryCompare, value: Box<IrExpr> },
+    Text { column: String, test: corvid_types::table_ops::QueryTextTest, value: Box<IrExpr> },
+}
+
+impl IrTableFilter {
+    /// Every value expression in the condition, left to right.
+    pub fn values(&self) -> Vec<&IrExpr> {
+        let mut out = Vec::new();
+        self.collect_values(&mut out);
+        out
+    }
+
+    fn collect_values<'a>(&'a self, out: &mut Vec<&'a IrExpr>) {
+        match self {
+            Self::Const(_) | Self::Column(_) => {}
+            Self::And(left, right) | Self::Or(left, right) => {
+                left.collect_values(out);
+                right.collect_values(out);
+            }
+            Self::Not(inner) => inner.collect_values(out),
+            Self::Compare { value, .. } | Self::Text { value, .. } => out.push(value),
+        }
+    }
+
+    /// [`Self::values`], mutably.
+    pub fn for_each_value_mut(&mut self, visit: &mut dyn FnMut(&mut IrExpr)) {
+        match self {
+            Self::Const(_) | Self::Column(_) => {}
+            Self::And(left, right) | Self::Or(left, right) => {
+                left.for_each_value_mut(visit);
+                right.for_each_value_mut(visit);
+            }
+            Self::Not(inner) => inner.for_each_value_mut(visit),
+            Self::Compare { value, .. } | Self::Text { value, .. } => visit(value),
+        }
+    }
+}
+
+/// What a table operation needs to run (B09): the table's row type,
+/// key and columns, and the database that holds it.
+#[derive(Debug, Clone)]
+pub struct IrTable {
+    pub def_id: DefId,
+    pub name: String,
+    /// The key's columns, in declaration order: one, or several that
+    /// identify a row together.
+    pub keys: Vec<String>,
+    /// Column names in declaration order, with `revision` last.
+    pub columns: Vec<String>,
+    /// Each `unique` rule's columns (B09 P10).
+    pub unique: Vec<Vec<String>>,
+    pub database: IrDatabase,
+}
+
+/// A `database` block's engine and location (B09).
+#[derive(Debug, Clone)]
+pub struct IrDatabase {
+    pub name: String,
+    pub engine: String,
+    pub location: corvid_ast::DatabaseLocation,
+    /// The `tls:` setting, for a networked engine.
+    pub tls: Option<String>,
+    /// The `connections:` setting, for a networked engine.
+    pub connections: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1176,6 +1337,14 @@ pub enum IrReplayToolArgPattern {
 pub enum IrLiteral {
     Int(i64),
     Float(f64),
+    /// B06 — an exact decimal literal (`19.99` where a `Decimal` is meant).
+    Decimal(corvid_decimal::Decimal),
+    /// B06 — a zone literal (`"Europe/Berlin"` where a `TimeZone` is meant).
+    TimeZone(corvid_time::TimeZone),
+    /// B06 — a currency literal (`"EUR"` where a `Currency` is meant).
+    Currency(corvid_currency::Currency),
+    /// B06 — a locale literal (`"de-DE"` where a `Locale` is meant).
+    Locale(corvid_currency::Locale),
     String(String),
     Bool(bool),
     Nothing,

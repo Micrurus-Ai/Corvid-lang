@@ -1,29 +1,51 @@
-import "std:http" use http_get, http_post_json
-import "std:json" use json_object_new, json_object_set_string, json_object_finish, json_parse, json_get_int
-
 type Message:
     text: String
 
 type Receipt:
     id: Int
-    attempts: Int
-    elapsed_ms: Int
 
-agent deliver(message: Message) -> Result<Receipt, String>:
-    data = json_object_set_string(json_object_new(), "text", message.text)
-    response = http_post_json("http://upstream.test/messages", json_object_finish(data))?
-    parsed = json_parse(response.body)?
-    id = json_get_int(parsed, "id")?
-    return Ok(Receipt(id, response.attempts, response.elapsed_ms))
+type RelayError:
+    | Unreachable(reason: String)
 
-agent wait_for_reply() -> Result<Int, String>:
-    response = http_get("http://upstream.test/wait")?
-    return Ok(response.status)
+effect upstream_read:
+    cost: $0.0
+
+effect upstream_write:
+    cost: $0.0
+    reversible: false
+
+connector upstream:
+    hosts: allowed_hosts
+    timeout: 30s
+    redirects: never
+    published: no
+    modes: [real]
+    operation deliver(url: String, message: Message) -> Result<Receipt, RelayError> uses upstream_write:
+        POST url body message
+        on failure -> Unreachable
+    operation wait(url: String) -> Result<Response<String>, RelayError> uses upstream_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+
+agent reason_of(e: RelayError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+agent deliver_message(message: Message) -> Result<Receipt, String> uses upstream_write:
+    return match deliver("http://upstream.test/messages", message):
+        Ok(receipt) -> Ok(receipt)
+        Err(e) -> Err(reason_of(e))
+
+agent wait_for_reply() -> Result<Int, String> uses upstream_read:
+    return match wait("http://upstream.test/wait"):
+        Ok(answer) -> Ok(answer.status())
+        Err(e) -> Err(reason_of(e))
 
 server relay:
-    route POST "/messages" body Message -> json Result<Receipt, String>:
-        return deliver(body)
-    route GET "/deadline" -> json Result<Int, String>:
+    route POST "/messages" body Message -> json Result<Receipt, String> uses upstream_write:
+        return deliver_message(body)
+    route GET "/deadline" -> json Result<Int, String> uses upstream_read:
         return try wait_for_reply() timeout 300
-    route GET "/wait" -> json Result<Int, String>:
+    route GET "/wait" -> json Result<Int, String> uses upstream_read:
         return wait_for_reply()

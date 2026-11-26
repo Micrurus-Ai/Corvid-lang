@@ -119,6 +119,7 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             writer: "normalized-writer".into(),
             commit_sha: commit_sha.clone(),
             source_path: source_path.clone(),
+            tzdb_version: None,
             ts_ms: 0,
             run_id: "normalized-run".into(),
         },
@@ -306,11 +307,10 @@ async fn refund_bot_native_trace_matches_interpreter_shape() {
         "native trace should include rollout_default_seed"
     );
 
-    // Filter out the native runtime's host-side `llm.usage` HostEvent
-    // before comparing — the interpreter tier does not emit it in this
-    // fixture, so leaving it in would assert a divergence that is
-    // about provider-usage telemetry, not record/replay
-    // determinism. Drop on both sides for symmetry.
+    // Filter out the `llm.usage` HostEvent before comparing: the
+    // interpreter records it in this fixture and the native run does not,
+    // a telemetry gap on the roadmap. Replay skips host events, so it does
+    // not affect replay. Drop on both sides for symmetry.
     fn drop_host_llm_usage(event: &TraceEvent) -> bool {
         !matches!(event, TraceEvent::HostEvent { name, .. } if name == "llm.usage")
     }
@@ -375,4 +375,46 @@ fn native_recording_overhead_smoke() {
         recorded,
         delta * 100.0
     );
+}
+
+
+/// A tool call, an approval and a prompt call replay on the other tier
+/// (native dispatch N5): the interpreter replays a native recording and
+/// the native binary replays the interpreter's, each giving the recorded
+/// result.
+#[tokio::test]
+async fn refund_bot_replays_on_the_other_tier() {
+    let ir = ir_of(RECORD_NATIVE_SRC);
+    let native_tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(
+        &ir,
+        "corvid_record_native_cross",
+        &native_tmp.path().join("refund_native"),
+        &[test_tools_lib_path().as_path()],
+    )
+    .expect("compile native binary");
+
+    let native_trace_path = native_tmp.path().join("native-trace.jsonl");
+    assert!(run_native_binary(&produced, &native_trace_path).status.success());
+    let replay = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .replay_from(&native_trace_path)
+        .build();
+    let replayed = run_agent(&ir, entry_name(&ir), vec![], &replay).await.expect("the interpreter replays a native recording");
+    assert_eq!(replayed, Value::Bool(true));
+
+    let interp_trace_dir = tempfile::tempdir().unwrap();
+    let (_, interp_trace_path) = run_interpreter(interp_trace_dir.path()).await;
+    let output = Command::new(&produced)
+        .env("CORVID_REPLAY_TRACE_PATH", &interp_trace_path)
+        .env("CORVID_APPROVE_AUTO", "1")
+        .env("CORVID_TEST_TOOL_ANSWER", "42")
+        .output()
+        .expect("run native replay");
+    assert!(
+        output.status.success(),
+        "native replay of an interpreter recording failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
 }

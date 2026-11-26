@@ -69,7 +69,7 @@ pub fn emit_struct_typeinfo(
     trace_fn: FuncId,
     runtime: &RuntimeFuncs,
 ) -> Result<cranelift_module::DataId, CodegenError> {
-    let symbol = format!("corvid_typeinfo_{}", ty.name);
+    let symbol = super::type_query::record_symbol("corvid_typeinfo_", ty);
     let data_id = module
         .declare_data(&symbol, Linkage::Local, false, false)
         .map_err(|e| {
@@ -273,7 +273,11 @@ pub fn typeinfo_data_for_refcounted_payload(
 ) -> Option<cranelift_module::DataId> {
     match ty {
         Type::Map(_, _) if crate::native_string_map(ty) => Some(runtime.map_typeinfo),
-        Type::String => Some(runtime.string_typeinfo),
+        // B06, B04 — a native `Decimal`, time, currency, locale or `Bytes` value is a
+        // String holding its canonical text.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Some(runtime.string_typeinfo),
+        // Native dispatch N3 — a secret is the runtime's own object.
+        Type::Secret => Some(runtime.secret_typeinfo),
         Type::Function { .. } if crate::native_callback_type(ty) => Some(runtime.callback_typeinfo),
         Type::Struct(def_id) => runtime.struct_typeinfos.get(def_id).copied(),
         Type::List(inner_inner) => runtime.list_typeinfos.get(&(**inner_inner)).copied(),

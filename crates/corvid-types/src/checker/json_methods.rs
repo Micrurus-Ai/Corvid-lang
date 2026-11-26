@@ -164,6 +164,16 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    /// Why `ty` cannot be sent (`encode`) or read as JSON, with what to
+    /// write instead; `None` when it can. For connector bodies and
+    /// responses, which travel as the same public JSON as `to_json`.
+    pub(super) fn json_wire_problem(&mut self, ty: &Type, encode: bool) -> Option<String> {
+        let direction = if encode { Direction::Encode } else { Direction::Decode };
+        self.json_form(ty, direction, &mut Vec::new())
+            .err()
+            .map(|no| format!("{}; {}", no.reason, no.hint))
+    }
+
     /// Whether `ty` has a JSON form in `direction`. `Ok(tainted)`
     /// reports whether any part of it is `Tainted`. `seen` stops
     /// recursion through self-referential records.
@@ -177,7 +187,8 @@ impl<'a> Checker<'a> {
             | Type::JsonValue
             | Type::Unknown => Ok(false),
             Type::Tainted(inner) => self.json_form(inner, direction, seen).map(|_| true),
-            Type::Option(inner) | Type::List(inner) => self.json_form(inner, direction, seen),
+            // A conflict crosses JSON as a sum type whose payload is its row.
+            Type::Option(inner) | Type::List(inner) | Type::Conflict(inner, _) => self.json_form(inner, direction, seen),
             Type::Map(a, b) | Type::Result(a, b) => {
                 let first = self.json_form(a, direction, seen)?;
                 Ok(self.json_form(b, direction, seen)? || first)
@@ -197,6 +208,31 @@ impl<'a> Checker<'a> {
                     "decode the error's fields into a record you declare",
                 )),
             },
+            // B06 — each crosses JSON as its exact canonical text (see
+            // `corvid_public_json::text_scalar`), and `Bytes` as base64url
+            // text. A table stores each in a column of its own (B09 P8a
+            // and P8c), and inside a JSON-stored column as that text.
+            Type::Decimal
+            | Type::Duration
+            | Type::Instant
+            | Type::TimeZone
+            | Type::ZonedTime
+            | Type::Currency
+            | Type::Locale
+            | Type::Bytes => {
+                Ok(false)
+            }
+            // A secret's text never leaves the program, so it has no
+            // JSON form in either direction, and a record holding one has
+            // none either.
+            Type::Secret => Err(NoForm::new(
+                "a `Secret` has no JSON form, because its text must never leave the program",
+                "keep the secret out of the encoded value and pass it straight to the tool that needs it",
+            )),
+            Type::RegexMatch => Err(NoForm::new(
+                "a `RegexMatch` describes a position in one text and has no JSON form",
+                "copy the fields you need into a record you declare",
+            )),
             Type::Page(inner) => match direction {
                 Direction::Encode => self.json_form(inner, direction, seen),
                 Direction::Decode => Err(NoForm::new(
@@ -252,6 +288,10 @@ impl<'a> Checker<'a> {
                 "an upload has no JSON form",
                 "read it with `text()` or `bytes()` first",
             )),
+            Type::Response(_) => Err(NoForm::new(
+                "a connector response has no JSON form",
+                "encode its `body()`, or the `status()` and headers you need",
+            )),
             Type::DbHandle => Err(NoForm::new("a database handle has no JSON form", "encode the rows you read")),
             Type::JsonBuilder => Err(NoForm::new(
                 "a JSON builder has no JSON form",
@@ -293,10 +333,10 @@ impl<'a> Checker<'a> {
             match self.json_form(&field_ty, direction, seen) {
                 Ok(field_tainted) => tainted |= field_tainted,
                 Err(no_form) => {
-                    return Err(NoForm::new(
-                        format!("field `{}.{}`: {}", decl.name.name, field.name.name, no_form.reason),
-                        no_form.hint,
-                    ))
+                    return Err(NoForm {
+                        reason: format!("field `{}.{}`: {}", decl.name.name, field.name.name, no_form.reason),
+                        ..no_form
+                    })
                 }
             }
         }
@@ -306,7 +346,7 @@ impl<'a> Checker<'a> {
 }
 
 /// The declaration of type `def_id` in an imported `module`.
-fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
+pub(super) fn imported_type_decl(module: &ResolvedModule, def_id: DefId) -> Option<&TypeDecl> {
     module.file.decls.iter().find_map(|decl| match decl {
         corvid_ast::Decl::Type(t) if module.resolved.symbols.lookup_def(&t.name.name) == Some(def_id) => Some(t),
         _ => None,
@@ -329,9 +369,10 @@ fn receiver_display_name(target: &Expr) -> String {
 }
 
 impl<'a> Checker<'a> {
-    /// A type name for JSON diagnostics that names records by their
-    /// declaration rather than `struct`.
-    fn json_type_name(&self, ty: &Type) -> String {
+    /// A type name for diagnostics that names records by their
+    /// declaration rather than `struct`. Used for JSON and connector
+    /// diagnostics.
+    pub(super) fn json_type_name(&self, ty: &Type) -> String {
         match ty {
             Type::Struct(id) => self
                 .types_by_id

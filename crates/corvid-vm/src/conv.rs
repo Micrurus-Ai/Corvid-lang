@@ -22,10 +22,73 @@ use std::sync::Arc;
 /// Convert a `Value` to a `serde_json::Value`. Lossless for primitives;
 /// structs become JSON objects (the type name is dropped — the receiving
 /// tool doesn't need it).
+///
+/// A `Secret` becomes the redaction marker `<redacted>`, wherever it
+/// sits: a tool argument, a record field, a list element. Every trace
+/// record, approval, step event, replay key and rendered prompt is
+/// built from this form, so none of them can hold a secret's text.
+/// Only [`tool_argument_json`] writes the text, for the tool
+/// implementation itself.
 pub fn value_to_json(v: &Value) -> serde_json::Value {
+    to_json(v, SecretForm::Redacted)
+}
+
+/// The JSON handed to a tool implementation: [`value_to_json`], except
+/// that a `Secret` is its text, because the tool needs it. The
+/// interpreter calls this in one place, when it dispatches a tool whose
+/// declared parameters hold a `Secret`; the trace of that call is built
+/// from [`value_to_json`].
+///
+/// A key made by `decode_base64_after` holds bytes, not text, so it has
+/// no form a tool could receive: the call is an error that says so,
+/// rather than the key handed on in some encoding the tool never asked
+/// for.
+pub fn tool_argument_json(v: &Value) -> Result<serde_json::Value, String> {
+    let decoded_key = std::cell::Cell::new(false);
+    let json = to_json(v, SecretForm::Revealed(&decoded_key));
+    if decoded_key.get() {
+        return Err(corvid_runtime::DECODED_KEY_TO_TOOL.to_string());
+    }
+    Ok(json)
+}
+
+/// How [`to_json`] writes a `Secret`.
+#[derive(Clone, Copy)]
+enum SecretForm<'a> {
+    /// The redaction marker, for every record of the value.
+    Redacted,
+    /// The text, for a tool implementation. A decoded key, which has no
+    /// text, is written as the redaction marker and flagged here, so
+    /// [`tool_argument_json`] refuses the call.
+    Revealed(&'a std::cell::Cell<bool>),
+}
+
+fn to_json(v: &Value, secrets: SecretForm<'_>) -> serde_json::Value {
     match v {
+        Value::Secret(secret) => serde_json::Value::String(match secrets {
+            SecretForm::Redacted => corvid_runtime::REDACTED_SECRET.to_string(),
+            SecretForm::Revealed(decoded_key) => match secret.expose_text() {
+                Some(text) => text.to_string(),
+                None => {
+                    decoded_key.set(true);
+                    corvid_runtime::REDACTED_SECRET.to_string()
+                }
+            },
+        }),
         Value::Int(n) => serde_json::Value::from(*n),
         Value::Float(f) => serde_json::Value::from(*f),
+        // B06 — exact text, never a JSON number, which would round; the
+        // public mapping's one printer.
+        Value::Decimal(_)
+        | Value::Duration(_)
+        | Value::Instant(_)
+        | Value::TimeZone(_)
+        | Value::ZonedTime(_)
+        | Value::Currency(_)
+        | Value::Locale(_)
+        | Value::Bytes(_) => serde_json::Value::String(
+            crate::public_json::text_scalar_of_value(v).expect("matched a text scalar").to_text(),
+        ),
         Value::String(s) => serde_json::Value::String(s.to_string()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Nothing => serde_json::Value::Null,
@@ -33,19 +96,19 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
             let mut obj = serde_json::Map::new();
             s.with_fields(|fields| {
                 for (k, v) in fields {
-                    obj.insert(k.clone(), value_to_json(v));
+                    obj.insert(k.clone(), to_json(v, secrets));
                 }
             });
             serde_json::Value::Object(obj)
         }
         Value::List(items) => {
-            serde_json::Value::Array(items.iter_cloned().iter().map(value_to_json).collect())
+            serde_json::Value::Array(items.iter_cloned().iter().map(|item| to_json(item, secrets)).collect())
         }
         Value::Enum(e) => serde_json::json!({
             "tag": "variant",
             "type": e.type_name(),
             "variant": e.variant_name(),
-            "fields": e.fields_cloned().iter().map(value_to_json).collect::<Vec<_>>(),
+            "fields": e.fields_cloned().iter().map(|item| to_json(item, secrets)).collect::<Vec<_>>(),
         }),
         Value::Map(m) => {
             let entries = m.entries_cloned();
@@ -53,7 +116,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                 let mut obj = serde_json::Map::new();
                 for (k, v) in &entries {
                     if let Value::String(s) = k {
-                        obj.insert(s.to_string(), value_to_json(v));
+                        obj.insert(s.to_string(), to_json(v, secrets));
                     }
                 }
                 serde_json::Value::Object(obj)
@@ -64,22 +127,22 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                     entries
                         .iter()
                         .map(|(k, v)| {
-                            serde_json::Value::Array(vec![value_to_json(k), value_to_json(v)])
+                            serde_json::Value::Array(vec![to_json(k, secrets), to_json(v, secrets)])
                         })
                         .collect(),
                 )
             }
         }
         Value::Weak(w) => match w.upgrade() {
-            Some(value) => serde_json::json!({ "tag": "weak", "value": value_to_json(&value) }),
+            Some(value) => serde_json::json!({ "tag": "weak", "value": to_json(&value, secrets) }),
             None => serde_json::json!({ "tag": "weak", "value": serde_json::Value::Null }),
         },
-        Value::ResultOk(v) => serde_json::json!({ "tag": "ok", "ok": value_to_json(&v.get()) }),
-        Value::ResultErr(v) => serde_json::json!({ "tag": "err", "err": value_to_json(&v.get()) }),
-        Value::OptionSome(v) => serde_json::json!({ "tag": "some", "value": value_to_json(&v.get()) }),
+        Value::ResultOk(v) => serde_json::json!({ "tag": "ok", "ok": to_json(&v.get(), secrets) }),
+        Value::ResultErr(v) => serde_json::json!({ "tag": "err", "err": to_json(&v.get(), secrets) }),
+        Value::OptionSome(v) => serde_json::json!({ "tag": "some", "value": to_json(&v.get(), secrets) }),
         Value::OptionNone => serde_json::json!({ "tag": "none" }),
         Value::Grounded(g) => {
-            let inner = value_to_json(&g.inner.get());
+            let inner = to_json(&g.inner.get(), secrets);
             let sources: Vec<serde_json::Value> = g.provenance.entries.iter().map(|e| {
                 serde_json::json!({
                     "kind": e.kind.label(),
@@ -95,7 +158,7 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
                 for (name, field) in partial_fields {
                     let value = match field {
                         PartialFieldValue::Complete(value) => {
-                            serde_json::json!({ "tag": "complete", "value": value_to_json(value) })
+                            serde_json::json!({ "tag": "complete", "value": to_json(value, secrets) })
                         }
                         PartialFieldValue::Streaming => serde_json::json!({ "tag": "streaming" }),
                     };
@@ -107,10 +170,10 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         Value::ResumeToken(token) => serde_json::json!({
             "tag": "resume_token",
             "prompt": token.prompt_name,
-            "args": token.args.iter().map(value_to_json).collect::<Vec<_>>(),
+            "args": token.args.iter().map(|item| to_json(item, secrets)).collect::<Vec<_>>(),
             "delivered": token.delivered.iter().map(|chunk| {
                 serde_json::json!({
-                    "value": value_to_json(&chunk.value),
+                    "value": to_json(&chunk.value, secrets),
                     "cost": chunk.cost,
                     "confidence": chunk.confidence,
                     "tokens": chunk.tokens,
@@ -180,6 +243,13 @@ pub fn json_to_value(
 ) -> Result<Value, ConvError> {
     use serde_json::Value as J;
     match (expected, json) {
+        // B06 — a tool result or a model reply carries these types as
+        // their exact text, read by the public mapping's one parser.
+        (ty, J::String(text)) if corvid_public_json::text_scalar::name(ty).is_some() => {
+            corvid_public_json::text_scalar::parse(ty, &text)
+                .map(crate::public_json::value_of_text_scalar)
+                .map_err(|problem| ConvError::TypeMismatch { expected: ty.display_name(), got: format!("`{text}`: {problem}") })
+        }
         (Type::Int, J::Number(n)) => n
             .as_i64()
             .map(Value::Int)
@@ -394,6 +464,16 @@ pub fn json_to_value(
         // rather than a documentation claim. The only path to a
         // valid `Value::DbHandle` is the typed-Value dispatch
         // surface in `Runtime::call_tool` for `db_open` (33S3b).
+        // A `Secret` has no JSON form: a tool result, a model reply, a
+        // request body or a resumed job cannot mint one, so a secret's
+        // text never arrives through a channel the trace records. The
+        // only paths to a `Value::Secret` are the runtime's own
+        // `secret(name)` and `random_token(bytes)`, decoded by
+        // [`secret_tool_result_to_value`].
+        (Type::Secret, _got) => Err(ConvError::TypeMismatch {
+            expected: "Secret (only produced by `secret(name)` from std/secrets and `random_token(bytes)` from std/crypto)".into(),
+            got: "JSON payload - a secret cannot be read from JSON".into(),
+        }),
         (Type::DbHandle, _got) => Err(ConvError::TypeMismatch {
             expected: "DbHandle (only producible by the runtime's db_open dispatch path)".into(),
             got: "JSON payload — opaque handles cannot be reconstructed from JSON".into(),
@@ -419,6 +499,46 @@ pub fn json_to_value(
             expected: type_label(expected),
             got: json_kind(&got).into(),
         }),
+    }
+}
+
+/// The result of a runtime tool that produces a `Secret`, by the tool's
+/// declared return type: `random_token(bytes) -> Secret` returns the
+/// text, and `secret(name) -> Result<Secret, String>` returns
+/// `{"tag": "ok", "ok": text}` or `{"tag": "err", "err": message}`.
+/// The interpreter calls this only for the runtime's own secret tools,
+/// whose recorded results carry `<redacted>` in place of the text.
+pub fn secret_tool_result_to_value(json: serde_json::Value, return_ty: &Type) -> Result<Value, ConvError> {
+    match (return_ty, json) {
+        (Type::Secret, serde_json::Value::String(text)) => Ok(Value::Secret(corvid_crypto::Secret::new(&text))),
+        (Type::Result(ok, err), json) if **ok == Type::Secret && **err == Type::String => secret_read_result_to_value(json),
+        (other, _) => Err(ConvError::TypeMismatch {
+            expected: format!("{} (a tool that produces a secret)", other.display_name()),
+            got: "a result that is not a secret tool's".into(),
+        }),
+    }
+}
+
+/// The `Result<Secret, String>` of `secret(name)`.
+fn secret_read_result_to_value(json: serde_json::Value) -> Result<Value, ConvError> {
+    let mismatch = || ConvError::TypeMismatch {
+        expected: "Result<Secret, String>".into(),
+        got: "a result that is not `secret(name)`'s".into(),
+    };
+    match json.get("tag").and_then(|tag| tag.as_str()) {
+        Some("ok") => match json.get("ok") {
+            Some(serde_json::Value::String(text)) => {
+                Ok(Value::ResultOk(BoxedValue::new(Value::Secret(corvid_crypto::Secret::new(text.as_str())))))
+            }
+            _ => Err(mismatch()),
+        },
+        Some("err") => match json.get("err") {
+            Some(serde_json::Value::String(message)) => {
+                Ok(Value::ResultErr(BoxedValue::new(Value::String(Arc::from(message.as_str())))))
+            }
+            _ => Err(mismatch()),
+        },
+        _ => Err(mismatch()),
     }
 }
 
@@ -485,11 +605,23 @@ fn type_label(t: &Type) -> String {
         Type::ResumeToken(inner) => format!("ResumeToken<{}>", type_label(inner)),
         Type::Upload(inner) => format!("Upload<{}>", type_label(inner)),
         Type::Page(inner) => format!("Page<{}>", type_label(inner)),
+        Type::Response(inner) => format!("Response<{}>", type_label(inner)),
+        Type::Conflict(row, _) => format!("Conflict<{}>", type_label(row)),
         Type::TraceId => "TraceId".into(),
         Type::DbHandle => "DbHandle".into(),
         Type::JsonValue => "JsonValue".into(),
         Type::JsonBuilder => "JsonBuilder".into(),
         Type::JsonError => "JsonError".into(),
+        Type::RegexMatch => "RegexMatch".into(),
+        Type::Decimal => "Decimal".into(),
+        Type::Duration => "Duration".into(),
+        Type::Instant => "Instant".into(),
+        Type::TimeZone => "TimeZone".into(),
+        Type::ZonedTime => "ZonedTime".into(),
+        Type::Currency => "Currency".into(),
+        Type::Locale => "Locale".into(),
+        Type::Bytes => "Bytes".into(),
+        Type::Secret => "Secret".into(),
         Type::RouteParams(_) => "route path params".into(),
         Type::Function { .. } => "function".into(),
         Type::Unknown => "<unknown>".into(),
@@ -671,6 +803,22 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Whether `value` holds `field`'s refinement, and if not the value as
+/// shown in a message. The one rule every check of a refinement uses:
+/// decoding, building a record in code, assigning a field, and reading
+/// a table row.
+pub fn refinement_breach(field: &corvid_ir::IrField, value: &Value) -> Option<String> {
+    let refinement = field.refinement.as_ref()?;
+    let admitted = match value {
+        Value::Int(n) => refinement.admits_int(*n),
+        Value::String(s) => refinement.admits_text(s),
+        // Form/type mismatches are rejected at typecheck; anything
+        // else reaching here has no value check.
+        _ => true,
+    };
+    (!admitted).then(|| value_to_json(value).to_string())
+}
+
 /// Slice 50j — enforce a field's declared value refinement after
 /// its structural decode. Violations render actionably (field,
 /// value, refinement) because this exact string is what `with
@@ -680,22 +828,12 @@ pub fn check_field_refinement(
     field: &corvid_ir::IrField,
     value: &Value,
 ) -> Result<(), ConvError> {
-    let Some(refinement) = &field.refinement else {
-        return Ok(());
-    };
-    let violated = match value {
-        Value::Int(n) => !refinement.admits_int(*n),
-        Value::String(s) => !refinement.admits_text(s),
-        // Form/type mismatches are rejected at typecheck; anything
-        // else reaching here decodes without a value check.
-        _ => false,
-    };
-    if violated {
+    if let Some(got) = refinement_breach(field, value) {
         return Err(ConvError::RefinementViolated {
             struct_name: struct_name.to_string(),
             field: field.name.clone(),
-            refinement: refinement.describe(),
-            got: value_to_json(value).to_string(),
+            refinement: field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default(),
+            got,
         });
     }
     Ok(())

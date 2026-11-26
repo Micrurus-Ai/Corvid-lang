@@ -197,7 +197,10 @@ impl<'a> Lexer<'a> {
             }
             let text = &self.src[start..self.pos];
             match text.parse::<f64>() {
-                Ok(v) => self.emit(TokKind::Float(v), Span::new(start, self.pos)),
+                Ok(v) => self.emit(
+                    TokKind::Float { value: v, text: text.to_string() },
+                    Span::new(start, self.pos),
+                ),
                 Err(_) => self.errors.push(LexError {
                     kind: LexErrorKind::InvalidNumber(text.to_string()),
                     span: Span::new(start, self.pos),

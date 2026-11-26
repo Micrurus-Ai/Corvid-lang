@@ -169,6 +169,11 @@ fn lower_stmt(
                     } else if field.ty == Type::Float && value.ty == Type::Int {
                         rhs = builder.ins().fcvt_from_sint(F64, rhs);
                     }
+                    // The assigned value holds the field's refinement (B09).
+                    if let Type::Struct(id) = ty {
+                        let owner = runtime.ir_types.get(id).map(|t| t.name.as_str()).unwrap_or_default();
+                        super::expr::hold_refinement(builder, module, runtime, owner, field, rhs, *span)?;
+                    }
                     if is_refcounted_type(&field.ty) {
                         let old = builder.ins().load(I64, MemFlags::trusted(), record, offset);
                         builder.ins().store(MemFlags::trusted(), rhs, record, offset);
@@ -280,21 +285,16 @@ fn lower_stmt(
                     (new_var, false)
                 }
             };
-            // For reassignment of a refcounted local: read the old
-            // value first, release it, THEN bind the new value (which
-            // came pre-Owned from `lower_expr`).
-            // Reassignment: the old value of the Local is being
-            // replaced; its +1 must drop. The .6d pass doesn't yet
-            // model reassignment-kill (the analysis treats a rebind
-            // as a def but doesn't schedule a Drop for the previous
-            // value Ã¢â‚¬â€ this is a forward-compatibility gap tracked for
-            // a future analysis extension). Always release the old
-            // value at codegen time so the unified pass stays
-            // refcount-correct on reassigned refcounted locals.
-            if refcounted && is_reassignment {
-                let old = builder.use_var(var);
-                emit_release(builder, module, runtime, old);
-            }
+            // Reassignment of a refcounted local: the old value's +1
+            // drops here, after the new value (which came pre-Owned
+            // from `lower_expr`) is computed, because in
+            // `text = text + "t"` or `text = text.trim()` the new value
+            // reads the old one. Both ownership paths do this. The
+            // unified pass's analysis models it: a rebinding `Let`
+            // reads the old value as its last, consuming use
+            // (`dataflow::cfg`), so the pass never drops that value
+            // itself.
+            let old = (refcounted && is_reassignment).then(|| builder.use_var(var));
             let v = lower_expr(
                 builder,
                 value,
@@ -305,6 +305,9 @@ fn lower_stmt(
                 module,
                 runtime,
             )?;
+            if let Some(old) = old {
+                emit_release(builder, module, runtime, old);
+            }
             // The Value flowing into a refcounted
             // binding must be stack-map-declared so Cranelift spills
             // it across safepoints. Cranelift's safepoint pass
@@ -369,6 +372,10 @@ fn lower_stmt(
         )),
         IrStmt::Parallel { span, .. } => Err(CodegenError::not_supported(
             "parallel blocks are interpreter-only in 46e",
+            *span,
+        )),
+        IrStmt::Atomic { span, .. } => Err(CodegenError::not_supported(
+            "atomic blocks run on the interpreter until native tables land (B09 P6); use `corvid run --tier interp`",
             *span,
         )),
         IrStmt::While { cond, body, span } => lower_while(
@@ -923,6 +930,7 @@ fn stmt_mentions_local(stmt: &IrStmt, target: LocalId) -> bool {
         IrStmt::While { cond, body, .. } => {
             expr_mentions_local(cond, target) || block_mentions_local(body, target)
         }
+        IrStmt::Atomic { body, .. } => block_mentions_local(body, target),
         IrStmt::Destructure { value, .. } => expr_mentions_local(value, target),
         IrStmt::Parallel { arms, .. } => {
             arms.iter().any(|arm| expr_mentions_local(&arm.call, target))
@@ -959,6 +967,8 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_mentions_local(items, target) || expr_mentions_local(next_cursor, target)
         }
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_mentions_local(arg, target)),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_mentions_local(e, target)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_mentions_local(receiver, target)
                 || args.iter().any(|a| expr_mentions_local(a, target))

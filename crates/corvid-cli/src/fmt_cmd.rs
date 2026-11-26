@@ -137,7 +137,7 @@ fn ends_operand(kind: &TokKind) -> bool {
         kind,
         Ident(_)
             | Int(_)
-            | Float(_)
+            | Float { .. }
             | StringLit(_)
             | KwTrue
             | KwFalse

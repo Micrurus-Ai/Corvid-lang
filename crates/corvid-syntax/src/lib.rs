@@ -139,7 +139,7 @@ mod tests {
             toks,
             vec![
                 TokKind::Int(42),
-                TokKind::Float(3.14),
+                TokKind::Float { value: 3.14, text: "3.14".into() },
                 TokKind::Newline,
                 TokKind::Eof,
             ]

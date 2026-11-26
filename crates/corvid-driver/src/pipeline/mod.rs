@@ -31,7 +31,7 @@ mod ir;
 
 pub use abi::{compile_to_abi_with_config, compile_to_application_contract_with_config};
 pub use compile::{
-    analyze_with_config_at_path, analyze_with_open_sources, compile, compile_with_config, compile_with_config_at_path,
+    analyze_with_config_at_path, analyze_with_open_sources, compile, compile_with_config,
     CompileResult,
 };
 pub use ir::{compile_to_ir, compile_to_ir_with_config, compile_to_ir_with_config_at_path};

@@ -10,6 +10,10 @@ pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
     match lit {
         IrLiteral::Int(n) => Value::Int(*n),
         IrLiteral::Float(f) => Value::Float(*f),
+        IrLiteral::Decimal(d) => Value::Decimal(*d),
+        IrLiteral::TimeZone(z) => Value::TimeZone(*z),
+        IrLiteral::Currency(c) => Value::Currency(*c),
+        IrLiteral::Locale(l) => Value::Locale(Arc::new(l.clone())),
         IrLiteral::String(s) => Value::String(Arc::from(s.as_str())),
         IrLiteral::Bool(b) => Value::Bool(*b),
         IrLiteral::Nothing => Value::Nothing,
@@ -102,7 +106,14 @@ fn eval_arithmetic(
     span: Span,
     wrapping: bool,
 ) -> Result<Value, InterpError> {
+    if super::time::is_time_operand(&l) || super::time::is_time_operand(&r) {
+        return super::time::eval_time_arithmetic(op, &l, &r, span);
+    }
     match (l, r) {
+        // B06 — `Int` widens to `Decimal` exactly; `@wrapping` does not
+        // apply, so decimal arithmetic is always checked.
+        (l @ Value::Decimal(_), r @ (Value::Decimal(_) | Value::Int(_)))
+        | (l @ Value::Int(_), r @ Value::Decimal(_)) => super::decimal::eval_decimal_arithmetic(op, &l, &r, span),
         (Value::Int(a), Value::Int(b)) => Ok(Value::Int(int_arith(op, a, b, span, wrapping)?)),
         (Value::Float(a), Value::Float(b)) => Ok(Value::Float(float_arith(op, a, b, span)?)),
         (Value::Int(a), Value::Float(b)) => {
@@ -199,7 +210,12 @@ fn eval_ordering(op: BinaryOp, l: Value, r: Value, span: Span) -> Result<Value, 
             _ => unreachable!("non-ordering op routed here"),
         }
     };
+    if super::time::is_time_operand(&l) || super::time::is_time_operand(&r) {
+        return super::time::eval_time_ordering(op, &l, &r, span);
+    }
     match (l, r) {
+        (l @ Value::Decimal(_), r @ (Value::Decimal(_) | Value::Int(_)))
+        | (l @ Value::Int(_), r @ Value::Decimal(_)) => super::decimal::eval_decimal_ordering(op, &l, &r, span),
         (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(match op {
             Lt => a < b,
             LtEq => a <= b,
@@ -238,6 +254,8 @@ pub(super) fn eval_unop(
             Value::Int(n) if wrapping => Ok(Value::Int(n.wrapping_neg())),
             Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| overflow(span)),
             Value::Float(f) => Ok(Value::Float(-f)),
+            Value::Decimal(d) => Ok(Value::Decimal(d.negate())),
+            Value::Duration(d) => Ok(Value::Duration(d.negate())),
             other => Err(InterpError::new(
                 InterpErrorKind::TypeMismatch {
                     expected: "Int or Float".into(),
@@ -421,17 +439,7 @@ mod tests {
 /// Python-style float rendering: always shows a decimal point
 /// or exponent so string output round-trips visibly typed.
 fn render_float(f: f64) -> String {
-    let rendered = format!("{f}");
-    if rendered.contains('.')
-        || rendered.contains('e')
-        || rendered.contains('E')
-        || rendered.contains("inf")
-        || rendered.contains("NaN")
-    {
-        rendered
-    } else {
-        format!("{rendered}.0")
-    }
+    corvid_runtime::number_text::float_to_string(f)
 }
 
 /// Checked Float->Int conversion shared by `floor`/`ceil`/`round`
@@ -750,6 +758,49 @@ pub(super) fn eval_builtin_method(
         // `filename` / `content_type` / `size` / `bytes` (List<Int>)
         // fields. The accessors read them; `text()` decodes the bytes
         // as UTF-8 (lossy).
+        // ----- Response<Body> accessors (B05) ---------------------
+        //
+        // A connector call builds the record from
+        // `corvid_types::RESPONSE_FIELDS`; see `interp/connector_json.rs`.
+        ResponseStatus => response_field(&recv, "status", span),
+        ResponseBody => response_field(&recv, "body", span),
+        ResponseHeader => {
+            let wanted = match &args[0] {
+                Value::String(name) => name.to_ascii_lowercase(),
+                other => {
+                    return Err(InterpError::new(
+                        InterpErrorKind::TypeMismatch { expected: "String".into(), got: other.type_name() },
+                        span,
+                    ))
+                }
+            };
+            let headers = response_field(&recv, "headers", span)?;
+            // The lookup native code answers with too.
+            let pairs: Vec<(std::sync::Arc<str>, std::sync::Arc<str>)> = match &headers {
+                Value::List(pairs) => pairs
+                    .iter_cloned()
+                    .into_iter()
+                    .filter_map(|pair| match pair {
+                        Value::List(pair) => match pair.iter_cloned().as_slice() {
+                            [Value::String(name), Value::String(value)] => Some((name.clone(), value.clone())),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let found = corvid_runtime::connectors::response_header(
+                pairs.iter().map(|(name, value)| (name.as_ref(), value.as_ref())),
+                &wanted,
+            )
+            .map(|value| Value::String(std::sync::Arc::from(value)));
+            Ok(match found {
+                Some(value) => Value::OptionSome(crate::value::BoxedValue::new(value)),
+                None => Value::OptionNone,
+            })
+        }
+
         UploadFilename => upload_field(&recv, "filename", span),
         UploadContentType => upload_field(&recv, "content_type", span),
         UploadSize => upload_field(&recv, "size", span),
@@ -778,6 +829,19 @@ pub(super) fn eval_builtin_method(
             InterpErrorKind::Other("a JSON method was evaluated without its checked type".into()),
             span,
         )),
+
+        _ if kind.is_decimal() => super::decimal::eval_decimal_method(kind, &recv, &args, span),
+        _ if kind.is_time() => super::time::eval_time_method(kind, &recv, &args, span),
+        _ if kind.is_currency() => super::currency::eval_currency_method(kind, &recv, &args, span),
+        _ if kind.is_crypto() => super::crypto::eval_crypto_method(kind, &recv, &args, span),
+        _ if kind.is_text_encoder() || kind.is_text_decoder() => {
+            let s = want_string(&recv, span)?;
+            super::text_methods::eval_text_method(kind, &s, span)
+        }
+        _ if kind.is_regex() => {
+            let s = want_string(&recv, span)?;
+            super::text_methods::eval_regex_method(kind, &s, &args, span)
+        }
 
         _ => {
             let s = want_string(&recv, span)?;
@@ -835,6 +899,26 @@ pub(super) fn eval_json_decode(
 
 /// Read a field from the `Upload<Format>` struct value `corvid serve`
 /// materialised for a route body (slice 52c-2).
+fn response_field(recv: &Value, field: &str, span: Span) -> Result<Value, InterpError> {
+    match recv {
+        Value::Struct(s) if s.type_id() == corvid_types::RESPONSE_TYPE_ID => {
+            s.get_field(field).ok_or_else(|| {
+                InterpError::new(
+                    InterpErrorKind::TypeMismatch {
+                        expected: format!("Response with `{field}`"),
+                        got: recv.type_name(),
+                    },
+                    span,
+                )
+            })
+        }
+        other => Err(InterpError::new(
+            InterpErrorKind::TypeMismatch { expected: "Response".into(), got: other.type_name() },
+            span,
+        )),
+    }
+}
+
 fn upload_field(recv: &Value, field: &str, span: Span) -> Result<Value, InterpError> {
     match recv {
         Value::Struct(s) => s.get_field(field).ok_or_else(|| {

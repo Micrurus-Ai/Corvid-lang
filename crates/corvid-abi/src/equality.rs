@@ -17,4 +17,21 @@ pub enum EqualityLayout {
     Result,
     StringMap,
     Identity,
+    /// B06 — a `Decimal` held as its canonical text, compared by
+    /// numeric value, so `1.0` equals `1.00`.
+    Decimal,
+    /// B06 — the time and currency types, each held as its canonical
+    /// text and compared by value through its own crate.
+    Duration,
+    Instant,
+    TimeZone,
+    ZonedTime,
+    Currency,
+    Locale,
+    /// B04 — a `Bytes` value held as its canonical base64url text,
+    /// compared in constant time, never bytewise like a `String`.
+    Bytes,
+    /// Native dispatch N3 — a `Secret` object, compared in constant time
+    /// by the runtime, which alone can read it.
+    Secret,
 }

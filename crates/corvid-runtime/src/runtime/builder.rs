@@ -210,8 +210,8 @@ impl RuntimeBuilder {
     }
 
     /// Slice 33S2a: install the parsed `[http] allow` policy on
-    /// the runtime. The executing HTTP tools (`http_get` /
-    /// `http_post_json`) check every URL against the policy
+    /// the runtime. Every connector request checks its URL against
+    /// the policy
     /// (always-on SSRF block + allowlist) before any
     /// `HttpClient::send` runs. Default (when this setter isn't
     /// called) is an unconfigured policy that makes every
@@ -374,16 +374,11 @@ impl RuntimeBuilder {
         let recorder = Recorder::for_tracer(&tracer, self.trace_schema_writer).map(Arc::new);
         let (mode, replay_error, rollout_seed) = if let Some(path) = self.replay_trace {
             let replay_load = if let Some((step_1based, replacement)) = self.replay_mutation {
-                ReplaySource::from_path_for_writer_with_mutation(
-                    path,
-                    self.trace_schema_writer,
-                    step_1based,
-                    replacement,
-                )
+                ReplaySource::from_path_with_mutation(path, step_1based, replacement)
             } else if let Some(model) = self.replay_model_swap {
-                ReplaySource::from_path_for_writer_with_model(path, self.trace_schema_writer, model)
+                ReplaySource::from_path_with_model(path, model)
             } else {
-                ReplaySource::from_path_for_writer(path, self.trace_schema_writer)
+                ReplaySource::from_path(path)
             };
             match replay_load {
                 Ok(source) => (
@@ -431,13 +426,10 @@ impl RuntimeBuilder {
         //   `write_text*`. Reads pass through. Trace emission uses
         //   `JsonlTraceWriter` directly and is unaffected.
         let mut llms = self.llms;
-        let mut http = self.http_client_override.unwrap_or_else(|| {
-            if self.http_policy.allow_list().is_empty() {
-                HttpClient::new()
-            } else {
-                HttpClient::with_egress_policy(self.http_policy.clone())
-            }
-        });
+        // Every client, including a test's override, checks redirect
+        // destinations against the same egress policy as first requests.
+        let mut http = self.http_client_override.unwrap_or_default();
+        http.set_egress_policy(self.http_policy.clone());
         let mut stores = self.stores;
         let mut io = IoRuntime::new();
         let db_registry = DbHandleRegistry::new();
@@ -486,6 +478,7 @@ impl RuntimeBuilder {
             rag_embedder: self.rag_embedder,
             mcp: self.mcp,
             db_registry,
+            table_databases: crate::tables::TableDatabases::default(),
             secrets: SecretRuntime::new(),
             cache: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::cache::CacheRuntime::new(),
@@ -501,6 +494,10 @@ impl RuntimeBuilder {
             // ordinary run has no durable job, which is exactly what
             // makes protocol execution refuse outside one.
             durable_job: None,
+            // A slow subscriber that falls this far behind is told it
+            // lagged and takes a fresh snapshot (B14).
+            table_commits: tokio::sync::broadcast::channel(1024).0,
+            instance_id: crate::tables::new_instance_id(),
         }
     }
 }

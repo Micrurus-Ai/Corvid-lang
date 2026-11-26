@@ -10,6 +10,8 @@ name = "corvid"
 path = "src/main.rs"
 
 [dependencies]
+# Ed25519 verification goes through corvid-crypto's strict check.
+corvid-crypto = { workspace = true }
 corvid-abi = { workspace = true }
 corvid-abi-verify = { workspace = true }
 corvid-ast = { workspace = true }
@@ -33,10 +35,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 toml = { workspace = true }
 async-stream = "0.3"
+tokio-stream = "0.1"
 tempfile = { workspace = true }
 time = { version = "0.3", features = ["parsing", "formatting"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "signal", "net"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+matchit = "0.7"
+percent-encoding = "2"
 multer = "3"
 futures = "0.3"
 rayon = { workspace = true }
@@ -51,10 +56,13 @@ wasmparser = "0.244.0"
 dirs = "5"
 hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled", "hooks"] }
+# B09 P4b: `corvid migrate` applies and plans migrations on Postgres.
+postgres = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 corvid-test-paths = { workspace = true }
 cc = "1"
 tempfile = { workspace = true }

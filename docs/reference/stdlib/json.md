@@ -68,6 +68,27 @@ and column. In an agent that returns `Result<_, String>`, write
 `T.from_json(text).map_err(fn (e) -> e.message)?` to pass a failure
 to the caller.
 
+`JsonError` is a type you can write, so a helper agent can take the
+error and a signature can return it. Only `from_json` and
+`from_json_strict` produce one.
+
+```corvid
+type Reading:
+    sensor: String
+    value: Int
+
+agent explain(problem: JsonError) -> String:
+    return problem.path + ": " + problem.message
+
+agent read(text: String) -> Result<Reading, JsonError>:
+    return Reading.from_json(text)
+
+agent describe(text: String) -> String:
+    return match read(text):
+        Ok(reading) -> reading.sensor
+        Err(problem) -> explain(problem)
+```
+
 To decode a list, map or option at the top level, name it with a type
 alias:
 
@@ -106,8 +127,10 @@ same mapping, so a compiled program accepts exactly the JSON the
 interpreter accepts, fails with the same `path`, `expected`, `found`
 and `message`, and encodes to the same text. A type the native target
 cannot hold runs on the interpreter: a map whose keys are not
-`String`, a `JsonValue`, or a `Grounded` value, whose sources native
-code does not keep.
+`String`, a `JsonValue`, a `Grounded` value, whose sources native
+code does not keep. `Decimal` and the time, zone, currency and locale
+types compile, each carried as its canonical text, and so does `Bytes`,
+carried as its unpadded base64url text.
 
 ## Public JSON mapping
 
@@ -130,6 +153,8 @@ program. HTTP request bodies and JSON replies, `T.from_json` and
 | sum type | `{"tag": "variant", "type": "<Type>", "variant": "<Variant>", "fields": [...]}` with payload fields in declaration order; on input only `variant` and, for a payload, `fields` are required |
 | `Grounded<T>` | `{"value": T, "sources": [...]}` on output only |
 | `JsonValue` | the JSON value itself |
+| `Decimal`, `Duration`, `Instant`, `TimeZone`, `ZonedTime`, `Currency`, `Locale` | a string in the type's exact text: `"19.90"`, `"PT1H30M"`, `"2026-07-11T08:30:00Z"`, `"Europe/Berlin"`, `"2026-03-29T03:30:00+02:00[Europe/Berlin]"`, `"EUR"`, `"de-DE"`. A JSON number for a `Decimal` is refused, because it could lose digits |
+| `Bytes` | a string in base64url (RFC 4648 section 5) without padding, such as `"3q2-7w"`; decoding also accepts `=` padding. Schemas publish `contentEncoding: base64url` |
 
 Decoding never invents provenance. A `Grounded<T>` target is rejected
 because JSON text cannot show where a value came from. Functions,
@@ -354,14 +379,37 @@ type User:
     id: Int
     email: String
 
-import "std:http" use http_get
+type FetchError:
+    | Unreachable(reason: String)
+
+effect http_read:
+    cost: $0.0
+
 import "std:db" use db_open, db_execute, db_param_int, db_param_text
 
-agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    # Fetch the JSON (Result: transport/policy failures are Err values).
-    response = http_get(url)?
-    # Decode into the typed record; a mismatch names the field.
-    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
+# A connector decodes the response into `User` through the public
+# mapping; a field of the wrong kind is an `Unreachable` naming it.
+connector users:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real, replay]
+    operation user_at(url: String) -> Result<User, FetchError> uses http_read:
+        GET url
+        on failure -> Unreachable
+
+agent fetch_user(url: String) -> Result<User, String> uses http_read:
+    return match user_at(url):
+        Ok(user) -> Ok(user)
+        Err(e) -> Err(reason_of(e))
+
+agent reason_of(e: FetchError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+agent ingest_user(url: String, db_path: String) -> Result<Int, String> uses http_read:
+    user = fetch_user(url)?
     # Persist via parameterised SQL (Result: SQL errors are Err values).
     handle = db_open(db_path)?
     db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?

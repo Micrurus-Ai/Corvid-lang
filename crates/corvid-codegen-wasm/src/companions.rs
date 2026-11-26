@@ -1,4 +1,5 @@
 use crate::error::WasmCodegenError;
+use crate::javascript_source_map::JavascriptSourceMap;
 use crate::WasmHostImport;
 use corvid_ir::IrAgent;
 use corvid_types::Type;
@@ -91,24 +92,36 @@ pub(crate) fn build_artifacts(
             .collect::<Vec<_>>().join(",\n");
         format!("const integerHandlers = {{\n{body}\n}};\n")
     };
+    let direct = (!methods.is_empty() && methods.len() == agents.len() && imports.is_empty())
+        .then(|| integer_exports(false));
+    let direct = direct.as_deref().map(|body| (body, methods.as_slice()));
+    let js_loader = emit_js_loader(module_name, agents, imports, trap_sites, &wasm_hash, direct, locate)?;
     let quantity_loader = methods.iter().any(|(agent, _)| agent.params.len() == 1).then(|| {
+        let runtime_digest = Sha256::digest(js_loader.as_bytes());
+        let locations: Vec<_> = agents.iter()
+            .filter(|agent| agent.params.len() == 1 && agent.params[0].ty == Type::Int && agent.return_ty == Type::Int)
+            .filter_map(|agent| Some((&agent.name, locate?(agent.id, agent.span)?)))
+            .collect();
         let names: Vec<_> = agents.iter()
             .filter(|agent| agent.params.len() == 1 &&
                 agent.params[0].ty == Type::Int && agent.return_ty == Type::Int)
             .map(|agent| &agent.name).collect();
-        format!("{}const intStateHandlers = new Set({});\n{}\n{}\n{}",
+        let mut loader = format!("{}const runtimeUrl = './events.js?v={runtime_digest:x}';\nconst handlerLocations = new Map({});\nconst intStateHandlers = new Set({});\n{}\n{}\n{}",
             integer_exports(true),
+            serde_json::to_string(&locations).expect("serialize quantity handler locations"),
             serde_json::to_string(&names).expect("serialize handler names"),
             include_str!("quantity_field.js"),
             include_str!("keyed_list.js"),
-            include_str!("quantity_page.js"))
+            include_str!("quantity_page.js"));
+        let mut map = JavascriptSourceMap::default();
+        map_integer_methods(&mut map, 1, methods.iter().filter(|(agent, _)| agent.params.len() == 1), locate);
+        map.append_to(&mut loader);
+        loader
     });
-    let direct = (!methods.is_empty() && methods.len() == agents.len() && imports.is_empty())
-        .then(|| integer_exports(false));
     Ok(WasmArtifacts {
         quantity_loader,
         wasm,
-        js_loader: emit_js_loader(module_name, agents, imports, trap_sites, &wasm_hash, direct.as_deref(), locate)?,
+        js_loader,
         ts_types: {
             let mut types = emit_ts_types(agents, imports)?;
             if module_name == "events" {
@@ -119,6 +132,23 @@ pub(crate) fn build_artifacts(
         },
         manifest_json: emit_manifest(module_name, agents, imports)?,
     })
+}
+
+fn map_integer_methods<'a>(
+    map: &mut JavascriptSourceMap,
+    mut line: usize,
+    methods: impl Iterator<Item = &'a (&'a IrAgent, String)>,
+    locate: Option<&super::Locate<'_>>,
+) {
+    let Some(locate) = locate else { return };
+    for (agent, method) in methods {
+        let line_count = method.lines().count();
+        map.record(line, locate(agent.id, agent.span));
+        if let [corvid_ir::IrStmt::Return { value: Some(value), .. }] = agent.body.stmts.as_slice() {
+            map.record(line + line_count - 2, locate(agent.id, value.span));
+        }
+        line += line_count;
+    }
 }
 
 /// WASM-level boundary kind for a Corvid `Type`. Used by the
@@ -177,7 +207,7 @@ fn emit_js_loader(
     imports: &[WasmHostImport],
     trap_sites: &[String],
     wasm_hash: &str,
-    direct: Option<&str>,
+    direct: Option<(&str, &[(&IrAgent, String)])>,
     locate: Option<&super::Locate<'_>>,
 ) -> Result<String, WasmCodegenError> {
     let mut out = String::new();
@@ -337,8 +367,10 @@ fn emit_js_loader(
     out.push_str("    },\n");
     out.push_str("  };\n");
     out.push_str("}\n\n");
-    if let Some(methods) = direct {
-        out.push_str(methods);
+    let mut loader_map = JavascriptSourceMap::default();
+    if let Some((body, methods)) = direct {
+        map_integer_methods(&mut loader_map, out.lines().count() + 1, methods.iter(), locate);
+        out.push_str(body);
     }
     out.push_str("async function wasmExports(imports) {\n");
     out.push_str("  const source = await WebAssembly.instantiateStreaming(fetch(WASM_URL), imports).catch(async () => {\n");
@@ -355,8 +387,18 @@ fn emit_js_loader(
         out.push_str("  const exports = await wasmExports(imports);\n");
     }
     out.push_str("  return {\n");
+    let mut wrapper_line = out.lines().count();
     for agent in agents {
+        let start = out.len();
         emit_js_agent_wrapper(&mut out, agent, !trap_sites.is_empty());
+        let lines = out[start..].lines().count();
+        if module_name == "events" {
+            let location = locate.and_then(|resolve| resolve(agent.id, agent.span));
+            for line in wrapper_line..wrapper_line + lines {
+                loader_map.record(line, location.clone());
+            }
+        }
+        wrapper_line += lines;
     }
     out.push_str("  };\n");
     out.push_str("}\n");
@@ -397,6 +439,7 @@ fn emit_js_loader(
             out.push_str(&format!("const {name} = new Map({bindings});\n"));
         }
         out.push_str("if (typeof document !== 'undefined' && [...document.querySelectorAll('script[type=module][data-corvid-ui]')].some(script => script.src === import.meta.url)) {\n");
+        out.push_str(include_str!("row_order.js"));
         out.push_str(include_str!("record_projections.js"));
         out.push_str(include_str!("form_controls.js"));
         out.push_str("}\n");
@@ -414,6 +457,7 @@ fn emit_js_loader(
         }
         out.push_str(include_str!("quantity_field.js"));
         out.push_str(include_str!("keyed_list.js"));
+        loader_map.append_to(&mut out);
     }
     Ok(out)
 }

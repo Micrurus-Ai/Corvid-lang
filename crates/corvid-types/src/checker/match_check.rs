@@ -58,6 +58,10 @@ impl<'a> Checker<'a> {
                     } else if prev.is_assignable_to(&body_ty) {
                         // Int -> Float style widening across arms.
                         body_ty
+                    } else if let Some(joined) = prev.join(&body_ty) {
+                        // Conflicts with different cases join into one
+                        // that holds both.
+                        joined
                     } else {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::TypeMismatch {
@@ -101,6 +105,10 @@ impl<'a> Checker<'a> {
                     // scrutinee's sum type.
                     Some(Binding::Decl(def_id)) => {
                         self.check_variant_pattern_owner(*def_id, scrut_ty, name.span);
+                    }
+                    // `Deleted` pattern over a conflict.
+                    Some(Binding::BuiltIn(corvid_resolve::BuiltIn::Deleted)) => {
+                        self.check_conflict_case(crate::types::ConflictCase::Deleted, scrut_ty, name.span);
                     }
                     // `None` pattern over Option.
                     Some(Binding::BuiltIn(_)) => {
@@ -176,6 +184,15 @@ impl<'a> Checker<'a> {
                             (BuiltIn::Some, Type::Option(inner)) => (**inner).clone(),
                             (BuiltIn::Ok, Type::Result(ok, _)) => (**ok).clone(),
                             (BuiltIn::Err, Type::Result(_, err)) => (**err).clone(),
+                            (BuiltIn::Changed | BuiltIn::Taken, Type::Conflict(row, _)) => {
+                                let case = if b == BuiltIn::Changed {
+                                    crate::types::ConflictCase::Changed
+                                } else {
+                                    crate::types::ConflictCase::Taken
+                                };
+                                self.check_conflict_case(case, scrut_ty, name.span);
+                                (**row).clone()
+                            }
                             (_, Type::Unknown) => Type::Unknown,
                             _ => {
                                 self.errors.push(TypeError::new(
@@ -290,6 +307,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A conflict case pattern must be one the matched value can be:
+    /// `Changed` against an `insert`'s conflict is an error, because the
+    /// arm could never run.
+    fn check_conflict_case(&mut self, case: crate::types::ConflictCase, scrut_ty: &Type, span: Span) {
+        match scrut_ty {
+            Type::Conflict(_, cases) if cases.contains(case) => {}
+            Type::Conflict(_, cases) => {
+                let possible: Vec<String> = cases.cases().map(|c| format!("`{}`", c.name())).collect();
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::ImpossibleConflictCase { case: case.name().into(), possible: possible.join(" or ") },
+                    span,
+                ));
+            }
+            Type::Unknown => {}
+            other => self.errors.push(TypeError::new(
+                TypeErrorKind::TypeMismatch {
+                    expected: other.display_name(),
+                    got: format!("the conflict case `{}`", case.name()),
+                    context: "pattern".into(),
+                },
+                span,
+            )),
+        }
+    }
+
     fn check_variant_pattern_owner(&mut self, variant_id: corvid_resolve::DefId, scrut_ty: &Type, span: Span) {
         let Some((owner, _)) = self.variant_owners.get(&variant_id).copied() else {
             return;
@@ -319,6 +361,13 @@ impl<'a> Checker<'a> {
             .iter()
             .any(|a| a.guard.is_none() && self.pattern_is_irrefutable(&a.pattern))
         {
+            return;
+        }
+        // Covered at any depth: `Err(Some(x))` and `Err(None)` cover
+        // `Err(_)`. The per-type reasons below then only name what is
+        // missing.
+        let rows: Vec<Vec<&Pattern>> = arms.iter().filter(|a| a.guard.is_none()).map(|a| vec![&a.pattern]).collect();
+        if self.rows_cover(&rows, std::slice::from_ref(scrut_ty)) {
             return;
         }
         let missing: Option<String> = match scrut_ty {
@@ -469,7 +518,7 @@ impl<'a> Checker<'a> {
 fn literal_type(lit: &corvid_ast::Literal) -> Type {
     match lit {
         corvid_ast::Literal::Int(_) => Type::Int,
-        corvid_ast::Literal::Float(_) => Type::Float,
+        corvid_ast::Literal::Float { value: _, .. } => Type::Float,
         corvid_ast::Literal::String(_) => Type::String,
         corvid_ast::Literal::Bool(_) => Type::Bool,
         corvid_ast::Literal::Nothing => Type::Nothing,

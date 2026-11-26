@@ -16,9 +16,11 @@
 //! helpers are private to this module; main.rs's dispatch arm
 //! only needs the two `cmd_migrate*` entry points.
 
+use crate::migrate_sqlite::{
+    apply_pending_sql_migrations, commit_history, execute_rollback_sql, export_history, open_database, read_history,
+};
 use anyhow::{Context, Result};
-use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
+use rusqlite::TransactionBehavior;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -45,11 +47,40 @@ pub(crate) fn cmd_migrate(
         .transpose()?;
     let (mut migration_state, _pending_export) = read_history(tx.as_deref(), state)?;
 
-    let drift = detect_migration_drift(&migrations, &migration_state);
+    let Some(pending_count) =
+        report_migrations(action, dir, state, &database.display().to_string(), dry_run, &migrations, &migration_state)
+    else {
+        return Ok(1);
+    };
+    if action == "up" && !dry_run {
+        let tx = tx.expect("writing opens the database");
+        apply_pending_sql_migrations(&tx, &migrations, &mut migration_state)?;
+        commit_history(tx, &migration_state, "up")?;
+        export_history(connection.as_mut().unwrap(), state)?;
+        println!("state_updated: true");
+    } else {
+        println!("state_updated: false");
+    }
+    print_mutation_intent(action, dry_run, pending_count);
+    Ok(0)
+}
+
+/// Print the status every `migrate status` and `migrate up` reports, for
+/// any engine. `None` when drift stops the command (already reported).
+pub(crate) fn report_migrations(
+    action: &str,
+    dir: &Path,
+    state: &Path,
+    database: &str,
+    dry_run: bool,
+    migrations: &[MigrationFile],
+    migration_state: &MigrationState,
+) -> Option<usize> {
+    let drift = detect_migration_drift(migrations, migration_state);
     println!("corvid migrate {action}");
     println!("migrations: {}", dir.display());
     println!("state: {}", state.display());
-    println!("database: {}", database.display());
+    println!("database: {database}");
     println!("dry_run: {dry_run}");
     let applied_count = migrations
         .iter()
@@ -68,7 +99,7 @@ pub(crate) fn cmd_migrate(
         println!("migrations_found: 0");
     } else {
         println!("migrations_found: {}", migrations.len());
-        for migration in &migrations {
+        for migration in migrations {
             let applied = migration_state.migrations.iter().any(|applied| {
                 applied.name == migration.name && applied.sha256 == migration.sha256
             });
@@ -86,17 +117,12 @@ pub(crate) fn cmd_migrate(
     if !drift.is_empty() {
         println!("drift_found: {}", drift.len());
         println!("state_updated: false");
-        return Ok(1);
+        return None;
     }
-    if action == "up" && !dry_run {
-        let tx = tx.expect("writing opens the database");
-        apply_pending_sql_migrations(&tx, &migrations, &mut migration_state)?;
-        commit_history(tx, &migration_state, "up")?;
-        export_history(connection.as_mut().unwrap(), state)?;
-        println!("state_updated: true");
-    } else {
-        println!("state_updated: false");
-    }
+    Some(pending_count)
+}
+
+pub(crate) fn print_mutation_intent(action: &str, dry_run: bool, pending_count: usize) {
     println!(
         "mutation_intent: {}",
         if action == "up" && !dry_run && pending_count > 0 {
@@ -107,7 +133,6 @@ pub(crate) fn cmd_migrate(
             "none"
         }
     );
-    Ok(0)
 }
 
 pub(crate) fn cmd_migrate_down(
@@ -188,30 +213,30 @@ pub(crate) fn cmd_migrate_down(
     Ok(0)
 }
 
-struct MigrationFile {
-    name: String,
-    sha256: String,
-    path: PathBuf,
+pub(crate) struct MigrationFile {
+    pub(crate) name: String,
+    pub(crate) sha256: String,
+    pub(crate) path: PathBuf,
 }
 
-struct MigrationDrift {
-    kind: &'static str,
-    message: String,
+pub(crate) struct MigrationDrift {
+    pub(crate) kind: &'static str,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct MigrationState {
-    migrations: Vec<AppliedMigration>,
+pub(crate) struct MigrationState {
+    pub(crate) migrations: Vec<AppliedMigration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AppliedMigration {
-    name: String,
-    sha256: String,
-    applied_at: u64,
+pub(crate) struct AppliedMigration {
+    pub(crate) name: String,
+    pub(crate) sha256: String,
+    pub(crate) applied_at: u64,
 }
 
-fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
+pub(crate) fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -239,7 +264,7 @@ fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
     Ok(files)
 }
 
-fn detect_migration_drift(
+pub(crate) fn detect_migration_drift(
     migrations: &[MigrationFile],
     state: &MigrationState,
 ) -> Vec<MigrationDrift> {
@@ -301,7 +326,7 @@ fn detect_migration_drift(
     drift
 }
 
-fn migration_version(name: &str) -> String {
+pub(crate) fn migration_version(name: &str) -> String {
     name.split_once('_')
         .map(|(version, _)| version)
         .or_else(|| name.split_once('.').map(|(version, _)| version))
@@ -309,7 +334,7 @@ fn migration_version(name: &str) -> String {
         .to_string()
 }
 
-fn load_migration_state(path: &Path) -> Result<MigrationState> {
+pub(crate) fn load_migration_state(path: &Path) -> Result<MigrationState> {
     if !path.exists() {
         return Ok(MigrationState::default());
     }
@@ -319,7 +344,7 @@ fn load_migration_state(path: &Path) -> Result<MigrationState> {
         .with_context(|| format!("cannot parse migration state `{}`", path.display()))
 }
 
-fn save_migration_state(path: &Path, state: &MigrationState) -> Result<()> {
+pub(crate) fn save_migration_state(path: &Path, state: &MigrationState) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create migration state dir `{}`", parent.display()))?;
@@ -337,123 +362,13 @@ fn save_migration_state(path: &Path, state: &MigrationState) -> Result<()> {
         .with_context(|| format!("cannot write migration state `{}`", path.display()))
 }
 
-fn now_unix_seconds() -> u64 {
+pub(crate) fn now_unix_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
 
-fn open_database(database: &Path, writing: bool) -> Result<Option<Connection>> {
-    if !writing && !database.try_exists()? {
-        return Ok(None);
-    }
-    let conn = if writing {
-        if let Some(parent) = database.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent)?;
-        }
-        Connection::open(database)
-    } else {
-        Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
-    };
-    Ok(Some(conn.with_context(|| {
-        format!("cannot open migration database `{}`", database.display())
-    })?))
-}
-
-fn read_history(
-    conn: Option<&Connection>,
-    path: &Path,
-) -> Result<(MigrationState, Option<String>)> {
-    if let Some(conn) = conn {
-        let initialized: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = '_corvid_migration_history')",
-            [], |row| row.get(0),
-        )?;
-        if initialized {
-            let (json, pending): (String, Option<String>) = conn.query_row(
-                "SELECT history, pending_export FROM _corvid_migration_history WHERE id = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            return Ok((serde_json::from_str(&json)?, pending));
-        }
-    }
-    Ok((load_migration_state(path)?, None))
-}
-
-fn commit_history(tx: Transaction<'_>, state: &MigrationState, action: &str) -> Result<()> {
-    tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS _corvid_migration_history (
-        id INTEGER PRIMARY KEY CHECK(id = 1), history TEXT NOT NULL, pending_export TEXT
-    )",
-    )?;
-    tx.execute(
-        "INSERT OR REPLACE INTO _corvid_migration_history VALUES (1, ?1, ?2)",
-        (serde_json::to_string(state)?, action),
-    )?;
-    tx.commit()?;
-    Ok(())
-}
-
-fn export_history(conn: &mut Connection, path: &Path) -> Result<()> {
-    // Serialize writers and export the newest committed snapshot.
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let (state, _) = read_history(Some(&tx), path)?;
-    save_migration_state(path, &state)?;
-    tx.execute(
-        "UPDATE _corvid_migration_history SET pending_export = NULL WHERE id = 1",
-        [],
-    )?;
-    tx.commit()?;
-    Ok(())
-}
-
-fn apply_pending_sql_migrations(
-    tx: &Transaction<'_>,
-    migrations: &[MigrationFile],
-    state: &mut MigrationState,
-) -> Result<()> {
-    for migration in migrations {
-        let applied = state
-            .migrations
-            .iter()
-            .any(|applied| applied.name == migration.name && applied.sha256 == migration.sha256);
-        if applied {
-            continue;
-        }
-        let sql = std::fs::read_to_string(&migration.path)
-            .with_context(|| format!("cannot read migration SQL `{}`", migration.path.display()))?;
-        execute_migration_sql(tx, &sql)
-            .with_context(|| format!("cannot execute migration `{}`", migration.name))?;
-        state.migrations.push(AppliedMigration {
-            name: migration.name.clone(),
-            sha256: migration.sha256.clone(),
-            applied_at: now_unix_seconds(),
-        });
-    }
-    Ok(())
-}
-
-fn execute_migration_sql(tx: &Transaction<'_>, sql: &str) -> rusqlite::Result<()> {
-    // Only the runner may end the transaction that owns the history update.
-    tx.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
-        AuthAction::Transaction { .. } => Authorization::Deny,
-        _ => Authorization::Allow,
-    }));
-    let result = tx.execute_batch(sql);
-    tx.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-    result
-}
-
-fn rollback_migration_path(down_dir: &Path, applied_name: &str) -> PathBuf {
+pub(crate) fn rollback_migration_path(down_dir: &Path, applied_name: &str) -> PathBuf {
     down_dir.join(format!("{applied_name}.down.sql"))
-}
-
-fn execute_rollback_sql(tx: &Transaction<'_>, rollback: &Path, applied_name: &str) -> Result<()> {
-    let sql = std::fs::read_to_string(rollback)
-        .with_context(|| format!("cannot read rollback SQL `{}`", rollback.display()))?;
-    execute_migration_sql(tx, &sql)
-        .with_context(|| format!("cannot execute rollback for `{applied_name}`"))?;
-    Ok(())
 }

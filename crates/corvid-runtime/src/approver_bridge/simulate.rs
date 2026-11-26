@@ -198,7 +198,7 @@ impl MiniApproverProgram {
         match expr {
             Expr::Literal { value, .. } => Ok(match value {
                 Literal::Int(value) => MiniValue::Int(*value),
-                Literal::Float(value) => MiniValue::Float(*value),
+                Literal::Float { value, .. } => MiniValue::Float(*value),
                 Literal::String(value) => MiniValue::String(value.clone()),
                 Literal::Bool(value) => MiniValue::Bool(*value),
                 Literal::Nothing => MiniValue::Nothing,

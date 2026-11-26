@@ -102,6 +102,7 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             writer: "normalized-writer".into(),
             commit_sha: commit_sha.clone(),
             source_path: source_path.clone(),
+            tzdb_version: None,
             ts_ms: 0,
             run_id: "normalized-run".into(),
         },
@@ -383,8 +384,10 @@ fn native_replay_empty_and_malformed_traces_fail_cleanly() {
     );
 }
 
+/// A native binary replays an interpreter recording (native dispatch
+/// N5) and gives its recorded result.
 #[tokio::test]
-async fn native_replay_rejects_interpreter_trace() {
+async fn native_replay_replays_an_interpreter_trace() {
     let trace_dir = tempfile::tempdir().unwrap();
     let (interp_result, interpreter_trace) = run_interpreter(trace_dir.path()).await;
     assert_eq!(interp_result, Value::Bool(true));
@@ -395,11 +398,60 @@ async fn native_replay_rejects_interpreter_trace() {
     let produced = build_native_refund_bot(&ir, &bin_path);
     let native_replay_trace = tmp.path().join("native-replay.jsonl");
     let replayed = run_native_binary(&produced, &native_replay_trace, Some(&interpreter_trace));
-    assert!(!replayed.status.success(), "cross-tier replay should fail");
     assert!(
-        String::from_utf8_lossy(&replayed.stderr)
-            .contains("cross-tier replay is not supported in v1"),
-        "stderr should mention cross-tier replay rejection: {}",
+        replayed.status.success(),
+        "native replay of an interpreter recording should succeed: {}",
         String::from_utf8_lossy(&replayed.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&replayed.stdout).trim(), "true");
+}
+
+/// A program that reads zone rules natively. The tool call makes the
+/// binary start the runtime, which records and replays the trace.
+const ZONE_RULES_SRC: &str = r#"
+tool answer() -> Int
+
+agent opening_hour() -> Int:
+    start = Instant.from_epoch_milliseconds(answer() * 42245828571)
+    local = start.in_zone("Europe/Berlin")
+    return local.hour() * 100 + local.add_days(1).hour()
+"#;
+
+#[test]
+fn native_replay_warns_when_the_trace_used_another_tz_database() {
+    let ir = ir_of(ZONE_RULES_SRC);
+    let tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(&ir, "corvid_zone_rules_replay", &tmp.path().join("zone_rules"), &[test_tools_lib_path().as_path()])
+        .expect("compile native binary");
+
+    let recorded_trace = tmp.path().join("recorded.jsonl");
+    let recorded = run_native_binary(&produced, &recorded_trace, None);
+    assert!(recorded.status.success(), "record run failed: {}", String::from_utf8_lossy(&recorded.stderr));
+    let mut events = read_events_from_path(&recorded_trace).expect("read recorded trace");
+    assert!(
+        matches!(&events[0], TraceEvent::SchemaHeader { tzdb_version: Some(v), .. } if v == corvid_time::TZDB_VERSION),
+        "a native trace records its tz database: {:?}",
+        events[0]
+    );
+
+    // The same database: replay says nothing about zones.
+    let same = run_native_binary(&produced, &tmp.path().join("same-replay.jsonl"), Some(&recorded_trace));
+    assert!(same.status.success(), "replay failed: {}", String::from_utf8_lossy(&same.stderr));
+    assert_eq!(same.stdout, recorded.stdout);
+    assert!(!String::from_utf8_lossy(&same.stderr).contains("tz database"), "{}", String::from_utf8_lossy(&same.stderr));
+
+    // Another database: each zone-dependent operation warns once.
+    if let TraceEvent::SchemaHeader { tzdb_version, .. } = &mut events[0] {
+        *tzdb_version = Some("1999z".into());
+    }
+    let older_trace = tmp.path().join("older.jsonl");
+    write_events_to_path(&older_trace, &events).expect("write trace");
+    let replayed = run_native_binary(&produced, &tmp.path().join("older-replay.jsonl"), Some(&older_trace));
+    let stderr = String::from_utf8_lossy(&replayed.stderr);
+    assert!(replayed.status.success(), "replay failed: {stderr}");
+    assert_eq!(replayed.stdout, recorded.stdout);
+    for operation in ["`hour` in Europe/Berlin", "`add_days` in Europe/Berlin"] {
+        assert_eq!(stderr.matches(operation).count(), 1, "{operation} warns once: {stderr}");
+    }
+    assert!(stderr.contains("recorded with tz database 1999z"), "{stderr}");
 }

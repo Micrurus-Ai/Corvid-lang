@@ -349,7 +349,9 @@ agent relay(ctx: String) -> Stream<String>:
             && to_model == "expert"
             && (*confidence_observed - 0.40).abs() < 0.001
             && (*threshold - 0.80).abs() < 0.001
-            && partial.get("value") == Some(&json!("draft"))
+            // The partial output as the continuation showed it to the
+            // stronger model: the value itself, in its JSON form.
+            && partial == &json!("draft")
     )));
     assert!(events.iter().any(|event| matches!(
         event,

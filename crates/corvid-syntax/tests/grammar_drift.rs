@@ -311,6 +311,25 @@ memory prefs:
 "#,
     ),
     (
+        "tables_and_databases",
+        r#"database library:
+    engine: sqlite
+    location: env("LIBRARY_DATABASE")
+
+table Shelf:
+    key shelf: Int
+    title: String renamed from name
+    owner: String
+    retired legacy, old_note
+    unique owner, title
+
+agent rename(shelf: Shelf) -> String:
+    atomic:
+        saved = Shelf.save(shelf)
+    return "ok"
+"#,
+    ),
+    (
         "weak_type_refs",
         r#"effect io_eff:
     reversible: true
@@ -401,11 +420,22 @@ extend Customer:
     (
         "connector_settings",
         r#"connector reports:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://example.org"
     auth: bearer(secret("REPORTS_TOKEN"))
     modes: [real]
-    operation generate(input: String) -> String dangerous:
+    operation attach(file: Upload<Pdf>) -> String:
+        POST "/files" multipart file
+    operation deltas(input: String) -> Stream<String>:
+        POST "/stream" body input
+        streams: server_sent_events until "[DONE]"
+    operation generate(input: String, request_id: String) -> String dangerous:
         POST "/reports" body input
+        header "X-Request-Id": request_id
+        on failure -> Failed
+        timeout: 30s
         async:
             statuses: [queued, completed, failed]
             initial: queued
@@ -456,6 +486,10 @@ server api:
         return body
     @upload(max_mb: 2, retention_days: 1, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json HealthStatus:
+        return HealthStatus(true)
+    live "/boards/{board: Int}/cards" -> HealthStatus requires permission("status.read"):
+        return HealthStatus.all()
+    route GET "/boards/{board}" -> json HealthStatus:
         return HealthStatus(true)
 
 schedule "0 9 * * *" zone "UTC" -> daily_summary()
@@ -680,6 +714,13 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("type_field", "record_types_and_stores"),
     ("choice_variant", "choice_declaration"),
     ("store_decl", "record_types_and_stores"),
+    ("table_decl", "tables_and_databases"),
+    ("table_field", "tables_and_databases"),
+    ("table_retired", "tables_and_databases"),
+    ("table_unique", "tables_and_databases"),
+    ("atomic_stmt", "tables_and_databases"),
+    ("database_decl", "tables_and_databases"),
+    ("database_setting", "tables_and_databases"),
     ("type_ref", "record_types_and_stores"),
     ("type_args", "record_types_and_stores"),
     ("type_arg", "weak_type_refs"),
@@ -716,16 +757,21 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("server_decl", "server_and_schedule"),
     ("route_decl", "server_and_schedule"),
     ("route_query", "server_and_schedule"),
+    ("live_decl", "server_and_schedule"),
     ("approval_arg", "server_and_schedule"),
     ("approval_annotation", "server_and_schedule"),
     ("upload_arg", "server_and_schedule"),
     ("upload_annotation", "server_and_schedule"),
     ("route_payload", "server_and_schedule"),
     ("route_policy", "server_and_schedule"),
+    ("route_path", "server_and_schedule"),
+    ("path_placeholder", "server_and_schedule"),
     ("identity_decl", "identity_settings"),
     ("connector_decl", "connector_settings"),
     ("connector_item", "connector_settings"),
     ("connector_mode", "connector_settings"),
+    ("redirect_policy", "connector_settings"),
+    ("stream_format", "connector_settings"),
     ("connector_auth", "connector_settings"),
     ("secret_ref", "connector_settings"),
     ("operation_decl", "connector_settings"),

@@ -330,6 +330,8 @@ fn expr_consumes_target(
             expr_consumes_target(items, target, sigs)
                 || expr_consumes_target(next_cursor, target, sigs)
         }
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_consumes_target(arg, target, sigs)),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_consumes_target(e, target, sigs)),
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_consumes_target(receiver, target, sigs)
                 || args.iter().any(|a| expr_consumes_target(a, target, sigs))
@@ -430,6 +432,8 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_references(items, target) || expr_references(next_cursor, target)
         }
+        IrExprKind::TableOp { args, .. } => args.iter().any(|arg| expr_references(arg, target)),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().any(|e| expr_references(e, target)),
         IrExprKind::Match { scrutinee, arms } => {
             expr_references(scrutinee, target)
                 || arms.iter().any(|arm| {
@@ -586,7 +590,9 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
         Type::Function { .. } => crate::native_callback_type(ty),
-        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
+        // B06, B04 — a native `Decimal`, time, currency, locale or `Bytes` value is a
+        // String holding its canonical text.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Secret | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Weak(_, _) | Type::Result(_, _) => {
             true
         }
         Type::Option(inner) => {
@@ -615,7 +621,7 @@ pub(crate) fn is_refcounted(ty: &Type) -> bool {
 pub(crate) fn is_strong_refcounted(ty: &Type) -> bool {
     match ty {
         Type::Map(_, _) => crate::native_string_map(ty),
-        Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes | Type::Secret | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Result(_, _) => true,
         // Weak is never a strong edge — it carries a weak slot.
         Type::Weak(_, _) => false,
         // Option<strong> is maybe-strong; callers requiring

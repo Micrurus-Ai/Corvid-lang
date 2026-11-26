@@ -2,6 +2,22 @@ use super::*;
 use corvid_resolve::{resolve, ResolveErrorKind};
 use corvid_syntax::{lex, parse_file};
 
+mod regex_methods;
+mod decimal;
+mod time;
+mod time_zones;
+mod currency;
+mod json_forms;
+mod json_error_type;
+mod typed_path_parameters;
+mod text_methods;
+mod bytes;
+mod hmac;
+mod secrets;
+mod comparison_literals;
+mod passwords;
+mod signatures;
+
 fn check(src: &str) -> Checked {
     let tokens = lex(src).expect("lex failed");
     let (file, perr) = parse_file(&tokens);
@@ -1597,6 +1613,93 @@ agent bad(id: String, amount: Float) -> Receipt:
     assert!(has_effect_violation(&c, "cost"), "got: {:?}", c.errors);
 }
 
+/// B09: a loop over a table query that ends in a literal `take(n)` runs
+/// at most `n` times, so `@budget` charges its body `n` times instead of
+/// warning that the cost cannot be proven; without `take` it still warns.
+#[test]
+fn a_query_loop_is_bounded_by_its_take() {
+    let program = |query: &str| {
+        format!(
+            "\
+effect paid_notice:
+    cost: $0.30
+
+tool notify(name: String) -> String uses paid_notice
+
+database site:
+    engine: sqlite
+    location: \"site.sqlite\"
+
+table Member:
+    key id: Int
+    name: String
+
+@budget($1.00)
+agent notify_members() -> String:
+    sent = \"\"
+    for member in {query}:
+        sent = notify(member.name)
+    return sent
+"
+        )
+    };
+    let unbounded = |c: &crate::Checked| c.warnings.iter().any(|w| matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. }));
+
+    let three = check(&program("Member.all().take(3)"));
+    assert!(!has_effect_violation(&three, "cost") && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let four = check(&program("Member.where(fn (m) -> m.name != \"\").take(4)"));
+    assert!(has_effect_violation(&four, "cost"), "four notices at $0.30 exceed $1.00: {:?}", four.errors);
+
+    let all = check(&program("Member.all()"));
+    assert!(unbounded(&all), "a query without take has no bound: {:?}", all.warnings);
+}
+
+/// B09 Refine-3: a query loop ending in `take(search.limit)` runs at most
+/// `limit`'s `between` maximum times, because every value of a refined
+/// field holds its refinement. An unrefined count has no bound.
+#[test]
+fn a_query_loop_is_bounded_by_a_refined_take() {
+    let program = |limit: &str| {
+        format!(
+            "\
+effect paid_notice:
+    cost: $0.30
+
+tool notify(name: String) -> String uses paid_notice
+
+database site:
+    engine: sqlite
+    location: \"site.sqlite\"
+
+table Member:
+    key id: Int
+    name: String
+
+type Search:
+    limit: {limit}
+
+@budget($1.00)
+agent notify_members(search: Search) -> String:
+    sent = \"\"
+    for member in Member.all().take(search.limit):
+        sent = notify(member.name)
+    return sent
+"
+        )
+    };
+    let unbounded = |c: &crate::Checked| c.warnings.iter().any(|w| matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. }));
+
+    let three = check(&program("Int where between(1, 3)"));
+    assert!(!has_effect_violation(&three, "cost") && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let fifty = check(&program("Int where between(1, 50)"));
+    assert!(has_effect_violation(&fifty, "cost"), "fifty notices at $0.30 exceed $1.00: {:?}", fifty.errors);
+
+    let unrefined = check(&program("Int"));
+    assert!(unbounded(&unrefined), "an unrefined count has no bound: {:?}", unrefined.warnings);
+}
+
 #[test]
 fn a_connector_operations_cost_counts_toward_the_budget() {
     // Regression (slice 52h-3): a connector `operation` resolves as a
@@ -1612,6 +1715,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     modes: [real]
     operation push_repo(owner: String) -> Repo dangerous uses http_write:
@@ -1645,6 +1751,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     retry: 3
     modes: [real]
@@ -1689,6 +1798,9 @@ type Job:
     status: String
 
 connector shipping:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: \"https://api.example.com\"
     modes: [real]
     operation submit_job(order: String) -> Job dangerous uses http_write:
@@ -2276,6 +2388,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2292,6 +2407,9 @@ agent fetch(owner: String, repo: String) -> Repo uses http_read:
 
 const VERIFIED_PROVIDER_PROTOCOL: &str = r#"
 connector video:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://video.example.com"
     retry: 3
     modes: [real]
@@ -2366,6 +2484,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2402,6 +2523,9 @@ type NewIssue:
     title: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2432,6 +2556,9 @@ type NewIssue:
     title: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2461,6 +2588,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2478,6 +2608,558 @@ connector github:
     );
 }
 
+/// How long a request may take and where a redirect may send it are
+/// declared, never defaulted: omitting either names the decision and its
+/// values, and a timeout must be between 1 and 3600 seconds.
+#[test]
+fn connector_timeout_and_redirect_policy_are_required() {
+    let connector = |items: &str, operation_item: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+connector svc:
+    base_url: "https://svc.example.com"
+{items}    modes: [real]
+    operation ping() -> String uses http_read:
+        GET "/ping"
+{operation_item}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |messages: &[String], needle: &str| messages.iter().any(|m| m.contains(needle));
+
+    let declared = messages(connector("    timeout: 10s\n    redirects: never\n    published: no\n", ""));
+    assert!(declared.is_empty(), "{declared:?}");
+
+    let no_timeout = messages(connector("    redirects: never\n", ""));
+    assert!(has(&no_timeout, "must declare `timeout: <n>s`"), "{no_timeout:?}");
+    assert!(has(&no_timeout, "There is no default timeout"), "{no_timeout:?}");
+
+    let no_redirects = messages(connector("    timeout: 10s\n", ""));
+    assert!(
+        has(&no_redirects, "must declare `redirects:` — `never`")
+            && has(&no_redirects, "`same_host`")
+            && has(&no_redirects, "`allowed_hosts`"),
+        "{no_redirects:?}"
+    );
+
+    let no_publication = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    assert_eq!(no_publication.len(), 1, "{no_publication:?}");
+    assert!(
+        has(&no_publication, "connector `svc` must declare whether the published contract lists it")
+            && has(&no_publication, "`published: no`")
+            && has(&no_publication, "`published: yes`"),
+        "{no_publication:?}"
+    );
+    let listed = messages(connector("    timeout: 10s\n    redirects: never\n    published: yes\n", ""));
+    assert!(listed.is_empty(), "{listed:?}");
+
+    let zero = messages(connector("    timeout: 0s\n    redirects: never\n    published: no\n", ""));
+    assert!(has(&zero, "`timeout: 0s`"), "{zero:?}");
+
+    let too_long = messages(connector(
+        "    timeout: 10s\n    redirects: never\n    published: no\n",
+        "        timeout: 7200s\n",
+    ));
+    assert!(has(&too_long, "operation `ping` declares `timeout: 7200s`"), "{too_long:?}");
+    assert!(has(&too_long, "durable job"), "{too_long:?}");
+}
+
+/// A query is a record of flat fields; a header is one the operation may
+/// set, once, from a `String` parameter or a fixed value.
+#[test]
+fn operation_query_and_headers_are_checked() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Address:
+    city: String
+
+type Filter:
+    customer: String
+    limit: Option<Int>
+    tags: List<String>
+
+type Nested:
+    address: Address
+
+connector svc:
+    base_url: "https://svc.example.com"
+    auth: header("X-Api-Key", secret("SVC_KEY"))
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        r#"    operation list(filter: Filter, request_id: String) -> String uses http_read:
+        GET "/items" query filter
+        header "X-Request-Id": request_id
+        header "Accept": "application/json"
+"#,
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let nested = messages(program(
+        r#"    operation list(filter: Nested) -> String uses http_read:
+        GET "/items" query filter
+"#,
+    ));
+    assert!(has(&nested, "query field `address` is `"), "{nested:?}");
+
+    let not_record = messages(program(
+        r#"    operation list(filter: String) -> String uses http_read:
+        GET "/items" query filter
+"#,
+    ));
+    assert!(has(&not_record, "must be a record"), "{not_record:?}");
+
+    let managed = messages(program(
+        r#"    operation list(token: String, key: String) -> String uses http_read:
+        GET "/items"
+        header "Authorization": token
+        header "x-api-key": key
+"#,
+    ));
+    assert!(has(&managed, "cannot set `Authorization` with `header`: the connector's `auth:` sets it"), "{managed:?}");
+    assert!(has(&managed, "cannot set `x-api-key` with `header`: the connector's `auth:` sends its credential"), "{managed:?}");
+
+    let wrong = messages(program(
+        r#"    operation list(count: Int) -> String uses http_read:
+        GET "/items"
+        header "X-Count": count
+        header "X-Trace": "a"
+        header "x-trace": "b"
+        header "Bad Name": "c"
+"#,
+    ));
+    assert!(has(&wrong, "takes `count`, which is `Int`"), "{wrong:?}");
+    assert!(has(&wrong, "sets header `x-trace` twice"), "{wrong:?}");
+    assert!(has(&wrong, "is not a valid HTTP header name"), "{wrong:?}");
+}
+
+/// A connector `Response` is the caller's value: an operation returns it
+/// whole or inside `Ok`, a helper agent can take it, and its accessors
+/// are typed. It never sits inside another type, in a record, at a route
+/// or a tool, or in `main`'s signature. A `HEAD` operation returns
+/// `Response<Nothing>`, a mock is the body, and a route never declares
+/// `HEAD` or `OPTIONS`.
+#[test]
+fn connector_responses_are_checked() {
+    let program = |extra: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Charge:
+    id: String
+
+type ChargeError:
+    | Missing
+
+connector payments:
+    base_url: "https://api.payments.example"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [mock, real]
+    operation charge(id: String) -> Response<Charge> uses http_read:
+        GET "/v1/charges/{{id}}"
+        mock: Charge(id)
+    operation maybe(id: String) -> Result<Response<Charge>, ChargeError> uses http_read:
+        GET "/v1/charges/{{id}}"
+        on status 404 -> Missing
+        mock: Ok(Charge(id))
+    operation exists(id: String) -> Response<Nothing> uses http_read:
+        HEAD "/v1/charges/{{id}}"
+        mock: nothing
+{extra}
+agent etag_of(r: Response<Charge>) -> String:
+    return match r.header("ETag"):
+        Some(tag) -> tag
+        None -> ""
+
+agent main() -> Int uses http_read:
+    r = charge("ch_1")
+    id: String = r.body().id
+    tag: String = etag_of(r)
+    return r.status()
+"#
+        )
+    };
+    let errors = |src: String| -> Vec<String> {
+        check(&src).errors.iter().map(|e| format!("{:?}", e.kind)).collect()
+    };
+    let has = |e: &[String], needle: &str| e.iter().any(|x| x.contains(needle));
+
+    let fine = errors(program(""));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let nested = errors(program(
+        r#"    operation all(id: String) -> List<Response<Charge>> uses http_read:
+        GET "/v1/all"
+        mock: []
+"#,
+    ));
+    assert!(has(&nested, "never inside another type"), "{nested:?}");
+
+    let head = errors(program(
+        r#"    operation peek(id: String) -> Response<Charge> uses http_read:
+        HEAD "/v1/charges/{{id}}"
+        mock: Charge(id)
+"#,
+    ));
+    assert!(has(&head, "returns `Response<Nothing>`"), "{head:?}");
+
+    let wrong_mock = errors(program(
+        r#"    operation other(id: String) -> Response<Charge> uses http_read:
+        GET "/v1/other"
+        mock: "not a charge"
+"#,
+    ));
+    assert!(has(&wrong_mock, "the operation's mock is `"), "{wrong_mock:?}");
+
+    let in_record = errors(program("type Saved:\n    answer: Response<Charge>\n"));
+    assert!(has(&in_record, "a field of `Saved`"), "{in_record:?}");
+
+    let in_tool = errors(program("tool keep(r: Response<Charge>) -> Bool\n"));
+    assert!(has(&in_tool, "a tool's signature"), "{in_tool:?}");
+
+    let route = errors(program(
+        r#"server api:
+    route HEAD "/status" -> json String:
+        return "ok"
+    route GET "/charge" -> json Response<Charge> uses http_read:
+        return charge("ch_1")
+"#,
+    ));
+    assert!(has(&route, "RouteMethodAnsweredByServer"), "{route:?}");
+    assert!(has(&route, "a route's inputs or response"), "{route:?}");
+
+    let to_json = errors(program(
+        "agent dump() -> String uses http_read:\n    return charge(\"ch_1\").to_json()\n",
+    ));
+    assert!(has(&to_json, "a connector response has no JSON form"), "{to_json:?}");
+}
+
+/// A `base_url` connector's operations give paths; a `hosts:
+/// allowed_hosts` connector's operations take a `String` URL parameter
+/// and carry no `async:` protocol; `response: text` reads a `String`.
+#[test]
+fn connector_targets_and_text_responses_are_checked() {
+    let program = |connector: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type Page:
+    title: String
+
+{connector}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+    let any_host = |operation: &str| {
+        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    published: no\n    modes: [real]\n{operation}")
+    };
+
+    let fine = messages(program(&any_host(
+        "    operation fetch(url: String) -> Response<String> uses http_read:\n        GET url\n        response: text\n",
+    )));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let path_on_any_host = messages(program(&any_host(
+        "    operation fetch(url: String) -> String uses http_read:\n        GET \"/x\"\n",
+    )));
+    assert!(has(&path_on_any_host, "take the whole URL as a parameter"), "{path_on_any_host:?}");
+
+    let url_on_base = messages(program(
+        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    published: no\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
+    ));
+    assert!(has(&url_on_base, "but the connector has a `base_url`"), "{url_on_base:?}");
+
+    let int_url = messages(program(&any_host(
+        "    operation fetch(url: Int) -> String uses http_read:\n        GET url\n",
+    )));
+    assert!(has(&int_url, "a URL is a `String`"), "{int_url:?}");
+
+    let text_record = messages(program(&any_host(
+        "    operation fetch(url: String) -> Page uses http_read:\n        GET url\n        response: text\n",
+    )));
+    assert!(has(&text_record, "its body is a `String`, not `Page`"), "{text_record:?}");
+}
+
+/// `on failure -> Variant` needs a `Result` whose error type declares the
+/// variant, with no fields or one `String` field for the reason.
+#[test]
+fn on_failure_is_checked() {
+    let program = |ret: &str| {
+        format!(
+            r#"
+effect http_read:
+    cost: 1.0
+
+type FetchError:
+    | Unreachable(reason: String)
+    | Gone
+    | Coded(code: Int)
+
+connector web:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation fetch(url: String) -> {ret} uses http_read:
+        GET url
+        response: text
+        on failure -> Unreachable
+"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(messages(program("Result<String, FetchError>")).is_empty());
+    assert!(messages(program("Result<String, FetchError>").replace("Unreachable\n", "Gone\n")).is_empty());
+    let not_result = messages(program("String"));
+    assert!(not_result.iter().any(|m| m.contains("returns a `Result`")), "{not_result:?}");
+    let unknown = messages(program("Result<String, FetchError>").replace("-> Unreachable", "-> Missing"));
+    assert!(unknown.iter().any(|m| m.contains("not a variant of its error type `FetchError`")), "{unknown:?}");
+    let coded = messages(program("Result<String, FetchError>").replace("-> Unreachable", "-> Coded"));
+    assert!(coded.iter().any(|m| m.contains("one `String` field for the reason")), "{coded:?}");
+
+    let with_protocol = r#"
+effect http_write:
+    cost: 1.0
+
+type Job:
+    status: String
+    id: String
+
+type JobError:
+    | Unreachable(reason: String)
+
+connector jobs:
+    base_url: "https://jobs.example.com"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation submit(input: String) -> Result<Job, JobError> dangerous uses http_write:
+        POST "/jobs" body input
+        on failure -> Unreachable
+        async:
+            statuses: [queued, done]
+            initial: queued
+            terminal: [done]
+            deadline: 60s
+            deadline_target: done
+            idempotency: intent via header "Idempotency-Key"
+            poll GET "/jobs/{id}"
+            every: 2s
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on done -> done
+"#;
+    let refused = messages(with_protocol.to_string());
+    assert!(refused.iter().any(|m| m.contains("cannot apply to it")), "{refused:?}");
+}
+
+/// A `Stream<T>` operation declares how its events arrive; nothing else
+/// declares `streams:`; a stream is the whole result and does not combine
+/// with `response: text`; `on failure` needs `Result` events; `until` is
+/// for server-sent events; a mock is the `List<T>` of events.
+#[test]
+fn streamed_operations_are_checked() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect read:
+    cost: 1.0
+
+type Delta:
+    text: String
+
+type Problem:
+    | Broken(reason: String)
+
+connector provider:
+    base_url: "https://provider.example"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [mock, real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: server_sent_events until \"[DONE]\"\n        mock: [Delta(q)]\n",
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let missing = messages(program("    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        mock: [Delta(q)]\n"));
+    assert!(has(&missing, "declares how events arrive"), "{missing:?}");
+
+    let not_stream = messages(program("    operation one(q: String) -> Delta uses read:\n        GET \"/d\"\n        streams: json_lines\n        mock: Delta(q)\n"));
+    assert!(has(&not_stream, "declares `streams:` but returns `Delta`"), "{not_stream:?}");
+
+    let nested = messages(program("    operation many(q: String) -> List<Stream<Delta>> uses read:\n        GET \"/d\"\n        mock: []\n"));
+    assert!(has(&nested, "never inside another type"), "{nested:?}");
+
+    let with_failure = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Delta(q)]\n",
+    ));
+    assert!(has(&with_failure, "so each event is a `Result`"), "{with_failure:?}");
+
+    // Decision 7: over `Result` events, `on failure` ends the stream with
+    // one final `Err` event.
+    let result_events = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(result_events.is_empty(), "{result_events:?}");
+    let wrong_variant = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Missing\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(has(&wrong_variant, "not a variant of its error type"), "{wrong_variant:?}");
+
+    let until_lines = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines until \"end\"\n        mock: [Delta(q)]\n",
+    ));
+    assert!(has(&until_lines, "an end marker belongs to `server_sent_events`"), "{until_lines:?}");
+
+    let wrong_mock = messages(program(
+        "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        mock: Delta(q)\n",
+    ));
+    assert!(has(&wrong_mock, "the operation's mock is `List<"), "{wrong_mock:?}");
+}
+
+/// A `body` is a file sent as itself or a value with a JSON form; a
+/// `form` carries no files; `multipart` is a record of flat fields, files
+/// included; a response is read through JSON.
+#[test]
+fn connector_bodies_and_responses_have_a_wire_form() {
+    let program = |operation: &str| {
+        format!(
+            r#"
+effect write:
+    cost: 1.0
+
+type Nested:
+    inner: Receipt
+
+type Receipt:
+    title: String
+    file: Upload<Pdf>
+    copies: List<Bytes>
+    note: Option<String>
+
+type Mixed:
+    title: String
+    file: Upload<Pdf>
+
+connector storage:
+    base_url: "https://storage.example"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+{operation}"#
+        )
+    };
+    let messages = |src: String| -> Vec<String> {
+        check(&src)
+            .errors
+            .iter()
+            .filter_map(|e| match &e.kind {
+                TypeErrorKind::ConnectorConfigInvalid { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
+
+    let fine = messages(program(
+        "    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" body file\n    operation b(data: Bytes) -> String uses write:\n        PUT \"/b\" body data\n    operation c(r: Receipt) -> String uses write:\n        POST \"/c\" multipart r\n",
+    ));
+    assert!(fine.is_empty(), "{fine:?}");
+
+    let json_with_file = messages(program("    operation a(m: Mixed) -> String uses write:\n        POST \"/a\" body m\n"));
+    assert!(has(&json_with_file, "sends `m` as its JSON body, but field `Mixed.file`: an upload has no JSON form"), "{json_with_file:?}");
+
+    let form_file = messages(program("    operation a(file: Upload<Pdf>) -> String uses write:\n        POST \"/a\" form file\n"));
+    assert!(has(&form_file, "carries text fields only"), "{form_file:?}");
+
+    let nested = messages(program("    operation a(n: Nested) -> String uses write:\n        POST \"/a\" multipart n\n"));
+    assert!(has(&nested, "multipart field `inner` is `Receipt`"), "{nested:?}");
+
+    let not_record = messages(program("    operation a(t: String) -> String uses write:\n        POST \"/a\" multipart t\n"));
+    assert!(has(&not_record, "so it is a record whose fields become the parts"), "{not_record:?}");
+
+    let upload_response = messages(program("    operation a() -> Upload<Pdf> uses write:\n        GET \"/a\"\n"));
+    assert!(has(&upload_response, "reads its response as `"), "{upload_response:?}");
+}
+
 #[test]
 fn mock_mode_requires_a_mock_payload_on_every_operation() {
     // If `mock` is an allowed mode, mock mode must be fully serveable:
@@ -2490,6 +3172,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2516,6 +3201,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2539,6 +3227,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2570,6 +3261,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -2594,6 +3288,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2626,6 +3323,9 @@ type GithubError:
     | NotFound
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2659,6 +3359,9 @@ type GithubError:
     | RateLimited
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -5344,6 +6047,74 @@ agent main(s: Status) -> String:
 ",
     );
     assert!(full.errors.is_empty(), "exhaustive match should pass, got {:?}", full.errors);
+}
+
+/// Nested patterns cover their constructor together: `Err(Some(x))` and
+/// `Err(None)` cover `Err(_)`, at any depth and inside sum variants and
+/// records, while a match still missing a nested case is refused.
+#[test]
+fn nested_patterns_cover_their_constructor_together() {
+    let non_exhaustive = |c: &crate::Checked| c.errors.iter().any(|e| matches!(e.kind, TypeErrorKind::NonExhaustiveMatch { .. }));
+    let complete = [
+        "agent f(r: Result<Int, Option<String>>) -> String:
+    return match r:
+        Ok(_) -> \"ok\"
+        Err(Some(reason)) -> reason
+        Err(None) -> \"gone\"
+",
+        "agent f(o: Option<Option<Bool>>) -> Int:
+    return match o:
+        Some(Some(true)) -> 1
+        Some(Some(false)) -> 2
+        Some(None) -> 3
+        None -> 4
+",
+        "type Outcome:
+    | Saved(count: Option<Int>)
+    | Refused
+
+agent f(o: Outcome) -> Int:
+    return match o:
+        Saved(Some(n)) -> n
+        Saved(None) -> 0
+        Refused -> 0 - 1
+",
+        "type Flags:
+    enabled: Bool
+    label: String
+
+agent f(flags: Flags) -> String:
+    return match flags:
+        Flags { enabled: true, .. } -> \"on\"
+        Flags { enabled: false, label } -> label
+",
+    ];
+    for source in complete {
+        let c = check(source);
+        assert!(!non_exhaustive(&c), "should be exhaustive:\n{source}\n{:?}", c.errors);
+    }
+    let incomplete = [
+        "agent f(o: Option<Option<Int>>) -> Int:
+    return match o:
+        Some(Some(n)) -> n
+        None -> 0
+",
+        "agent f(r: Result<Int, Option<String>>) -> String:
+    return match r:
+        Ok(_) -> \"ok\"
+        Err(Some(reason)) -> reason
+",
+        // Literals never cover a number, nested or not.
+        "agent f(o: Option<Int>) -> Int:
+    return match o:
+        Some(0) -> 0
+        None -> 1
+",
+    ];
+    for source in incomplete {
+        let c = check(source);
+        assert!(non_exhaustive(&c), "should be refused:\n{source}\n{:?}", c.errors);
+    }
 }
 
 /// Slice 45i — Option/Result exhaustiveness + guarded arms never

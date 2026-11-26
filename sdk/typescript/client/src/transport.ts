@@ -7,8 +7,29 @@
 // audited surface. Nothing here is regenerated per app.
 
 import { CorvidError } from "./errors.js";
-import { type AgentEvent, type AgentStream, type ApprovalRequest } from "./events.js";
+import { connectionForPage, type LiveConnection, type LiveObserver } from "./live-connection.js";
+import {
+  type AgentEvent,
+  type AgentStream,
+  type ApprovalRequest,
+  type RouteEvent,
+  type RouteFailure,
+  type RouteStream,
+} from "./events.js";
 import { type Page, paginate } from "./pagination.js";
+import { fillPath, urlEncodedRecord } from "./path.js";
+import { readSseEvents, type SseEvent } from "./sse.js";
+
+/**
+ * How a generated route call lays out its arguments: the path parameters
+ * in path order, then the query record when `query` is true, then the
+ * body in the form `body` names.
+ */
+export interface RouteShape {
+  readonly params: readonly string[];
+  readonly query: boolean;
+  readonly body: "json" | "form" | null;
+}
 
 export interface CorvidClientOptions {
   /** Base URL of the Corvid backend, e.g. `https://api.example.com`. */
@@ -20,6 +41,7 @@ export interface CorvidClientOptions {
 }
 
 export class CorvidClient {
+  private live?: LiveConnection;
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
   private readonly doFetch: typeof fetch;
@@ -28,6 +50,15 @@ export class CorvidClient {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.headers = options.headers ?? {};
     this.doFetch = options.fetch ?? fetch.bind(globalThis);
+  }
+
+  /** Subscribe with a concrete route path and its ordered table key fields.
+   * The returned function releases this subscription and is safe to call twice. */
+  subscribe<Row extends object>(
+    path: string, keyFields: readonly (keyof Row)[], observer: LiveObserver<Row>,
+  ): () => void {
+    this.live ??= connectionForPage(this.baseUrl);
+    return this.live.subscribe(path, keyFields, observer, CorvidError);
   }
 
   /** Invoke a public agent/prompt and await its single JSON result. */
@@ -137,20 +168,9 @@ export class CorvidClient {
       if (!res.ok || !res.body) {
         throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buffer.indexOf("\n\n")) !== -1) {
-          const raw = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          const event = parseSseEvent<T>(raw);
-          if (event) yield event;
-        }
+      for await (const raw of readSseEvents(res.body)) {
+        const event = agentEvent<T>(raw);
+        if (event) yield event;
       }
     }
 
@@ -163,6 +183,80 @@ export class CorvidClient {
           if (event.kind === "failed") throw new CorvidError(200, event.error, "agent failed");
         }
         throw new CorvidError(200, null, "stream ended without a terminal event");
+      },
+    };
+  }
+
+  /**
+   * Call a declared route that returns `Stream<Item>`. `route` is the
+   * method and contract path, as in `"GET /boards/{board}/feed"`, and
+   * `args` follow `shape`. Generated `Api.route` calls this. A path value
+   * that cannot be sent exactly throws here, before any request.
+   */
+  routeStream<Item>(route: string, shape: RouteShape, args: readonly unknown[]): RouteStream<Item> {
+    const space = route.indexOf(" ");
+    const method = route.slice(0, space);
+    const values: Record<string, unknown> = {};
+    let next = 0;
+    for (const name of shape.params) values[name] = args[next++];
+    let path = fillPath(route.slice(space + 1), values);
+    if (shape.query) {
+      const query = urlEncodedRecord(args[next++]);
+      if (query) path += "?" + query;
+    }
+    const headers: Record<string, string> = { accept: "text/event-stream", ...this.headers };
+    let body: string | undefined;
+    if (shape.body === "json") {
+      body = JSON.stringify(args[next++]);
+      headers["content-type"] = "application/json";
+    } else if (shape.body === "form") {
+      body = urlEncodedRecord(args[next++]);
+      headers["content-type"] = "application/x-www-form-urlencoded";
+    }
+    const url = `${this.baseUrl}${path}`;
+    const doFetch = this.doFetch;
+
+    async function* iterate(): AsyncGenerator<RouteEvent<Item>> {
+      let res: Response;
+      try {
+        res = await doFetch(url, { method, credentials: "include", headers, body });
+      } catch {
+        yield { kind: "interrupted" };
+        return;
+      }
+      if (!res.ok || !res.body) {
+        throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
+      }
+      try {
+        for await (const { event, data } of readSseEvents(res.body)) {
+          if (event === "chunk") {
+            yield { kind: "chunk", value: data as Item };
+          } else if (event === "completed") {
+            yield { kind: "completed", value: null };
+            return;
+          } else if (event === "failed") {
+            yield { kind: "failed", error: routeFailure(data) };
+            return;
+          }
+        }
+      } catch {
+        // The connection failed mid-read; reported as interrupted below.
+      }
+      yield { kind: "interrupted" };
+    }
+
+    const gen = iterate();
+    return {
+      [Symbol.asyncIterator]: () => gen,
+      async result(): Promise<null> {
+        for await (const event of gen) {
+          if (event.kind === "completed") return null;
+          if (event.kind === "failed") throw new CorvidError(200, event.error, event.error.detail);
+          if (event.kind === "interrupted") {
+            throw new CorvidError(0, null, "the connection was lost before the stream completed");
+          }
+        }
+        throw new CorvidError(0, null, "the stream ended without a terminal event");
       },
     };
   }
@@ -208,20 +302,8 @@ async function safeJson(res: Response): Promise<unknown> {
   }
 }
 
-function parseSseEvent<T>(raw: string): AgentEvent<T> | null {
-  let event = "message";
-  const dataLines: string[] = [];
-  for (const line of raw.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-  }
-  if (dataLines.length === 0) return null;
-  let payload: unknown = undefined;
-  try {
-    payload = JSON.parse(dataLines.join("\n"));
-  } catch {
-    payload = dataLines.join("\n");
-  }
+/** An agent invocation's event, or `null` for one it does not define. */
+function agentEvent<T>({ event, data: payload }: SseEvent): AgentEvent<T> | null {
   switch (event) {
     case "started":
       return { kind: "started", runId: (payload as { run_id?: string })?.run_id ?? "" };
@@ -240,4 +322,13 @@ function parseSseEvent<T>(raw: string): AgentEvent<T> | null {
     default:
       return null;
   }
+}
+
+/** A `failed` event's data; a malformed one still yields a safe sentence. */
+function routeFailure(data: unknown): RouteFailure {
+  const failure = (data ?? {}) as Partial<RouteFailure>;
+  return {
+    error: typeof failure.error === "string" ? failure.error : "handler_failed",
+    detail: typeof failure.detail === "string" ? failure.detail : "the server stopped the stream",
+  };
 }

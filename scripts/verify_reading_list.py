@@ -5,8 +5,7 @@ from contextlib import closing, contextmanager, nullcontext
 from html import escape
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import hashlib
-import hmac
+from serve_test_session import seed_session, set_role
 import json
 import secrets
 import os
@@ -388,28 +387,7 @@ def check_batch(cli, installed, env, provider, channel, http_only, webmcp=False,
                CORVID_OAUTH_GOOGLE_CLIENT_ID="fixture", CORVID_OAUTH_GOOGLE_CLIENT_SECRET="fixture")
 
     def session(auth, actor):
-        # Seed the durable state a completed login produces. No provider is contacted.
-        token = secrets.token_hex(32)
-        hashed = "sha256:" + hashlib.sha256(("corvid-auth-session-v1:" + token).encode()).hexdigest()
-        binding = secrets.token_hex(16)
-        mac = hmac.new(csrf_secret.encode(), ("corvid-csrf-v1:" + binding).encode(), "sha256")
-        csrf = binding + "." + mac.hexdigest()
-        with closing(sqlite3.connect(auth)) as db, db:
-            db.execute("INSERT INTO auth_actors (id, tenant_id, display_name, actor_kind, auth_method, "
-                       "assurance_level, role_fingerprint, permission_fingerprint, created_ms, updated_ms) "
-                       "VALUES (?, 'library', ?, 'user', 'oauth', 'aal1', '', '', 0, 0)", (actor, actor))
-            db.execute("INSERT INTO auth_sessions (id, actor_id, tenant_id, token_hash, issued_ms, "
-                       "expires_ms, rotation_counter, csrf_binding_id, created_ms, updated_ms) "
-                       "VALUES (?, ?, 'library', ?, 1, ?, 0, ?, 1, 1)",
-                       (actor, actor, hashed, int(time.time() * 1000) + 600000, binding))
-        return {"Cookie": f"corvid_session={token}; corvid_csrf={csrf}", "X-CSRF-Token": csrf}
-
-    def set_role(auth, actor, role, granted):
-        with closing(sqlite3.connect(auth)) as db, db:
-            if granted:
-                db.execute("INSERT INTO auth_actor_roles VALUES (?, ?, 1)", (actor, role))
-            else:
-                db.execute("DELETE FROM auth_actor_roles WHERE actor_id=? AND role=?", (actor, role))
+        return seed_session(auth, actor, "library", csrf_secret)
 
     def post(endpoint, payload, headers):
         return read(Request(endpoint, data=payload, headers=headers))

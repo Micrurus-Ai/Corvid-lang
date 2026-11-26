@@ -63,6 +63,7 @@ impl ValueBuilder for Counting {
         self.make()
     }
     fn json(&mut self, _: &J) -> u32 { self.make() }
+    fn text_scalar(&mut self, _: crate::text_scalar::TextScalar) -> u32 { self.make() }
     fn discard(&mut self, value: u32) { self.consume(value); }
 }
 

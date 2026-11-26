@@ -53,7 +53,7 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
     let unknown_fields = if strict != 0 { UnknownFields::Reject } else { UnknownFields::Ignore };
-    let mut builder = NativeValues { plan: &plan, typeinfos };
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
     let text = unsafe { text.as_str() };
     match corvid_public_json::decode_text(text, &plan.root, &types_by_id, unknown_fields, &mut builder) {
         Ok(value) => {
@@ -66,6 +66,110 @@ pub unsafe extern "C" fn corvid_json_decode_typed(
             RESULT_TAG_ERR
         }
     }
+}
+
+/// A native value of the plan's root type built from `json`, for a
+/// runtime export that answers with a compiler-known record (a
+/// `RegexMatch`). The runtime builds the JSON itself, so a decode
+/// failure is a compiler bug.
+///
+/// # Safety
+/// `plan`, `plan_len` and `typeinfos` as for [`corvid_json_decode_typed`].
+pub(crate) unsafe fn native_value_from_json(json: &J, plan: *const u8, plan_len: i64, typeinfos: *const *const c_void) -> i64 {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
+    match corvid_public_json::decode(json, &plan.root, &types_by_id, UnknownFields::Reject, &mut builder) {
+        Ok(value) => value.bits,
+        Err(error) => panic!("internal compiler error: the runtime's own value does not decode as its declared type {}", error.message()),
+    }
+}
+
+/// A runtime-owned call from native code (native dispatch N1, N2): a
+/// connector operation or a tool the runtime implements. Run
+/// `Runtime::call_tool(name, args)`, the path the interpreter takes, and
+/// decode its answer into the plan's root type, writing it to `payload`.
+/// The arguments are public JSON texts the compiled code encoded. A
+/// connector answer that does not decode becomes the operation's
+/// `on failure` variant, as in the interpreter; any other failure stops
+/// the program with the runtime's message, as the interpreter does.
+///
+/// # Safety
+/// `name` and the `arg_count` strings at `args` must be live Corvid
+/// strings; `plan`, `plan_len` and `typeinfos` as for
+/// [`corvid_json_decode_typed`]; `payload` a writable, aligned slot;
+/// `revealed` null, or `arg_count` live Corvid strings holding the
+/// revealed arguments of a tool that takes a secret.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_runtime_call(
+    name: CorvidString,
+    args: *const CorvidString,
+    arg_count: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+    payload: *mut i64,
+    revealed: *const CorvidString,
+) -> i64 {
+    let name = unsafe { name.as_str() }.to_string();
+    let parse = |texts: *const CorvidString| -> Vec<J> {
+        (0..arg_count.max(0) as usize)
+            .map(|index| {
+                let text = unsafe { (*texts.add(index)).as_str() };
+                serde_json::from_str::<J>(text).unwrap_or_else(|err| {
+                    panic!("internal compiler error: native code encoded an argument of `{name}` that is not JSON: {err}")
+                })
+            })
+            .collect()
+    };
+    let values = parse(args);
+    // A tool that takes a secret gets the revealed form; every record of
+    // the call holds `values`, as on the interpreter.
+    let revealed = (!revealed.is_null()).then(|| crate::RevealedToolArguments::new(&values, parse(revealed)));
+    let state = crate::ffi_bridge::bridge();
+    let runtime = state.corvid_runtime();
+    let call_name = name.clone();
+    let call_runtime = runtime.clone();
+    let answer = state
+        .tokio_handle()
+        .block_on(async move {
+            match revealed {
+                Some(revealed) => call_runtime.call_tool_revealing_secrets(&call_name, values, revealed).await,
+                None => call_runtime.call_tool(&call_name, values).await,
+            }
+        });
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(err) => {
+            runtime.record_connector_call(&name, false);
+            crate::ffi_bridge::panic_if_replay_runtime_error(&format!("corvid: `{name}`"), &err);
+            eprintln!("corvid: `{name}`: {err}");
+            std::process::exit(1);
+        }
+    };
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let accepts_secrets = crate::runtime::is_stdlib_secret_value_tool(&name);
+    let mut builder = NativeValues { plan: &plan, typeinfos, accepts_secrets, secret_form: None };
+    let decoded = match corvid_public_json::decode(&answer, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder) {
+        Ok(value) => value,
+        Err(error) => match runtime.connector_failure_variant(&name) {
+            Some((variant, takes_reason)) => {
+                let reason = format!("the response does not match the declared type {}", error.message());
+                let failure = crate::connectors::failure_result(&variant, takes_reason, &reason);
+                corvid_public_json::decode(&failure, &plan.root, &types_by_id, UnknownFields::Ignore, &mut builder)
+                    .unwrap_or_else(|e| panic!("internal error: `{name}`'s failure value does not decode: {}", e.message()))
+            }
+            None => {
+                runtime.record_connector_call(&name, false);
+                eprintln!("corvid: `{name}`: the answer does not match the declared type {}", error.message());
+                std::process::exit(1);
+            }
+        },
+    };
+    runtime.record_connector_call(&name, true);
+    unsafe { payload.write(decoded.bits) };
+    RESULT_TAG_OK
 }
 
 /// Plans live in the program's read-only data, so their address
@@ -106,6 +210,20 @@ impl Slot {
 struct NativeValues<'a> {
     plan: &'a DecodePlan,
     typeinfos: *const *const c_void,
+    /// Whether a `Secret` position may be built: only for the answer of a
+    /// tool the runtime implements whose result it holds as a secret.
+    accepts_secrets: bool,
+    /// How a `Secret` position is written, when this reads a tool
+    /// argument (N3c); `None` refuses it, as `to_json` must.
+    secret_form: Option<SecretForm>,
+}
+
+/// The two forms of a tool argument that holds a secret: what every
+/// record of the call holds, and what the implementation receives.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SecretForm {
+    Recorded,
+    Revealed,
 }
 
 impl NativeValues<'_> {
@@ -168,6 +286,11 @@ impl ValueBuilder for NativeValues<'_> {
     fn string(&mut self, value: &str) -> Slot {
         self.native_string(value)
     }
+    fn secret(&mut self, text: &str) -> Option<Slot> {
+        self.accepts_secrets.then(|| {
+            Slot::reference(super::secret_object::new_secret_object(corvid_crypto::Secret::new(text)))
+        })
+    }
     fn bool(&mut self, value: bool) -> Slot {
         Slot::scalar(i64::from(value))
     }
@@ -222,6 +345,11 @@ impl ValueBuilder for NativeValues<'_> {
     fn json(&mut self, _json: &J) -> Slot {
         panic!("internal compiler error: a native decode plan targets `JsonValue`, which has no native form")
     }
+    /// B06 — every text-scalar type is a native String holding its
+    /// canonical text.
+    fn text_scalar(&mut self, value: corvid_public_json::text_scalar::TextScalar) -> Slot {
+        self.native_string(&value.to_text())
+    }
     fn discard(&mut self, value: Slot) {
         if value.owned && value.bits != 0 {
             unsafe { corvid_release(value.bits as *const u8) };
@@ -260,11 +388,44 @@ pub unsafe extern "C" fn corvid_json_encode_typed(
 ) -> CorvidString {
     let plan = unsafe { cached_plan(plan, plan_len) };
     let types_by_id = plan.types_by_id();
-    let mut reader = NativeValues { plan: &plan, typeinfos };
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: None };
     match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
         Ok(text) => crate::ffi_bridge::string_from_rust(text),
         Err(reason) => {
             eprintln!("corvid: to_json: {reason}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// One argument of a runtime call whose tool takes a secret (N3c), as
+/// public JSON: with `<redacted>` at every `Secret` position when
+/// `revealed` is 0, the form every record of the call holds, or with the
+/// secrets' texts when it is 1, the form only the implementation
+/// receives. A key made by `decode_base64_after` has no text, so the
+/// revealed form stops the program with the interpreter's message.
+///
+/// # Safety
+/// As for [`corvid_json_encode_typed`]; `name` must be a live Corvid
+/// string.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_json_encode_tool_argument(
+    name: CorvidString,
+    value: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+    revealed: i64,
+) -> CorvidString {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let secret_form = Some(if revealed != 0 { SecretForm::Revealed } else { SecretForm::Recorded });
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form };
+    match corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader) {
+        Ok(text) => crate::ffi_bridge::string_from_rust(text),
+        Err(reason) => {
+            let name = unsafe { name.as_str() };
+            eprintln!("corvid: tool `{name}`: {reason}");
             std::process::exit(1);
         }
     }
@@ -279,6 +440,17 @@ unsafe fn slot_at(pointer: i64, first_offset: i32, index: usize) -> i64 {
 
 impl corvid_public_json::ValueReader for NativeValues<'_> {
     type Value = Slot;
+
+    fn secret(&mut self, value: &Slot) -> Result<J, String> {
+        match self.secret_form {
+            None => Err("`Secret` has no JSON form".to_string()),
+            Some(SecretForm::Recorded) => Ok(J::String(crate::REDACTED_SECRET.to_string())),
+            Some(SecretForm::Revealed) => {
+                let secret = unsafe { super::secret_object::secret_of(value.bits as *const c_void) };
+                secret.expose_text().map(|text| J::String(text.to_string())).ok_or_else(|| crate::DECODED_KEY_TO_TOOL.to_string())
+            }
+        }
+    }
 
     fn int(&mut self, value: &Slot) -> Result<i64, String> {
         Ok(value.bits)
@@ -338,5 +510,16 @@ impl corvid_public_json::ValueReader for NativeValues<'_> {
     }
     fn json(&mut self, _value: &Slot) -> Result<J, String> {
         Err("`JsonValue` has no native form".into())
+    }
+    /// B06 — a native text-scalar slot holds its canonical text, read
+    /// back with the parser the JSON form uses.
+    fn text_scalar(&mut self, ty: &corvid_types::Type, value: &Slot) -> Result<corvid_public_json::text_scalar::TextScalar, String> {
+        // SAFETY: a native text-scalar slot holds a live descriptor
+        // pointer; `CorvidString` has no destructor.
+        let text: CorvidString = unsafe { std::mem::transmute(value.bits as *const u8) };
+        let text = unsafe { super::strings::borrow_corvid_string(&text) };
+        corvid_public_json::text_scalar::parse(ty, text).map_err(|error| {
+            format!("internal compiler error: a native `{}` holds `{text}`: {error}", ty.display_name())
+        })
     }
 }

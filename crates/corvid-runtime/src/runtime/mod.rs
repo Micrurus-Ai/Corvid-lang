@@ -38,17 +38,24 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 pub use builder::RuntimeBuilder;
+pub use llm_dispatch::{is_native_runtime_tool, is_stdlib_secret_value_tool};
 
 mod builder;
 mod connector_dispatch;
+mod connector_stream;
+pub use connector_stream::ConnectorEventStream;
+mod crypto_tools;
+mod http_trace;
 mod io;
 mod path;
 mod protocol_dispatch;
+mod uuid;
 mod jobs;
 mod llm_dispatch;
 mod model_catalog;
 mod replay_reports;
 mod store_dispatch;
+mod table_replay;
 
 pub(super) const APPROVAL_TOKEN_SCOPE_ONE_TIME: &str = "one_time";
 pub(super) const APPROVAL_TOKEN_TTL_MS: u64 = 5 * 60 * 1000;
@@ -115,6 +122,9 @@ pub struct Runtime {
     /// `Arc` so all clones share the same backing slotmap and
     /// the same write-quarantine flag.
     pub(super) db_registry: crate::db::DbHandleRegistry,
+    /// One open handle per table database location (B09), shared by
+    /// clones so every operation on a database uses one connection.
+    pub(crate) table_databases: crate::tables::TableDatabases,
     secrets: SecretRuntime,
     /// In-memory cache shared across Runtime clones (worker pools,
     /// per-job tracer swaps). The stdlib cache tools lock it per
@@ -149,6 +159,13 @@ pub struct Runtime {
     /// is what makes "a protocol operation requires a durable job"
     /// enforceable rather than advisory.
     durable_job: Option<DurableJobContext>,
+    /// Every committed table write, announced for live subscriptions
+    /// (B14). Clones of a `Runtime` share it, so a server's runs feed one
+    /// stream.
+    pub(crate) table_commits: tokio::sync::broadcast::Sender<crate::tables::TableCommit>,
+    /// This process's tag on the commits it shares through Postgres, so
+    /// it can skip its own when they come back (B14 RT-6).
+    pub(crate) instance_id: std::sync::Arc<str>,
 }
 
 /// The durable job a run is executing under (slice 52h-2): the SQLite
@@ -273,6 +290,22 @@ impl Runtime {
     /// by default.
     pub fn egress_configured(&self) -> bool {
         self.http_policy.is_configured()
+    }
+
+    /// The `on failure` variant of connector operation `name`, and whether
+    /// it carries the reason; `None` for an operation without one.
+    pub(crate) fn connector_failure_variant(&self, name: &str) -> Option<(String, bool)> {
+        self.connector_calls.get(name).and_then(|spec| spec.on_failure.clone())
+    }
+
+    /// Why the project's HTTP policy refuses `url`, or `None` when it is
+    /// allowed. The same check every outbound request runs; the
+    /// connector startup check asks it once per connector `base_url`.
+    pub fn egress_refusal(&self, url: &str) -> Option<String> {
+        self.http_policy.check(url).err().map(|err| match err {
+            RuntimeError::ToolFailed { message, .. } => message,
+            other => other.to_string(),
+        })
     }
 
     /// Whether a named secret resolves right now (slice 52g-3c). Used by
@@ -435,6 +468,41 @@ impl Runtime {
             name: name.to_string(),
             payload,
         });
+    }
+
+    /// Record the `connector.invocation` evidence of one connector call:
+    /// the connector, operation, mode, declared effects and whether the
+    /// call returned a value, never its arguments or payload. Both tiers
+    /// call this after each connector call, so the record is the same
+    /// whichever tier ran it.
+    pub fn record_connector_invocation(
+        &self,
+        connector: &str,
+        operation: &str,
+        mode: corvid_ast::ConnectorMode,
+        effects: &[String],
+        ok: bool,
+    ) {
+        self.emit_host_event(
+            "connector.invocation",
+            serde_json::json!({
+                "connector": connector,
+                "operation": operation,
+                "mode": mode.as_str(),
+                "effects": effects,
+                "outcome": if ok { "ok" } else { "error" },
+            }),
+        );
+    }
+
+    /// Record the `connector.invocation` evidence of a call to connector
+    /// operation `name` in the selected mode, from its installed spec.
+    /// Native code records through this; it does nothing for a name that
+    /// is not a connector operation.
+    pub(crate) fn record_connector_call(&self, name: &str, ok: bool) {
+        if let (Some(spec), Some(mode)) = (self.connector_calls.get(name), self.connector_mode) {
+            self.record_connector_invocation(&spec.connector, &spec.operation, mode, &spec.effects, ok);
+        }
     }
 }
 

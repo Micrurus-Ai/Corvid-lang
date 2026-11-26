@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::Call { callee: Box::new(callee), args: vec![children], span })
     }
 
-    fn parse_child_list(&mut self) -> Result<Expr, ParseError> {
+    pub(super) fn parse_child_list(&mut self) -> Result<Expr, ParseError> {
         let start = self.expect(TokKind::Colon, ": before child views")?;
         self.expect_newline()?;
         self.expect(TokKind::Indent, "indented child expressions")?;
@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
     }
 
     fn field_key_builtin(&self, owner: &Expr) -> &'static str {
-        if matches!(owner, Expr::Ident { name, .. } if self.row_bindings.contains(&name.name)) {
+        if matches!(owner, Expr::Ident { name, .. } if self.row_bindings.iter().any(|row| row.name == name.name)) {
             "__browser_row_key"
         } else {
             "__browser_field_key"
@@ -84,6 +84,9 @@ impl<'a> Parser<'a> {
         };
         self.expect(TokKind::KwIn, "in before the list of records")?;
         let source = self.parse_expr()?;
+        if matches!(self.peek(), TokKind::Colon) {
+            return self.parse_live_children(row, source, start);
+        }
         self.expect_contextual_ident("by")?;
         if row == "agent" {
             self.expect(TokKind::KwAgent, "the current agent row")?;
@@ -92,7 +95,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::Dot, "a key field on the current row")?;
         let (key, key_span) = self.expect_ident()?;
-        self.row_bindings.push(row.clone());
+        self.row_bindings.push(super::RowBinding { name: row.clone(), live: None });
         let children = self.parse_child_list();
         self.row_bindings.pop();
         let children = children?;
@@ -128,7 +131,7 @@ impl<'a> Parser<'a> {
 
     fn parse_browser_field_path(&mut self) -> Result<(Expr, Expr), ParseError> {
         let (owner, owner_span) = if matches!(self.peek(), TokKind::KwAgent)
-            && self.row_bindings.iter().any(|row| row == "agent") {
+            && self.row_bindings.iter().any(|row| row.name == "agent") {
             ("agent".to_owned(), self.bump().span)
         } else {
             self.expect_ident()?
@@ -422,10 +425,10 @@ impl<'a> Parser<'a> {
                     span: start_span,
                 })
             }
-            TokKind::Float(f) => {
+            TokKind::Float { value: f, text } => {
                 self.bump();
                 Ok(Expr::Literal {
-                    value: Literal::Float(f),
+                    value: Literal::Float { value: f, text },
                     span: start_span,
                 })
             }
@@ -465,6 +468,13 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let (owner, key) = self.parse_browser_field_path()?;
                 let field_span = key.span();
+                if let Expr::Ident { name, .. } = &owner {
+                    let binding = self.row_bindings.iter().rev().find(|row| row.name == name.name);
+                    if let Some((server, live)) = binding.and_then(|row| row.live.as_ref()) {
+                        return Ok(super::authoring::call("__live_field",
+                            vec![server.clone(), live.clone(), key], start_span.merge(field_span)));
+                    }
+                }
                 Ok(super::authoring::call(self.field_key_builtin(&owner), vec![owner, key], start_span.merge(field_span)))
             }
             TokKind::Ident(w) if w == "ask" && matches!(self.peek_ahead(1), TokKind::Ident(_)) => {
@@ -481,7 +491,7 @@ impl<'a> Parser<'a> {
                     span: start.merge(self.prev_span()),
                 })
             }
-            TokKind::KwAgent if self.row_bindings.iter().any(|row| row == "agent") => {
+            TokKind::KwAgent if self.row_bindings.iter().any(|row| row.name == "agent") => {
                 let span = self.bump().span;
                 Ok(Expr::Ident { name: Ident::new("agent", span), span })
             }

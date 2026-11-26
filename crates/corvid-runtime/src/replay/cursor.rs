@@ -16,6 +16,15 @@ impl TraceCursor {
         self.next
     }
 
+    /// The index of the next event [`Self::next_event`] will return,
+    /// past any dispatch metadata such as an `llm.usage` host event. A
+    /// report that names the step of that event reads this, so a host
+    /// event recorded between a call and its result never shifts it.
+    pub(crate) fn next_event_step(&mut self, events: &[TraceEvent]) -> usize {
+        self.skip_dispatch_metadata(events);
+        self.next
+    }
+
     pub(crate) fn next_event(&mut self, events: &[TraceEvent]) -> TraceEvent {
         self.skip_dispatch_metadata(events);
         let event = events
@@ -64,6 +73,20 @@ impl TraceCursor {
                 got_description,
             })
         }
+    }
+
+    /// Steps past the next event when `predicate` holds for it, and
+    /// reports whether it did.
+    pub(crate) fn advance_if<F>(&mut self, events: &[TraceEvent], predicate: F) -> bool
+    where
+        F: FnOnce(&TraceEvent) -> bool,
+    {
+        self.skip_dispatch_metadata(events);
+        let matched = events.get(self.next).is_some_and(predicate);
+        if matched {
+            self.next += 1;
+        }
+        matched
     }
 
     pub(crate) fn finish(&mut self, events: &[TraceEvent]) -> Result<(), ReplayDivergence> {

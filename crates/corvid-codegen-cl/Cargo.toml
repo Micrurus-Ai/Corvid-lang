@@ -12,11 +12,14 @@ corvid-resolve  = { workspace = true }
 corvid-types    = { workspace = true }
 corvid-public-json = { workspace = true }
 corvid-abi      = { workspace = true }
+corvid-decimal  = { workspace = true }
+corvid-time     = { workspace = true }
 # Regular dep (not dev-dep) so Cargo builds corvid-runtime's staticlib
 # variant whenever this crate is built — the `link.rs` step needs the
 # .lib / .a file on disk to link into every emitted Corvid binary.
-# Rlib side effect on this crate is ignorable; codegen-cl doesn't use
-# corvid-runtime's Rust surface, only its staticlib artifact.
+# Codegen also reads two runtime definitions so native code and the
+# runtime agree: the connector specs it embeds and the list of tools the
+# runtime implements (native dispatch).
 corvid-runtime  = { workspace = true }
 corvid-prompt-format = { workspace = true }
 

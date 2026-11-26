@@ -112,6 +112,71 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let string_parse_int_id = module
         .declare_function("corvid_string_parse_int", Linkage::Import, &char_at_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare string_parse_int: {e}"), Span::new(0, 0)))?;
+    // B03 text methods: encoders take the text and return a String;
+    // decoders also take a Result payload slot and return its tag,
+    // the `corvid_string_parse_int` shape.
+    let mut regex_find_sig = module.make_signature();
+    for _ in 0..5 {
+        regex_find_sig.params.push(AbiParam::new(I64));
+    }
+    regex_find_sig.returns.push(AbiParam::new(I64));
+    let mut text_methods = Vec::new();
+    for kind in crate::text_methods::NATIVE_TEXT_METHODS {
+        let Some((symbol, shape)) = crate::text_methods::native_text_symbol(kind) else { continue };
+        use crate::text_methods::NativeTextShape;
+        let sig = match shape {
+            NativeTextShape::Encoder => &char_len_sig,
+            NativeTextShape::Decoder => &char_at_sig,
+            NativeTextShape::RegexSearch => &search_sig,
+            NativeTextShape::RegexReplace | NativeTextShape::RegexSplit => &substring_sig,
+            NativeTextShape::RegexFind => &regex_find_sig,
+        };
+        let id = module
+            .declare_function(symbol, Linkage::Import, sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
+        text_methods.push((kind, id));
+    }
+    // B06 `Decimal`: one import per operation, shaped by its table entry.
+    let mut decimal_operations = HashMap::new();
+    for operation in crate::decimal_methods::DecimalOperation::all() {
+        use crate::decimal_methods::DecimalSlot;
+        let width = |slot: DecimalSlot| match slot {
+            DecimalSlot::Word => I64,
+            DecimalSlot::Float => F64,
+        };
+        let (params, returns) = operation.signature();
+        let mut sig = module.make_signature();
+        sig.params.extend(params.iter().map(|slot| AbiParam::new(width(*slot))));
+        sig.returns.push(AbiParam::new(width(returns)));
+        let symbol = operation.symbol();
+        let id = module
+            .declare_function(&symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))?;
+        decimal_operations.insert(operation, id);
+    }
+    // B06 time and currency types: one import per operation, every
+    // parameter and the return one word.
+    let mut declare_word_import = |symbol: &str, arity: usize| {
+        let mut sig = module.make_signature();
+        sig.params.extend((0..arity).map(|_| AbiParam::new(I64)));
+        sig.returns.push(AbiParam::new(I64));
+        module
+            .declare_function(symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))
+    };
+    let mut time_operations = HashMap::new();
+    for operation in crate::time_methods::TimeOperation::all() {
+        time_operations.insert(operation, declare_word_import(&operation.symbol(), operation.arity())?);
+    }
+    let mut currency_operations = HashMap::new();
+    for operation in crate::currency_methods::CurrencyOperation::all() {
+        currency_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
+    }
+    // B04 `Bytes`: the same one-word shape.
+    let mut bytes_operations = HashMap::new();
+    for operation in crate::bytes_methods::BytesOperation::all() {
+        bytes_operations.insert(operation, declare_word_import(operation.symbol(), operation.arity())?);
+    }
     // corvid_json_decode_typed(text, plan, plan_len, typeinfos, strict, payload) -> tag
     let mut json_decode_sig = module.make_signature();
     for _ in 0..6 {
@@ -121,6 +186,28 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let json_decode_typed_id = module
         .declare_function("corvid_json_decode_typed", Linkage::Import, &json_decode_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare json_decode_typed: {e}"), Span::new(0, 0)))?;
+    // corvid_runtime_call(name, args, arg_count, plan, plan_len, typeinfos, payload) -> tag
+    // corvid_runtime_call(name, args, count, plan, plan_len, typeinfos,
+    // payload, revealed) -> tag; `revealed` is null unless the tool takes
+    // a secret (native dispatch N3c).
+    let mut runtime_call_sig = module.make_signature();
+    for _ in 0..8 {
+        runtime_call_sig.params.push(AbiParam::new(I64));
+    }
+    runtime_call_sig.returns.push(AbiParam::new(I64));
+    let runtime_call_id = module
+        .declare_function("corvid_runtime_call", Linkage::Import, &runtime_call_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare runtime_call: {e}"), Span::new(0, 0)))?;
+    // corvid_json_encode_tool_argument(name, value, plan, plan_len,
+    // typeinfos, revealed) -> String (native dispatch N3c).
+    let mut tool_argument_sig = module.make_signature();
+    for _ in 0..6 {
+        tool_argument_sig.params.push(AbiParam::new(I64));
+    }
+    tool_argument_sig.returns.push(AbiParam::new(I64));
+    let json_encode_tool_argument = module
+        .declare_function("corvid_json_encode_tool_argument", Linkage::Import, &tool_argument_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_encode_tool_argument: {e}"), Span::new(0, 0)))?;
     // corvid_json_encode_typed(value, plan, plan_len, typeinfos) -> String
     let mut json_encode_sig = module.make_signature();
     for _ in 0..4 {
@@ -199,6 +286,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare String typeinfo: {e}"), Span::new(0, 0))
         })?;
+    // Native dispatch N3 — the runtime's `Secret` object, for a list or
+    // record slot that holds one.
+    let secret_typeinfo = module
+        .declare_data("corvid_typeinfo_Secret", Linkage::Import, false, false)
+        .map_err(|e| CodegenError::cranelift(format!("declare Secret typeinfo: {e}"), Span::new(0, 0)))?;
     let map_typeinfo = module
         .declare_data("corvid_typeinfo_OrderedMap", Linkage::Import, false, false)
         .map_err(|e| CodegenError::cranelift(format!("declare Map typeinfo: {e}"), Span::new(0, 0)))?;
@@ -462,6 +554,48 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .map_err(|e| {
             CodegenError::cranelift(format!("declare runtime_init: {e}"), Span::new(0, 0))
         })?;
+
+    let mut register_connectors_sig = module.make_signature();
+    register_connectors_sig.params.push(AbiParam::new(I64));
+    let register_connectors_id = module
+        .declare_function("corvid_register_connectors", Linkage::Import, &register_connectors_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare register_connectors: {e}"), Span::new(0, 0)))?;
+
+    // `int.to_string()`, `float.to_string()`, `bool.to_string()`, in the
+    // interpreter's text.
+    let mut int_text_sig = module.make_signature();
+    int_text_sig.params.push(AbiParam::new(I64));
+    int_text_sig.returns.push(AbiParam::new(I64));
+    let int_to_string = module
+        .declare_function("corvid_int_to_string", Linkage::Import, &int_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare int_to_string: {e}"), Span::new(0, 0)))?;
+    let bool_to_string = module
+        .declare_function("corvid_bool_to_string", Linkage::Import, &int_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare bool_to_string: {e}"), Span::new(0, 0)))?;
+    let mut float_text_sig = module.make_signature();
+    float_text_sig.params.push(AbiParam::new(F64));
+    float_text_sig.returns.push(AbiParam::new(I64));
+    let float_to_string = module
+        .declare_function("corvid_float_to_string", Linkage::Import, &float_text_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare float_to_string: {e}"), Span::new(0, 0)))?;
+
+    // Native dispatch N4 — `response.header(name)` as an Option<String>.
+    let mut response_header_sig = module.make_signature();
+    response_header_sig.params.push(AbiParam::new(I64));
+    response_header_sig.params.push(AbiParam::new(I64));
+    response_header_sig.returns.push(AbiParam::new(I64));
+    let response_header = module
+        .declare_function("corvid_response_header", Linkage::Import, &response_header_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare response_header: {e}"), Span::new(0, 0)))?;
+
+    // Native dispatch N3 — `a == b` on two secrets, in constant time.
+    let mut secret_eq_sig = module.make_signature();
+    secret_eq_sig.params.push(AbiParam::new(I64));
+    secret_eq_sig.params.push(AbiParam::new(I64));
+    secret_eq_sig.returns.push(AbiParam::new(I64));
+    let secret_eq = module
+        .declare_function("corvid_secret_eq", Linkage::Import, &secret_eq_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare secret_eq: {e}"), Span::new(0, 0)))?;
 
     let runtime_shutdown_sig = module.make_signature();
     let runtime_shutdown_id = module
@@ -767,6 +901,11 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let mut sfi_sig = module.make_signature();
     sfi_sig.params.push(AbiParam::new(I64));
     sfi_sig.returns.push(AbiParam::new(I64));
+    // A `String` prompt argument renders as its JSON form, quoted and
+    // escaped, as the interpreter renders it.
+    let string_json_quote = module
+        .declare_function("corvid_string_json_quote", Linkage::Import, &sfi_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare string_json_quote: {e}"), Span::new(0, 0)))?;
     let string_from_int_id = module
         .declare_function(STRING_FROM_INT_SYMBOL, Linkage::Import, &sfi_sig)
         .map_err(|e| {
@@ -1245,8 +1384,15 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_replace,
         string_split,
         string_parse_int: string_parse_int_id,
+        text_methods,
+        decimal_operations,
+        time_operations,
+        currency_operations,
+        bytes_operations,
         json_decode_typed: json_decode_typed_id,
+        runtime_call: runtime_call_id,
         json_encode_typed: json_encode_typed_id,
+        json_encode_tool_argument,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,
@@ -1256,6 +1402,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         weak_upgrade: weak_upgrade_id,
         weak_clear_self: weak_clear_self_id,
         string_typeinfo: string_typeinfo_id,
+        secret_typeinfo,
         map_typeinfo,
         weak_box_typeinfo: weak_box_typeinfo_id,
         entry_init: entry_init_id,
@@ -1284,6 +1431,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         invoke_tool_string: invoke_tool_string_id,
         invoke_tool_struct: invoke_tool_struct_id,
         runtime_init: runtime_init_id,
+        register_connectors: register_connectors_id,
+        secret_eq,
+        int_to_string,
+        float_to_string,
+        bool_to_string,
+        response_header,
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
         sleep_ms: sleep_ms_id,
@@ -1308,6 +1461,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         string_from_int: string_from_int_id,
         string_from_bool: string_from_bool_id,
         string_from_float: string_from_float_id,
+        string_json_quote,
         approve_sync: approve_sync_id,
         prompt_call_int: prompt_call_int_id,
         prompt_call_bool: prompt_call_bool_id,
@@ -1352,9 +1506,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         // stabilized in production.
         in_match_operand: Default::default(),
         next_variable: Default::default(),
-        dup_drop_enabled: std::env::var("CORVID_DUP_DROP_PASS")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true),
+        dup_drop_enabled: crate::dup_drop_pass_enabled(),
         // Default to the native (link-time wrapper) dispatch; `lower_file`
         // sets this true for library targets (cdylib/staticlib).
         tools_via_registry: false,
@@ -1371,6 +1523,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         result_typeinfos: HashMap::new(),
         option_typeinfos: HashMap::new(),
         ir_types: HashMap::new(),
+        runtime_call_ops: std::collections::HashSet::new(),
         ir_tools: HashMap::new(),
         tool_wrapper_ids: std::cell::RefCell::new(HashMap::new()),
         ir_prompts: HashMap::new(),

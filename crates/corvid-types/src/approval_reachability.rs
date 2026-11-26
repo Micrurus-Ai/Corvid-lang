@@ -204,6 +204,9 @@ impl<'a> ReachabilityPass<'a> {
                 self.check_expr(entrypoint, iter, approvals, visiting);
                 self.check_block(entrypoint, body, approvals.clone(), visiting);
             }
+            Stmt::Atomic { body, .. } => {
+                self.check_block(entrypoint, body, approvals.clone(), visiting);
+            }
             Stmt::While { cond, body, .. } => {
                 self.check_expr(entrypoint, cond, approvals, visiting);
                 self.check_block(entrypoint, body, approvals.clone(), visiting);

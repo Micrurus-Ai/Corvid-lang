@@ -49,6 +49,13 @@ pub enum TraceEvent {
         /// sidecar — the trace is self-describing.
         #[serde(default)]
         source_path: Option<String>,
+        /// B06 — the IANA time zone database the recording binary was
+        /// built with, such as `2025b`. Zone rules change between
+        /// versions, so replay compares it with its own and warns at
+        /// each zone-dependent operation when they differ. `None` for
+        /// pre-schema-v3 traces, read as "unknown" rather than refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tzdb_version: Option<String>,
         ts_ms: u64,
         run_id: String,
     },
@@ -197,6 +204,45 @@ pub enum TraceEvent {
         run_id: String,
         name: String,
         payload: serde_json::Value,
+    },
+    /// One HTTP request the runtime sent: one hop of one attempt. A
+    /// retried call records each attempt, and a followed redirect each
+    /// hop, so the trace shows every host a call reached. Evidence only:
+    /// replay substitutes the enclosing tool call and never these.
+    ///
+    /// Nothing credential-shaped is recorded. Request and response
+    /// headers appear by name only, and the body by its SHA-256 and size.
+    HttpExchange {
+        ts_ms: u64,
+        run_id: String,
+        /// The connector that sent the request, when one did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connector: Option<String>,
+        /// The operation or tool the request belongs to.
+        operation: String,
+        /// 1 for the first attempt, 2 for the first retry, and so on.
+        attempt: u32,
+        /// 0 for the request as sent, 1 for the first redirect followed.
+        hop: u32,
+        method: String,
+        url: String,
+        request_headers: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_body_sha256: Option<String>,
+        request_body_bytes: u64,
+        /// The response status, absent when no response arrived.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<u16>,
+        response_headers: Vec<String>,
+        response_body_bytes: u64,
+        elapsed_ms: u64,
+        /// `response`, `redirected`, `timeout`, `refused` or
+        /// `transport_error`.
+        outcome: String,
+        /// Why the exchange did not complete, for every outcome but
+        /// `response` and `redirected`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
     /// A pseudo-random number read. Recorded per draw so replay
     /// can reproduce the exact sequence even when the seeded PRNG

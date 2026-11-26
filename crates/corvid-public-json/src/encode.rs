@@ -34,6 +34,17 @@ pub trait ValueReader {
     /// The inner value and the provenance entries of a `Grounded` value.
     fn grounded(&mut self, grounded: &Type, value: &Self::Value) -> Result<(Self::Value, Vec<J>), String>;
     fn json(&mut self, value: &Self::Value) -> Result<J, String>;
+    /// B06 — a `Decimal`, time or currency value of type `ty`.
+    fn text_scalar(&mut self, ty: &Type, value: &Self::Value) -> Result<crate::text_scalar::TextScalar, String>;
+    /// A `Secret`, which has no JSON form, so every reader refuses by
+    /// default and `to_json` can never write one. Only the native runtime
+    /// call's reader accepts one, for a tool argument: `<redacted>` in
+    /// the form every record of the call holds, the text in the form the
+    /// tool's implementation receives (native dispatch N3c).
+    fn secret(&mut self, value: &Self::Value) -> Result<J, String> {
+        let _ = value;
+        Err(no_json_form(&Type::Secret))
+    }
 }
 
 /// Encode `value`, of type `ty`, as public JSON.
@@ -117,20 +128,10 @@ impl<R: ValueReader> Encoder<'_, R> {
                 if decl.variants.is_empty() {
                     self.record(decl, value)?
                 } else {
-                    let (index, fields) = self.reader.variant(decl, value)?;
-                    let variant = decl
-                        .variants
-                        .get(index)
-                        .ok_or_else(|| format!("`{}` has no variant {index}", decl.name))?;
-                    let encoded = variant
-                        .fields
-                        .iter()
-                        .zip(&fields)
-                        .map(|(field, field_value)| self.encode(field_value, &field.ty))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    json!({ "tag": "variant", "type": decl.name, "variant": variant.name, "fields": encoded })
+                    self.sum(decl, value)?
                 }
             }
+            Type::Conflict(row, _) => self.sum(&crate::conflict_decl(row), value)?,
             Type::JsonError => self.record(&crate::json_error_decl(), value)?,
             // The cursor-pagination envelope `{items, next_cursor, has_more}`.
             Type::Page(item) => {
@@ -153,8 +154,23 @@ impl<R: ValueReader> Encoder<'_, R> {
                 json!({ "value": self.encode(&payload, inner)?, "sources": sources })
             }
             Type::JsonValue => self.reader.json(value)?,
+            Type::Secret => self.reader.secret(value)?,
+            // B06 — exact text, printed by the type's own crate.
+            ty if crate::text_scalar::name(ty).is_some() => J::String(self.reader.text_scalar(ty, value)?.to_text()),
             other => return Err(no_json_form(other)),
         })
+    }
+
+    fn sum(&mut self, decl: &IrType, value: &R::Value) -> Result<J, String> {
+        let (index, fields) = self.reader.variant(decl, value)?;
+        let variant = decl.variants.get(index).ok_or_else(|| format!("`{}` has no variant {index}", decl.name))?;
+        let encoded = variant
+            .fields
+            .iter()
+            .zip(&fields)
+            .map(|(field, field_value)| self.encode(field_value, &field.ty))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(json!({ "tag": "variant", "type": decl.name, "variant": variant.name, "fields": encoded }))
     }
 
     fn record(&mut self, decl: &IrType, value: &R::Value) -> Result<J, String> {

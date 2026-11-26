@@ -24,13 +24,15 @@ things, states which in its file header, and appears in this table:
 | `std/env` | **Executing** | `env_get` returns a typed optional process variable through `secret_read`. |
 | `std/path` | **Executing** | `path_join`, `path_parent`, `path_filename`, `path_extension`, and `path_is_absolute` use host filesystem conventions. |
 | `std/io` | **Executing** | `io_read_text` / `io_write_text` / `io_list_dir` over `[io] root` confinement |
-| `std/http` | **Executing** | `http_get` / `http_post_json` over SSRF block + `[http] allow` |
+| `std/http` | Envelopes | Request and response envelope types and builders, and the built-in network effects; requests are made through [connectors](http.md) over the SSRF block + `[http] allow` |
 | `std/db` | **Executing** (SQLite) | `db_open` / `db_query` / `db_execute`; Postgres path is contract-only |
 | `std/json` | **Executing** | `json_parse` family; typed decoding is `T.from_json` |
 | `std/mcp` | **Executing** | `mcp_call` over governed `[mcp]` servers |
 | `std/rag` | **Executing** | `rag_ingest` / `rag_search` over `[io] root` + optional `[rag]` embedder |
 | `std/time` | **Executing** | clock tools (traced + replay-substituted) |
 | `std/random` | **Executing** | randomness tools (traced + replay-substituted) |
+| `std/crypto` | **Executing** | `random_token` (a `Secret`, recorded as `<redacted>`, drawn afresh on replay with a warning) / `hash_password` (Argon2id at a declared cost, replay-substituted); `verify_password` is the builtin `Secret` method. See [Cryptography](../cryptography.md#random-tokens) |
+| `std/uuid` | **Executing** | `uuid_v4` / `uuid_v7` generation tools (traced + replay-substituted); parsing is the builtin `String.parse_uuid()` |
 | `std/agent` | Pure patterns | workflow envelope vocabulary; `assert judged` is the executing judge |
 | `std/ai` | Pure patterns | message/prompt vocabulary; `prompt` + `call_llm` are the executing surface |
 | `std/effects` | Pure vocabulary | the shared effect-metadata types every module imports |
@@ -76,13 +78,12 @@ trace helpers that carry effects, replay, cost, and provenance metadata.
 `std/http.cor` defines the executing HTTP-client surface added in Phase 33S2
 plus the request/response envelopes the surface returns.
 
-Executing tools:
+Requests are made through a `connector`; see [Making HTTP requests](http.md).
+The `http_get` and `http_post_json` tools were replaced by connectors in B05.
 
-- `http_get(url) -> Result<HttpResponseEnvelope, String> uses http_egress_get` — executing tool
-- `http_post_json(url, body) -> Result<HttpResponseEnvelope, String> uses http_egress_post` — executing tool
-
-Recoverable failures (policy refusals, transport errors) are Err values;
-an error HTTP status (4xx/5xx) is still Ok — inspect `status`.
+Built-in network effects: `http_egress_get` (reversible) and
+`http_egress_post` (not reversible), for connector operations that do
+not declare their own.
 
 Envelope-builder agents (pure; construct a request without executing it):
 

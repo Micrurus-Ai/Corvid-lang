@@ -55,10 +55,30 @@ pub fn compute_worst_case_cost(
     analyzer.analyze_agent(agent_name)
 }
 
+/// [`compute_worst_case_cost`] with the checker's type of every
+/// expression, so a bound can be read from a type: a query loop that
+/// ends with `take(search.limit)` runs at most as many times as
+/// `limit`'s `between` maximum, because every value of a refined field
+/// holds its refinement (B09).
+pub fn compute_worst_case_cost_with_types(
+    file: &corvid_ast::File,
+    resolved: &corvid_resolve::Resolved,
+    registry: &EffectRegistry,
+    agent_name: &str,
+    expr_types: &HashMap<corvid_ast::Span, crate::types::Type>,
+) -> Option<CostEstimate> {
+    let mut analyzer = CostAnalyzer::new(file, resolved, registry);
+    analyzer.expr_types = Some(expr_types);
+    analyzer.analyze_agent(agent_name)
+}
+
 struct CostAnalyzer<'a> {
     file: &'a corvid_ast::File,
     resolved: &'a corvid_resolve::Resolved,
     registry: &'a EffectRegistry,
+    /// The checker's type of each expression, when the analysis runs
+    /// after checking.
+    expr_types: Option<&'a HashMap<corvid_ast::Span, crate::types::Type>>,
     memo: HashMap<String, CostEstimate>,
     visiting: HashSet<String>,
 }
@@ -73,6 +93,7 @@ impl<'a> CostAnalyzer<'a> {
             file,
             resolved,
             registry,
+            expr_types: None,
             memo: HashMap::new(),
             visiting: HashSet::new(),
         }
@@ -225,6 +246,8 @@ impl<'a> CostAnalyzer<'a> {
             // construction: the body + condition feed the tree once
             // and the estimate is UNBOUNDED so `@budget` stays sound.
             // (`for` over a static range stays the bounded-loop tool.)
+            // An atomic block runs its body once; its cost is the body's.
+            corvid_ast::Stmt::Atomic { body, .. } => self.analyze_block(body, agent_name),
             corvid_ast::Stmt::While { cond, body, span } => {
                 let cond_est = self.analyze_expr(cond, agent_name);
                 let body_est = self.analyze_block(body, agent_name);
@@ -305,7 +328,7 @@ impl<'a> CostAnalyzer<'a> {
                 iter, body, span, ..
             } => {
                 let iter_est = self.analyze_expr(iter, agent_name);
-                if let Some(iterations) = static_loop_bound(iter) {
+                if let Some(iterations) = self.static_loop_bound(iter) {
                     let body_est = self.analyze_block(body, agent_name);
                     let loop_tree = scale_tree(body_est.tree.clone(), iterations, *span);
                     let sequence = sequence_tree(
@@ -352,6 +375,45 @@ impl<'a> CostAnalyzer<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// The most times a `for` loop over `expr` runs, when that is known
+    /// before it runs: the items of a list literal, or the count a table
+    /// query ends with (B09), which returns at most that many rows: a
+    /// literal (`take(10)`) or a refined field (`take(search.limit)` with
+    /// `limit: Int where between(1, 50)` gives 50).
+    fn static_loop_bound(&self, expr: &corvid_ast::Expr) -> Option<u64> {
+        match expr {
+            corvid_ast::Expr::List { items, .. } => Some(items.len() as u64),
+            corvid_ast::Expr::Call { callee, args, .. } => {
+                let query = crate::table_ops::table_query_call(callee, args, self.file, &self.resolved.symbols, &self.resolved.bindings)?;
+                match query.take? {
+                    corvid_ast::Expr::Literal { value: corvid_ast::Literal::Int(count), .. } => u64::try_from(*count).ok(),
+                    corvid_ast::Expr::FieldAccess { target, field, .. } => self.refined_maximum(target, &field.name),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The `between` maximum of `target.field`, read from the record
+    /// type the checker gave `target`. A negative maximum bounds the
+    /// rows at zero, since `take` of a negative count stops the run.
+    fn refined_maximum(&self, target: &corvid_ast::Expr, field: &str) -> Option<u64> {
+        let crate::types::Type::Struct(id) = self.expr_types?.get(&target.span())?.ungrounded() else {
+            return None;
+        };
+        let span = self.resolved.symbols.get(*id).span;
+        let fields = self.file.decls.iter().find_map(|decl| match decl {
+            corvid_ast::Decl::Type(t) if t.span == span => Some(t.fields.as_slice()),
+            corvid_ast::Decl::Table(table) if table.record.span == span => Some(table.record.fields.as_slice()),
+            _ => None,
+        })?;
+        match fields.iter().find(|f| f.name.name == field)?.refinement? {
+            corvid_ast::Refinement::Between { max, .. } => Some(u64::try_from(max).unwrap_or(0)),
+            corvid_ast::Refinement::LenBetween { .. } => None,
         }
     }
 
@@ -876,12 +938,6 @@ fn collect_warnings(chunks: &[Vec<CostWarning>]) -> Vec<CostWarning> {
     warnings
 }
 
-fn static_loop_bound(expr: &corvid_ast::Expr) -> Option<u64> {
-    match expr {
-        corvid_ast::Expr::List { items, .. } => Some(items.len() as u64),
-        _ => None,
-    }
-}
 
 fn effect_node_for_decl(
     name: &str,

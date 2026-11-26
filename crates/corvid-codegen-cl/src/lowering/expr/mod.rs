@@ -3,9 +3,12 @@ use super::*;
 mod callback;
 mod binop;
 mod constructors;
+mod decimal;
 mod match_value;
 mod operand;
 mod overflow;
+mod refinement;
+mod scalar_call;
 mod try_propagate;
 mod try_retry;
 mod wrappers;
@@ -21,6 +24,7 @@ pub(super) use operand::{
     lower_string_operand_maybe_borrowed,
 };
 pub(super) use overflow::{trap_if, with_overflow_trap};
+pub(super) use refinement::hold_refinement;
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 use wrappers::tool_wrapper_symbol;
@@ -136,6 +140,10 @@ pub(super) fn lower_expr(
             "Page<Item> responses are interpreter-only in 52c-2 (served via corvid serve)",
             expr.span,
         )),
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => Err(CodegenError::not_supported(
+            "table operations run on the interpreter until native tables land (B09 P6); use `corvid run --tier interp`",
+            expr.span,
+        )),
         IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
             let capacity = builder.ins().iconst(I64, keys.len() as i64);
             let new = module.declare_func_in_func(runtime.map_new, builder.func);
@@ -150,6 +158,20 @@ pub(super) fn lower_expr(
                 builder.ins().call(set, &[map, key, value]);
             }
             Ok(map)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_scalar_to_string(*kind) => {
+            let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let (func, input) = match kind {
+                corvid_types::BuiltinMethodKind::FloatToString => (runtime.float_to_string, input),
+                corvid_types::BuiltinMethodKind::BoolToString => {
+                    let widened = if builder.func.dfg.value_type(input) == I8 { builder.ins().uextend(I64, input) } else { input };
+                    (runtime.bool_to_string, widened)
+                }
+                _ => (runtime.int_to_string, input),
+            };
+            let call = module.declare_func_in_func(func, builder.func);
+            let call = builder.ins().call(call, &[input]);
+            Ok(builder.inst_results(call)[0])
         }
         IrExprKind::BuiltinMethod { kind, receiver, .. } if crate::native_numeric_conversion(*kind) => {
             let input = lower_expr(builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
@@ -261,7 +283,158 @@ pub(super) fn lower_expr(
             }
             Ok(output)
         }
-        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::native_string_method(*kind) => {
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_time_method(*kind) => {
+            let method = crate::time_methods::native_time_method(*kind).expect("checked by the guard");
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.time_operations.get(&operation).copied(),
+                crate::time_methods::TimeOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_currency_method(*kind) => {
+            let method = crate::currency_methods::native_currency_method(*kind).expect("checked by the guard");
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.currency_operations.get(&operation).copied(),
+                crate::currency_methods::CurrencyOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        // Native dispatch N4 — a `Response` is a record (see
+        // `response_record`): `status()` and `body()` are field reads,
+        // lowered as one so they own and release exactly as a field
+        // read does, and `header(name)` asks the runtime.
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::ResponseStatus | corvid_types::BuiltinMethodKind::ResponseBody),
+            receiver,
+            ..
+        } => {
+            let field = if *kind == corvid_types::BuiltinMethodKind::ResponseStatus { "status" } else { "body" };
+            let read = IrExpr {
+                kind: IrExprKind::FieldAccess { target: receiver.clone(), field: field.to_string() },
+                ty: expr.ty.clone(),
+                span: expr.span,
+            };
+            lower_expr(builder, &read, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)
+        }
+        IrExprKind::BuiltinMethod { kind: corvid_types::BuiltinMethodKind::ResponseHeader, receiver, args } => {
+            let (offset, _) = record_field(runtime, &receiver.ty, "headers", expr.span)?;
+            let (record, record_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let headers = builder.ins().load(I64, MemFlags::trusted(), record, offset);
+            let (name, name_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let lookup = module.declare_func_in_func(runtime.response_header, builder.func);
+            let call = builder.ins().call(lookup, &[headers, name]);
+            let found = builder.inst_results(call)[0];
+            if !name_borrowed {
+                emit_release(builder, module, runtime, name);
+            }
+            if !record_borrowed {
+                emit_release(builder, module, runtime, record);
+            }
+            Ok(found)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_bytes_method(*kind) => {
+            // An HMAC keyed by a `Secret` calls the entry point that opens
+            // the runtime's secret object (N3b).
+            let keyed_by_secret = args.iter().any(|arg| matches!(crate::text_scalar::scalar_of(&arg.ty), Type::Secret));
+            let method = match crate::bytes_methods::native_bytes_method(*kind).expect("checked by the guard") {
+                crate::text_scalar::NativeScalarMethod::Call(operation) if keyed_by_secret => {
+                    crate::text_scalar::NativeScalarMethod::Call(operation.keyed_by_secret())
+                }
+                other => other,
+            };
+            scalar_call::lower_scalar_method(
+                builder, expr, method,
+                |operation| runtime.bytes_operations.get(&operation).copied(),
+                crate::bytes_methods::BytesOperation::is_parse,
+                receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args } if crate::is_native_decimal_method(*kind) => {
+            let method = crate::decimal_methods::native_decimal_method(*kind).expect("checked by the guard");
+            decimal::lower_decimal_method(
+                builder, expr, method, receiver, args, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        // `find_regex` and `find_all_regex`: the runtime runs the match and
+        // builds the `Option<RegexMatch>` or `List<RegexMatch>` from the
+        // decode plan of the result type (`RegexMatch` is a record here,
+        // see `regex_match_record`).
+        IrExprKind::BuiltinMethod {
+            kind: kind @ (corvid_types::BuiltinMethodKind::StringFindRegex | corvid_types::BuiltinMethodKind::StringFindAllRegex),
+            receiver,
+            args,
+        } => {
+            let (text, text_borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let (pattern, pattern_borrowed) = lower_container_maybe_borrowed(
+                builder, &args[0], current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let method = runtime
+                .text_methods
+                .iter()
+                .find(|(declared, _)| declared == kind)
+                .map(|(_, id)| *id)
+                .ok_or_else(|| CodegenError::cranelift(format!("text method {kind:?} was not declared"), expr.span))?;
+            let (plan, plan_len, table) = super::public_json::json_plan(module, runtime, &expr.ty, expr.span)?;
+            let plan = module.declare_data_in_func(plan, builder.func);
+            let plan = builder.ins().symbol_value(I64, plan);
+            let plan_len = builder.ins().iconst(I64, plan_len);
+            let table = module.declare_data_in_func(table, builder.func);
+            let table = builder.ins().symbol_value(I64, table);
+            let func = module.declare_func_in_func(method, builder.func);
+            let call = builder.ins().call(func, &[text, pattern, plan, plan_len, table]);
+            let value = builder.inst_results(call)[0];
+            if !pattern_borrowed {
+                emit_release(builder, module, runtime, pattern);
+            }
+            if !text_borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(value)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, .. }
+            if crate::native_text_method(*kind) && !crate::text_methods::native_regex_method(*kind) => {
+            // B03 encoders and decoders: one runtime call into
+            // `corvid-text`. A decoder fills a `Result<String, String>`
+            // the way `parse_int` fills its Result.
+            let (text, borrowed) = lower_container_maybe_borrowed(
+                builder, receiver, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )?;
+            let method = runtime
+                .text_methods
+                .iter()
+                .find(|(declared, _)| declared == kind)
+                .map(|(_, id)| *id)
+                .ok_or_else(|| CodegenError::cranelift(format!("text method {kind:?} was not declared"), expr.span))?;
+            let func = module.declare_func_in_func(method, builder.func);
+            let value = if kind.is_text_decoder() {
+                let placeholder = builder.ins().iconst(I64, 0);
+                let result = emit_result_wrapper_value(
+                    builder, module, runtime, &expr.ty, placeholder, &Type::String, RESULT_TAG_OK, expr.span,
+                )?;
+                let slot = builder.ins().iadd_imm(result, i64::from(RESULT_PAYLOAD_OFFSET));
+                let call = builder.ins().call(func, &[text, slot]);
+                let tag = builder.inst_results(call)[0];
+                builder.ins().store(MemFlags::trusted(), tag, result, RESULT_TAG_OFFSET);
+                result
+            } else {
+                let call = builder.ins().call(func, &[text]);
+                builder.inst_results(call)[0]
+            };
+            if !borrowed {
+                emit_release(builder, module, runtime, text);
+            }
+            Ok(value)
+        }
+        IrExprKind::BuiltinMethod { kind, receiver, args }
+            if crate::native_string_method(*kind) || crate::text_methods::native_regex_method(*kind) => {
             use corvid_types::BuiltinMethodKind::*;
             let outer_temporaries = runtime.return_temporaries.borrow().len();
             let (text, borrowed) = lower_container_maybe_borrowed(
@@ -280,11 +453,18 @@ pub(super) fn lower_expr(
                 }
                 operands.push(value);
             }
-            if *kind == StringSplit {
+            let splits = matches!(kind, StringSplit | StringSplitRegex);
+            if splits {
                 let capacity = builder.ins().iconst(I64, 0);
                 operands.push(allocate_slots(builder, module, runtime, &Type::String, capacity, expr.span)?);
             }
+            // B03 regex methods share this argument handling; their
+            // runtime entry points come from the text-method table.
+            let regex_method = runtime.text_methods.iter().find(|(declared, _)| declared == kind).map(|(_, id)| *id);
             let method = match kind {
+                _ if crate::text_methods::native_regex_method(*kind) => regex_method.ok_or_else(|| {
+                    CodegenError::cranelift(format!("regex method {kind:?} was not declared"), expr.span)
+                })?,
                 StringLength => runtime.string_char_len,
                 StringSubstring => runtime.string_substring,
                 StringToUpper => runtime.string_to_upper,
@@ -303,7 +483,7 @@ pub(super) fn lower_expr(
             for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
                 emit_release(builder, module, runtime, value);
             }
-            if *kind == StringSplit {
+            if splits {
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(2));
             }
             Ok(result)
@@ -412,6 +592,22 @@ pub(super) fn lower_expr(
             Ok(builder.ins().iconst(I8, if *b { 1 } else { 0 }))
         }
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
+        // B06 — a native zone, currency or locale is its canonical
+        // text: the IANA name, the ISO 4217 code, the BCP 47 tag.
+        IrExprKind::Literal(IrLiteral::TimeZone(zone)) => {
+            lower_string_literal(builder, module, runtime, &zone.to_string(), expr.span)
+        }
+        IrExprKind::Literal(IrLiteral::Currency(currency)) => {
+            lower_string_literal(builder, module, runtime, &currency.to_string(), expr.span)
+        }
+        IrExprKind::Literal(IrLiteral::Locale(locale)) => {
+            lower_string_literal(builder, module, runtime, &locale.to_string(), expr.span)
+        }
+        // B06 — a native `Decimal` is its canonical text, the digits the
+        // literal was written with (`2.50`).
+        IrExprKind::Literal(IrLiteral::Decimal(d)) => {
+            lower_string_literal(builder, module, runtime, &d.to_string(), expr.span)
+        }
         IrExprKind::Literal(IrLiteral::String(s)) => {
             lower_string_literal(builder, module, runtime, s, expr.span)
         }
@@ -474,6 +670,34 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // Native dispatch N3 — `==` and `!=` on secrets are the runtime's
+        // constant-time comparison; the checker refuses every other
+        // operator on a secret.
+        IrExprKind::BinOp { op, left, right }
+            if matches!(op, BinaryOp::Eq | BinaryOp::NotEq)
+                && matches!(crate::text_scalar::scalar_of(&left.ty), Type::Secret) =>
+        {
+            scalar_call::lower_scalar_binop(
+                builder,
+                runtime.secret_eq,
+                crate::text_scalar::ScalarBinary { operation: (), swapped: false, reading: crate::text_scalar::BinaryReading::Equality },
+                *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        // B06, B04 — time, currency, locale and `Bytes` operators are
+        // runtime calls; `@wrapping` does not apply to them, and `==` on
+        // `Bytes` is the runtime's constant-time comparison.
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::time_methods::has_time_operand(&left.ty, &right.ty)
+                || crate::currency_methods::has_currency_operand(&left.ty, &right.ty)
+                || crate::bytes_methods::has_bytes_operand(&left.ty, &right.ty) => scalar_call::lower_text_scalar_binop(
+                builder, *op, left, right, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            ),
+        // B06 — `@wrapping` does not apply to decimals; both forms are checked.
+        IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
+            if crate::decimal_methods::is_decimal_binary(*op, &left.ty, &right.ty) => decimal::lower_decimal_binop(
+                builder, *op, left, right, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            ),
         IrExprKind::BinOp { op, left, right } | IrExprKind::WrappingBinOp { op, left, right }
             if uses_structural_equality(*op, &left.ty) => super::equality::lower_comparison(
                 builder, *op, left, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime, expr.span,
@@ -539,6 +763,20 @@ pub(super) fn lower_expr(
             let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             lower_binop_wrapping(builder, *op, l, r, expr.span)
+        }
+        IrExprKind::UnOp { op: UnaryOp::Neg, operand } | IrExprKind::WrappingUnOp { op: UnaryOp::Neg, operand }
+            if *crate::text_scalar::scalar_of(&operand.ty) == Type::Duration => {
+            let func = *runtime.time_operations.get(&crate::time_methods::TimeOperation::DurationNegate).ok_or_else(|| {
+                CodegenError::cranelift("Duration negation was not declared", expr.span)
+            })?;
+            scalar_call::lower_scalar_negate(
+                builder, func, operand, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
+        }
+        IrExprKind::UnOp { op, operand } | IrExprKind::WrappingUnOp { op, operand } if operand.ty == Type::Decimal => {
+            decimal::lower_decimal_unop(
+                builder, *op, operand, expr.span, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+            )
         }
         IrExprKind::UnOp { op, operand } => {
             let v = lower_expr(builder, operand, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
@@ -705,6 +943,25 @@ pub(super) fn lower_expr(
                             "tool `{callee_name}` declared with {} param(s) but called with {}",
                             tool.params.len(),
                             args.len()
+                        ),
+                        expr.span,
+                    ));
+                }
+                // A connector operation is a runtime-owned call: the
+                // runtime sends it, records it and replays it.
+                if runtime.runtime_call_ops.contains(def_id) {
+                    return super::runtime_call::lower_runtime_call(
+                        builder, &tool, args, expr, current_return_ty, env, scope_stack,
+                        func_ids_by_def, module, runtime,
+                    );
+                }
+                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
+                if let Some(held) = tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
+                    .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
+                    return Err(CodegenError::not_supported(
+                        format!(
+                            "tool `{callee_name}`: {}",
+                            crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
                         ),
                         expr.span,
                     ));
@@ -1092,6 +1349,19 @@ pub(super) fn lower_expr(
                 }
             }
             IrCallKind::Prompt { def_id, .. } => {
+                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
+                if let Some(prompt) = runtime.ir_prompts.get(def_id) {
+                    if let Some(held) = prompt.params.iter().map(|p| &p.ty).chain(std::iter::once(&prompt.return_ty))
+                        .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
+                        return Err(CodegenError::not_supported(
+                            format!(
+                                "prompt `{callee_name}`: {}",
+                                crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
+                            ),
+                            expr.span,
+                        ));
+                    }
+                }
                 lower_prompt_call(
                     builder,
                     module,
@@ -1110,16 +1380,18 @@ pub(super) fn lower_expr(
             IrCallKind::StructConstructor { def_id } | IrCallKind::EnumConstructor { def_id, .. } => {
                 let ty = runtime.ir_types.get(def_id).ok_or_else(||
                     CodegenError::cranelift(format!("missing layout for `{callee_name}`"), expr.span))?;
-                let (fields, info, tag) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
+                // A refinement message names the record, or the variant as the
+                // interpreter does.
+                let (fields, info, tag, owner) = if let IrCallKind::EnumConstructor { variant_index, .. } = kind {
                     let variant = ty.variants.get(*variant_index as usize).ok_or_else(||
                         CodegenError::cranelift("unknown constructor tag", expr.span))?;
-                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index))
+                    (&variant.fields, runtime.variant_typeinfos.get(&(*def_id, *variant_index)), Some(*variant_index), variant.name.as_str())
                 } else {
-                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None)
+                    (&ty.fields, runtime.struct_typeinfos.get(def_id), None, ty.name.as_str())
                 };
                 let info = info.ok_or_else(|| CodegenError::cranelift("missing constructor typeinfo", expr.span))?;
                 lower_struct_constructor(
-                    builder, module, runtime, fields, *info, tag,
+                    builder, module, runtime, owner, fields, *info, tag,
                     args,
                     current_return_ty,
                     env,

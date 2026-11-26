@@ -34,6 +34,8 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
         IrStmt::While { cond, body, .. } => expr_uses_runtime(cond) || block_uses_runtime(body),
         IrStmt::Destructure { value, .. } => expr_uses_runtime(value),
         IrStmt::Parallel { .. } => true,
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        IrStmt::Atomic { .. } => true,
         IrStmt::Approve { .. } => true,
         IrStmt::Expr { expr, .. } => expr_uses_runtime(expr),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => false,
@@ -64,6 +66,7 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
         IrExprKind::PageNew { items, next_cursor } => {
             expr_uses_runtime(items) || expr_uses_runtime(next_cursor)
         }
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => true,
         IrExprKind::BuiltinMethod { receiver, args, .. } => {
             expr_uses_runtime(receiver) || args.iter().any(expr_uses_runtime)
         }
@@ -143,6 +146,7 @@ pub(super) fn emit_entry_main(
     // keeps compiled binaries as small + fast-starting as they were in
     // startup benchmark baseline.
     uses_runtime: bool,
+    connector_specs: Option<&str>,
 ) -> Result<(), CodegenError> {
     // I32 is imported at file scope since runtime setup needs it in
     // `declare_runtime_funcs` too.
@@ -195,6 +199,11 @@ pub(super) fn emit_entry_main(
         // exit. Shutdown runs BEFORE the leak-counter atexit (atexit
         // is LIFO), so any refcount activity from the runtime settles
         // before the counter prints ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â that's the intended ordering.
+        if let Some(specs) = connector_specs {
+            let text = super::prompt::emit_string_const(&mut builder, module, runtime, specs, entry_agent.span)?;
+            let register_ref = module.declare_func_in_func(runtime.register_connectors, builder.func);
+            builder.ins().call(register_ref, &[text]);
+        }
         if uses_runtime {
             let rt_init_ref = module.declare_func_in_func(runtime.runtime_init, builder.func);
             builder.ins().call(rt_init_ref, &[]);
@@ -386,7 +395,10 @@ pub(super) fn emit_entry_main(
                     Type::Int => Some(runtime.trace_run_completed_int),
                     Type::Bool => Some(runtime.trace_run_completed_bool),
                     Type::Float => Some(runtime.trace_run_completed_float),
-                    Type::String => Some(runtime.trace_run_completed_string),
+                    // B06, B04 — a `Decimal`, time, currency, locale or
+                    // `Bytes` value is traced as its canonical text, the
+                    // JSON string the interpreter records.
+                    Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Some(runtime.trace_run_completed_string),
                     Type::Grounded(inner) => match &**inner {
                         Type::Int => Some(runtime.trace_run_completed_int),
                         Type::Bool => Some(runtime.trace_run_completed_bool),
@@ -483,6 +495,58 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str) -> Result<(), Co
             ),
             span,
         )),
+        Type::RegexMatch => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `RegexMatch` - a match has no native command-line representation; return its `text` or positions instead, or use the interpreter tier (`corvid run --tier interp`)."
+            ),
+            span,
+        )),
+        Type::Secret => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `Secret` - the command line prints a result and passes arguments as text, so a secret can neither enter nor leave through it; read one with `secret(name)` inside the program"
+            ),
+            span,
+        )),
+        // B06 — a returned `Decimal`, time, currency or locale value
+        // prints its canonical text, as the interpreter prints it. B04 —
+        // a returned `Bytes` prints `Bytes(<hex>)`, as the interpreter
+        // prints it.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes
+            if role == "return" => Ok(()),
+        // Neither tier reads these types from the command line.
+        Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
+            let read = match ty {
+                Type::Decimal => "call `parse_decimal()` on it",
+                Type::Duration => "call `parse_duration()` on it",
+                Type::Instant => "call `parse_instant()` on it",
+                Type::TimeZone => "call `parse_time_zone()` on it",
+                Type::ZonedTime => "call `parse_zoned_time()` on it",
+                Type::Currency => "call `parse_currency()` on it",
+                Type::Bytes => "decode it with `Bytes.from_hex(text)` or `Bytes.from_base64_url(text)`",
+                _ => "call `parse_locale()` on it",
+            };
+            Err(CodegenError::not_supported(
+                format!(
+                    "entry agent {role} of type `{}` - `corvid run` passes `Int`, `Float`, `Bool` and `String` arguments; take a `String` and {read}",
+                    ty.display_name()
+                ),
+                span,
+            ))
+        }
+        Type::Conflict(_, _) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - a table write's conflict runs on the interpreter until tables compile natively (B09 P6)",
+                ty.display_name()
+            ),
+            span,
+        )),
+        Type::Response(_) => Err(CodegenError::not_supported(
+            format!(
+                "entry agent {role} of type `{}` - a connector response never crosses the command-line boundary; return its `body()` or `status()`",
+                ty.display_name()
+            ),
+            span,
+        )),
         Type::Upload(_) | Type::Page(_) => Err(CodegenError::not_supported(
             format!(
                 "entry agent {role} of type `{}` - uploads and pagination are HTTP-boundary types served by `corvid serve`, not the native command-line boundary; the application contract describes the surface. Use the interpreter/serve tier.",
@@ -519,10 +583,27 @@ fn emit_entry_result_print(
             let r = module.declare_func_in_func(runtime.print_f64, builder.func);
             builder.ins().call(r, &[result_val]);
         }
-        Type::String => {
+        // B06 — a native `Decimal`, time, currency or locale value is
+        // its canonical text.
+        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale => {
             builder.declare_value_needs_stack_map(result_val);
             let r = module.declare_func_in_func(runtime.print_string, builder.func);
             builder.ins().call(r, &[result_val]);
+            emit_release(builder, module, runtime, result_val);
+        }
+        // B04 — `Bytes(<hex>)`, the interpreter's printed form, written
+        // by the runtime from the same `Debug` form.
+        Type::Bytes => {
+            let display = runtime.bytes_operations.get(&crate::bytes_methods::BytesOperation::Display).copied().ok_or_else(|| {
+                CodegenError::cranelift("the `Bytes` display operation was not declared", span)
+            })?;
+            let display = module.declare_func_in_func(display, builder.func);
+            let call = builder.ins().call(display, &[result_val]);
+            let text = builder.inst_results(call)[0];
+            builder.declare_value_needs_stack_map(text);
+            let r = module.declare_func_in_func(runtime.print_string, builder.func);
+            builder.ins().call(r, &[text]);
+            emit_release(builder, module, runtime, text);
             emit_release(builder, module, runtime, result_val);
         }
         Type::Struct(def_id) => {

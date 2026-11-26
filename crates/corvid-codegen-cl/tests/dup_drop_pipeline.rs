@@ -87,6 +87,12 @@ fn parse_counts(stderr: &str) -> Counts {
 ///   - allocs == releases (no leak, no double-free)
 #[track_caller]
 fn compile_run(src: &str, flag: &str) -> Counts {
+    compile_run_with_output(src, flag).0
+}
+
+/// [`compile_run`], also returning what the program printed.
+#[track_caller]
+fn compile_run_with_output(src: &str, flag: &str) -> (Counts, String) {
     let ir = {
         // Set the flag AROUND the codegen call. We can't thread it via
         // API (it lives in `lower_file` as std::env::var) so the test
@@ -125,7 +131,7 @@ fn compile_run(src: &str, flag: &str) -> Counts {
         c.allocs, c.releases,
         "leak under CORVID_DUP_DROP_PASS={flag}: {c:?}"
     );
-    c
+    (c, String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Primitive-only program — no refcounted values. Pass should be a
@@ -190,4 +196,32 @@ agent main() -> Int:
     let c1 = compile_run(src, "0");
     let c2 = compile_run(src, "0");
     assert_eq!(c1, c2, "flag=0 must be deterministic");
+}
+
+/// A loop that rebinds a refcounted local to a value built from its old
+/// value keeps every update in both modes. The legacy path once released
+/// the old value before building the new one, so the new value read
+/// freed memory; it showed once that memory was reused, as here, where
+/// the later reads of `subtotal` printed `3.30` instead of `16.05`.
+#[test]
+fn a_loop_rebinding_a_value_from_itself_keeps_every_update() {
+    let src = r#"
+type Line:
+    name: String
+    price: Decimal
+    quantity: Int
+
+agent main() -> String:
+    lines = [Line("Coffee", 4.50, 2), Line("Bagel", 2.25, 3), Line("Napkin", 0.10, 3)]
+    subtotal: Decimal = 0
+    for line in lines:
+        subtotal = subtotal + line.price * line.quantity
+    tax = (subtotal * 0.0825).round_half_even(2)
+    share = (subtotal / 3).round_half_even(2)
+    return subtotal.to_string() + " + " + tax.to_string() + " tax, " + share.to_string() + " each"
+"#;
+    for flag in ["0", "1"] {
+        let (_, stdout) = compile_run_with_output(src, flag);
+        assert_eq!(stdout.trim(), "16.05 + 1.32 tax, 5.35 each", "CORVID_DUP_DROP_PASS={flag}");
+    }
 }

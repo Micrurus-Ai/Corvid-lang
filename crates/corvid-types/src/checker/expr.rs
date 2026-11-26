@@ -24,18 +24,40 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_expr_as(&mut self, e: &Expr, expected: Option<&Type>) -> Type {
         let ty = match e {
+            // B06 — a number literal where a `Decimal` is meant is one.
+            Expr::Literal { value: value @ (Literal::Int(_) | Literal::Float { .. }), span }
+                if matches!(expected, Some(Type::Decimal)) =>
+            {
+                self.check_decimal_literal(value, *span)
+            }
+            // B06 — likewise for a `Currency` and a `Locale`.
+            Expr::Literal { value: Literal::String(code), span } if matches!(expected, Some(Type::Currency)) => {
+                self.check_currency_literal(code, *span)
+            }
+            Expr::Literal { value: Literal::String(tag), span } if matches!(expected, Some(Type::Locale)) => {
+                self.check_locale_literal(tag, *span)
+            }
+            // B06 — a string literal where a `TimeZone` is meant is one.
+            Expr::Literal { value: Literal::String(name), span } if matches!(expected, Some(Type::TimeZone)) => {
+                self.check_time_zone_literal(name, *span)
+            }
             Expr::Literal { value, .. } => match value {
                 Literal::Int(_) => Type::Int,
-                Literal::Float(_) => Type::Float,
+                Literal::Float { value: _, .. } => Type::Float,
                 Literal::String(_) => Type::String,
                 Literal::Bool(_) => Type::Bool,
                 Literal::Nothing => Type::Nothing,
             },
             Expr::Ident { name, .. } => {
                 let ty = self.type_of_ident(name);
-                match (&ty, expected) {
-                    (Type::Option(inner), Some(expected @ Type::Option(_)))
-                        if **inner == Type::Unknown && matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::None))) => expected.clone(),
+                // A bare `None` or `Deleted` takes its payload type from
+                // where it goes.
+                match (&ty, expected, self.bindings.get(&name.span)) {
+                    (Type::Option(inner), Some(expected @ Type::Option(_)), Some(Binding::BuiltIn(BuiltIn::None)))
+                        if **inner == Type::Unknown => expected.clone(),
+                    (Type::Conflict(..), Some(Type::Conflict(row, _)), Some(Binding::BuiltIn(BuiltIn::Deleted))) => {
+                        Type::Conflict(row.clone(), crate::types::ConflictCases::ALL)
+                    }
                     _ => ty,
                 }
             }
@@ -105,8 +127,8 @@ impl<'a> Checker<'a> {
                 left,
                 right,
                 span,
-            } => self.check_binop(*op, left, right, *span),
-            Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand),
+            } => self.check_binop(*op, left, right, *span, expected),
+            Expr::UnOp { op, operand, .. } => self.check_unop(*op, operand, expected),
             Expr::Match {
                 scrutinee,
                 arms,
@@ -261,6 +283,15 @@ impl<'a> Checker<'a> {
             Binding::BuiltIn(b) => match b {
                 BuiltIn::Int
                 | BuiltIn::Float
+                | BuiltIn::Decimal
+                | BuiltIn::Duration
+                | BuiltIn::Instant
+                | BuiltIn::TimeZone
+                | BuiltIn::ZonedTime
+                | BuiltIn::Currency
+                | BuiltIn::Locale
+                | BuiltIn::Bytes
+                | BuiltIn::Secret
                 | BuiltIn::String
                 | BuiltIn::Bool
                 | BuiltIn::Nothing
@@ -288,7 +319,14 @@ impl<'a> Checker<'a> {
                 // names; naming one in value position is a TypeAsValue
                 // error like the other type constructors.
                 | BuiltIn::Upload
-                | BuiltIn::Page => {
+                | BuiltIn::Page
+                // B05 — a `Response` comes only from a connector call.
+                | BuiltIn::Response
+                | BuiltIn::Conflict
+                // B03 — a `RegexMatch` comes only from the regex methods.
+                | BuiltIn::RegexMatch
+                // B01 — a `JsonError` comes only from `from_json`.
+                | BuiltIn::JsonError => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -306,11 +344,15 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Resume
                 | BuiltIn::StreamResumeToken
                 | BuiltIn::Ask
+                | BuiltIn::LiveArguments
+                | BuiltIn::LiveField
                 | BuiltIn::BrowserRowKey
                 | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor
                 | BuiltIn::Range
+                | BuiltIn::Changed
+                | BuiltIn::Taken
                 | BuiltIn::Choose => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::BareFunctionReference {
@@ -321,6 +363,7 @@ impl<'a> Checker<'a> {
                     Type::Unknown
                 }
                 BuiltIn::None => Type::Option(Box::new(Type::Unknown)),
+                BuiltIn::Deleted => Type::Conflict(Box::new(Type::Unknown), crate::types::ConflictCases::ALL),
             },
         }
     }
@@ -404,7 +447,8 @@ impl<'a> Checker<'a> {
             | DeclKind::Effect
             | DeclKind::Model
             | DeclKind::Server
-            | DeclKind::Identity => Type::Unknown,
+            | DeclKind::Identity
+            | DeclKind::Database => Type::Unknown,
         }
     }
 
@@ -478,13 +522,18 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Partial(inner) => self.check_partial_field(inner, field, span),
-            Type::JsonError => {
-                match crate::builtin_methods::json_error_fields().into_iter().find(|(name, _)| *name == field.name) {
+            Type::JsonError | Type::RegexMatch => {
+                let fields: Vec<(&str, Type)> = if matches!(target_ty, Type::JsonError) {
+                    crate::builtin_methods::json_error_fields().into()
+                } else {
+                    crate::builtin_methods::regex_match_fields().into()
+                };
+                match fields.into_iter().find(|(name, _)| *name == field.name) {
                     Some((_, ty)) => ty,
                     None => {
                         self.errors.push(TypeError::new(
                             TypeErrorKind::UnknownField {
-                                struct_name: "JsonError".into(),
+                                struct_name: target_ty.display_name(),
                                 field: field.name.clone(),
                             },
                             span,
@@ -775,6 +824,7 @@ fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) ->
                 "ResumeToken" => Type::ResumeToken(Box::new(inner)),
                 "Upload" => Type::Upload(Box::new(inner)),
                 "Page" => Type::Page(Box::new(inner)),
+                "Conflict" => Type::Conflict(Box::new(inner), crate::types::ConflictCases::ALL),
                 _ => Type::Unknown,
             }
         }

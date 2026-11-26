@@ -1,14 +1,12 @@
-//! Build-to-disk helpers — compile a Corvid source file and write
-//! the emitted artifact (Python or native binary) to `target/`.
-//!
-//! `corvid build <file>` and `corvid build --target native <file>`
-//! both route through here.
+//! Build-to-disk helpers: compile a Corvid source file and write the
+//! artifact (native binary, server, library or wasm) to `target/`.
+//! `corvid build <file>` builds natively by default.
 //!
 //! Extracted from `lib.rs` as part of Phase 20i responsibility
 //! decomposition (20i-audit-driver-d).
 
 use super::{
-    compile_to_ir_with_config_at_path, compile_with_config_at_path, load_corvid_config_for,
+    compile_to_ir_with_config_at_path, load_corvid_config_for,
     lower_driver_file, typecheck_driver_file, Diagnostic,
 };
 pub use corvid_codegen_cl::BuildTarget;
@@ -20,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 mod catalog_descriptor;
 mod claim_coverage;
+mod browser_imports;
 mod server_render;
 pub use catalog_descriptor::build_catalog_descriptor_for_source;
 use catalog_descriptor::emit_catalog_descriptor;
@@ -31,50 +30,9 @@ use server_render::{
 #[cfg(test)]
 mod tests;
 
-/// Compile `source_path` and write the generated Python to disk.
-///
-/// Layout convention:
-///   * If the source is inside a `src/` directory, output goes to a sibling
-///     `target/py/<stem>.py` relative to that `src/`.
-///   * Otherwise, output goes alongside the source in `./target/py/<stem>.py`.
-pub fn build_to_disk(source_path: &Path) -> anyhow::Result<BuildOutput> {
-    let source = std::fs::read_to_string(source_path)
-        .map_err(|e| anyhow::anyhow!("cannot read `{}`: {}", source_path.display(), e))?;
-
-    let config = load_corvid_config_for(source_path);
-    let result = compile_with_config_at_path(&source, source_path, config.as_ref());
-
-    if !result.ok() {
-        return Ok(BuildOutput {
-            source,
-            output_path: None,
-            diagnostics: result.diagnostics,
-        });
-    }
-
-    let out_path = output_path_for(source_path);
-    if let Some(parent) = out_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let py = result.python_source.expect("codegen produced no source");
-    std::fs::write(&out_path, &py)?;
-
-    Ok(BuildOutput {
-        source,
-        output_path: Some(out_path),
-        diagnostics: Vec::new(),
-    })
-}
-
-pub struct BuildOutput {
-    pub source: String,
-    pub output_path: Option<PathBuf>,
-    pub diagnostics: Vec<Diagnostic>,
-}
-
 /// Compile `source_path` to a native binary under `<project>/target/bin/`.
 ///
-/// Layout convention mirrors `build_to_disk`: if the source is inside a
+/// Layout convention: if the source is inside a
 /// `src/` directory, output goes to a sibling `target/bin/<stem>[.exe]`.
 /// Otherwise, output goes alongside the source in `./target/bin/`.
 pub fn build_native_to_disk(
@@ -111,6 +69,23 @@ fn build_native_entry(
                     .collect();
                 ir.agents
                     .retain(|agent| !handlers.contains(&(agent.name.as_str(), agent.span)));
+            }
+            // What `corvid run --target native` refuses, a native build
+            // refuses too, by name and before compiling, never as a link
+            // error after it.
+            if let Err(reason) = crate::native_ability::native_ability_with_tools(&ir, !extra_tool_libs.is_empty()) {
+                return Ok(NativeBuildOutput {
+                    source,
+                    output_path: None,
+                    diagnostics: vec![Diagnostic {
+                        origin: None,
+                        span: corvid_ast::Span::new(0, 0),
+                        message: format!("`{}` cannot be built as native code yet: {reason}", source_path.display()),
+                        hint: Some(
+                            "run it with `corvid run`, serve it with `corvid serve`, or package it with `corvid build --target web`".into(),
+                        ),
+                    }],
+                });
             }
             let bin_dir = native_output_dir_for(source_path);
             let stem = source_path
@@ -335,11 +310,22 @@ pub fn build_target_to_disk(
 }
 
 pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput> {
+    build_wasm_with_component_locations(source_path, 0, &[])
+}
+
+/// Compile a staged browser entry, mapping its appended component handler lines
+/// back to the author's project-relative file, line and column.
+pub fn build_wasm_with_component_locations(
+    source_path: &Path,
+    first_component_line: usize,
+    component_locations: &[String],
+) -> anyhow::Result<WasmBuildOutput> {
     let source = std::fs::read_to_string(source_path)
         .map_err(|e| anyhow::anyhow!("cannot read `{}`: {}", source_path.display(), e))?;
 
     let config = load_corvid_config_for(source_path);
-    let parser = if source_path.canonicalize()?.ends_with("src/events.cor") {
+    let browser_events = source_path.canonicalize()?.ends_with("src/events.cor");
+    let parser = if browser_events {
         corvid_syntax::parser::parse_browser_exports
     } else {
         parse_file
@@ -355,6 +341,9 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
             diagnostics,
         }),
         Ok(frontend) => {
+            if browser_events {
+                browser_imports::check(&frontend, source_path)?;
+            }
             let out_dir = wasm_output_dir_for(source_path);
             let stem = source_path
                 .file_stem()
@@ -375,6 +364,11 @@ pub fn build_wasm_to_disk(source_path: &Path) -> anyhow::Result<WasmBuildOutput>
                 let before = text.get(..span.start)?;
                 let path = path.strip_prefix(project).unwrap_or_else(|_| Path::new(path.file_name().unwrap_or_default()));
                 let line = 1 + before.bytes().filter(|b| *b == b'\n').count();
+                if !imported.contains_key(&id) {
+                    if let Some(location) = line.checked_sub(first_component_line).and_then(|i| component_locations.get(i)) {
+                        return Some(location.clone());
+                    }
+                }
                 let column = 1 + before.rsplit('\n').next()?.chars().count();
                 Some(format!("{}:{line}:{column}", path.to_string_lossy().replace('\\', "/")))
             };
@@ -596,25 +590,5 @@ pub fn wasm_output_dir_for(source_path: &Path) -> PathBuf {
     }
     let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
     parent.join("target").join("wasm")
-}
-
-pub(super) fn output_path_for(source_path: &Path) -> PathBuf {
-    let stem = source_path.file_stem().unwrap_or_default();
-    let py_name = format!("{}.py", stem.to_string_lossy());
-
-    // Find the nearest enclosing `src` directory by walking up.
-    let mut ancestor: Option<&Path> = source_path.parent();
-    while let Some(dir) = ancestor {
-        if dir.file_name().map(|n| n == "src").unwrap_or(false) {
-            if let Some(project_root) = dir.parent() {
-                return project_root.join("target").join("py").join(py_name);
-            }
-        }
-        ancestor = dir.parent();
-    }
-
-    // Default: alongside the source, in a `target/py/` subdir.
-    let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
-    parent.join("target").join("py").join(py_name)
 }
 

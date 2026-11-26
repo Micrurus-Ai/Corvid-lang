@@ -127,6 +127,7 @@ fn empty_trace(path: &Path, writer: &str) {
                 writer: writer.to_string(),
                 commit_sha: None,
                 source_path: None,
+                tzdb_version: None,
                 ts_ms: 0,
                 run_id: "r-empty".into(),
             },
@@ -225,19 +226,18 @@ async fn replay_on_malformed_trace_returns_typed_error() {
     ));
 }
 
+/// A trace the native tier wrote is read by the interpreter's `replay`
+/// expression like its own (native dispatch N5).
 #[tokio::test]
-async fn replay_cross_tier_trace_is_rejected() {
+async fn replay_reads_a_trace_the_native_tier_wrote() {
     let temp = tempfile::tempdir().unwrap();
     let trace_path = temp.path().join("native.jsonl");
     empty_trace(&trace_path, WRITER_NATIVE);
     let runtime = replay_runtime(None);
-    let err = run_agent_with_trace(REPLAY_SRC, "replay_no_match", &trace_path, &runtime)
+    let value = run_agent_with_trace(REPLAY_SRC, "replay_no_match", &trace_path, &runtime)
         .await
-        .expect_err("cross-tier trace should fail");
-    assert!(matches!(
-        err.kind,
-        InterpErrorKind::Runtime(RuntimeError::CrossTierReplayUnsupported { .. })
-    ));
+        .expect("a native trace replays on the interpreter");
+    assert_eq!(value, Value::String(Arc::from("else")));
 }
 
 #[tokio::test]

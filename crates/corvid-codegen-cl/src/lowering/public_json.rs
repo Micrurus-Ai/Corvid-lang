@@ -20,17 +20,71 @@ use std::collections::{BTreeMap, HashSet};
 /// provenance to encode, and `JsonValue` has no native form.
 pub fn native_public_json_type(target: &Type, types: &[corvid_ir::IrType]) -> bool {
     let by_id: HashMap<DefId, &corvid_ir::IrType> = types.iter().map(|ty| (ty.id, ty)).collect();
-    decodable(target, &by_id, &mut HashSet::new())
+    Decodable { types: &by_id, secrets: false }.check(target, &mut HashSet::new())
 }
 
-fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut HashSet<DefId>) -> bool {
+/// Whether `target` has a native JSON form once `Secret` positions are
+/// allowed: the answer of a tool the runtime holds as a secret
+/// (`secret(name)`, `random_token(bytes)`), which only the runtime call's
+/// decoder builds, and a runtime call's arguments, which it writes as
+/// `<redacted>` or reveals to the tool (native dispatch N3).
+pub fn native_form_with_secrets(target: &Type, types: &[corvid_ir::IrType]) -> bool {
+    let by_id: HashMap<DefId, &corvid_ir::IrType> = types.iter().map(|ty| (ty.id, ty)).collect();
+    Decodable { types: &by_id, secrets: true }.check(target, &mut HashSet::new())
+}
+
+/// Whether native code can make `tool`'s runtime call: every parameter
+/// has a native JSON form and so does the result, where a tool whose
+/// result the runtime holds as a secret may return one. The code
+/// generator and the driver's tier picker both ask this.
+pub fn native_runtime_call_types(tool: &corvid_ir::IrTool, types: &[corvid_ir::IrType]) -> bool {
+    let result_is_native = if corvid_runtime::runtime::is_stdlib_secret_value_tool(&tool.name) {
+        native_form_with_secrets(&tool.return_ty, types)
+    } else {
+        native_public_json_type(&tool.return_ty, types)
+    };
+    // A parameter may hold a secret: the runtime call writes it as
+    // `<redacted>` in every record and reveals it only to the tool.
+    result_is_native && tool.params.iter().all(|p| native_form_with_secrets(&p.ty, types))
+}
+
+struct Decodable<'a, 'types> {
+    types: &'a HashMap<DefId, &'types corvid_ir::IrType>,
+    secrets: bool,
+}
+
+impl Decodable<'_, '_> {
+    fn check(&self, ty: &Type, seen: &mut HashSet<DefId>) -> bool {
+        decodable(ty, self, seen)
+    }
+}
+
+fn decodable(ty: &Type, rules: &Decodable<'_, '_>, seen: &mut HashSet<DefId>) -> bool {
+    let types = rules.types;
     match ty {
+        Type::Secret => rules.secrets,
+        // Native dispatch N4 — before the rewrite into its record, a
+        // `Response<Body>` decodes wherever its body does.
+        Type::Response(body) => decodable(body, rules, seen),
+        // B06 — a `Decimal`, time, currency or locale value travels as
+        // its canonical text.
         Type::Int | Type::Float | Type::String | Type::Bool => true,
-        Type::Tainted(inner) | Type::List(inner) => decodable(inner, types, seen),
-        Type::Option(inner) => is_native_option_type(ty) && decodable(inner, types, seen),
-        Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, types, seen),
+        // JSON `null`, which the decoder and the native builder already
+        // read; a `HEAD` request's `Response<Nothing>` has this body.
+        Type::Nothing => true,
+        ty if crate::text_scalar::is_text_scalar(ty) => true,
+        Type::Tainted(inner) | Type::List(inner) => decodable(inner, rules, seen),
+        Type::Option(inner) => is_native_option_type(ty) && decodable(inner, rules, seen),
+        Type::Map(_, value) => crate::native_string_map(ty) && decodable(value, rules, seen),
+        // The program question, so a `Result` holding a `Response`
+        // counts before `compile_to_object` rewrites the `Response` into
+        // its record (native dispatch N4); after the rewrite the two
+        // questions agree.
         Type::Result(ok, err) => {
-            is_native_result_type(ty) && decodable(ok, types, seen) && decodable(err, types, seen)
+            is_native_value_type_for(ok, NativeTypeQuestion::Program)
+                && is_native_value_type_for(err, NativeTypeQuestion::Program)
+                && decodable(ok, rules, seen)
+                && decodable(err, rules, seen)
         }
         // The driver checks programs before `JsonError` becomes a record
         // and this backend after, so the record is excluded here too:
@@ -44,7 +98,7 @@ fn decodable(ty: &Type, types: &HashMap<DefId, &corvid_ir::IrType>, seen: &mut H
             decl.fields
                 .iter()
                 .chain(decl.variants.iter().flat_map(|variant| &variant.fields))
-                .all(|field| decodable(&field.ty, types, seen))
+                .all(|field| decodable(&field.ty, rules, seen))
         }
         _ => false,
     }
@@ -129,8 +183,39 @@ pub(super) fn lower_json_encode(
     Ok(builder.inst_results(call)[0])
 }
 
+/// Lower one argument of a runtime call whose tool takes a secret: its
+/// recorded form (`<redacted>` at every secret position) or its revealed
+/// form, as public JSON text (native dispatch N3c).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn lower_tool_argument_encode(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    name: ClValue,
+    param_ty: &Type,
+    value: ClValue,
+    revealed: bool,
+    span: Span,
+) -> Result<ClValue, CodegenError> {
+    let slot = match builder.func.dfg.value_type(value) {
+        I8 => builder.ins().uextend(I64, value),
+        F64 => builder.ins().bitcast(I64, MemFlags::new(), value),
+        _ => value,
+    };
+    let (plan, plan_len, table) = json_plan(module, runtime, param_ty, span)?;
+    let plan = module.declare_data_in_func(plan, builder.func);
+    let plan = builder.ins().symbol_value(I64, plan);
+    let plan_len = builder.ins().iconst(I64, plan_len);
+    let table = module.declare_data_in_func(table, builder.func);
+    let table = builder.ins().symbol_value(I64, table);
+    let form = builder.ins().iconst(I64, i64::from(revealed));
+    let encode = module.declare_func_in_func(runtime.json_encode_tool_argument, builder.func);
+    let call = builder.ins().call(encode, &[name, slot, plan, plan_len, table, form]);
+    Ok(builder.inst_results(call)[0])
+}
+
 /// The embedded plan for `target`: its data, length and typeinfo table.
-fn json_plan(
+pub(super) fn json_plan(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
     target: &Type,

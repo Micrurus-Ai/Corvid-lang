@@ -131,6 +131,15 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
     match ty {
         Type::Int => named_type("Int", span),
         Type::Float => named_type("Float", span),
+        Type::Decimal => named_type("Decimal", span),
+        Type::Duration => named_type("Duration", span),
+        Type::Instant => named_type("Instant", span),
+        Type::TimeZone => named_type("TimeZone", span),
+        Type::ZonedTime => named_type("ZonedTime", span),
+        Type::Currency => named_type("Currency", span),
+        Type::Locale => named_type("Locale", span),
+        Type::Bytes => named_type("Bytes", span),
+        Type::Secret => named_type("Secret", span),
         Type::String => named_type("String", span),
         Type::Bool => named_type("Bool", span),
         Type::Nothing => named_type("Nothing", span),
@@ -155,6 +164,7 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
             span,
         ),
         Type::Option(inner) => generic_type("Option", vec![type_to_type_ref(inner, symbols)], span),
+        Type::Conflict(row, _) => generic_type("Conflict", vec![type_to_type_ref(row, symbols)], span),
         Type::Weak(inner, effects) => TypeRef::Weak {
             inner: Box::new(type_to_type_ref(inner, symbols)),
             effects: if effects.is_any() {
@@ -177,11 +187,13 @@ fn type_to_type_ref(ty: &Type, symbols: &SymbolTable) -> TypeRef {
             generic_type("Upload", vec![type_to_type_ref(inner, symbols)], span)
         }
         Type::Page(inner) => generic_type("Page", vec![type_to_type_ref(inner, symbols)], span),
+        Type::Response(inner) => generic_type("Response", vec![type_to_type_ref(inner, symbols)], span),
         Type::TraceId => named_type("TraceId", span),
         Type::DbHandle => named_type("DbHandle", span),
         Type::JsonValue => named_type("JsonValue", span),
         Type::JsonBuilder => named_type("JsonBuilder", span),
         Type::JsonError => named_type("JsonError", span),
+        Type::RegexMatch => named_type("RegexMatch", span),
         Type::Function { .. } | Type::RouteParams(_) | Type::Unknown => named_type("Nothing", span),
     }
 }

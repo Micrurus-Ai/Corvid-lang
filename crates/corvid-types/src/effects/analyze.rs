@@ -176,6 +176,9 @@ fn collect_stmt_capabilities(
             collect_expr_capabilities(iter, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
         }
+        corvid_ast::Stmt::Atomic { body, .. } => {
+            collect_body_capabilities(body, file, resolved, caps);
+        }
         corvid_ast::Stmt::While { cond, body, .. } => {
             collect_expr_capabilities(cond, file, resolved, caps);
             collect_body_capabilities(body, file, resolved, caps);
@@ -277,6 +280,9 @@ fn collect_stmt_effects(
             collect_expr_effects(iter, file, resolved, effects);
             collect_body_effects(body, file, resolved, effects);
         }
+        corvid_ast::Stmt::Atomic { body, .. } => {
+            collect_body_effects(body, file, resolved, effects);
+        }
         corvid_ast::Stmt::While { cond, body, .. } => {
             collect_expr_effects(cond, file, resolved, effects);
             collect_body_effects(body, file, resolved, effects);
@@ -320,6 +326,13 @@ fn collect_expr_effects(
 ) {
     match expr {
         corvid_ast::Expr::Call { callee, args, .. } => {
+            // `Shelf.save(row)` uses the built-in database effects (B09).
+            if let Some((_, op)) = crate::table_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
+                effects.names.push(op.effect().into());
+            }
+            if crate::table_ops::table_query_call(callee, args, file, &resolved.symbols, &resolved.bindings).is_some() {
+                effects.names.push(crate::TableOp::Get.effect().into());
+            }
             if let Some((import, _)) = python_call_target(callee, file, &resolved.symbols, &resolved.bindings) {
                 effects.names.extend(import.effect_row.effects.iter().map(|e| e.name.name.clone()));
             }

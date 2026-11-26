@@ -29,6 +29,7 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
     out.push_str(BUILTIN_MODELS);
     out.push_str(&json_error_model());
     out.push_str(&page_model());
+    out.push_str(&conflict_model());
 
     let mut records = vec![record_entry("JsonError", &json_error_fields())];
     let mut sums = Vec::new();
@@ -73,6 +74,12 @@ pub(super) fn emit_python(contract: &ApplicationContract) -> String {
         out.push_str(entry);
     }
     out.push_str("}\n\n");
+    // B06 — the types whose JSON is their exact canonical text; the SDK
+    // keeps that text as a `str` (see `corvid_public_json::text_scalar`).
+    out.push_str(&format!(
+        "_TEXT_SCALARS = ({})\n\n",
+        corvid_public_json::text_scalar::NAMES.iter().map(|name| format!("{name:?}, ")).collect::<String>()
+    ));
     out.push_str(CODEC);
     out
 }
@@ -132,6 +139,28 @@ fn page_model() -> String {
     out
 }
 
+/// A table write's conflict (B09): a generic base class with one
+/// dataclass per case, from `corvid_types::ConflictCase`, and the
+/// codec's table of them. `Conflict.Taken(holder)` builds one.
+fn conflict_model() -> String {
+    let cases = corvid_types::ConflictCase::ALL;
+    let names = cases.iter().map(|case| case.name()).collect::<Vec<_>>().join(", ");
+    let mut out = format!("class Conflict(Generic[T]):\n    \"\"\"Why a table write did not happen: one of {names}.\"\"\"\n\n\n");
+    let mut table = Vec::new();
+    for case in cases {
+        let class = format!("Conflict{}", case.name());
+        out.push_str(&format!("@dataclass\nclass {class}(Conflict[T]):\n"));
+        match case.field() {
+            Some(field) => out.push_str(&format!("    {field}: T\n")),
+            None => out.push_str("    pass\n"),
+        }
+        out.push_str(&format!("\n\nConflict.{} = {class}\n\n\n", case.name()));
+        table.push(format!("{:?}: ({class}, {})", case.name(), usize::from(case.field().is_some())));
+    }
+    out.push_str(&format!("_CONFLICT_CASES = {{{}}}\n\n\n", table.join(", ")));
+    out
+}
+
 /// The contract spelling of a compiler-known type. `Unknown` stands for
 /// a page's item type, which the codec fills in per use.
 fn contract_type_name(ty: &Type) -> String {
@@ -184,6 +213,7 @@ fn annotation(ty: &TypeName) -> String {
         ("Int", 0) => "int".into(),
         ("Float", 0) => "float".into(),
         ("String" | "TraceId", 0) => "str".into(),
+        (name, 0) if corvid_public_json::text_scalar::is_name(name) => "str".into(),
         ("Bool", 0) => "bool".into(),
         ("Nothing", 0) => "None".into(),
         ("JsonValue", 0) => "Any".into(),
@@ -192,6 +222,7 @@ fn annotation(ty: &TypeName) -> String {
         ("Option", 1) => format!("Optional[{}]", annotation(ty.arg(0))),
         ("Stream" | "Tainted" | "Grounded", 1) => annotation(ty.arg(0)),
         ("Page", 1) => format!("Page[{}]", annotation(ty.arg(0))),
+        ("Conflict", 1) => format!("Conflict[{}]", annotation(ty.arg(0))),
         ("Upload", 1) => "bytes".into(),
         ("Map", 2) => format!("dict[{}, {}]", annotation(ty.arg(0)), annotation(ty.arg(1))),
         ("Result", 2) => format!("Union[Ok[{}], Err[{}]]", annotation(ty.arg(0)), annotation(ty.arg(1))),
@@ -297,6 +328,17 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
                 else:
                     raise _fail(_key(path, name), "a value", None)
             return Page(**values)
+        if head == "Conflict":
+            if not isinstance(data, dict):
+                raise _fail(path, "a conflict", data)
+            name = data.get("variant")
+            if name not in _CONFLICT_CASES:
+                raise WireError(f"at `{_key(path, 'variant')}`: expected one of {', '.join(_CONFLICT_CASES)}, found {name!r}")
+            cls, count = _CONFLICT_CASES[name]
+            payload = data.get("fields", [])
+            if not isinstance(payload, list) or len(payload) != count:
+                raise WireError(f"at `{_key(path, 'fields')}`: expected {count} fields for `{name}`")
+            return cls(*[_decode(args[0], v, f"{_key(path, 'fields')}[{i}]") for i, v in enumerate(payload)])
         raise WireError(f"`{head}` has no JSON form")
     if ty == "Int":
         if isinstance(data, bool) or not isinstance(data, int):
@@ -306,6 +348,10 @@ def _decode(ty: Any, data: Any, path: str) -> Any:
         if isinstance(data, bool) or not isinstance(data, (int, float)):
             raise _fail(path, "Float", data)
         return float(data)
+    if ty in _TEXT_SCALARS:
+        if not isinstance(data, str):
+            raise _fail(path, ty, data)
+        return data
     if ty in ("String", "TraceId"):
         if not isinstance(data, str):
             raise _fail(path, "String", data)
@@ -375,12 +421,19 @@ def _encode(ty: Any, value: Any) -> Any:
             return {"tag": "err", "err": _encode(args[1], value.error)}
         if head == "Page":
             return {name: _encode(_fill_item(field_ty, args[0]), getattr(value, name)) for name, field_ty in _PAGE_FIELDS}
+        if head == "Conflict":
+            for name, (cls, _) in _CONFLICT_CASES.items():
+                if isinstance(value, cls):
+                    values = [getattr(value, f) for f in cls.__dataclass_fields__]
+                    return {"tag": "variant", "type": "Conflict", "variant": name,
+                            "fields": [_encode(args[0], v) for v in values]}
+            raise WireError(f"{value!r} is not a `Conflict` case")
         raise WireError(f"`{head}` values are not sent as JSON")
     if ty == "Float":
         if not math.isfinite(value):
             raise WireError(f"the Float {value} has no JSON form")
         return float(value)
-    if ty in ("Int", "String", "TraceId", "Bool", "Nothing", "JsonValue"):
+    if ty in ("Int", "String", "TraceId", "Bool", "Nothing", "JsonValue") or ty in _TEXT_SCALARS:
         return value
     if ty in _RECORDS:
         _, fields = _RECORDS[ty]

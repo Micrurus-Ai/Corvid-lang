@@ -133,6 +133,7 @@ fn stmt_blocks_pair_search(stmt: &IrStmt, local_id: LocalId) -> bool {
         IrStmt::If { .. }
         | IrStmt::For { .. }
         | IrStmt::While { .. }
+        | IrStmt::Atomic { .. }
         | IrStmt::Destructure { .. }
         | IrStmt::Parallel { .. }
         | IrStmt::Return { .. }
@@ -190,6 +191,9 @@ fn stmt_local_mentions(stmt: &IrStmt, local_id: LocalId) -> usize {
         IrStmt::If { cond, .. } => count_local_mentions_expr(cond, local_id),
         IrStmt::For { iter, .. } => count_local_mentions_expr(iter, local_id),
         IrStmt::While { cond, .. } => count_local_mentions_expr(cond, local_id),
+        // Never reached: native_ability refuses atomic blocks before native lowering (B09 P6).
+        // Counted as a mention so no pair is eliminated across one.
+        IrStmt::Atomic { .. } => 1,
         IrStmt::Destructure { value, .. } => count_local_mentions_expr(value, local_id),
         IrStmt::Parallel { arms, .. } => arms
             .iter()
@@ -244,6 +248,8 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
             count_local_mentions_expr(items, local_id)
                 + count_local_mentions_expr(next_cursor, local_id)
         }
+        IrExprKind::TableOp { args, .. } => args.iter().map(|arg| count_local_mentions_expr(arg, local_id)).sum(),
+        IrExprKind::TableQuery { filter, take, .. } => corvid_ir::table_query_operands(filter, take).into_iter().map(|e| count_local_mentions_expr(e, local_id)).sum(),
         IrExprKind::Match { scrutinee, arms } => {
             count_local_mentions_expr(scrutinee, local_id)
                 + arms
@@ -336,6 +342,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         IrExprKind::StructLiteral { .. } => true,
         // `Page(...)` builds a new struct cell (items + cursor handles).
         IrExprKind::PageNew { .. } => true,
+        IrExprKind::TableOp { .. } | IrExprKind::TableQuery { .. } => true,
         IrExprKind::Match { scrutinee, arms } => {
             expr_observes_refcount(scrutinee, local_id)
                 || arms.iter().any(|arm| {

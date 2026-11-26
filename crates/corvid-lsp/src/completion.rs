@@ -89,11 +89,10 @@ pub(crate) fn imported_members_at(
     let Binding::Decl(id) = resolved.bindings.get(&tokens[member - 2].span)? else { return None };
     if resolved.symbols.get(*id).kind != DeclKind::Import { return None; }
     let import = file.decls.iter().find_map(|d| match d {
-        Decl::Import(i) if i.source == corvid_ast::ImportSource::Corvid
-            && i.alias.as_ref().is_some_and(|a| resolved.symbols.lookup_def(&a.name) == Some(*id)) => Some(i),
+        Decl::Import(i) if i.alias.as_ref().is_some_and(|a| resolved.symbols.lookup_def(&a.name) == Some(*id)) => Some(i),
         _ => None,
     })?;
-    let (_, target) = crate::navigation::local_module_source(documents, uri, &import.module)?;
+    let (_, target) = crate::navigation::imported_module_source(documents, uri, import)?;
     let file = parse_lenient(&target);
     let exports = collect_public_exports(&file, &resolve(&file));
     let mut items = CompletionSet::default();
@@ -233,6 +232,18 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 CompletionItemKind::STRUCT,
                 store.kind.as_str(),
                 format!("{} {}", store.kind.as_str(), store.name.name),
+            )),
+            Decl::Table(table) => items.add(symbol_item(
+                &table.record.name.name,
+                CompletionItemKind::STRUCT,
+                "table",
+                format!("table {}", table.record.name.name),
+            )),
+            Decl::Database(database) => items.add(symbol_item(
+                &database.name.name,
+                CompletionItemKind::MODULE,
+                "database",
+                format!("database {}", database.name.name),
             )),
             Decl::Effect(effect) => items.add(symbol_item(
                 &effect.name.name,

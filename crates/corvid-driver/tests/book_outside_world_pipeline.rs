@@ -64,12 +64,10 @@ fn stage_book_pipeline_project(dir: &Path, main_source: &str) -> std::path::Path
 /// Build a reqwest client that resolves `api.example.com` to the
 /// loopback wiremock socket. Same pattern as
 /// `executing_http_through_driver.rs::loopback_resolving_client`.
-fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::Client {
+fn loopback_resolving_client(host: &str, server: &MockServer) -> reqwest::ClientBuilder {
     let addr: std::net::SocketAddr = *server.address();
     reqwest::Client::builder()
         .resolve(host, addr)
-        .build()
-        .expect("reqwest client with .resolve override should build")
 }
 
 /// 33S4 — the quickstart's executing-I/O example also compiles
@@ -159,19 +157,42 @@ type User:
     id: Int
     email: String
 
-import "./std/http" use http_get
+type FetchError:
+    | Unreachable(reason: String)
+
+effect http_read:
+    cost: $0.0
+
 import "./std/db" use db_open, db_execute, db_query, db_param_int, db_param_text
 
-agent ingest_user(url: String, db_path: String) -> Result<Int, String>:
-    response = http_get(url)?
-    user = User.from_json(response.body).map_err(fn (e) -> e.message)?
+connector users:
+    hosts: allowed_hosts
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real, replay]
+    operation user_at(url: String) -> Result<User, FetchError> uses http_read:
+        GET url
+        on failure -> Unreachable
+
+agent fetch_user(url: String) -> Result<User, String> uses http_read:
+    return match user_at(url):
+        Ok(user) -> Ok(user)
+        Err(e) -> Err(reason_of(e))
+
+agent reason_of(e: FetchError) -> String:
+    return match e:
+        Unreachable(reason) -> reason
+
+agent ingest_user(url: String, db_path: String) -> Result<Int, String> uses http_read:
+    user = fetch_user(url)?
     handle = db_open(db_path)?
     db_execute(handle, "CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT NOT NULL)", [])?
     db_execute(handle, "INSERT INTO users(id, email) VALUES (?, ?)", [db_param_int(user.id), db_param_text(user.email)])?
     rows = db_query(handle, "SELECT id FROM users WHERE id = ?", [db_param_int(user.id)])?
     return Ok(rows[0].rows_affected)
 
-agent main() -> Result<Int, String>:
+agent main() -> Result<Int, String> uses http_read:
     return ingest_user("http://api.example.com/users/1", ":memory:")
 "#,
     );
@@ -187,11 +208,13 @@ agent main() -> Result<Int, String>:
     let io_policy = IoToolPolicy::new(Some("."), Some(project.path()));
     let http_policy = HttpEgressPolicy::new(Some(&["api.example.com".to_string()]));
     let http_client =
-        HttpClient::with_reqwest_client(loopback_resolving_client("api.example.com", &server));
+        HttpClient::with_reqwest_builder(loopback_resolving_client("api.example.com", &server));
     let runtime = Runtime::builder()
         .io_policy(io_policy)
         .http_policy(http_policy)
         .http_client(http_client)
+        .connector_mode(Some(corvid_ast::ConnectorMode::Real))
+        .connector_calls(corvid_runtime::connectors::connector_calls_from_ir(&ir))
         .build();
 
     let result = run_ir_with_runtime(&ir, None, vec![], &runtime).await.expect(

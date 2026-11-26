@@ -53,6 +53,9 @@ fn capability_group(tool: &str) -> Option<&'static str> {
         "json"
     } else if tool.starts_with("time_") {
         "time"
+    } else if tool == "random_token" || tool == "hash_password" {
+        // std/crypto, checked before the `random_` prefix of std/random.
+        "crypto"
     } else if tool.starts_with("random_") {
         "random"
     } else if tool.starts_with("rag_") {
@@ -93,7 +96,7 @@ pub struct SkillMeta {
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct SkillCapabilities {
     /// Allowed capability groups (io / http / db / json / time /
-    /// random / rag / mcp / secrets / cache / llm). Empty = the
+    /// random / crypto / rag / mcp / secrets / cache / llm). Empty = the
     /// skill claims to be pure vocabulary.
     #[serde(default)]
     pub uses: Vec<String>,
@@ -183,6 +186,12 @@ pub fn compute_skill_audit(skill_dir: &Path) -> anyhow::Result<SkillAudit> {
         }
         for decl in &file.decls {
             match decl {
+                // A connector is how a program makes HTTP requests, so a
+                // skill that declares one uses the `http` capability,
+                // whatever its operations are called.
+                corvid_ast::Decl::Connector(_) => {
+                    audit.capabilities.insert("http".to_string());
+                }
                 corvid_ast::Decl::Effect(effect) => {
                     for dim in &effect.dimensions {
                         match (dim.name.name.as_str(), &dim.value) {
@@ -607,10 +616,17 @@ effect repo_read:
     trust: supervisor_required
     data: external
 
-public tool fetch_activity(repo: String) -> String uses repo_read
+connector github:
+    base_url: \"https://api.github.com\"
+    timeout: 10s
+    redirects: never
+    published: no
+    modes: [real]
+    operation activity_of(repo: String) -> String uses repo_read:
+        GET \"/repos/{repo}/activity\"
 
 public agent summarize(repo: String) -> Result<String, String>:
-    activity = http_get(repo)
+    activity = activity_of(repo)
     return Ok(\"summary\")
 ";
 
@@ -627,12 +643,30 @@ public agent summarize(repo: String) -> Result<String, String>:
         assert!(violations.is_empty(), "got: {violations:?}");
     }
 
+    /// A skill whose only network access is a connector still reports
+    /// the `http` capability.
+    #[test]
+    fn a_connector_counts_as_the_http_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill(dir.path(), HONEST_MANIFEST, HONEST_SOURCE);
+        let audit = compute_skill_audit(dir.path()).unwrap();
+        assert!(audit.capabilities.contains("http"), "{:?}", audit.capabilities);
+        assert!(!HONEST_SOURCE.contains("http_"), "the source names no http_ identifier");
+    }
+
+    #[test]
+    fn std_crypto_tools_are_their_own_capability_group() {
+        assert_eq!(capability_group("random_token"), Some("crypto"));
+        assert_eq!(capability_group("hash_password"), Some("crypto"));
+        assert_eq!(capability_group("random_int"), Some("random"));
+    }
+
     #[test]
     fn capability_outside_label_is_named() {
         let dir = tempfile::tempdir().unwrap();
         // Source calls io_read_text but the label only allows http/llm.
         let source = HONEST_SOURCE
-            .replace("activity = http_get(repo)", "activity = io_read_text(repo)");
+            .replace("activity = activity_of(repo)", "activity = io_read_text(repo)");
         write_skill(dir.path(), HONEST_MANIFEST, &source);
         let manifest = load_manifest(dir.path()).unwrap();
         let audit = compute_skill_audit(dir.path()).unwrap();
@@ -692,7 +726,7 @@ public agent summarize(repo: String) -> Result<String, String>:
         let vendored_main = plan.destination.join("main.cor");
         let edited = std::fs::read_to_string(&vendored_main)
             .unwrap()
-            .replace("activity = http_get(repo)", "activity = db_open(repo)");
+            .replace("activity = activity_of(repo)", "activity = db_open(repo)");
         std::fs::write(&vendored_main, edited).unwrap();
 
         let violations = verify_project_skills(project.path());

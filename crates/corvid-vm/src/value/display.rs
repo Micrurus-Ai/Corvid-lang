@@ -19,7 +19,17 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(n) => write!(f, "{n}"),
-            Value::Float(x) => write!(f, "{x}"),
+            Value::Float(x) => f.write_str(&corvid_runtime::number_text::float_display(*x)),
+            Value::Decimal(d) => write!(f, "{d}"),
+            Value::Duration(d) => write!(f, "{d}"),
+            Value::Instant(i) => write!(f, "{i}"),
+            Value::TimeZone(z) => write!(f, "{z}"),
+            Value::ZonedTime(z) => write!(f, "{z}"),
+            Value::Currency(c) => write!(f, "{c}"),
+            Value::Locale(l) => write!(f, "{l}"),
+            Value::Bytes(b) => write!(f, "{b:?}"),
+            // `<secret>`: the text never formats.
+            Value::Secret(s) => write!(f, "{s}"),
             Value::String(s) => write!(f, "\"{}\"", escape_display(s)),
             Value::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Nothing => write!(f, "nothing"),

@@ -193,8 +193,8 @@ public agent db_param_null() -> DbParam:
 # Phase 33S3b — these envelope-builder agents were renamed from
 # `db_query` / `db_execute` to `db_request_query` /
 # `db_request_execute` so the unprefixed names host the
-# executing tools below. Mirrors the 33S2a rename of HTTP
-# envelope agents (http_get → http_request_get etc.).
+# executing tools below. Mirrors the 33S2a rename of the HTTP
+# envelope agents to `http_request_get` and friends.
 public agent db_request_query(sql: String, param_count: Int, replay_key: String) -> DbQuery:
     return DbQuery(sql, true, param_count, "read", replay_key, effect_envelope("std.db.query", "", "", "", replay_key))
 

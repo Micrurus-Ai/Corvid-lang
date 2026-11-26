@@ -14,7 +14,50 @@ use crate::types::Type;
 use corvid_ast::{Expr, Ident, Span, StructLiteralField};
 use corvid_resolve::{Binding, DeclKind};
 
+/// A value the compiler knows without running the program.
+enum Constant<'e> {
+    Int(i64),
+    Text(&'e str),
+}
+
+/// The constant an expression is, when it is a literal: `500`, `-3`,
+/// `"dune"`.
+fn constant_value(expr: &Expr) -> Option<Constant<'_>> {
+    match expr {
+        Expr::Literal { value: corvid_ast::Literal::Int(n), .. } => Some(Constant::Int(*n)),
+        Expr::Literal { value: corvid_ast::Literal::String(text), .. } => Some(Constant::Text(text)),
+        Expr::UnOp { op: corvid_ast::UnaryOp::Neg, operand, .. } => match operand.as_ref() {
+            Expr::Literal { value: corvid_ast::Literal::Int(n), .. } => n.checked_neg().map(Constant::Int),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
+    /// A constant given to a refined field must hold the refinement
+    /// (B09): `Search("dune", 500)` against `between(1, 50)` is caught
+    /// here, and a computed value is checked when the record is built.
+    pub(super) fn check_constant_refinement(&mut self, type_name: &str, field: &corvid_ast::Field, value: &Expr) {
+        let Some(refinement) = &field.refinement else { return };
+        let (admitted, shown) = match constant_value(value) {
+            Some(Constant::Int(n)) => (refinement.admits_int(n), n.to_string()),
+            Some(Constant::Text(text)) => (refinement.admits_text(text), format!("{text:?}")),
+            None => return,
+        };
+        if !admitted {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::RefinementOutOfRange {
+                    type_name: type_name.to_string(),
+                    field: field.name.name.clone(),
+                    refinement: refinement.describe(),
+                    value: shown,
+                },
+                value.span(),
+            ));
+        }
+    }
+
     pub(super) fn check_struct_literal(
         &mut self,
         name: &Ident,
@@ -115,6 +158,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let field_ty = self.type_ref_to_type(&field_tr.clone());
+            if let (Some(value), Some(declared)) = (&f.value, ty_decl.fields.iter().find(|d| d.name.name == f.name.name)) {
+                self.check_constant_refinement(&name.name, declared, value);
+            }
             let got = match &f.value {
                 Some(v) => self.check_expr_as(v, Some(&field_ty)),
                 // Shorthand: the resolver bound the field name to a
@@ -160,10 +206,17 @@ impl<'a> Checker<'a> {
                 }
             }
             None => {
+                // A table row may leave out `revision`; it is then 0,
+                // a row never stored (B09).
+                let is_table = self
+                    .types_by_id
+                    .get(&def_id)
+                    .is_some_and(|decl| crate::table_decl(self.file, decl.span).is_some());
                 let missing: Vec<&str> = decl_fields
                     .iter()
                     .map(|(n, _)| n.as_str())
                     .filter(|n| !provided.contains(n))
+                    .filter(|n| !(is_table && *n == corvid_ast::TableDecl::REVISION_FIELD))
                     .collect();
                 if !missing.is_empty() {
                     self.errors.push(TypeError::new(

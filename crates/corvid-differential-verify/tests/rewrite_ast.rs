@@ -18,6 +18,9 @@ fn clean_corpus_round_trips_through_ast_printer() {
 #[test]
 fn connector_round_trips_through_ast_printer() {
     let source = r#"connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: header("X-Api-Key", secret("KEY"))
     retry: 3
@@ -53,7 +56,7 @@ fn connector_round_trips_through_ast_printer() {
             _ => None,
         })
         .expect("connector survives the round-trip");
-    assert_eq!(back.base_url, "https://api.github.com");
+    assert_eq!(back.base_url.as_deref(), Some("https://api.github.com"));
     assert_eq!(back.retry, Some(3));
     assert_eq!(back.circuit_breaker, Some(5));
     assert_eq!(

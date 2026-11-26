@@ -283,7 +283,9 @@ async fn logout(State(ctx): State<Arc<AuthContext>>, headers: HeaderMap) -> Resp
         let at = now_ms();
         let trace = format!("logout-{}", random_token());
         if let Ok(resolution) = ctx.auth.resolve_session_cookie(&token, &trace, at) {
-            let _ = ctx.auth.revoke_session(&resolution.session.id, at);
+            if ctx.auth.revoke_session(&resolution.session.id, at).is_err() {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
         }
     }
     (

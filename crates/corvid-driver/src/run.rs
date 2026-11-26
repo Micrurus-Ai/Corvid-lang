@@ -41,6 +41,10 @@ pub enum RunError {
     UnknownAgent { name: String, available: Vec<String> },
     /// The caller asked for default args but the agent expects parameters.
     NeedsArgs { agent: String, expected: usize },
+    /// The agent picked as the program's entry point returns a
+    /// `Secret`, which the runner would print. The checker refuses this
+    /// for `main`; this covers a file whose only agent is the entry.
+    EntryReturnsSecret { agent: String },
     /// The interpreter aborted.
     Interp(InterpError),
 }
@@ -64,6 +68,10 @@ impl fmt::Display for RunError {
             Self::NeedsArgs { agent, expected } => write!(
                 f,
                 "agent `{agent}` expects {expected} argument(s); pass scalar arguments after the file name in `corvid run`"
+            ),
+            Self::EntryReturnsSecret { agent } => write!(
+                f,
+                "agent `{agent}` is the program's entry point and returns a `Secret`, which would be printed; return what the secret proves, such as a `Bool`, or call the agent from another agent"
             ),
             Self::Interp(e) => write!(f, "{e}"),
         }
@@ -162,11 +170,15 @@ pub fn run_with_target(
         }
     };
 
-    let scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    let mut scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    // A connector's mock is a Corvid expression the interpreter evaluates.
+    if scan.is_ok() && !ir.connectors.is_empty() && connector_mode == Some(corvid_ast::ConnectorMode::Mock) {
+        scan = Err(crate::native_ability::NotNativeReason::ConnectorMockMode);
+    }
 
     match target {
         RunTarget::Native => match &scan {
-            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args),
+            Ok(()) => run_via_native_tier(path, &source, &ir, tools_lib, args, connector_mode),
             Err(reason) => {
                 eprintln!(
                     "error: `--target=native` refused: {reason}. Run without `--target` to fall back to the interpreter."
@@ -205,7 +217,7 @@ fn try_native_then_interpret(
     args: &[String],
     connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
-    match run_via_native_tier(path, source, ir, tools_lib, args) {
+    match run_via_native_tier(path, source, ir, tools_lib, args, connector_mode) {
         Ok(code) => Ok(code),
         Err(err) if is_missing_staticlib_error(&err) => {
             eprintln!("↻ running via interpreter: native staticlib unavailable");
@@ -345,9 +357,8 @@ fn run_via_interpreter_tier(
     builder = corvid_runtime::browser::with_browser_tools(builder);
 
     // Slice 33S2b: install the [http] allow policy parsed from
-    // corvid.toml (33S0) onto the runtime so the executing
-    // http_get / http_post_json tools gate every URL through the
-    // allowlist + always-on SSRF block. CORVID_HTTP_ALLOW env
+    // corvid.toml (33S0) onto the runtime so every connector
+    // request goes through the allowlist + always-on SSRF block. CORVID_HTTP_ALLOW env
     // override (comma-separated host list) takes precedence over
     // the corvid.toml value — same env-override pattern as
     // CORVID_IO_ROOT / CORVID_MODEL.
@@ -384,9 +395,11 @@ fn run_via_interpreter_tier(
     // widen `executable_modes`.
     {
         let secret_present = |name: &str| rt.secret_present(name);
+        let egress_refusal = |url: &str| rt.egress_refusal(url);
         let ctx = crate::connector_startup::ConnectorRuntimeContext {
             selected_mode: rt.connector_mode(),
             egress_configured: rt.egress_configured(),
+            egress_refusal: &egress_refusal,
             replay_source_present: rt.has_replay_source(),
             secret_present: &secret_present,
             executable_modes: &[
@@ -492,7 +505,43 @@ fn run_via_native_tier(
     ir: &IrFile,
     tools_lib: Option<&Path>,
     args: &[String],
+    connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
+    // A native program with connectors is checked as the interpreter's
+    // is before it starts, and runs with the selected mode and the
+    // project's HTTP policy (native dispatch N1).
+    let mut connector_env: Vec<(&str, String)> = Vec::new();
+    if !ir.connectors.is_empty() {
+        let policy = load_http_egress_policy(path);
+        let secret_present = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        let egress_refusal = |url: &str| {
+            policy.check(url).err().map(|err| match err {
+                corvid_runtime::RuntimeError::ToolFailed { message, .. } => message,
+                other => other.to_string(),
+            })
+        };
+        let ctx = crate::connector_startup::ConnectorRuntimeContext {
+            selected_mode: connector_mode,
+            egress_configured: policy.is_configured(),
+            egress_refusal: &egress_refusal,
+            replay_source_present: std::env::var_os("CORVID_REPLAY_TRACE_PATH").is_some(),
+            secret_present: &secret_present,
+            executable_modes: &[corvid_ast::ConnectorMode::Replay, corvid_ast::ConnectorMode::Real],
+        };
+        let refusals = crate::connector_startup::check_connector_startup(ir, &ctx);
+        if !refusals.is_empty() {
+            for refusal in &refusals {
+                eprintln!("{}", refusal.message());
+            }
+            return Ok(1);
+        }
+        if let Some(mode) = connector_mode {
+            connector_env.push(("CORVID_CONNECTOR_MODE", mode.as_str().to_string()));
+        }
+        if policy.is_configured() {
+            connector_env.push(("CORVID_HTTP_ALLOW", policy.allow_list().join(",")));
+        }
+    }
     let binary = build_or_get_cached_native(path, source, ir, tools_lib)?.path;
     // Slice 33Q17a: forward CLI positional args verbatim. The
     // codegen-emitted `main` decodes argv per parameter type, so the
@@ -500,6 +549,7 @@ fn run_via_native_tier(
     // pass the strings through.
     let status = std::process::Command::new(&binary)
         .args(args)
+        .envs(connector_env)
         .status()
         .map_err(|e| anyhow::anyhow!("spawn native binary `{}`: {e}", binary.display()))?;
     Ok(status.code().unwrap_or(1) as u8)
@@ -615,6 +665,9 @@ type Repo:
     name: String
 
 connector github:
+    timeout: 10s
+    redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock, real]
@@ -834,19 +887,16 @@ pub fn load_io_tool_policy(source_path: &Path) -> IoToolPolicy {
 /// can share this loading logic instead of re-implementing the
 /// precedence.
 pub fn load_http_egress_policy(source_path: &Path) -> HttpEgressPolicy {
+    http_egress_policy_from(std::env::var("CORVID_HTTP_ALLOW").ok().as_deref(), source_path)
+}
+
+/// [`load_http_egress_policy`] with the `CORVID_HTTP_ALLOW` value given,
+/// so the precedence can be tested without changing the process
+/// environment, which other tests in the same process read.
+fn http_egress_policy_from(env_allow: Option<&str>, source_path: &Path) -> HttpEgressPolicy {
     // 1. Env override.
-    if let Ok(env_allow) = std::env::var("CORVID_HTTP_ALLOW") {
-        let env_allow_trimmed = env_allow.trim();
-        if !env_allow_trimmed.is_empty() {
-            let hosts: Vec<String> = env_allow_trimmed
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !hosts.is_empty() {
-                return HttpEgressPolicy::new(Some(&hosts));
-            }
-        }
+    if let Some(policy) = env_allow.and_then(HttpEgressPolicy::from_allow_list) {
+        return policy;
     }
 
     // 2. corvid.toml.
@@ -984,16 +1034,10 @@ mod http_policy_loader_tests {
     //! `CORVID_HTTP_ALLOW` env override > `[http] allow` from
     //! corvid.toml > unconfigured (fail-closed default).
     //!
-    //! These tests serialise on env state — they always snapshot
-    //! the current `CORVID_HTTP_ALLOW` value, mutate inside the
-    //! test, then restore it. Two tests touching the same env
-    //! var must NOT run in parallel; the `tokio::test` flavor
-    //! `multi_thread` is fine here because cargo test runs each
-    //! function on its own thread by default, but cross-test
-    //! parallelism is the actual concern. For the loader tests
-    //! here that's `cargo test`'s job to schedule; we don't add
-    //! a serial lock because the existing 33S1b `CORVID_IO_ROOT`
-    //! tests pass the same way.
+    //! The tests give the `CORVID_HTTP_ALLOW` value to
+    //! `http_egress_policy_from` directly rather than setting the
+    //! process-wide variable, which other tests running in parallel
+    //! read.
 
     use super::*;
 
@@ -1013,14 +1057,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             policy.is_configured(),
@@ -1057,14 +1094,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             !policy.is_configured(),
@@ -1088,14 +1118,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") };
-
-        let policy = load_http_egress_policy(&source);
-
-        if let Some(v) = prior_env {
-            unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) };
-        }
+        let policy = http_egress_policy_from(None, &source);
 
         assert!(
             !policy.is_configured(),
@@ -1120,20 +1143,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe {
-            std::env::set_var(
-                "CORVID_HTTP_ALLOW",
-                "env-host-one.example, env-host-two.example",
-            )
-        };
-
-        let policy = load_http_egress_policy(&source);
-
-        match prior_env {
-            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
-            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
-        }
+        let policy = http_egress_policy_from(Some("env-host-one.example, env-host-two.example"), &source);
 
         assert!(policy.is_configured());
         let allow = policy.allow_list();
@@ -1168,15 +1178,7 @@ mod http_policy_loader_tests {
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "agent main() -> Int:\n    return 0\n").unwrap();
 
-        let prior_env = std::env::var("CORVID_HTTP_ALLOW").ok();
-        unsafe { std::env::set_var("CORVID_HTTP_ALLOW", "   ,, ,  ") };
-
-        let policy = load_http_egress_policy(&source);
-
-        match prior_env {
-            Some(v) => unsafe { std::env::set_var("CORVID_HTTP_ALLOW", v) },
-            None => unsafe { std::env::remove_var("CORVID_HTTP_ALLOW") },
-        }
+        let policy = http_egress_policy_from(Some("   ,, ,  "), &source);
 
         assert!(
             policy.is_configured(),

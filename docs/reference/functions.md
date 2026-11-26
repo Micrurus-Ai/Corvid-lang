@@ -18,11 +18,37 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `String.substring(start: Int, end: Int) -> String`
 - `String.parse_int() -> Result<Int, String>`
 - `String.parse_float() -> Result<Float, String>`
+- `String.parse_decimal() -> Result<Decimal, String>`
+- `String.parse_duration() -> Result<Duration, String>`
+- `String.parse_instant() -> Result<Instant, String>`
+- `String.parse_time_zone() -> Result<TimeZone, String>`
+- `String.parse_zoned_time() -> Result<ZonedTime, String>`
+- `String.parse_local_time(zone: TimeZone) -> Result<ZonedTime, String>`
+- `String.encode_base64() -> String`
+- `String.decode_base64() -> Result<String, String>`
+- `String.encode_base64_url() -> String`
+- `String.decode_base64_url() -> Result<String, String>`
+- `String.encode_hex() -> String`
+- `String.decode_hex() -> Result<String, String>`
+- `String.encode_url_component() -> String`
+- `String.decode_url_component() -> Result<String, String>`
+- `String.parse_uuid() -> Result<String, String>`
+
+- `String.contains_regex(pattern: String) -> Bool`
+- `String.find_regex(pattern: String) -> Option<RegexMatch>`
+- `String.find_all_regex(pattern: String) -> List<RegexMatch>`
+- `String.replace_regex(pattern: String, replacement: String) -> String`
+- `String.split_regex(pattern: String) -> List<String>`
+
+- `String.utf8() -> Bytes`
+
+The encoders and decoders work on the text's UTF-8 bytes. A regex pattern must be a string literal, which the compiler checks. A `RegexMatch` has the fields `text: String`, `start: Int`, `end: Int` and `groups: List<Option<String>>`. `parse_uuid` returns the canonical lowercase hyphenated form. See [Text and encoding](text-and-encoding.md).
 
 ## Int
 
 - `Int.to_string() -> String`
 - `Int.to_float() -> Float`
+- `Int.to_decimal() -> Decimal`
 - `Int.abs() -> Int`
 - `Int.min(other: Int) -> Int`
 - `Int.max(other: Int) -> Int`
@@ -32,6 +58,7 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 
 - `Float.to_string() -> String`
 - `Float.to_int_truncated() -> Int`
+- `Float.to_decimal() -> Decimal`
 - `Float.abs() -> Float`
 - `Float.min(other: Float) -> Float`
 - `Float.max(other: Float) -> Float`
@@ -40,6 +67,97 @@ For worked examples, see [Types and collections](../book/05-types.md), [Pattern 
 - `Float.floor() -> Int`
 - `Float.ceil() -> Int`
 - `Float.round() -> Int`
+
+## Decimal
+
+- `Decimal.round_half_even(places: Int) -> Decimal`
+- `Decimal.round_half_up(places: Int) -> Decimal`
+- `Decimal.round_toward_zero(places: Int) -> Decimal`
+- `Decimal.round_away_from_zero(places: Int) -> Decimal`
+- `Decimal.round_floor(places: Int) -> Decimal`
+- `Decimal.round_ceiling(places: Int) -> Decimal`
+- `Decimal.abs() -> Decimal`
+- `Decimal.scale() -> Int`
+- `Decimal.to_string() -> String`
+- `Decimal.to_float() -> Float`
+- `Decimal.to_int_truncated() -> Int`
+- `Decimal.format_currency(currency: Currency, locale: Locale) -> String`
+
+## Currency and Locale
+
+- `Currency.minor_digits() -> Int`
+- `Currency.to_string() -> String`
+- `Locale.to_string() -> String`
+- `String.parse_currency() -> Result<Currency, String>`
+- `String.parse_locale() -> Result<Locale, String>`
+
+A string literal where a `Currency` or `Locale` is meant is one the compiler checks against CLDR: `total.format_currency("EUR", "de-DE")`. See [Formatting money](decimal.md#formatting-money).
+
+A number literal is a `Decimal` where a `Decimal` is meant: `price: Decimal = 19.99`, `price * 1.08`. `/` on decimals is written with its rounding, `(total / 3).round_half_even(2)`. Mixing `Decimal` and `Float` is a compile error. See [Exact decimals](decimal.md).
+
+## Duration
+
+- `Duration.whole_hours() -> Int`
+- `Duration.whole_minutes() -> Int`
+- `Duration.whole_seconds() -> Int`
+- `Duration.whole_milliseconds() -> Int`
+- `Duration.whole_microseconds() -> Int`
+- `Duration.whole_nanoseconds() -> Int`
+- `Duration.abs() -> Duration`
+- `Duration.to_string() -> String`
+
+## Instant
+
+- `Instant.from_epoch_milliseconds(n: Int) -> Instant`
+- `Instant.epoch_milliseconds() -> Int`
+- `Instant.to_string() -> String`
+- `Instant.in_zone(zone: TimeZone) -> ZonedTime`
+
+## ZonedTime
+
+- `ZonedTime.year() -> Int`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `nanosecond()`, `weekday()`, `offset_seconds()`
+- `ZonedTime.time_zone() -> TimeZone`
+- `ZonedTime.instant() -> Instant`
+- `ZonedTime.add_days(n: Int) -> ZonedTime`
+- `ZonedTime.add_months(n: Int) -> ZonedTime`
+- `ZonedTime.add_years(n: Int) -> ZonedTime`
+- `ZonedTime.with_zone(zone: TimeZone) -> ZonedTime`
+- `ZonedTime.to_string() -> String`
+
+## TimeZone
+
+- `TimeZone.to_string() -> String`
+
+A string literal where a `TimeZone` is meant is a zone the compiler checks: `at.in_zone("Europe/Berlin")`. See [Time zones](stdlib/time.md#time-zones).
+
+Instants subtract to a `Duration` and move by one; `time_now()` in `std/time` reads the clock. See [Durations and instants](stdlib/time.md#durations-and-instants).
+
+## Bytes
+
+- `String.utf8() -> Bytes`
+- `Bytes.from_hex(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64(text: String) -> Result<Bytes, String>`
+- `Bytes.from_base64_url(text: String) -> Result<Bytes, String>`
+- `Bytes.to_utf8() -> Result<String, String>`
+- `Bytes.length() -> Int`
+- `Bytes.to_hex() -> String`
+- `Bytes.to_base64() -> String`
+- `Bytes.to_base64_url() -> String`
+- `Bytes.sha256() -> Bytes`
+- `Bytes.sha384() -> Bytes`
+- `Bytes.sha512() -> Bytes`
+- `Bytes.hmac_sha256(key: Bytes or Secret) -> Bytes`
+- `Bytes.hmac_sha512(key: Bytes or Secret) -> Bytes`
+- `Bytes.verify_ed25519(signature: Bytes, public_key: Bytes) -> Bool`
+
+`==` and `!=` on `Bytes` are constant-time, and `Bytes` has no ordering and no `+`. An HMAC key is `Bytes` or a `Secret`. `verify_ed25519` checks a 64-byte Ed25519 signature against a 32-byte public key strictly, and is `false` for any other length. In JSON a `Bytes` value is unpadded base64url text. See [Cryptography](cryptography.md).
+
+## Secret
+
+- `Secret.decode_base64_after(prefix: String) -> Result<Secret, String>`
+- `Secret.verify_password(hash: String) -> Bool`
+
+No method returns a secret's text. `decode_base64_after` returns another secret, the key written in base64 after a literal `prefix` such as `"whsec_"`. `verify_password` says whether the secret is the password an Argon2id hash in PHC format was made from, using the cost and salt the hash records; it is `false` for a malformed hash, and it is pure. `==` and `!=` between two secrets are constant-time, and a secret can key `hmac_sha256` and `hmac_sha512`; nothing else applies, and a secret cannot be printed, turned into text, encoded as JSON, stored, or passed to a prompt. `secret(name)` in `std/secrets` reads one and `random_token(bytes)` in `std/crypto` draws one. See [Cryptography: secrets](cryptography.md#secrets).
 
 ## Bool
 
@@ -110,6 +228,14 @@ Use `None` for an absent option. Pass a type name as the second argument to `ask
 - `Upload<Format>.filename() -> String`
 - `Upload<Format>.content_type() -> String`
 - `Upload<Format>.size() -> Int`
+
+## Response
+
+- `Response<Body>.status() -> Int`
+- `Response<Body>.body() -> Body`
+- `Response<Body>.header(name: String) -> Option<String>`
+
+A connector operation that declares `-> Response<Body>` (or `Result<Response<Body>, E>`) returns one: the decoded body, the HTTP status and the response headers. `header` compares names without case and returns the first match. `Set-Cookie` is never passed on. A `HEAD` operation returns `Response<Nothing>`. In mock mode, the operation's `mock:` is the body, answered with status 200 and no headers. A `Response` stays in the program that made the call: it cannot be a record field, a route, tool or prompt type, JSON, or part of `main`'s signature. It works the same in native code, which holds it as a record of the status, the headers and the body, and answers `header` with the lookup the interpreter uses. See [connector declarations](grammar.md#connector-declarations).
 
 ## Every type
 
@@ -227,6 +353,15 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `agent cache_entry(key: CacheKeyEnvelope, replay_safe: Bool, invalidation_key: String) -> CacheEntryEnvelope`
 - `agent cache_hit(entry: CacheEntryEnvelope) -> Bool`
 
+### [std/crypto](../../std/crypto.cor)
+
+- `type PasswordCost` with `memory_kib: Int`, `iterations: Int`, `lanes: Int`
+- `fn owasp_2023() -> PasswordCost`
+- `tool random_token(bytes: Int) -> Secret uses crypto_random`
+- `tool hash_password(password: Secret, cost: PasswordCost) -> String uses crypto_random`
+
+`random_token` draws 16 to 1024 random bytes from the operating system and returns their unpadded base64url text as a `Secret`; replay draws a fresh one and warns. `hash_password` returns the Argon2id hash as a PHC string and refuses a cost below the OWASP 2023 minimum. Check a password with `Secret.verify_password(hash)`. See [Cryptography: random tokens](cryptography.md#random-tokens) and [Passwords](cryptography.md#passwords).
+
 ### [std/db](../../std/db.cor)
 
 - `agent sqlite_open(dsn: String, replay_key: String) -> DbConnection`
@@ -287,8 +422,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `agent http_with_retry(request: HttpRequestEnvelope, max_retries: Int) -> HttpRequestEnvelope`
 - `agent http_with_timeout(request: HttpRequestEnvelope, timeout_ms: Int) -> HttpRequestEnvelope`
 - `agent http_ok(response: HttpResponseEnvelope) -> Bool`
-- `tool http_get(url: String) -> Result<HttpResponseEnvelope, String> uses http_egress_get`
-- `tool http_post_json(url: String, body: String) -> Result<HttpResponseEnvelope, String> uses http_egress_post`
+- `effect http_egress_get`, `effect http_egress_post` — the built-in network effects; requests are made through a `connector` ([Making HTTP requests](stdlib/http.md))
 
 ### [std/io](../../std/io.cor)
 
@@ -373,6 +507,7 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 
 ### [std/secrets](../../std/secrets.cor)
 
+- `tool secret(name: String) -> Result<Secret, String> uses secrets_read`
 - `tool secret_read(name: String) -> Result<SecretReadEnvelope, String> uses secrets_read`
 - `agent secret_present(name: String, value: String) -> SecretReadEnvelope`
 - `agent secret_missing(name: String) -> SecretReadEnvelope`
@@ -384,6 +519,13 @@ Import the module that declares the call. A tool's `uses` clause lists its decla
 - `tool time_monotonic_ms() -> Int uses time_monotonic`
 - `tool time_parse_iso(text: String) -> Result<Int, String> uses time_wall`
 - `tool time_format_iso(epoch_ms: Int) -> String uses time_wall`
+
+### [std/uuid](../../std/uuid.cor)
+
+- `tool uuid_v4() -> String uses uuid_generate`
+- `tool uuid_v7() -> String uses uuid_generate`
+
+Both return the canonical lowercase hyphenated form. See [Generating UUIDs](text-and-encoding.md#generating-uuids).
 
 ### [std/ui](../../std/ui.cor)
 
@@ -504,7 +646,7 @@ See [Build a color picker from a record](../book/19-browser-views.md#build-a-col
 
 - `ui.local_slider(label: String, name: String) -> View` binds a native slider to a record field. Supply one per field.
 - `ui.list_editor(rows: View, new_row: View, add_label: String, remove_label: String) -> View` adds local insertion and removal to one keyed browser list. Render exactly one row with the same row function for the template. Its key is the prefix for newly generated string keys. The other fields supply the defaults. Edits and membership last until reload.
-- `ui.assistant_reorder(component: View, name: String, description: String) -> View` exposes the move action for one enclosed browser list. Its inputs are a row key and a direction of `up` or `down`. For a list editor, `{}` reads the current keys in display order.
+- `ui.assistant_reorder(component: View, name: String, description: String) -> View` exposes the move action for one enclosed browser list. Its inputs are a string row key and a direction of `up` or `down`. For a list editor, `{}` reads the current keys in display order. A move requires the row's enabled button for that direction. A cached call fails if the row was removed, the list left its wrapper, or the wrapper withdrew the tool name.
 - The keyed child loop uses `ui.browser_row(key: String, key_field: String, fields: Map<String, List<String>>, content: List<View>) -> View` to mount a record editor and `ui.browser_rows(label: String, rows: List<View>) -> View` to group the rows.
 - `ui.boolean_children(field: String, content: List<View>) -> View` shows its children while a browser boolean is true. Prefer `if settings.tools.web_search:` inside a child block for compile-time checking.
 - `ui.choice_children(field: String, variant: String, content: List<View>) -> View` groups views whose visibility follows a browser choice. Prefer an indented `if settings.mode == Scheduled` child block so the compiler checks the field and variant.
@@ -567,3 +709,15 @@ The scene editor builds three example agents for its browser worker. The generat
 - `useCorvidPaginated(fetchPage)` supplies `(cursor?, signal?)` to the page loader. Reset aborts a pending request and starts the first page. Unmount aborts the active request. A failure retains earlier pages so `loadMore()` can retry the same cursor.
 
 See [Read order activity and upload a CSV](../book/19-browser-views.md#read-order-activity-and-upload-a-csv).
+
+## Windowed inventory example
+
+These integer exports belong to the inventory example. Scroll offsets and viewport sizes are nonnegative CSS pixels and row height must be positive. The caller supplies a valid scroll offset for the current inventory size.
+
+| Export | Result |
+| --- | --- |
+| `first_row(scroll: Int, height: Int) -> Int` | Zero-based index of the first mounted row, including up to two rows above the visible area. |
+| `end_row(scroll: Int, viewport: Int, height: Int, count: Int) -> Int` | Exclusive end index, including any partially visible row and up to two extra rows below. Never exceeds the number of bins. |
+| `stock(bin: Int) -> Int` | Fixture stock for a one-based bin number, computed as `bin * 17 % 101`. |
+
+[Window a long inventory](../book/19-browser-views.md#window-a-long-inventory)

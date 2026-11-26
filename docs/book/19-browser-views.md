@@ -1,5 +1,27 @@
 # Browser views
 
+## Preview your first web project
+
+```sh
+corvid new palette --web
+cd palette
+corvid check
+corvid test src/main.cor
+corvid serve src/main.cor --listen 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/`. The GET route calls `welcome_page()`.
+Change the greeting and its test in `src/main.cor`, stop the preview with
+Ctrl+C and start it again to see the edit. Build a distributable archive
+with `corvid build src/main.cor --target web`.
+
+After installing a component package, use a module alias such as
+`import "corvid://@trial/color-picker/v1.0.0" as picker`. In a Corvid
+editor, type `picker.Col` to complete exported names. Use Go to Definition
+on `picker.ColorPicker` to open the installed source that matches the lock.
+
+From the repository root, run `python -B scripts/verify_component_tooling.py --cli target/debug/corvid.exe --channel msedge` with Python Playwright and Edge installed. It exercises the locked picker with scripting enabled and disabled, then triggers a nested checkout failure, checks the reported Corvid line and retries after rebuilding the fix.
+
 A view can be an ordinary Corvid function. Import `std/ui` in a scaffolded project and return a `View` to reuse a control. Pass a list of views to a container to set their order.
 
 ```corvid-fragment
@@ -430,9 +452,15 @@ The [storefront](../../examples/storefront/src/main.cor) renders its catalog lin
 
 After the event module attaches, each line total reads the current input value, including edits made while the module was loading. Use the move buttons, or press Alt+Up or Alt+Down in a quantity field. The move handler shifts the adjacent row so the active input stays attached. A status message gives the row's new position.
 
+The packaged cart loads a small module for quantity fields. It attaches the handlers it contains immediately. If another field needs Wasm, the module requests the runtime from the same build. A missing result element produces a diagnostic beside that field when its alert is present. Other quantities can still update and the native checkout form can still submit.
+
+The standard interactive page footer carries a SHA-256 integrity value when served by `corvid serve`. An old page can submit its native form if its matching script is unavailable. For the JavaScript quantity handlers, a CSP of `script-src 'self'` permits the module. Pages that execute Wasm also need `'wasm-unsafe-eval'` in that directive. HTML styles have their own CSP directive.
+
+Inspect the inline source map in the packaged JavaScript to match a generated quantity calculation to its Corvid return line. Use the source tree from that build. Keep Python, database, file, environment and secret access in the server route. Browser handlers can import ordinary Corvid functions such as a shared price calculation.
+
 The notebook and pencil screens each import `ColorPicker` and `Color` from [the same local module](../../examples/storefront/src/color_picker.cor). Each supplies an initial value and a form destination. For example, the notebook starts with `Color(0)` and calls `ColorPicker(value, "/notebook")`. With scripting enabled, the select's change event submits the form. **Apply color** submits it before enhancement. Each POST route decodes the selected shade into a `Color` and passes it to its screen handler. This example uses server-owned color previews and browser-local cart edits.
 
-From the repository root, run `python scripts/verify_storefront.py target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. Omit `--http-only` to run the keyboard and focus tests with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
+From the repository root, run `python scripts/verify_storefront.py --cli target/debug/corvid.exe --http-only` to scaffold, check, test, package and serve the example on loopback. The verifier uses Node.js to read the emitted source maps and check their Corvid line numbers. Replace `--http-only` with `--channel msedge` to run the hydration, script integrity, CSP, keyboard and focus checks with Python Playwright and Edge. The browser test uses 320 px and 960 px viewports.
 
 The verifier edits the notebook price in the scaffold, rebuilds it and serves the two extracted archives separately. Twelve notebooks and one pencil total 5,525 cents in the original and 5,825 cents after the edit. It fetches the rebuilt JavaScript and Wasm over HTTP and checks their content types and bytes. To repeat the same keyboard journey with installed Playwright engines, run the command once each with `--browser chromium`, `--browser firefox` and `--browser webkit` in place of `--http-only`.
 
@@ -800,7 +828,13 @@ Wait for “Drawing saved.” before reloading. Each worker response writes its 
 
 To try offline drawing, wait for “Ready for offline reload.” and stop the local HTTP server. Reload the same URL, add another mark, wait for the save and reload again. The service worker caches the HTML, JavaScript modules and compiled Wasm. When changing those files, bump the cache version in `offline.js`, restart the server and close older editor tabs so the update can activate. Offline setup requires a first online visit over HTTPS or loopback.
 
-The Node tests exercise the generated worker, reopen the sketch using an in-memory IndexedDB implementation and check the cache handler against the built files. With Python Playwright and Chrome installed, run `python scripts/verify_drawing_editor.py` from the repository root after building the example. That trial draws a line, stops its loopback server, checks the restored canvas pixels and repeats the reload after an offline edit.
+The first time you open an older sketch, close other sketchbook tabs if prompted. The editor keeps its existing marks and queues them for upload in the same database upgrade. Each subsequent stroke saves its marks and queues them together. A newer database version requires reloading a compatible editor.
+
+To share a sketch, the host must serve a writable `./sketch.json` with conditional HTTP writes. A static file server supports local drawing and offline reloads. When an upload fails, the sync message explains the failure and the queue survives a reload. Reconnect or choose **Sync drawing** to retry. When two people paint the same pixel, it stays painted. Distinct marks from both sketches survive a revision conflict.
+
+The browser adapter in `drawing-store.js` opens storage with `openDrawing(onBlocked)`, reads saved coordinate pairs with `restoreCells(db)`, and saves a worker's flat coordinate array with `saveCells(db, cells)`. On startup and reconnect, `synchronizeDrawing(db, resource)` reads the shared sketch, merges queued marks, and acknowledges the upload. The [drawing storage reference](../reference/reference-apps.md#drawing-editor-storage) describes the host contract.
+
+The Node tests use the generated worker and an in-memory IndexedDB. With Python Playwright and Edge installed, run `python scripts/verify_drawing_editor.py --cli target/debug/corvid.exe --channel msedge` from the repository root. The script builds the Wasm module and serves a conditional HTTP test resource. It checks a blocked upgrade, two offline tabs, a conflicting write on reconnect, and recovery after a shell update fails to install.
 
 ## Edit landscape tiles with a WebGL canvas
 
@@ -1039,6 +1073,8 @@ fn agent_list(workspace: Workspace) -> ui.View:
 
 Give each agent a unique, nonempty string ID. Use editable fields such as the name for the controls and keep the ID stable. Start editing the second name and press Alt+Up. The row moves with the caret. An assistant can call the opted-in action with `{"key":"writer","direction":"up"}` to make the same move while the user is typing. On an editable list, calling the reorder action with `{}` returns the current IDs in display order.
 
+The context contains only string IDs. Names and enabled settings stay in the editor. Disabling a row's **Move earlier** button also disables that move through Alt+Up and the assistant. Removing the row invalidates requests for its ID. Moving the list outside its exposing wrapper invalidates the cached tool.
+
 **Add agent** creates a row from the supplied template, including its initial name and enabled setting. The template key supplies the prefix for new IDs such as `agent-1` and `agent-2`. **Remove agent** removes just that row. If you remove the last row, the Add button remains available. Use `ui.value(bind agent.id)` when displaying the generated ID.
 
 ### Show a field in a custom live preview
@@ -1123,3 +1159,58 @@ console.log(receipt.filename, receipt.bytes);
 ```
 
 Call `controller.abort()` when the user cancels. Create a fresh controller for a retry. The upload promise resolves when the server sends its receipt. A search can use the same cancellation mechanism through `client.request<OrderPage>("GET", path, undefined, controller.signal)`. With React, pass the signal from `useCorvidPaginated((cursor, signal) => ...)` to the page request. Its `reset()` discards accumulated items and starts a fresh first page. An older response arriving afterward cannot append items or replace the new error state.
+
+## Display a live board in Corvid
+
+Use the subscription declared by the server as the source of a child loop.
+The table supplies the key, including every column of a composite key.
+
+```corvid
+fn card_list(board: Int) -> ui.View:
+    return ui.stack:
+        for card in ui.live(board_app.cards, board):
+            ui.value(bind card.title)
+            ui.text_field("Local note", "note", "")
+```
+
+The compiler checks `board` against the path declaration and `title` against
+the delivered row type. On a server with the WebSocket transport, mounting
+the view subscribes with the current session. A new snapshot supplies the
+query order. Rows whose keys and revisions match keep their DOM elements,
+including the local note input. Removing the view releases its subscription.
+A terminal error clears the rows and displays the reason.
+
+The compiler calls `ui.live_rows(server_name, subscription, arguments, content)`
+to render the component and its template. Generated TypeScript uses the SDK
+function `livePath(template, values)` to encode named path arguments. Run the
+markup example with `corvid test sdk/typescript/client/test/boards.cor`.
+[Subscription fixture](../../sdk/typescript/client/test/boards.cor)
+
+## Subscribe to a board from TypeScript
+
+For rows from a live database query, the generated TypeScript client gets its
+row type and key from the table. For example, in the board fixture the path
+segment `{board: Int}` makes `path.board` an integer in the handler. Generate
+the client with `corvid contract ts-client sdk/typescript/client/test/boards.cor --out generated`.
+Pass the board number and an observer to the resulting method:
+
+```ts
+const stop = api.live.board_app.cards(7, {
+  rows(cards) { renderTitles(cards.map(card => card.title)); },
+  error() { renderTitles([]); },
+});
+// When the board view unmounts:
+stop();
+```
+
+Here `renderTitles` is the application's display function. Each update
+contains the whole ordered result. The returned function releases this
+observer. Live delivery requires an RT-3 server. [Live client transport](../reference/cli.md#live-client-transport)
+
+## Window a long inventory
+
+For a list of 10,000 storage bins, give each row a fixed height of 32 CSS pixels. Call `first_row(scroll, height)` and `end_row(scroll, viewport, height, count)` to get the half-open range to mount. A spacer the height of the whole inventory keeps the scrollbar stable. Position each row at its index times its height and keep the focused link mounted until focus moves. The example calls `stock(bin)` for the visible quantity using the one-based bin number. [Corvid source](../../examples/windowed_inventory/src/inventory.cor) · [Function reference](../reference/functions.md#windowed-inventory-example)
+
+Use Tab to enter the list or table, Page Down to advance one viewport, End to visit the last bin, and Enter to inspect its stock. Back returns to the saved row and offset. The Receive shipment button subscribes to a loopback event stream which appends 32 bins. [Browser adapter](../../examples/windowed_inventory/inventory.js)
+
+Run `python scripts/verify_windowed_inventory.py --cli target/debug/corvid.exe --prepare-only` to build the model, compare it against TypeScript and check the HTTP fixture. The full check uses Node 22.13 or later, Python with Playwright and psutil, installed Firefox and WebKit builds matching Playwright and a Chromium browser. Replace `--prepare-only` with `--channel msedge` for hosted Windows. [Protocol and budgets](../proposals/frontend-windowed-collections.md#measurement-protocol)

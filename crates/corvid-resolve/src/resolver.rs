@@ -255,6 +255,9 @@ impl Resolver {
                     }
                 }
                 Decl::Store(s) => (s.name.name.clone(), DeclKind::Store, s.span),
+                // A table is a record type; the checker knows it is stored.
+                Decl::Table(t) => (t.record.name.name.clone(), DeclKind::Type, t.record.span),
+                Decl::Database(d) => (d.name.name.clone(), DeclKind::Database, d.span),
                 Decl::Tool(t) => (t.name.name.clone(), DeclKind::Tool, t.span),
                 Decl::Prompt(p) => (p.name.name.clone(), DeclKind::Prompt, p.span),
                 Decl::Agent(a) => (a.name.name.clone(), DeclKind::Agent, a.span),
@@ -457,6 +460,24 @@ impl Resolver {
                 }
                 Decl::Type(t) => self.resolve_type_decl(t),
                 Decl::Store(s) => self.resolve_store_decl(s),
+                Decl::Table(t) => {
+                    for field in &t.record.fields {
+                        self.resolve_type_ref(&field.ty);
+                    }
+                    // `in library` names a database declared in this module.
+                    if let Some(database) = &t.database {
+                        match self.symbols.lookup(&database.name) {
+                            Some(binding) => {
+                                self.bindings.insert(database.span, binding);
+                            }
+                            None => self.errors.push(ResolveError {
+                                kind: ResolveErrorKind::UndefinedName(database.name.clone()),
+                                span: database.span,
+                            }),
+                        }
+                    }
+                }
+                Decl::Database(_) => {}
                 Decl::Tool(t) => self.resolve_tool_decl(t),
                 Decl::Prompt(p) => self.resolve_prompt_decl(p),
                 Decl::Agent(a) => self.resolve_agent_decl(a),
@@ -937,6 +958,9 @@ impl Resolver {
                 self.bindings.insert(var.span, Binding::Local(id));
                 self.resolve_block(body);
             }
+            Stmt::Atomic { body, .. } => {
+                self.resolve_block(body);
+            }
             Stmt::While { cond, body, .. } => {
                 self.resolve_expr(cond);
                 self.resolve_block(body);
@@ -989,9 +1013,13 @@ impl Resolver {
                         return;
                     }
                 }
-                if name.name == "None" {
-                    self.bindings
-                        .insert(name.span, Binding::BuiltIn(crate::scope::BuiltIn::None));
+                let unit = match name.name.as_str() {
+                    "None" => Some(crate::scope::BuiltIn::None),
+                    "Deleted" => Some(crate::scope::BuiltIn::Deleted),
+                    _ => None,
+                };
+                if let Some(unit) = unit {
+                    self.bindings.insert(name.span, Binding::BuiltIn(unit));
                     return;
                 }
                 self.bind_pattern_local(name);
@@ -1057,6 +1085,9 @@ impl Resolver {
             "None" => BuiltIn::None,
             "Ok" => BuiltIn::Ok,
             "Err" => BuiltIn::Err,
+            "Changed" => BuiltIn::Changed,
+            "Deleted" => BuiltIn::Deleted,
+            "Taken" => BuiltIn::Taken,
             _ => return None,
         })
     }
@@ -1382,6 +1413,7 @@ fn decl_kind_label(kind: DeclKind) -> &'static str {
         DeclKind::Model => "model",
         DeclKind::Server => "server",
         DeclKind::Identity => "identity",
+        DeclKind::Database => "database",
     }
 }
 

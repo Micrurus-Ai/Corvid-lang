@@ -52,17 +52,158 @@ flows through the `Result` — never a trap.
 Renders epoch milliseconds as RFC 3339 UTC with a trailing `Z` and
 millisecond precision.
 
-## Durations
+## Durations and instants
 
-Durations are plain `Int` milliseconds. Ordinary arithmetic IS the
-duration API — `deadline = now.epoch_ms + 30 * 1000` — and the
-always-checked arithmetic rule covers overflow. There is no
-separate Duration type to learn.
+B06 adds two exact types. `Instant` is a point on the UTC timeline,
+to the nanosecond, from 0001-01-01 to 9999-12-31. `Duration` is an
+exact length of elapsed time. Read the clock with `time_now()`:
+
+```corvid
+import "std:time" use time_now
+
+agent wait_report(started: Instant) -> String:
+    waited = time_now() - started
+    return "waited " + waited.whole_seconds().to_string() + " s (" + waited.to_string() + ")"
+```
+
+`time_now() -> Instant uses time_wall` is a tool like
+`time_now_utc`: it is traced, replay returns the recorded instant,
+and `@deterministic` code cannot call it. Everything else below is
+pure.
+
+| Expression | Result |
+| --- | --- |
+| `instant - instant` | the `Duration` between them |
+| `instant + duration`, `duration + instant`, `instant - duration` | an `Instant` |
+| `duration + duration`, `duration - duration`, `-duration` | a `Duration` |
+| `duration * n`, `n * duration`, `duration / n` with `n: Int` | a `Duration`; `/` truncates to the nanosecond |
+| comparisons of two durations or two instants | `Bool` |
+
+Instants compare on the timeline, so `2026-03-29T03:30:00+02:00`
+equals `2026-03-29T01:30:00Z`. Adding a bare number to a duration
+or an instant is a compile error, because a number has no unit, and
+adding two instants is a compile error too. Arithmetic is exact and
+traps if a result leaves the range.
+
+| Method | Result |
+| --- | --- |
+| `text.parse_instant()` | `Result<Instant, String>` from RFC 3339 with any offset |
+| `text.parse_duration()` | `Result<Duration, String>` from ISO 8601 such as `PT1H30M`; `P1D` is rejected because a day is not a fixed length |
+| `instant.to_string()` | RFC 3339 in UTC, such as `2026-07-11T08:30:00.012Z` |
+| `instant.epoch_milliseconds()` | `Int`, rounded toward negative infinity |
+| `Instant.from_epoch_milliseconds(n)` | the `Instant` `n` milliseconds after 1970-01-01T00:00:00Z |
+| `duration.to_string()` | ISO 8601, such as `PT1H30M` |
+| `duration.whole_hours()`, `whole_minutes()`, `whole_seconds()`, `whole_milliseconds()`, `whole_microseconds()`, `whole_nanoseconds()` | `Int`, truncated toward zero |
+| `duration.abs()` | the length without its sign |
+
+Every JSON boundary carries `Instant` and `Duration`, and the zone
+types below, as their exact text: tools, prompts, routes, stores,
+`to_json` and `from_json`. OpenAPI publishes `format: date-time` and
+`format: duration`, a prompt's schema tells the model which format to
+use, and the TypeScript client and the SDKs hold the text as a string.
+Table columns of these types wait for B09 to map their storage.
+
+Durations, instants, zones and zoned times run the same in native
+builds. Native code holds each as its canonical text, the same text
+as its JSON form, and every operator and method calls `corvid-time`,
+the code the interpreter runs, so both tiers give the same results and
+stop with the same messages. Instants and durations are ordered and
+compared by value, never by their text. Tools and prompts whose
+signature holds one of these types run on the interpreter, which
+checks the text at the boundary; so do programs that call `time_now()`,
+a tool.
+
+A duration literal, `30 seconds`, is proposed and waits for agreement
+with frontend development. Until it lands, durations come from
+subtracting instants or from `parse_duration`.
+
+`time_parse_iso` and `time_format_iso` keep working; new code uses
+`parse_instant` and `to_string`, which are pure and need no tool call.
+Older code that keeps durations as `Int` milliseconds also keeps
+working.
+
+## Time zones
+
+`TimeZone` is an IANA zone and `ZonedTime` is an instant seen in one.
+A string literal where a `TimeZone` is meant is a zone, checked
+against the bundled IANA database when the program compiles, so a
+typo such as `"Europe/Berln"` is a compile error that suggests
+`Europe/Berlin`:
+
+```corvid
+agent opening(at: Instant) -> String:
+    local = at.in_zone("Europe/Berlin")
+    return local.hour().to_string() + ":00 in " + local.time_zone().to_string()
+```
+
+A zone name that arrives at run time, such as from a user's profile,
+goes through `text.parse_time_zone()`, which returns a `Result` whose
+`Err` suggests the closest name. A fixed offset such as `+02:00` is
+not a zone, because it has no daylight-saving rules.
+
+| Call | Result |
+| --- | --- |
+| `instant.in_zone(zone)` | the `ZonedTime`; always succeeds |
+| `zoned.year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `nanosecond()` | the local field as an `Int` |
+| `zoned.weekday()` | 1 for Monday through 7 for Sunday |
+| `zoned.offset_seconds()` | the offset from UTC in force then |
+| `zoned.time_zone()`, `zoned.instant()` | the zone and the instant |
+| `zoned.with_zone(zone)` | the same instant in another zone |
+| `zoned.add_days(n)`, `add_months(n)`, `add_years(n)` | the same local time on another calendar date |
+| `zoned + duration`, `zoned - duration` | a move along the timeline |
+| `zoned - zoned` | the `Duration` between their instants |
+| `zoned.to_string()` | RFC 9557, such as `2026-03-29T09:00:00+02:00[Europe/Berlin]` |
+| `text.parse_zoned_time()` | `Result<ZonedTime, String>` from RFC 9557 |
+| `text.parse_local_time(zone)` | `Result<ZonedTime, String>` from a wall-clock time such as `2026-03-29T09:00` |
+
+**Calendar days are not 24 hours.** In Berlin the clocks move forward
+on 29 March 2026, so:
+
+```corvid
+agent next_morning(saturday: ZonedTime) -> ZonedTime:
+    return saturday.add_days(1)
+```
+
+For `2026-03-28T09:00:00+01:00[Europe/Berlin]` this returns
+`2026-03-29T09:00:00+02:00[Europe/Berlin]`, which is 23 hours later.
+Adding a `Duration` of `PT24H` instead gives 10:00.
+
+`add_months` moves a day past the end of the month back to its last
+day, so one month after 31 January is 28 or 29 February. When a
+calendar move lands on a local time the zone skips, it moves forward
+by the length of the gap, and when it lands on one the zone shows
+twice, it takes the earlier offset. This is the rule RFC 5545
+(iCalendar) and Temporal use.
+
+**Reading a local time never guesses.** `parse_local_time` returns an
+`Err` for a time the zone skips (`2026-03-29T02:30` in Berlin) or
+shows twice (`2026-10-25T02:30`), and the message names both offsets.
+`parse_zoned_time` refuses text whose offset the zone does not use at
+that time.
+
+Zoned times compare with `==` (same instant and same zone). They have
+no `<`, because two zoned times in different zones can be the same
+instant; compare `a.instant() < b.instant()`.
+
+Zone rules come from the IANA database compiled into Corvid
+(`corvid_time::TZDB_VERSION`), the same one the queue scheduler uses,
+so a schedule and a program agree on every daylight-saving change.
+A trace records that database's version. Replaying a trace recorded
+with a different one still works, and each zone-dependent operation
+(a local field, a calendar move, `to_string`, `parse_local_time`)
+warns once with the operation and the zone, because a zone whose
+rules changed in between can give a different answer. A native binary
+reports the same operations to its runtime, so a native replay warns
+the same way.
+
+Before standard time, zones ran on local mean time, whose offsets have
+seconds (Kolkata was `+05:53:28`). RFC 9557 text writes offsets in
+whole minutes, so such a time prints its offset rounded to the minute,
+`1850-06-01T17:53:28+05:53[Asia/Kolkata]`, and reading that text back
+gives the exact instant.
 
 ## Non-scope
 
-No timezone database surface (UTC only; render local time in the
-host application). No calendar arithmetic (`add_months`) — epoch
-math plus `time_format_iso` covers the agent-workload cases; a
-calendar surface would ship as a separate slice with explicit
-DST/overflow semantics.
+Plain dates and times without a zone (such as birthdays), and explicit
+earlier or later resolution of skipped and repeated local times, wait
+for an example that needs them.

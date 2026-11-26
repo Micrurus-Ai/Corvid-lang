@@ -17,7 +17,21 @@ mod stream;
 mod core;
 mod dispatch;
 mod parallel;
+mod regex;
+mod decimal;
+mod time;
+mod time_zones;
+mod currency;
+mod json_forms;
 mod test_runner;
+mod text;
+mod bytes;
+mod hmac;
+mod secrets;
+mod passwords;
+mod ed25519;
+mod outages;
+mod prompt_json;
 
 /// Compile source text all the way down to IR. Panics on any frontend
 /// error — tests should pass clean programs.

@@ -4,37 +4,64 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::routing::MethodRouter;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use super::ServeState;
 
+#[derive(Default)]
+pub(super) struct PageScripts {
+    pub(super) events: Option<String>,
+    pub(super) quantity: Option<String>,
+}
+
+impl PageScripts {
+    pub(super) fn tag(name: &str, bytes: &[u8]) -> String {
+        let digest = STANDARD.encode(Sha256::digest(bytes));
+        format!(
+            r#"<script type="module" data-corvid-ui integrity="sha256-{digest}" src="/target/wasm/{name}"></script>"#
+        )
+    }
+
+    pub(super) fn attach(&self, document: &mut String) {
+        const ENTRY: &str =
+            r#"<script type="module" data-corvid-ui src="/target/wasm/events.js"></script>"#;
+        let Some(main) = document.strip_suffix("</main></body></html>") else {
+            return;
+        };
+        let Some(content) = main.strip_suffix(ENTRY) else {
+            return;
+        };
+        let tag = self
+            .quantity
+            .as_ref()
+            .filter(|_| is_quantity_page(content))
+            .or(self.events.as_ref());
+        if let Some(tag) = tag {
+            document.replace_range(content.len()..main.len(), tag);
+        }
+    }
+}
+
 /// Recognize the standard document footer and only the controls this smaller entrypoint binds.
-pub(super) fn select_quantity_loader(html: &mut String) {
-    const FOOTER: &str = "<script type=\"module\" data-corvid-ui src=\"/target/wasm/events.js\"></script></main></body></html>";
-    let Some(content) = html.strip_suffix(FOOTER) else {
-        return;
-    };
+fn is_quantity_page(content: &str) -> bool {
     if !content.contains("<div data-corvid-quantity-field>") {
-        return;
+        return false;
     }
     let normalized = content.to_ascii_lowercase();
-    if normalized.contains("<script") {
-        return;
+    if normalized.contains("<script") || normalized.contains("<corvid-") {
+        return false;
     }
-    if normalized.split("data-corvid-").skip(1).any(|suffix| {
+    normalized.split("data-").skip(1).all(|suffix| {
         let name = suffix
             .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
             .next();
-        !matches!(
+        matches!(
             name,
-            Some("quantity-field" | "quantity" | "list" | "key" | "move")
+            Some("corvid-quantity-field" | "corvid-quantity" | "corvid-list" | "corvid-key" | "corvid-move")
         )
-    }) {
-        return;
-    }
-    let offset = content.len() + FOOTER.find("events.js").unwrap() + "events".len();
-    html.insert_str(offset, ".quantity");
+    })
 }
 
 pub(super) fn browser_asset(

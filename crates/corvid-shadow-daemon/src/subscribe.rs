@@ -22,12 +22,23 @@ impl FileWatchSubscription {
         let seen = Arc::new(Mutex::new(HashMap::<PathBuf, Instant>::new()));
         let debounce = Duration::from_millis(debounce_ms.max(1));
         let seen_handle = seen.clone();
+        // The watcher reports the directory's resolved path (on macOS a
+        // temporary directory under `/var` is reported under
+        // `/private/var`). Each path is given back under the directory
+        // as the caller named it, so the daemon reports, matches and
+        // logs the paths its configuration names.
+        let given = dir.to_path_buf();
+        let resolved = dir.canonicalize().ok().filter(|resolved| resolved != &given);
         let watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                     return;
                 }
                 for path in event.paths {
+                    let path = match resolved.as_ref().and_then(|resolved| path.strip_prefix(resolved).ok()) {
+                        Some(relative) => given.join(relative),
+                        None => path,
+                    };
                     if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                         continue;
                     }
