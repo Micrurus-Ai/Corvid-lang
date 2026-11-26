@@ -6,7 +6,7 @@
     "build": "tsc && node -e \"require('node:fs').copyFileSync('node_modules/fflate/esm/browser.js', 'target/wasm/fflate.js')\""
   },
   "dependencies": {
-    "fflate": "0.8.2"
+    "fflate": "0.8.3"
   },
   "devDependencies": {
     "typescript": "5.9.3"

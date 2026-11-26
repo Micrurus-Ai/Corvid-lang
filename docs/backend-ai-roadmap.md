@@ -110,6 +110,12 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] `corvid build` defaults to `native`; `--target python` stops with a message naming what it could not express and where to go instead; the `corvid-codegen-py` crate is removed; `compile()` and `compile_with_config()` check without emitting, so the Python-only refusals (stdlib executing tools, typed Python imports) no longer fail `corvid check`-style callers; the book's Python section now builds a shared library and runs `corvid bind python`.
 - [x] Trim `runtime/python` to what `tools.py` needs: `@tool`, its registry and `invoke_tool`. `tool_call`, `approve_gate`, `llm_call`, the tracing and the test helpers that generated code called are removed. The refund bot's Python-target `tools.py` is gone, and the release-archive test, which still built `--target python`, now checks a native build.
 
+**Dependency security** (found 2026-11-25 from GitHub's Dependabot alerts, under "Make what you find stronger")
+
+- [x] Every advisory with a compatible patch release is fixed: rustls, rustls-webpki and webpki-roots (TLS secrets in `Debug`, distrusted intermediates, a handshake bypass), quinn-proto and quinn-udp (seven QUIC denial-of-service bugs), h2, tokio, tokio-postgres, url, crossbeam-epoch, ctutils, anyhow and rustix, and two yanked releases; npm's esbuild, fflate and brace-expansion. The VS Code extension's check now requires a `brace-expansion` override past the advisories instead of one exact, since-vulnerable version.
+- [ ] rusqlite 0.31 to 0.43, for the bundled C SQLite CVE (RUSTSEC-2026-0459, fixed in libsqlite3-sys 0.39). A major version: every `rusqlite` call in `corvid-runtime` and `corvid-cli` is checked against its changes.
+- [ ] Run `cargo audit` and `npm audit` in CI, failing on a new advisory, so a vulnerable dependency is caught when it appears rather than found later in a push notice. `chrono`, `chrono-tz`, `instant` and `ttf-parser` are unmaintained with no successor release yet; list them as known, so only new findings fail.
+
 **Repository: commits in the owner's name** (decided by the owner 2026-11-25; see AGENTS.md)
 
 - [x] The law: every commit, PR, tag and release note in the owner's name, with no co-author or tool line.

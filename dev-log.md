@@ -944,6 +944,39 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Dependencies past their security advisories
+
+Each push reported 16 Dependabot alerts on `main`. `cargo audit` on
+`Cargo.lock` found 19 advisories in 12 crates, and `npm audit` found 3
+across the npm lockfiles. All but one were fixed with patch-level
+updates inside the declared version ranges:
+- **TLS:** rustls (secrets exposed by `Debug`, handshake messages
+  accepted across encryption levels, a downgrade); rustls-webpki and
+  webpki-roots (distrusted intermediates).
+- **QUIC:** quinn-proto and quinn-udp, seven denial-of-service bugs.
+- **Other crates:** h2, tokio, tokio-postgres (a panic on a short
+  `DataRow`), url, crossbeam-epoch, ctutils, anyhow, rustix, and two
+  yanked releases.
+- **npm:** esbuild, fflate and brace-expansion.
+
+Found and fixed along the way: the VS Code extension's verify script
+required the `brace-expansion` override to be exactly `2.1.4`, which
+pinned a version that later advisories cover. It now requires an exact
+2.x release at or above the newest fix, and checks that the lockfile
+resolves every copy to it.
+
+The remaining advisory, the bundled C SQLite CVE, needs rusqlite 0.31
+to 0.43, a major version, so it is its own roadmap item. Running the
+audits in CI, so new advisories fail a build instead of arriving as a
+push notice, is filed too.
+
+The first test run failed on every Postgres test because the WSL disk
+was full and Postgres had stopped. The build cache held 56 GB, mostly
+stale test executables. Removing the executables untouched for two
+hours freed 16 GB without discarding compiled libraries.
+
+---
+
 ## 2026-11-25 - `JsonError` in signatures (B01)
 
 `T.from_json` returned `Result<T, JsonError>`, but a program could not
