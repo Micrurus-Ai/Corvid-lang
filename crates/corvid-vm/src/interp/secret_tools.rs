@@ -4,7 +4,7 @@
 //! and every record of the call holds `<redacted>` instead: the
 //! interpreter builds the recorded arguments with
 //! [`crate::conv::value_to_json`] and the implementation's with
-//! [`crate::conv::tool_argument_json`], and the runtime keeps them
+//! [`super::tool_json::tool_arguments`], and the runtime keeps them
 //! apart (`corvid_runtime::secret_arguments`). Whether a call needs the
 //! revealed form is decided by the tool's declared parameter types, not
 //! by looking at the values.
@@ -13,7 +13,7 @@
 //! std/crypto are the tools whose result is a `Secret`. JSON cannot mint
 //! one (`json_to_value` refuses it), so their results are decoded here.
 
-use crate::conv::{secret_tool_result_to_value, tool_argument_json};
+use crate::conv::secret_tool_result_to_value;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::value::Value;
 use corvid_ast::Span;
@@ -38,11 +38,8 @@ pub(super) fn revealed_arguments(
     if !takes_secret {
         return Ok(None);
     }
-    let revealed = arg_values
-        .iter()
-        .map(tool_argument_json)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(format!("tool `{}`: {problem}", tool.name)), span))?;
+    let revealed = super::tool_json::tool_arguments(tool, arg_values, types_by_id, crate::public_json::SecretArgument::Revealed)
+        .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(problem), span))?;
     Ok(Some(RevealedToolArguments::new(recorded, revealed)))
 }
 

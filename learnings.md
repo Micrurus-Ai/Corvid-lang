@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A tool now receives its arguments, and is read back, in the same JSON form `to_json` writes: a Python, host or Rust tool gets `None` as `null` and a variant as `{"tag": "variant", "type": ..., "variant": ..., "fields": [...]}` instead of `{"tag": "some", ...}`, and an answer that does not fit the tool's declared return type is refused with the field it got wrong. A recording made earlier whose tool arguments hold an `Option` or a variant no longer replays; record it again.
+
 A prompt that takes or returns a record, a list, an `Option`, a `Result`, a sum type, a `Decimal` or a time value now runs in native code; such a program used to run on the interpreter. Both tiers show the model the same text and schema, and record the same call. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)
 
 Declare an operation that people, assistants and the program share with `action`: `action move_card(move: MoveCard) -> Card requires permission("board.edit"):`. Corvid code calls it as any agent, `move_card(m)`. Every action says who may call it from outside: `requires authenticated`, `role("...")`, `permission("...")` joined with `and`, or `requires anyone` on its own. Leaving `requires` out is a compile error, as is a role or permission the `identity` block does not declare. `corvid contract app` lists each action with its input, result and caller policy. The endpoint, the form binding and assistant tools follow in the next B10 slices. [Shared actions](docs/proposals/shared-actions.md)

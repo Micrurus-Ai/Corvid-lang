@@ -104,6 +104,34 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Tool calls exchange the public JSON form (B2a)
+
+Found while starting B2: the interpreter sent a tool its arguments in its
+internal form (`{"tag": "some", ...}` for an `Option`, no `type` on a
+variant) and read the answer the same way, while native runtime calls
+already sent the public form. Moving native user tools onto the runtime
+call alone would have made the tiers disagree, so B2 became two slices,
+recorded in the [proposal](docs/proposals/native-scalar-boundaries.md).
+
+B2a: `interp/tool_json.rs` encodes each argument by its parameter's
+declared type with the public mapping. A `Secret` is `<redacted>` in the
+recorded form and its text in the form the tool receives, through the
+public encoder's secret hook. A grounded value at a plain parameter
+crosses as its value. A type holding a runtime handle (`DbHandle`,
+`JsonBuilder`) crosses as the handle; that rule is decided by the type.
+The answer is decoded by the declared return type, ignoring undeclared
+keys. Those arguments are what the trace records, what an approver sees,
+and what Python, host and Rust tools receive. The step debugger shows
+the same form.
+
+Behaviour that changed: tests that read a grounded argument as
+`args[0]["value"]` now read the value. The Python import test's message
+for `sqrt(2)` declared `-> Int` is the public decoder's: "expected Int,
+found the fractional number". No committed recording held an old-form
+tool argument.
+
+---
+
 ## 2026-11-26 - Native prompts through the public JSON plan (B1b)
 
 A native prompt could take only `Int`, `Bool`, `Float` and `String`, and

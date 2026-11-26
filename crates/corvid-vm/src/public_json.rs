@@ -55,7 +55,7 @@ pub fn decode_public_json(
     types_by_id: &HashMap<DefId, &IrType>,
     unknown_fields: UnknownFields,
 ) -> Result<Value, JsonDecodeError> {
-    corvid_public_json::decode(json, expected, types_by_id, unknown_fields, &mut InterpreterValues)
+    corvid_public_json::decode(json, expected, types_by_id, unknown_fields, &mut InterpreterValues::default())
 }
 
 /// Read request text (a path segment or one query value) as a value of
@@ -100,11 +100,38 @@ pub fn decode_public_json_text(
     types_by_id: &HashMap<DefId, &IrType>,
     unknown_fields: UnknownFields,
 ) -> Result<Value, JsonDecodeError> {
-    corvid_public_json::decode_text(text, expected, types_by_id, unknown_fields, &mut InterpreterValues)
+    corvid_public_json::decode_text(text, expected, types_by_id, unknown_fields, &mut InterpreterValues::default())
 }
 
 /// Builds interpreter values for the shared decoder.
-struct InterpreterValues;
+#[derive(Default)]
+struct InterpreterValues {
+    /// How a `Secret` is written: `None` refuses one, as `to_json` must;
+    /// a tool argument is written recorded or revealed.
+    secrets: Option<SecretArgument>,
+}
+
+/// The two forms of a tool argument that holds a `Secret`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecretArgument {
+    /// `<redacted>`: the form every record of the call holds.
+    Recorded,
+    /// The text: the form only the tool's implementation receives.
+    Revealed,
+}
+
+/// Encode a tool argument, of its parameter's type `ty`, as public JSON:
+/// the form the interpreter sends every tool and native runtime calls
+/// send (native scalar boundaries B2a). A `Secret` is written in the
+/// given form; a decoded key has no text and is refused when revealed.
+pub fn encode_tool_argument(
+    value: &Value,
+    ty: &Type,
+    types_by_id: &HashMap<DefId, &IrType>,
+    secrets: SecretArgument,
+) -> Result<J, String> {
+    corvid_public_json::encode(value, ty, types_by_id, &mut InterpreterValues { secrets: Some(secrets) })
+}
 
 impl corvid_public_json::ValueBuilder for InterpreterValues {
     type Value = Value;
@@ -196,7 +223,7 @@ pub fn encode_public_json_text(
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
 ) -> Result<String, String> {
-    corvid_public_json::encode_text(value, ty, types_by_id, &mut InterpreterValues)
+    corvid_public_json::encode_text(value, ty, types_by_id, &mut InterpreterValues::default())
 }
 
 /// Encode `value`, of type `ty`, as public JSON. The walk follows the
@@ -209,7 +236,7 @@ pub fn encode_public_json(
     ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
 ) -> Result<J, String> {
-    corvid_public_json::encode(value, ty, types_by_id, &mut InterpreterValues)
+    corvid_public_json::encode(value, ty, types_by_id, &mut InterpreterValues::default())
 }
 
 fn mismatch(expected: &str, value: &Value) -> String {
@@ -218,6 +245,18 @@ fn mismatch(expected: &str, value: &Value) -> String {
 
 impl corvid_public_json::ValueReader for InterpreterValues {
     type Value = Value;
+
+    fn secret(&mut self, value: &Value) -> Result<J, String> {
+        let Value::Secret(secret) = value else { return Err(mismatch("Secret", value)) };
+        match self.secrets {
+            None => Err("a `Secret` has no JSON form".into()),
+            Some(SecretArgument::Recorded) => Ok(J::String(corvid_runtime::REDACTED_SECRET.to_string())),
+            Some(SecretArgument::Revealed) => secret
+                .expose_text()
+                .map(|text| J::String(text.to_string()))
+                .ok_or_else(|| corvid_runtime::DECODED_KEY_TO_TOOL.to_string()),
+        }
+    }
 
     fn int(&mut self, value: &Value) -> Result<i64, String> {
         match value {
