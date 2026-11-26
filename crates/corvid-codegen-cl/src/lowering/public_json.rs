@@ -216,6 +216,33 @@ pub(super) fn lower_tool_argument_encode(
     Ok(builder.inst_results(call)[0])
 }
 
+/// Lower a value a trace records (a run's arguments and result, an
+/// `approve`'s arguments) as public JSON text: secrets redacted, and a
+/// value the form cannot write recorded as `null`, never stopping the run.
+pub(super) fn lower_recorded_encode(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    ty: &Type,
+    value: ClValue,
+    span: Span,
+) -> Result<ClValue, CodegenError> {
+    let slot = match builder.func.dfg.value_type(value) {
+        I8 => builder.ins().uextend(I64, value),
+        F64 => builder.ins().bitcast(I64, MemFlags::new(), value),
+        _ => value,
+    };
+    let (plan, plan_len, table) = json_plan(module, runtime, ty, span)?;
+    let plan = module.declare_data_in_func(plan, builder.func);
+    let plan = builder.ins().symbol_value(I64, plan);
+    let plan_len = builder.ins().iconst(I64, plan_len);
+    let table = module.declare_data_in_func(table, builder.func);
+    let table = builder.ins().symbol_value(I64, table);
+    let encode = module.declare_func_in_func(runtime.json_encode_recorded, builder.func);
+    let call = builder.ins().call(encode, &[slot, plan, plan_len, table]);
+    Ok(builder.inst_results(call)[0])
+}
+
 /// The embedded plan for `target`: its data, length and typeinfo table.
 pub(super) fn json_plan(
     module: &mut ObjectModule,

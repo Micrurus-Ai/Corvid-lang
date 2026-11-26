@@ -88,3 +88,14 @@ pub(crate) fn debugger_view(value: &Value, ty: &Type, types: &HashMap<DefId, &Ir
         .unwrap_or_else(|problem| serde_json::json!({ "unencodable": problem }))
 }
 
+/// A value a trace records (a run's arguments and result, an `approve`'s
+/// arguments): the public form by its declared type, a `Secret` as
+/// `<redacted>`, as native code records it. A record is an observation and
+/// never stops the run, so a type with no public form (a stream, a handle)
+/// or a value the form cannot write (a malformed record, a NaN) is
+/// recorded in the interpreter's own form, which writes a NaN as `null`, as
+/// native code does.
+pub(crate) fn recorded_value_json(value: &Value, ty: &Type, types: &HashMap<DefId, &IrType>) -> J {
+    tool_value_json(value, ty, types, SecretArgument::Recorded).unwrap_or_else(|_| value_to_json(value))
+}
+

@@ -19,7 +19,7 @@ pub(super) use payload::*;
 pub(super) use stackmap::{define_function_with_stack_maps, emit_stack_map_table};
 pub(super) use symbols::*;
 pub(super) use trace::{define_option_trace, define_result_trace, define_struct_trace};
-pub(super) use trace_payload::emit_trace_payload;
+pub(super) use trace_payload::{json_trace_payload, recorded_values_payload};
 pub(super) use type_query::{
     collect_list_element_types, collect_option_types, collect_result_types, emit_release,
     emit_retain, is_native_option_expr_type, is_native_option_type, is_native_result_type,

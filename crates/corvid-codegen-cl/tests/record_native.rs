@@ -418,3 +418,79 @@ async fn refund_bot_replays_on_the_other_tier() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
 }
+
+const RECORD_RESULT_SRC: &str = r#"
+type Refund:
+    @json(key: "order-id")
+    order_id: String
+    amount: Int
+    approved: Bool
+
+agent refund_bot() -> Refund:
+    refund = Refund("ord-7", 42, true)
+    approve IssueRefund(refund)
+    return refund
+"#;
+
+fn approval_and_result(events: &[TraceEvent]) -> (Vec<serde_json::Value>, Option<serde_json::Value>, Option<serde_json::Value>) {
+    let approval = events
+        .iter()
+        .find_map(|event| match event {
+            TraceEvent::ApprovalRequest { args, .. } => Some(args.clone()),
+            _ => None,
+        })
+        .expect("an approval request");
+    let started = events.iter().find_map(|event| match event {
+        TraceEvent::RunStarted { args, .. } => Some(serde_json::Value::Array(args.clone())),
+        _ => None,
+    });
+    let result = events.iter().find_map(|event| match event {
+        TraceEvent::RunCompleted { result, .. } => result.clone(),
+        _ => None,
+    });
+    (approval, started, result)
+}
+
+/// A record argument to `approve` and a record result are recorded in the
+/// public JSON form on both tiers: under the renamed key, the same values
+/// the interpreter records.
+#[tokio::test]
+async fn a_record_result_and_approval_record_the_same_public_form_on_both_tiers() {
+    let ir = ir_of(RECORD_RESULT_SRC);
+
+    let interp_trace_dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .trace_to(interp_trace_dir.path())
+        .build();
+    run_agent(&ir, entry_name(&ir), vec![], &runtime).await.expect("interpreter run");
+    let interp_events = read_events_from_path(runtime.tracer().path()).expect("read interpreter trace");
+
+    let native_tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(
+        &ir,
+        "corvid_record_result_native",
+        &native_tmp.path().join("record_result_native"),
+        &[test_tools_lib_path().as_path()],
+    )
+    .expect("compile native binary");
+    let native_trace_path = native_tmp.path().join("native-trace.jsonl");
+    let output = Command::new(&produced)
+        .env("CORVID_TRACE_PATH", &native_trace_path)
+        .env("CORVID_APPROVE_AUTO", "1")
+        .output()
+        .expect("run native binary");
+    assert!(
+        output.status.success(),
+        "native run failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let native_events = read_events_from_path(&native_trace_path).expect("read native trace");
+
+    let expected = json!({"order-id": "ord-7", "amount": 42, "approved": true});
+    let (interp_approval, interp_started, interp_result) = approval_and_result(&interp_events);
+    assert_eq!(interp_approval, vec![expected.clone()]);
+    assert_eq!(interp_result, Some(expected));
+    assert_eq!(approval_and_result(&native_events), (interp_approval, interp_started, interp_result));
+}
+

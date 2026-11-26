@@ -381,7 +381,7 @@ pub(super) fn lower_prompt_call(
 
     let prompt_name_val = emit_string_const(builder, module, runtime, &prompt.name, span)?;
     let model_val = emit_string_const(builder, module, runtime, "", span)?;
-    let trace_payload = json_trace_payload(builder, module, runtime, &arg_json, span)?;
+    let trace_payload = super::runtime::json_trace_payload(builder, module, runtime, &arg_json, span)?;
 
     let bridge_return_ty = match return_ty {
         Type::Grounded(inner) => inner.as_ref(),
@@ -516,32 +516,4 @@ pub(super) fn lower_prompt_call(
     Ok(result_vals[0])
 }
 
-/// The recorded arguments of a prompt call: each argument's public JSON
-/// text, tagged `j` so the runtime parses it back into the JSON value the
-/// interpreter records. The texts stay owned by the caller.
-fn json_trace_payload(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    texts: &[ClValue],
-    span: Span,
-) -> Result<TracePayload, CodegenError> {
-    let tags = "j".repeat(texts.len());
-    let type_tags = lower_string_literal(builder, module, runtime, &tags, span)?;
-    let count = builder.ins().iconst(I64, texts.len() as i64);
-    let values_ptr = if texts.is_empty() {
-        builder.ins().iconst(I64, 0)
-    } else {
-        let slot = builder.create_sized_stack_slot(clir::StackSlotData::new(
-            clir::StackSlotKind::ExplicitSlot,
-            (texts.len() as u32) * 8,
-            3,
-        ));
-        for (index, text) in texts.iter().enumerate() {
-            builder.ins().stack_store(*text, slot, (index * 8) as i32);
-        }
-        builder.ins().stack_addr(I64, slot, 0)
-    };
-    Ok(TracePayload { type_tags, count, values_ptr, owned_values: Vec::new() })
-}
 

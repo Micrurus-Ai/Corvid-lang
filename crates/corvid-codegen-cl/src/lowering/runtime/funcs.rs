@@ -62,6 +62,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_json_encode_tool_argument`: one argument of a runtime call
     /// whose tool takes a secret, recorded (`<redacted>`) or revealed.
     pub json_encode_tool_argument: FuncId,
+    /// `corvid_json_encode_recorded`: a value a trace records, as public
+    /// JSON with secrets redacted, `null` for one it cannot write.
+    pub json_encode_recorded: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
@@ -122,14 +125,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,
-    pub json_buffer_new: FuncId,
-    pub json_buffer_finish: FuncId,
-    pub json_buffer_append_raw: FuncId,
-    pub json_buffer_append_int: FuncId,
-    pub json_buffer_append_float: FuncId,
-    pub json_buffer_append_bool: FuncId,
-    pub json_buffer_append_null: FuncId,
-    pub json_buffer_append_string: FuncId,
     pub string_into_cstr: FuncId,
     pub begin_direct_observation: FuncId,
     pub finish_direct_observation: FuncId,
@@ -176,10 +171,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub json_object_finish: FuncId,
     pub citation_verify_or_panic: FuncId,
     pub trace_run_started: FuncId,
-    pub trace_run_completed_int: FuncId,
-    pub trace_run_completed_bool: FuncId,
-    pub trace_run_completed_float: FuncId,
-    pub trace_run_completed_string: FuncId,
+    /// `corvid_trace_run_completed_json`: a run's result as public JSON text.
+    pub trace_run_completed: FuncId,
     pub literal_counter: std::cell::Cell<u64>,
     /// When true, codegen-level scattered
     /// `emit_retain` / `emit_release` sites are skipped because the

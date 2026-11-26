@@ -2,6 +2,32 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native run and approval traces in the public JSON form
+
+Native traces recorded a run's arguments and an `approve`'s arguments with a
+separate hand-written JSON mapping, and recorded a run's result only for
+scalars. The interpreter recorded all three in its own form. Both tiers now
+record them the same way: in the public JSON form, by declared type, with a
+`Secret` shown as `<redacted>`. Native code encodes through the embedded plan
+with `corvid_json_encode_recorded`; the interpreter uses `recorded_value_json`.
+A field renamed by `@json(key:)` is recorded under its JSON name, which both
+tiers got wrong before. Recording never stops a run: a stream, a NaN or a
+malformed record falls back to the interpreter's form, or `null` natively,
+because three existing tests showed a strict encoder would fail them.
+
+The hand-written mapping, the per-type `corvid_trace_run_completed_*` exports
+and the C JSON buffer behind them (`json.c`) are gone. `runtime/trace.rs` held
+both collector trace functions and trace payloads, so the payloads moved to
+`runtime/trace_payload.rs` first, in a separate pure-move commit. A new test runs a
+record-returning program with a renamed key on both tiers and compares the
+recorded approval, start and result.
+
+Found and filed: the native command-line boundary prints a record through its
+own scalar-only encoder that ignores renamed keys, refuses `List`, `Option` and
+`Result` returns, and differs from the interpreter's `Display` output. Fixed
+too: the cryptography reference still said native code calls a program's own
+tool directly without redaction, which stopped being true with B2b.
+
 ### RT-4 live subscriptions verified over RT-3
 
 Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.

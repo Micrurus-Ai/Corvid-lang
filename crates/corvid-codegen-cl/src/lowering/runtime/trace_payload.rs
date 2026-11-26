@@ -1,321 +1,45 @@
-//! Trace-event payloads: the JSON-payload helpers
-//! (`emit_json_stringify_arg`, `emit_trace_payload`, and friends) build
-//! a serialized String representation of a runtime value for the
-//! diagnostic tracer. They recurse over the static `Type` to drive the
-//! C `corvid_json_buffer_*` surface.
+//! Trace-event payloads: the values a trace event records, encoded in
+//! the public JSON form by declared type, as the interpreter records
+//! them.
 
 use super::*;
 
-/// Build a JSON-encoded `Corvid String` for `value` and return a
-/// descriptor pointer that the trace recorder can pin into a
-/// `'j'`-tagged trace slot. The returned descriptor has refcount = 1;
-/// the caller releases it after the trace event has been recorded.
-///
-/// Walks the static `Type` to drive a `corvid_json_buffer_*` C surface:
-/// scalars are appended directly, structs/lists/options/results recurse
-/// over the respective memory layout. The payload format mirrors
-/// `serde_json::Value::to_string()` for the same logical value, so the
-/// downstream `decode_slot_json('j')` path can decode through
-/// `serde_json::from_str` without any custom parser.
-pub fn emit_json_stringify_arg(
+/// A trace payload of public JSON texts, each tagged `j` so the runtime
+/// parses it back into the JSON value the interpreter records. The texts
+/// stay owned by the caller.
+pub(in crate::lowering) fn json_trace_payload(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
-    value: ClValue,
-    ty: &Type,
+    texts: &[ClValue],
     span: Span,
-) -> Result<ClValue, CodegenError> {
-    let new_ref = module.declare_func_in_func(runtime.json_buffer_new, builder.func);
-    let new_call = builder.ins().call(new_ref, &[]);
-    let buf = builder.inst_results(new_call)[0];
-
-    emit_json_append(builder, module, runtime, buf, value, ty, span)?;
-
-    let finish_ref = module.declare_func_in_func(runtime.json_buffer_finish, builder.func);
-    let finish_call = builder.ins().call(finish_ref, &[buf]);
-    Ok(builder.inst_results(finish_call)[0])
-}
-
-fn emit_json_append(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    value: ClValue,
-    ty: &Type,
-    span: Span,
-) -> Result<(), CodegenError> {
-    match ty {
-        Type::Int => {
-            let f = module.declare_func_in_func(runtime.json_buffer_append_int, builder.func);
-            builder.ins().call(f, &[buf, value]);
-        }
-        Type::Bool => {
-            let f = module.declare_func_in_func(runtime.json_buffer_append_bool, builder.func);
-            builder.ins().call(f, &[buf, value]);
-        }
-        Type::Float => {
-            let f = module.declare_func_in_func(runtime.json_buffer_append_float, builder.func);
-            builder.ins().call(f, &[buf, value]);
-        }
-        // B06, B04 — a `Decimal`, time, currency, locale or `Bytes` value is a JSON
-        // string of its canonical text, as the interpreter's
-        // `value_to_json` writes it.
-        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
-            let f = module.declare_func_in_func(runtime.json_buffer_append_string, builder.func);
-            builder.ins().call(f, &[buf, value]);
-        }
-        Type::Grounded(inner) => {
-            emit_json_append(builder, module, runtime, buf, value, inner, span)?;
-        }
-        Type::Struct(def_id) => {
-            emit_json_append_struct(builder, module, runtime, buf, value, *def_id, span)?;
-        }
-        Type::List(elem_ty) => {
-            emit_json_append_list(builder, module, runtime, buf, value, elem_ty, span)?;
-        }
-        Type::Option(payload_ty) => {
-            emit_json_append_option(builder, module, runtime, buf, value, ty, payload_ty, span)?;
-        }
-        Type::Result(ok_ty, err_ty) => {
-            emit_json_append_result(builder, module, runtime, buf, value, ok_ty, err_ty, span)?;
-        }
-        other => {
-            return Err(CodegenError::not_supported(
-                format!(
-                    "JSON-encoding `{}` for trace payload — non-scalar trace coverage is incremental; this concrete shape is outside the current native subset",
-                    other.display_name()
-                ),
-                span,
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn emit_json_append_raw(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    text: &str,
-    span: Span,
-) -> Result<(), CodegenError> {
-    let lit = lower_string_literal(builder, module, runtime, text, span)?;
-    let f = module.declare_func_in_func(runtime.json_buffer_append_raw, builder.func);
-    builder.ins().call(f, &[buf, lit]);
-    Ok(())
-}
-
-fn emit_json_append_struct(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    value: ClValue,
-    def_id: DefId,
-    span: Span,
-) -> Result<(), CodegenError> {
-    let ir_type = runtime
-        .ir_types
-        .get(&def_id)
-        .ok_or_else(|| {
-            CodegenError::cranelift(
-                format!("JSON-encoding struct: missing IR type for def {def_id:?}"),
-                span,
-            )
-        })?
-        .clone();
-    if ir_type.fields.is_empty() {
-        emit_json_append_raw(builder, module, runtime, buf, "{}", span)?;
-        return Ok(());
-    }
-    for (i, field) in ir_type.fields.iter().enumerate() {
-        // Corvid identifiers are alphanumeric + underscore, so they
-        // need no JSON escaping inside a key string.
-        let prefix = if i == 0 {
-            format!("{{\"{}\":", field.name)
-        } else {
-            format!(",\"{}\":", field.name)
-        };
-        emit_json_append_raw(builder, module, runtime, buf, &prefix, span)?;
-        let field_cl_ty = cl_type_for(&field.ty, span)?;
-        let offset = (i as i32) * STRUCT_FIELD_SLOT_BYTES;
-        let field_val = builder
-            .ins()
-            .load(field_cl_ty, MemFlags::trusted(), value, offset);
-        emit_json_append(builder, module, runtime, buf, field_val, &field.ty, span)?;
-    }
-    emit_json_append_raw(builder, module, runtime, buf, "}", span)?;
-    Ok(())
-}
-
-fn emit_json_append_list(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    value: ClValue,
-    elem_ty: &Type,
-    span: Span,
-) -> Result<(), CodegenError> {
-    let elem_cl_ty = cl_type_for(elem_ty, span)?;
-    emit_json_append_raw(builder, module, runtime, buf, "[", span)?;
-    let length = builder.ins().load(I64, MemFlags::trusted(), value, 0);
-    let zero = builder.ins().iconst(I64, 0);
-
-    let header_block = builder.create_block();
-    let body_block = builder.create_block();
-    let comma_block = builder.create_block();
-    let elem_block = builder.create_block();
-    let end_block = builder.create_block();
-    let counter = builder.append_block_param(header_block, I64);
-
-    builder.ins().jump(header_block, &[zero.into()]);
-
-    builder.switch_to_block(header_block);
-    let cond = builder.ins().icmp(IntCC::SignedLessThan, counter, length);
-    builder.ins().brif(cond, body_block, &[], end_block, &[]);
-
-    builder.switch_to_block(body_block);
-    builder.seal_block(body_block);
-    let needs_comma = builder.ins().icmp_imm(IntCC::SignedGreaterThan, counter, 0);
-    builder
-        .ins()
-        .brif(needs_comma, comma_block, &[], elem_block, &[]);
-
-    builder.switch_to_block(comma_block);
-    builder.seal_block(comma_block);
-    emit_json_append_raw(builder, module, runtime, buf, ",", span)?;
-    builder.ins().jump(elem_block, &[]);
-
-    builder.switch_to_block(elem_block);
-    builder.seal_block(elem_block);
-    let offset = builder.ins().imul_imm(counter, 8);
-    let base = builder.ins().load(I64, MemFlags::trusted(), value, 8);
-    let elem_addr = builder.ins().iadd(base, offset);
-    let elem_val = builder
-        .ins()
-        .load(elem_cl_ty, MemFlags::trusted(), elem_addr, 0);
-    emit_json_append(builder, module, runtime, buf, elem_val, elem_ty, span)?;
-    let next = builder.ins().iadd_imm(counter, 1);
-    builder.ins().jump(header_block, &[next.into()]);
-
-    // Header has two predecessors: initial jump and loop-back jump.
-    // Seal only after both edges have been emitted.
-    builder.seal_block(header_block);
-
-    builder.switch_to_block(end_block);
-    builder.seal_block(end_block);
-    emit_json_append_raw(builder, module, runtime, buf, "]", span)?;
-    Ok(())
-}
-
-fn emit_json_append_option(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    value: ClValue,
-    option_ty: &Type,
-    payload_ty: &Type,
-    span: Span,
-) -> Result<(), CodegenError> {
-    if !is_native_option_type(option_ty) {
-        return Err(CodegenError::not_supported(
-            format!(
-                "JSON-encoding `{}` for trace payload — only nullable-pointer Option<T> for refcounted T plus wide scalar Option<Int|Bool|Float> are covered today",
-                option_ty.display_name()
-            ),
-            span,
-        ));
-    }
-    let some_block = builder.create_block();
-    let none_block = builder.create_block();
-    let merge_block = builder.create_block();
-
-    builder.ins().brif(value, some_block, &[], none_block, &[]);
-
-    builder.switch_to_block(none_block);
-    builder.seal_block(none_block);
-    let null_f = module.declare_func_in_func(runtime.json_buffer_append_null, builder.func);
-    builder.ins().call(null_f, &[buf]);
-    builder.ins().jump(merge_block, &[]);
-
-    builder.switch_to_block(some_block);
-    builder.seal_block(some_block);
-    let payload_val = if option_uses_wrapper(option_ty) {
-        let payload_cl_ty = cl_type_for(payload_ty, span)?;
-        builder.ins().load(
-            payload_cl_ty,
-            MemFlags::trusted(),
-            value,
-            OPTION_PAYLOAD_OFFSET,
-        )
+) -> Result<TracePayload, CodegenError> {
+    let tags = "j".repeat(texts.len());
+    let type_tags = lower_string_literal(builder, module, runtime, &tags, span)?;
+    let count = builder.ins().iconst(I64, texts.len() as i64);
+    let values_ptr = if texts.is_empty() {
+        builder.ins().iconst(I64, 0)
     } else {
-        // Refcounted-payload Option uses bare nullable-pointer
-        // encoding — the value IS the payload pointer when non-null.
-        value
+        let slot = builder.create_sized_stack_slot(clir::StackSlotData::new(
+            clir::StackSlotKind::ExplicitSlot,
+            (texts.len() as u32) * 8,
+            3,
+        ));
+        for (index, text) in texts.iter().enumerate() {
+            builder.ins().stack_store(*text, slot, (index * 8) as i32);
+        }
+        builder.ins().stack_addr(I64, slot, 0)
     };
-    emit_json_append(builder, module, runtime, buf, payload_val, payload_ty, span)?;
-    builder.ins().jump(merge_block, &[]);
-
-    builder.switch_to_block(merge_block);
-    builder.seal_block(merge_block);
-    Ok(())
+    Ok(TracePayload { type_tags, count, values_ptr, owned_values: Vec::new() })
 }
 
-fn emit_json_append_result(
-    builder: &mut FunctionBuilder,
-    module: &mut ObjectModule,
-    runtime: &RuntimeFuncs,
-    buf: ClValue,
-    value: ClValue,
-    ok_ty: &Type,
-    err_ty: &Type,
-    span: Span,
-) -> Result<(), CodegenError> {
-    let tag = builder
-        .ins()
-        .load(I64, MemFlags::trusted(), value, RESULT_TAG_OFFSET);
-    let is_ok = builder.ins().icmp_imm(IntCC::Equal, tag, RESULT_TAG_OK);
-
-    let ok_block = builder.create_block();
-    let err_block = builder.create_block();
-    let merge_block = builder.create_block();
-
-    builder.ins().brif(is_ok, ok_block, &[], err_block, &[]);
-
-    builder.switch_to_block(ok_block);
-    builder.seal_block(ok_block);
-    emit_json_append_raw(builder, module, runtime, buf, "{\"Ok\":", span)?;
-    let ok_cl_ty = cl_type_for(ok_ty, span)?;
-    let ok_payload =
-        builder
-            .ins()
-            .load(ok_cl_ty, MemFlags::trusted(), value, RESULT_PAYLOAD_OFFSET);
-    emit_json_append(builder, module, runtime, buf, ok_payload, ok_ty, span)?;
-    emit_json_append_raw(builder, module, runtime, buf, "}", span)?;
-    builder.ins().jump(merge_block, &[]);
-
-    builder.switch_to_block(err_block);
-    builder.seal_block(err_block);
-    emit_json_append_raw(builder, module, runtime, buf, "{\"Err\":", span)?;
-    let err_cl_ty = cl_type_for(err_ty, span)?;
-    let err_payload =
-        builder
-            .ins()
-            .load(err_cl_ty, MemFlags::trusted(), value, RESULT_PAYLOAD_OFFSET);
-    emit_json_append(builder, module, runtime, buf, err_payload, err_ty, span)?;
-    emit_json_append_raw(builder, module, runtime, buf, "}", span)?;
-    builder.ins().jump(merge_block, &[]);
-
-    builder.switch_to_block(merge_block);
-    builder.seal_block(merge_block);
-    Ok(())
-}
-
-pub fn emit_trace_payload(
+/// Values recorded in a trace (a run's arguments, an `approve`'s), each
+/// in the public JSON form by its declared type, a `Secret` as
+/// `<redacted>`, a value the form cannot write as `null`: what the
+/// interpreter records for the same values. The
+/// payload's texts are returned in `owned_values` for the caller to
+/// release after the call.
+pub(in crate::lowering) fn recorded_values_payload(
     builder: &mut FunctionBuilder,
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
@@ -323,80 +47,23 @@ pub fn emit_trace_payload(
     tys: &[Type],
     span: Span,
 ) -> Result<TracePayload, CodegenError> {
-    debug_assert_eq!(values.len(), tys.len());
-    let tags = tys
-        .iter()
-        .map(trace_tag_for_type)
-        .collect::<Result<String, _>>()?;
-    let type_tags = lower_string_literal(builder, module, runtime, &tags, span)?;
-    let count = builder.ins().iconst(I64, values.len() as i64);
-    let mut owned_values = Vec::new();
-    let values_ptr = if values.is_empty() {
-        builder.ins().iconst(I64, 0)
-    } else {
-        let stack_slot = builder.create_sized_stack_slot(clir::StackSlotData::new(
-            clir::StackSlotKind::ExplicitSlot,
-            (values.len() as u32) * 8,
-            3,
-        ));
-        for (idx, (value, ty)) in values.iter().zip(tys.iter()).enumerate() {
-            let offset = (idx as i32) * 8;
-            match ty {
-                Type::Grounded(inner) => match inner.as_ref() {
-                    Type::Int | Type::String => {
-                        builder.ins().stack_store(*value, stack_slot, offset);
-                    }
-                    Type::Bool => {
-                        let widened = builder.ins().uextend(I64, *value);
-                        builder.ins().stack_store(widened, stack_slot, offset);
-                    }
-                    Type::Float => {
-                        builder.ins().stack_store(*value, stack_slot, offset);
-                    }
-                    other => {
-                        let json =
-                            emit_json_stringify_arg(builder, module, runtime, *value, other, span)?;
-                        builder.ins().stack_store(json, stack_slot, offset);
-                        owned_values.push(json);
-                    }
-                },
-                Type::Int | Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => {
-                    builder.ins().stack_store(*value, stack_slot, offset);
-                }
-                Type::Bool => {
-                    let widened = builder.ins().uextend(I64, *value);
-                    builder.ins().stack_store(widened, stack_slot, offset);
-                }
-                Type::Float => {
-                    builder.ins().stack_store(*value, stack_slot, offset);
-                }
-                other => {
-                    let json =
-                        emit_json_stringify_arg(builder, module, runtime, *value, other, span)?;
-                    builder.ins().stack_store(json, stack_slot, offset);
-                    owned_values.push(json);
-                }
-            }
+    let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
+    let mut texts = Vec::with_capacity(values.len());
+    for (value, ty) in values.iter().zip(tys) {
+        let shown = match ty {
+            Type::Grounded(inner) | Type::Tainted(inner) => inner.as_ref(),
+            other => other,
+        };
+        if !crate::lowering::public_json::native_form_with_secrets(shown, &types) {
+            return Err(CodegenError::not_supported(
+                format!("recording a `{}` value, which has no native JSON form; use the interpreter tier", shown.display_name()),
+                span,
+            ));
         }
-        builder.ins().stack_addr(I64, stack_slot, 0)
-    };
-    Ok(TracePayload {
-        type_tags,
-        count,
-        values_ptr,
-        owned_values,
-    })
+        texts.push(crate::lowering::public_json::lower_recorded_encode(builder, module, runtime, shown, *value, span)?);
+    }
+    let mut payload = json_trace_payload(builder, module, runtime, &texts, span)?;
+    payload.owned_values = texts;
+    Ok(payload)
 }
 
-fn trace_tag_for_type(ty: &Type) -> Result<char, CodegenError> {
-    match ty {
-        Type::Grounded(inner) => trace_tag_for_type(inner),
-        Type::Int => Ok('i'),
-        Type::Bool => Ok('b'),
-        Type::Float => Ok('f'),
-        // B06, B04 — a `Decimal`, time, currency, locale or `Bytes` value is traced
-        // as its canonical text.
-        Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Ok('s'),
-        _ => Ok('j'),
-    }
-}

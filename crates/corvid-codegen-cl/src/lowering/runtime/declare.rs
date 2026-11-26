@@ -208,6 +208,16 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let json_encode_tool_argument = module
         .declare_function("corvid_json_encode_tool_argument", Linkage::Import, &tool_argument_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare json_encode_tool_argument: {e}"), Span::new(0, 0)))?;
+    // corvid_json_encode_recorded(value, plan, plan_len, typeinfos) ->
+    // String: a value a trace records, secrets redacted, never failing.
+    let mut recorded_sig = module.make_signature();
+    for _ in 0..4 {
+        recorded_sig.params.push(AbiParam::new(I64));
+    }
+    recorded_sig.returns.push(AbiParam::new(I64));
+    let json_encode_recorded = module
+        .declare_function("corvid_json_encode_recorded", Linkage::Import, &recorded_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare json_encode_recorded: {e}"), Span::new(0, 0)))?;
     // corvid_json_encode_typed(value, plan, plan_len, typeinfos) -> String
     let mut json_encode_sig = module.make_signature();
     for _ in 0..4 {
@@ -641,131 +651,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         .declare_function(SLEEP_MS_SYMBOL, Linkage::Import, &sleep_ms_sig)
         .map_err(|e| CodegenError::cranelift(format!("declare sleep_ms: {e}"), Span::new(0, 0)))?;
 
-    // JSON encoder primitives backing the trace-payload `'j'` slot.
-    let mut json_buffer_new_sig = module.make_signature();
-    json_buffer_new_sig.returns.push(AbiParam::new(I64));
-    let json_buffer_new_id = module
-        .declare_function(
-            JSON_BUFFER_NEW_SYMBOL,
-            Linkage::Import,
-            &json_buffer_new_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare json_buffer_new: {e}"), Span::new(0, 0))
-        })?;
-
-    let mut json_buffer_finish_sig = module.make_signature();
-    json_buffer_finish_sig.params.push(AbiParam::new(I64));
-    json_buffer_finish_sig.returns.push(AbiParam::new(I64));
-    let json_buffer_finish_id = module
-        .declare_function(
-            JSON_BUFFER_FINISH_SYMBOL,
-            Linkage::Import,
-            &json_buffer_finish_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(format!("declare json_buffer_finish: {e}"), Span::new(0, 0))
-        })?;
-
-    let mut json_buffer_append_raw_sig = module.make_signature();
-    json_buffer_append_raw_sig.params.push(AbiParam::new(I64));
-    json_buffer_append_raw_sig.params.push(AbiParam::new(I64));
-    let json_buffer_append_raw_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_RAW_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_raw_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_raw: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut json_buffer_append_int_sig = module.make_signature();
-    json_buffer_append_int_sig.params.push(AbiParam::new(I64));
-    json_buffer_append_int_sig.params.push(AbiParam::new(I64));
-    let json_buffer_append_int_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_INT_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_int_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_int: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut json_buffer_append_float_sig = module.make_signature();
-    json_buffer_append_float_sig.params.push(AbiParam::new(I64));
-    json_buffer_append_float_sig.params.push(AbiParam::new(F64));
-    let json_buffer_append_float_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_FLOAT_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_float_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_float: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut json_buffer_append_bool_sig = module.make_signature();
-    json_buffer_append_bool_sig.params.push(AbiParam::new(I64));
-    json_buffer_append_bool_sig.params.push(AbiParam::new(I8));
-    let json_buffer_append_bool_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_BOOL_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_bool_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_bool: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut json_buffer_append_null_sig = module.make_signature();
-    json_buffer_append_null_sig.params.push(AbiParam::new(I64));
-    let json_buffer_append_null_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_NULL_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_null_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_null: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut json_buffer_append_string_sig = module.make_signature();
-    json_buffer_append_string_sig
-        .params
-        .push(AbiParam::new(I64));
-    json_buffer_append_string_sig
-        .params
-        .push(AbiParam::new(I64));
-    let json_buffer_append_string_id = module
-        .declare_function(
-            JSON_BUFFER_APPEND_STRING_SYMBOL,
-            Linkage::Import,
-            &json_buffer_append_string_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare json_buffer_append_string: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
     // Stringification helpers. Each takes a typed scalar
     // and returns a Corvid String descriptor pointer (i64).
     let mut sfi_sig = module.make_signature();
@@ -1021,69 +906,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare trace_run_started: {e}"), Span::new(0, 0))
         })?;
 
-    let mut trace_run_completed_int_sig = module.make_signature();
-    trace_run_completed_int_sig.params.push(AbiParam::new(I64));
-    let trace_run_completed_int_id = module
-        .declare_function(
-            TRACE_RUN_COMPLETED_INT_SYMBOL,
-            Linkage::Import,
-            &trace_run_completed_int_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_run_completed_int: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_run_completed_bool_sig = module.make_signature();
-    trace_run_completed_bool_sig.params.push(AbiParam::new(I8));
-    let trace_run_completed_bool_id = module
-        .declare_function(
-            TRACE_RUN_COMPLETED_BOOL_SYMBOL,
-            Linkage::Import,
-            &trace_run_completed_bool_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_run_completed_bool: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_run_completed_float_sig = module.make_signature();
-    trace_run_completed_float_sig
-        .params
-        .push(AbiParam::new(F64));
-    let trace_run_completed_float_id = module
-        .declare_function(
-            TRACE_RUN_COMPLETED_FLOAT_SYMBOL,
-            Linkage::Import,
-            &trace_run_completed_float_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_run_completed_float: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
-
-    let mut trace_run_completed_string_sig = module.make_signature();
-    trace_run_completed_string_sig
-        .params
-        .push(AbiParam::new(I64));
-    let trace_run_completed_string_id = module
-        .declare_function(
-            TRACE_RUN_COMPLETED_STRING_SYMBOL,
-            Linkage::Import,
-            &trace_run_completed_string_sig,
-        )
-        .map_err(|e| {
-            CodegenError::cranelift(
-                format!("declare trace_run_completed_string: {e}"),
-                Span::new(0, 0),
-            )
-        })?;
+    // A run's result as its public JSON text (one mapping for every type).
+    let mut trace_run_completed_sig = module.make_signature();
+    trace_run_completed_sig.params.push(AbiParam::new(I64));
+    let trace_run_completed_id = module
+        .declare_function(TRACE_RUN_COMPLETED_JSON_SYMBOL, Linkage::Import, &trace_run_completed_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare trace_run_completed_json: {e}"), Span::new(0, 0)))?;
 
     Ok(RuntimeFuncs {
         overflow: overflow_func_id,
@@ -1116,6 +944,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         runtime_call: runtime_call_id,
         json_encode_typed: json_encode_typed_id,
         json_encode_tool_argument,
+        json_encode_recorded,
         string_char_len: string_char_len_id,
         string_char_at: string_char_at_id,
         alloc_typed: alloc_typed_id,
@@ -1151,14 +980,6 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         runtime_shutdown: runtime_shutdown_id,
         runtime_embed_init: embed_init_id,
         sleep_ms: sleep_ms_id,
-        json_buffer_new: json_buffer_new_id,
-        json_buffer_finish: json_buffer_finish_id,
-        json_buffer_append_raw: json_buffer_append_raw_id,
-        json_buffer_append_int: json_buffer_append_int_id,
-        json_buffer_append_float: json_buffer_append_float_id,
-        json_buffer_append_bool: json_buffer_append_bool_id,
-        json_buffer_append_null: json_buffer_append_null_id,
-        json_buffer_append_string: json_buffer_append_string_id,
         string_into_cstr: string_into_cstr_id,
         begin_direct_observation: begin_direct_observation_id,
         finish_direct_observation: finish_direct_observation_id,
@@ -1189,10 +1010,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         json_object_finish: json_object_finish_id,
         citation_verify_or_panic: citation_verify_or_panic_id,
         trace_run_started: trace_run_started_id,
-        trace_run_completed_int: trace_run_completed_int_id,
-        trace_run_completed_bool: trace_run_completed_bool_id,
-        trace_run_completed_float: trace_run_completed_float_id,
-        trace_run_completed_string: trace_run_completed_string_id,
+        trace_run_completed: trace_run_completed_id,
         literal_counter: std::cell::Cell::new(0),
         // The unified ownership pass is the default. It produces
         // refcount-correct code

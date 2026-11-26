@@ -357,7 +357,7 @@ pub(super) fn emit_entry_main(
                 .iter()
                 .map(|param| param.ty.clone())
                 .collect::<Vec<_>>();
-            let trace_payload = emit_trace_payload(
+            let trace_payload = recorded_values_payload(
                 &mut builder,
                 module,
                 runtime,
@@ -377,6 +377,9 @@ pub(super) fn emit_entry_main(
                 ],
             );
             emit_release(&mut builder, module, runtime, trace_payload.type_tags);
+            for text in trace_payload.owned_values {
+                emit_release(&mut builder, module, runtime, text);
+            }
             emit_release(&mut builder, module, runtime, entry_name_val);
         }
         let entry_call = builder.ins().call(entry_ref, &decoded_args);
@@ -391,28 +394,16 @@ pub(super) fn emit_entry_main(
         }
         if let Some(result_val) = result {
             if uses_runtime {
-                let trace_result_ref = match &entry_agent.return_ty {
-                    Type::Int => Some(runtime.trace_run_completed_int),
-                    Type::Bool => Some(runtime.trace_run_completed_bool),
-                    Type::Float => Some(runtime.trace_run_completed_float),
-                    // B06, B04 — a `Decimal`, time, currency, locale or
-                    // `Bytes` value is traced as its canonical text, the
-                    // JSON string the interpreter records.
-                    Type::String | Type::Decimal | Type::Duration | Type::Instant | Type::TimeZone | Type::ZonedTime | Type::Currency | Type::Locale | Type::Bytes => Some(runtime.trace_run_completed_string),
-                    Type::Grounded(inner) => match &**inner {
-                        Type::Int => Some(runtime.trace_run_completed_int),
-                        Type::Bool => Some(runtime.trace_run_completed_bool),
-                        Type::Float => Some(runtime.trace_run_completed_float),
-                        Type::String => Some(runtime.trace_run_completed_string),
-                        _ => None,
-                    },
-                    _ => None,
+                // The result as its public JSON text, what the
+                // interpreter records for the same run.
+                let shown = match &entry_agent.return_ty {
+                    Type::Grounded(inner) => inner.as_ref(),
+                    other => other,
                 };
-                if let Some(trace_result) = trace_result_ref {
-                    let trace_run_completed_ref =
-                        module.declare_func_in_func(trace_result, builder.func);
-                    builder.ins().call(trace_run_completed_ref, &[result_val]);
-                }
+                let text = super::public_json::lower_recorded_encode(&mut builder, module, runtime, shown, result_val, entry_agent.span)?;
+                let trace_run_completed_ref = module.declare_func_in_func(runtime.trace_run_completed, builder.func);
+                builder.ins().call(trace_run_completed_ref, &[text]);
+                emit_release(&mut builder, module, runtime, text);
             }
             emit_entry_result_print(
                 &mut builder,

@@ -29,7 +29,6 @@ const C_SOURCES: &[&str] = &[
     "stack_maps_fallback.c",
     "collector.c",
     "verify.c",
-    "json.c",
 ];
 const C_HEADERS: &[&str] = &["list_layout.h"];
 
