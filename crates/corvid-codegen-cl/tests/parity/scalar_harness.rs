@@ -42,7 +42,7 @@ pub(super) fn assert_parity_text(src: &str) -> String {
         Value::Bytes(bytes) => format!("{bytes:?}"),
         Value::Int(n) => n.to_string(),
         // `corvid run` prints a Float result in this form.
-        Value::Float(x) => corvid_runtime::number_text::float_display(x),
+        Value::Float(x) => corvid_runtime::number_text::float_to_string(x),
         other => panic!("interpreter returned {other:?}, not a String, Int or text-held scalar; src=\n{src}"),
     };
     let tmp = tempfile::tempdir().expect("tempdir");

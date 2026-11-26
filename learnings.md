@@ -8391,3 +8391,7 @@ A native build links the `corvid-runtime` staticlib only if it holds the runtime
 
 A host that loads an `approve_site` approver from source runs it on Corvid's approval evaluator, which takes `if`, `return`, bindings, constructor calls, field and list access, and arithmetic and comparisons on `Int`, `Float`, `Bool` and `String` values. An approver that uses anything else, such as a duration literal or a method call, is refused when it is loaded or simulated, with an error that names the construct, rather than failing its first approval. Its arithmetic is checked: an overflow is an error, not a wrapped number.
 
+### A printed `Float` always shows its decimal point
+
+`corvid run` prints a `Float` result the way `to_string()` writes it, on the interpreter and in native code alike: an agent returning `2.0` prints `2.0`, where it used to print `2`. A `Float` inside a printed list or record, and one interpolated into text, reads the same way. A whole number printed with a point is a `Float`, and one without is an `Int`. A very large `Float` prints every digit in native code too, where it used to be cut off.
+

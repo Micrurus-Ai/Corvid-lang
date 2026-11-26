@@ -86,13 +86,14 @@ agent f() -> Bool:
     );
 }
 
-/// A Float result prints as `corvid run` prints it on the interpreter.
-/// Native code used `%.17g`, which printed `0.1` as `0.10000000000000001`.
+/// A Float result prints as `corvid run` prints it on the interpreter,
+/// always with its decimal point. Native code used `%.17g`, which printed
+/// `0.1` as `0.10000000000000001`; both tiers once printed `2.0` as `2`.
 #[test]
 fn float_results_print_alike() {
     for (src, expected) in [
         ("agent f() -> Float:\n    return 0.1\n", "0.1"),
-        ("agent f() -> Float:\n    return 2.0\n", "2"),
+        ("agent f() -> Float:\n    return 2.0\n", "2.0"),
         ("agent f() -> Float:\n    return 0.1 + 0.2\n", "0.30000000000000004"),
         ("agent f() -> Float:\n    return 1.0 / 3.0\n", "0.3333333333333333"),
     ] {

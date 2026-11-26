@@ -19,7 +19,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(n) => write!(f, "{n}"),
-            Value::Float(x) => f.write_str(&corvid_runtime::number_text::float_display(*x)),
+            Value::Float(x) => f.write_str(&corvid_runtime::number_text::float_to_string(*x)),
             Value::Decimal(d) => write!(f, "{d}"),
             Value::Duration(d) => write!(f, "{d}"),
             Value::Instant(i) => write!(f, "{i}"),

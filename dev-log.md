@@ -2,6 +2,25 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A printed `Float` reads as one
+
+`to_string()` writes `2.0` for a whole-number `Float`, the language's rule
+that a `Float` always reads as one. A printed result wrote `2` on both tiers,
+through a separate `number_text::float_display`. That function is gone. A
+printed result, interpolation and `to_string()` now share `float_to_string`, so
+`number_text` has one form for people and one for JSON. This changes program
+output, as the learnings entry says. Considered and rejected: keeping two
+forms, one for printing, because then `print(x)` and `x.to_string()` would
+disagree about the same value.
+
+Found on the way: native `corvid_print_f64` formatted into a 64-byte buffer
+through a copy helper that truncates silently, so a native program printing
+a large `Float` (`1e300`, 301 digits) cut the number short. It now prints the
+string `corvid_float_to_string` returns, at any length. A parity test prints
+`2.0`, `0.1` and `1e300` on both tiers. Its first run was refused by the new
+runtime stamp, because the test tools library still held the old runtime.
+Before the stamp, it would have linked the old runtime and failed on a `2` with no hint why.
+
 ### Host test binaries out of the source tree
 
 The shared-library tests compiled their C hosts into

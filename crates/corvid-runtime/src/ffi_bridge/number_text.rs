@@ -12,15 +12,6 @@ unsafe fn write_into(text: &str, buffer: *mut u8, capacity: usize) -> usize {
     length
 }
 
-/// A `Float` result as `corvid run` prints it, into `buffer`.
-///
-/// # Safety
-/// `buffer` must be writable for `capacity` bytes.
-#[no_mangle]
-pub unsafe extern "C" fn corvid_float_display_text(value: f64, buffer: *mut u8, capacity: usize) -> usize {
-    unsafe { write_into(&crate::number_text::float_display(value), buffer, capacity) }
-}
-
 /// A `Float` as JSON number text (`null` when not finite), into `buffer`.
 ///
 /// # Safety
@@ -30,7 +21,7 @@ pub unsafe extern "C" fn corvid_float_json_text(value: f64, buffer: *mut u8, cap
     unsafe { write_into(&crate::number_text::float_json(value), buffer, capacity) }
 }
 
-/// `float.to_string()`.
+/// `float.to_string()`, and a `Float` result as `corvid run` prints it.
 #[no_mangle]
 pub extern "C" fn corvid_float_to_string(value: f64) -> CorvidString {
     string_from_rust(crate::number_text::float_to_string(value))
