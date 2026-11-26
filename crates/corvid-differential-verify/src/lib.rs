@@ -550,8 +550,17 @@ fn ensure_native_runtime_staticlib() -> Result<()> {
     } else {
         "libcorvid_runtime.a"
     };
-    if corvid_codegen_cl::staticlib_discovery::discover_staticlib(filename)
-        .is_some_and(|location| location.path.is_file())
+    // A staticlib named explicitly is used as given. One merely found next
+    // to the binary may predate the runtime it is linked against: a newly
+    // exported runtime function then fails to link with a confusing error.
+    // So the workspace's own library is always brought up to date once per
+    // process; cargo does nothing when it already is.
+    let named = ["CORVID_RUNTIME_STATICLIB_OVERRIDE", "CORVID_STATICLIB_DIR"]
+        .iter()
+        .any(|var| std::env::var_os(var).is_some());
+    if named
+        && corvid_codegen_cl::staticlib_discovery::discover_staticlib(filename)
+            .is_some_and(|location| location.path.is_file())
     {
         return Ok(());
     }
