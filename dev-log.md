@@ -1712,6 +1712,30 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - `corvid act` (B10-4a)
+
+`corvid act move_card --card 3 --to Done --position 7` calls an action
+from the command line. Flags are text values, the same as form fields,
+so they read through the same decoder: two refactor commits first moved
+the request-text readers out of `serve_cmd.rs` (`request_text.rs`) and
+the action table and decoders out of the HTTP endpoint
+(`action_calls.rs`, with `decode_text_input` now shared by forms and
+flags), and a driver refactor made `interpreter_runtime` the one place
+the command-line runtime is built. `--json` takes the whole input, the
+result prints as public JSON (a stream one value per line), an unknown
+flag is refused, and an action that requires a signed-in caller is
+refused by name: the command line has no sign-in yet, and running it as
+no one would skip its `requires`. Filed for B11: command-line sign-in.
+B10-4b (workers) waits for B11 for signed-in actions and is split out.
+
+Found and fixed: `corvid run` parsed its positional arguments with its
+own copy of a text reader that knew only Int, Float, Bool and String, so
+`agent main(price: Decimal)` could not be run with an argument. It now
+reads through `decode_request_text`, the rule paths, queries, forms and
+flags use, with a test passing `2.50`.
+
+---
+
 ## 2026-11-26 - Assistants call actions, and their person confirms (B10-3b)
 
 `corvid serve` answers `POST /mcp` (MCP over HTTP: `initialize`,

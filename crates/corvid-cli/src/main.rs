@@ -74,6 +74,7 @@ mod review_queue_cmd;
 mod routing_report;
 mod run_cmd;
 mod serve_approval;
+mod act_cmd;
 mod action_calls;
 mod request_text;
 mod serve_auth;

@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Call an action from the command line: `corvid act move_card --card 3 --to Done --position 7`, or `corvid act --json '{"card": 3, ...}' move_card`. Flags are read like form fields (repeat one for a `List`, leave an `Option` out), the result prints as JSON, and a bad value names its field without running anything. An action that requires a signed-in caller is refused until the command line can sign in. `corvid run` now also accepts any text type as an argument, such as `corvid run main.cor 2.50` for a `Decimal`. [CLI: actions](docs/reference/cli.md#calling-an-action-from-the-command-line)
+
 An assistant can now call your actions. `corvid serve` answers `POST /mcp`, the Model Context Protocol, for every action with an `assistants: confirm "..."` line. The assistant works inside its person's signed-in session and sees only the offered actions that person may call. Its call does not run the action: it waits until the same person confirms it at `/__confirmations/<id>/confirm`, and then runs with that person as the `Caller`. An action offered to assistants needs an `identity` block. [CLI: assistants](docs/reference/cli.md#assistants)
 
 A native prompt now asks the model exactly what the interpreter asks: the prompt text and the reply's JSON schema, with no extra instructions, and it retries a reply that does not fit only as `with repair N` says, never on its own. A prompt without `with repair` stops with "unusable reply" after one unusable answer on both tiers, and a recording of a repaired call replays on either.

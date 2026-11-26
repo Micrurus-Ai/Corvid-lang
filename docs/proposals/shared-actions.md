@@ -148,7 +148,8 @@ What frontend development owns here: the page script's CSRF fill, the fetch subm
 **The trace and the caller.** Each call records the `action` event with `surface: "assistant"`, the confirmation id and the actor; the confirmation records its own `assistant.confirmation` event when proposed, confirmed, declined or expired. An action's `Caller` parameter is the signed-in person, since the assistant acts with their authority.
 
 **Non-scope.** Delegated tokens and `allow` (B11); a durable confirmation store that survives a restart (with B13); the in-page WebMCP registration and the confirmation prompt UI (frontend development, reading `tools/list`).
-- [ ] B10-4. The CLI and workers: `corvid act` and `jobs enqueue --task <action>`, decoding through the same type.
+- [x] B10-4a. `corvid act <action> --field value ...` (or `--json`), reading flags by the request-text rule through the shared `action_calls` decoders, printing public JSON, traced as `surface: "cli"`. An action that requires a signed-in caller is refused by name until the command line can sign in (B11). Built 2026-11-26.
+- [ ] B10-4b. Workers: `jobs enqueue --task <action>` checks the payload against the action's input type at enqueue time, and `jobs run` runs the action through the same path, traced as `surface: "worker"`. A signed-in action needs the enqueuing person's authority carried with the job, which is B11's on-behalf-of authority.
 - [ ] B10-5. Cross-tier change report: `corvid contract app --diff`, and the project-board example (`move_card`), with a test that renames an input and checks every reported caller. Port the reading list's `apply_reviewed_titles` and `read_page` onto actions, deleting the hand-written form script.
 
 ## Non-scope

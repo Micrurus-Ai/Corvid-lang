@@ -144,6 +144,10 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             let file = resolve_project_source(file)?;
             cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
+        Some(Command::Act { action, file, json, mode, fields }) => {
+            let file = resolve_project_source(file)?;
+            crate::act_cmd::cmd_act(&file, &action, json.as_deref(), mode.as_deref(), &fields)
+        }
         Some(Command::Serve {
             access_log,
             file,
