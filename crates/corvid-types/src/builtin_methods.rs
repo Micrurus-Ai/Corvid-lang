@@ -800,6 +800,14 @@ pub const JSON_ERROR_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32:
 /// variant index.
 pub const CONFLICT_TYPE_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 3);
 
+/// The id IR lowering gives a reference it could not resolve: a
+/// variant's owner, a struct literal's type, a test or a mock target.
+/// A checked program never needs it, because the checker resolved each
+/// of them first. It names no record, so a lookup through it fails
+/// loudly ("missing from the IR") instead of finding a compiler-known
+/// record such as `JsonError`, whose id `u32::MAX` it used to share.
+pub const UNRESOLVED_DEF_ID: corvid_resolve::DefId = corvid_resolve::DefId(u32::MAX - 1000);
+
 /// Every type id reserved for a compiler-known record, by name. A new
 /// compiler-known record takes the next free id below these and joins
 /// this list; the test beside it fails if two share an id, which would
@@ -827,6 +835,14 @@ mod reserved_type_id_tests {
             assert!(!RESPONSE_RECORD_IDS.contains(&id.0), "`{name}`'s id {id:?} is inside the Response record band");
         }
         assert!(RESPONSE_RECORD_IDS.start > 1 << 24, "the band must sit far above resolver-assigned ids");
+    }
+
+    /// Lowering's fallback id is none of the reserved ones.
+    #[test]
+    fn the_unresolved_id_names_no_reserved_record() {
+        for (name, id) in RESERVED_TYPE_IDS {
+            assert_ne!(id, super::UNRESOLVED_DEF_ID, "the unresolved id must not be `{name}`'s");
+        }
     }
 
     #[test]

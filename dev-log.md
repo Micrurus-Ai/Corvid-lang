@@ -861,6 +861,20 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Lowering's fallback id names no record
+
+IR lowering used `DefId(u32::MAX)` in eight places for a reference it
+could not resolve: a variant's owner, a struct literal's type, a test,
+a fixture and a mock target. The checker resolves each first, so a
+checked program never reaches them, but `u32::MAX` is `JsonError`'s
+reserved id, so had one been reached, the interpreter or native code
+would have looked up `JsonError` instead of failing. The fallback is now
+`UNRESOLVED_DEF_ID`, declared beside `RESERVED_TYPE_IDS` with a test
+that it is none of them, so any lookup through it reports the missing
+type. The Mac session found it while listing the reserved ids.
+
+---
+
 ## 2026-11-25 - A refined field bounds a query loop (B09 Refine-3)
 
 `@budget` could bound a loop over a table query only when it ended in a

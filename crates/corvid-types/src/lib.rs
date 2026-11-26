@@ -52,7 +52,7 @@ pub use builtin_methods::{
 };
 pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};
 pub use type_receiver::{type_receiver, TypeReceiver};
-pub use builtin_methods::CONFLICT_TYPE_ID;
+pub use builtin_methods::{CONFLICT_TYPE_ID, UNRESOLVED_DEF_ID};
 pub use types::{ConflictCase, ConflictCases, Type};
 
 #[cfg(test)]
