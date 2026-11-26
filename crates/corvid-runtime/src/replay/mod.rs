@@ -27,7 +27,7 @@ use crate::errors::RuntimeError;
 use crate::llm::{LlmRegistry, LlmRequestRef, LlmResponse, TokenUsage};
 pub use approval_outcome::{ReplayApprovalDecision, ReplayApprovalOutcome};
 use corvid_trace_schema::{
-    read_events_from_path, validate_supported_schema, TraceEvent, WRITER_INTERPRETER,
+    read_events_from_path, validate_supported_schema, TraceEvent,
 };
 use cursor::TraceCursor;
 pub use differential::{
@@ -192,25 +192,20 @@ impl ReplaySource {
         })
     }
 
+    /// A trace from either tier: replay compares every substituted call
+    /// exactly, so a trace the replaying tier would record differently
+    /// stops with a divergence naming the first event that differs
+    /// (native dispatch N5).
     pub fn from_path(path: impl Into<PathBuf>) -> Result<Self, RuntimeError> {
-        Self::from_path_for_writer(path, WRITER_INTERPRETER)
+        Self::load(path.into(), ReplayMode::Substitute)
     }
 
-    pub fn from_path_for_writer(
+    pub fn from_path_with_model(
         path: impl Into<PathBuf>,
-        replay_writer: &'static str,
-    ) -> Result<Self, RuntimeError> {
-        Self::load(path.into(), replay_writer, ReplayMode::Substitute)
-    }
-
-    pub fn from_path_for_writer_with_model(
-        path: impl Into<PathBuf>,
-        replay_writer: &'static str,
         model: impl Into<String>,
     ) -> Result<Self, RuntimeError> {
         Self::load(
             path.into(),
-            replay_writer,
             ReplayMode::Differential {
                 model: model.into(),
                 report: Arc::new(Mutex::new(ReplayDifferentialReport::default())),
@@ -218,15 +213,13 @@ impl ReplaySource {
         )
     }
 
-    pub fn from_path_for_writer_with_mutation(
+    pub fn from_path_with_mutation(
         path: impl Into<PathBuf>,
-        replay_writer: &'static str,
         step_1based: usize,
         replacement: serde_json::Value,
     ) -> Result<Self, RuntimeError> {
         Self::load(
             path.into(),
-            replay_writer,
             ReplayMode::Mutation(ReplayMutation {
                 step_1based,
                 replacement,
@@ -238,7 +231,6 @@ impl ReplaySource {
 
     fn load(
         path: PathBuf,
-        replay_writer: &'static str,
         mode: ReplayMode,
     ) -> Result<Self, RuntimeError> {
         let events = read_events_from_path(&path).map_err(|err| RuntimeError::ReplayTraceLoad {
@@ -259,14 +251,9 @@ impl ReplaySource {
             Some(TraceEvent::SchemaHeader { tzdb_version, .. }) => tzdb_version.clone(),
             _ => None,
         };
+        // Either tier's trace replays here; the writer is not checked.
         match events.first() {
-            Some(TraceEvent::SchemaHeader { writer, .. }) if writer == replay_writer => {}
-            Some(TraceEvent::SchemaHeader { writer, .. }) => {
-                return Err(RuntimeError::CrossTierReplayUnsupported {
-                    recorded_writer: writer.clone(),
-                    replay_writer: replay_writer.to_string(),
-                });
-            }
+            Some(TraceEvent::SchemaHeader { .. }) => {}
             _ => {
                 return Err(RuntimeError::ReplayTraceLoad {
                     path,
@@ -447,7 +434,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::RunCompleted {
                         ok: recorded_ok,
@@ -485,7 +472,7 @@ impl ReplaySource {
                 }
             }
             ReplayMode::Mutation(_) => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::RunCompleted {
                         ok: recorded_ok,
@@ -589,7 +576,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::ToolCall {
                         tool: expected_tool,
@@ -833,7 +820,7 @@ impl ReplaySource {
                             ),
                         )
                         .map_err(RuntimeError::ReplayDivergence)?;
-                    let result_step = display_step(cursor.current_step());
+                    let result_step = display_step(cursor.next_event_step(&self.events));
                     let recorded_result = match cursor.next_event(&self.events) {
                         TraceEvent::LlmResult {
                             prompt: expected_prompt,
@@ -975,7 +962,7 @@ impl ReplaySource {
                     .map_err(RuntimeError::ReplayDivergence)?;
             }
             ReplayMode::Differential { .. } => {
-                let step = display_step(cursor.current_step());
+                let step = display_step(cursor.next_event_step(&self.events));
                 match cursor.next_event(&self.events) {
                     TraceEvent::ApprovalRequest {
                         label: expected_label,
@@ -1134,31 +1121,35 @@ impl ReplaySource {
 #[cfg(test)]
 mod tests {
     use super::{ReplaySource, SubstitutionDivergence};
-    use crate::errors::RuntimeError;
     use corvid_trace_schema::{write_events_to_path, TraceEvent, SCHEMA_VERSION, WRITER_NATIVE};
 
+    /// The tier that wrote a trace never changes whether it loads for
+    /// replay (native dispatch N5): the same events load, or fail to
+    /// load, the same way under either writer.
     #[test]
-    fn rejects_cross_tier_native_trace() {
+    fn the_writer_of_a_trace_never_decides_whether_it_replays() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("native.jsonl");
-        write_events_to_path(
-            &path,
-            &[TraceEvent::SchemaHeader {
-                version: SCHEMA_VERSION,
-                writer: WRITER_NATIVE.into(),
-                commit_sha: None,
-                source_path: None,
-                tzdb_version: None,
-                ts_ms: 0,
-                run_id: "native".into(),
-            }],
-        )
-        .unwrap();
-        let err = ReplaySource::from_path(&path).unwrap_err();
-        assert!(matches!(
-            err,
-            RuntimeError::CrossTierReplayUnsupported { .. }
-        ));
+        let outcome = |writer: &str| {
+            let path = dir.path().join(format!("{writer}.jsonl"));
+            write_events_to_path(
+                &path,
+                &[
+                    TraceEvent::SchemaHeader {
+                        version: SCHEMA_VERSION,
+                        writer: writer.into(),
+                        commit_sha: None,
+                        source_path: None,
+                        tzdb_version: None,
+                        ts_ms: 0,
+                        run_id: "r".into(),
+                    },
+                    TraceEvent::SeedRead { ts_ms: 0, run_id: "r".into(), purpose: "rollout_default_seed".into(), value: 7 },
+                ],
+            )
+            .unwrap();
+            ReplaySource::from_path(&path).err().map(|error| error.to_string().replace(writer, "<writer>"))
+        };
+        assert_eq!(outcome(WRITER_NATIVE), outcome(corvid_trace_schema::WRITER_INTERPRETER));
     }
 
     #[test]
@@ -1200,7 +1191,7 @@ mod tests {
         )
         .unwrap();
         let replay =
-            ReplaySource::from_path_for_writer_with_model(&path, "interpreter", "mock-2").unwrap();
+            ReplaySource::from_path_with_model(&path, "mock-2").unwrap();
         replay.record_substitution_divergence(SubstitutionDivergence {
             step: 1,
             expected: TraceEvent::RunStarted {

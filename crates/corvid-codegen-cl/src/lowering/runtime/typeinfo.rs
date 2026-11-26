@@ -69,7 +69,7 @@ pub fn emit_struct_typeinfo(
     trace_fn: FuncId,
     runtime: &RuntimeFuncs,
 ) -> Result<cranelift_module::DataId, CodegenError> {
-    let symbol = format!("corvid_typeinfo_{}", ty.name);
+    let symbol = super::type_query::record_symbol("corvid_typeinfo_", ty);
     let data_id = module
         .declare_data(&symbol, Linkage::Local, false, false)
         .map_err(|e| {

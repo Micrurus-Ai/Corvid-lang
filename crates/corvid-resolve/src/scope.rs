@@ -146,6 +146,11 @@ pub enum BuiltIn {
     /// `find_all_regex` return. Nameable so helper agents can take a
     /// match as a parameter; only the regex methods construct one.
     RegexMatch,
+    /// B01 — `JsonError`, the compiler-known record `T.from_json`
+    /// returns on failure. Nameable so a helper agent can take the error
+    /// and a signature can return `Result<T, JsonError>`; only
+    /// `from_json` constructs one.
+    JsonError,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -264,6 +269,8 @@ impl SymbolTable {
         self.builtins.insert("Taken".into(), BuiltIn::Taken);
         // B03 — see the `BuiltIn::RegexMatch` docstring.
         self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
+        // B01 — see the `BuiltIn::JsonError` docstring.
+        self.builtins.insert("JsonError".into(), BuiltIn::JsonError);
     }
 
     /// Insert a top-level declaration.

@@ -133,11 +133,6 @@ pub enum RuntimeError {
         message: String,
     },
 
-    CrossTierReplayUnsupported {
-        recorded_writer: String,
-        replay_writer: String,
-    },
-
     /// A replay-mode runtime caught a side-effect call that bypassed the
     /// recorded-event substitution path. `surface` names the quarantined
     /// component (`"llm"` for slice `35V2-P38-C-4`; `"http"`, `"store"`,
@@ -285,13 +280,6 @@ impl fmt::Display for RuntimeError {
             Self::InvalidReplayMutation { step, message } => write!(
                 f,
                 "invalid replay mutation at substitutable step {step}: {message}"
-            ),
-            Self::CrossTierReplayUnsupported {
-                recorded_writer,
-                replay_writer,
-            } => write!(
-                f,
-                "cross-tier replay is not supported in v1: trace writer `{recorded_writer}` cannot replay on `{replay_writer}`"
             ),
             Self::QuarantineViolation { surface, detail } => write!(
                 f,

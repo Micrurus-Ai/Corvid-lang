@@ -62,6 +62,7 @@ pub fn lower_file(
     module: &mut ObjectModule,
     entry_agent_name: Option<&str>,
     tools_via_registry: bool,
+    connector_specs: Option<&str>,
 ) -> Result<HashMap<String, FuncId>, CodegenError> {
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut func_ids_by_def: HashMap<DefId, FuncId> = HashMap::new();
@@ -325,17 +326,15 @@ pub fn lower_file(
         // Windows, which would otherwise regress every tool-free
         // `corvid run` invocation.
         let uses_runtime = ir_uses_runtime(ir);
-        // A program with connectors embeds their dispatch specs, the
-        // projection the interpreter's runtime gets, and installs them
-        // before the runtime is built (native dispatch N1).
-        let connector_specs = corvid_runtime::connectors::connector_calls_json(ir);
+        // The connector specs `compile_to_object` projected from the
+        // program as checked; installed before the runtime is built.
         emit_entry_main(
             module,
             entry_agent,
             entry_func_id,
             &runtime,
             uses_runtime || connector_specs.is_some(),
-            connector_specs.as_deref(),
+            connector_specs,
         )?;
     }
 

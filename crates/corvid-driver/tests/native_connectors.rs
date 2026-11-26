@@ -60,17 +60,22 @@ agent main() -> String:
 struct Project {
     _dir: tempfile::TempDir,
     source: PathBuf,
+    program: String,
     ir: corvid_ir::IrFile,
 }
 
 fn project() -> Project {
+    project_of(PROGRAM)
+}
+
+fn project_of(program: &str) -> Project {
     let dir = tempfile::tempdir().expect("tempdir");
     let src_dir = dir.path().join("src");
     std::fs::create_dir_all(&src_dir).unwrap();
     let source = src_dir.join("main.cor");
-    std::fs::write(&source, PROGRAM).unwrap();
-    let ir = compile_to_ir_with_config_at_path(PROGRAM, &source, None).expect("program compiles");
-    Project { _dir: dir, source, ir }
+    std::fs::write(&source, program).unwrap();
+    let ir = compile_to_ir_with_config_at_path(program, &source, None).expect("program compiles");
+    Project { _dir: dir, source, program: program.to_string(), ir }
 }
 
 async fn provider() -> MockServer {
@@ -135,7 +140,7 @@ fn link_current_runtime() {
 fn native_binary(project: &Project) -> PathBuf {
     native_ability(&project.ir).expect("the program compiles to native code");
     link_current_runtime();
-    build_or_get_cached_native(&project.source, PROGRAM, &project.ir, None).expect("native build").path
+    build_or_get_cached_native(&project.source, &project.program, &project.ir, None).expect("native build").path
 }
 
 /// Runs the binary with the environment `corvid run --target native`
@@ -174,6 +179,19 @@ fn run_native(binary: &Path, mode: &str, server: Option<&MockServer>, env: &[(&s
     String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
+fn drop_date_headers(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            if let Some(serde_json::Value::Array(headers)) = fields.get_mut("headers") {
+                headers.retain(|pair| pair.get(0).and_then(|name| name.as_str()) != Some("date"));
+            }
+            fields.values_mut().for_each(drop_date_headers);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_date_headers),
+        _ => {}
+    }
+}
+
 /// Every event of a trace after its header and seed, without the fields
 /// that differ per run: times, the run id, and the response headers
 /// wiremock dates.
@@ -188,6 +206,9 @@ fn run_events(trace: &Path) -> Vec<serde_json::Value> {
             for key in ["ts_ms", "run_id", "elapsed_ms", "response_headers"] {
                 fields.remove(key);
             }
+            // A `Response` result carries the provider's headers, and
+            // wiremock dates each reply.
+            drop_date_headers(&mut event);
             event
         })
         .collect()
@@ -315,3 +336,128 @@ fn mock_mode_refuses_the_native_target() {
     assert_eq!(code, 1);
 }
 
+
+/// `Response<Body>` in native code (native dispatch N4): the status, a
+/// header read without regard to case, the typed body, a mapped status
+/// through `Result<Response<Body>, E>`, and a `HEAD` request's
+/// `Response<Nothing>`, the same on both tiers, with `Set-Cookie` never
+/// passed on.
+const RESPONSE_PROGRAM: &str = r#"
+effect http_read:
+    cost: 1.0
+
+type Charge:
+    id: String
+
+type ChargeError:
+    | Missing
+
+connector payments:
+    base_url: "http://api.payments.example"
+    timeout: 10s
+    redirects: never
+    modes: [real, replay]
+    operation charge(id: String) -> Response<Charge> uses http_read:
+        GET "/v1/charges/{id}"
+    operation maybe(id: String) -> Result<Response<Charge>, ChargeError> uses http_read:
+        GET "/v1/charges/{id}"
+        on status 404 -> Missing
+    operation exists(id: String) -> Response<Nothing> uses http_read:
+        HEAD "/v1/charges/{id}"
+
+agent text_or(value: Option<String>, fallback: String) -> String:
+    return match value:
+        Some(v) -> v
+        None -> fallback
+
+agent status_of(found: Result<Response<Charge>, ChargeError>) -> String:
+    return match found:
+        Ok(r) -> r.body().id
+        Err(Missing) -> "missing"
+
+agent main() -> String uses http_read:
+    r = charge("ch_1")
+    first = r.status().to_string() + " " + text_or(r.header("ETag"), "none") + " " + r.body().id + " " + text_or(r.header("set-cookie"), "no cookie") + " " + text_or(r.header("X-Absent"), "absent")
+    return first + " " + status_of(maybe("ch_1")) + " " + status_of(maybe("ch_9")) + " " + exists("ch_1").status().to_string()
+"#;
+
+async fn response_provider() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(path("/v1/charges/ch_1"))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .insert_header("etag", "\"v7\"")
+                .insert_header("set-cookie", "session=sess-secret-123; HttpOnly")
+                .set_body_string(r#"{"id":"ch_1"}"#),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/v1/charges/ch_9"))
+        .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"error":"missing"}"#))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_native_response_matches_the_interpreter() {
+    let project = project_of(RESPONSE_PROGRAM);
+    let server = response_provider().await;
+    let traces = tempfile::tempdir().unwrap();
+
+    let (interpreted, interpreter_trace) = interpreter_real(&project, &server, traces.path()).await;
+    let expected = "201 \"v7\" ch_1 no cookie absent ch_1 missing 201";
+    assert_eq!(interpreted, Value::String(expected.into()));
+
+    let binary = native_binary(&project);
+    let native_trace = traces.path().join("native.jsonl");
+    let native = run_native(&binary, "real", Some(&server), &[("CORVID_TRACE_PATH", &native_trace)]);
+    assert_eq!(native, expected);
+    assert_eq!(run_events(&native_trace), run_events(&interpreter_trace), "both tiers record the same run");
+    assert!(!std::fs::read_to_string(&native_trace).unwrap().contains("sess-secret-123"));
+
+    drop(server);
+    let replayed = run_native(&binary, "replay", None, &[("CORVID_REPLAY_TRACE_PATH", &native_trace)]);
+    assert_eq!(replayed, expected, "native replay answers the headers from the recording");
+
+    // Every response record, header list and looked-up header is freed.
+    let output = Command::new(&binary)
+        .env("CORVID_CONNECTOR_MODE", "replay")
+        .env("CORVID_REPLAY_TRACE_PATH", &native_trace)
+        .env("CORVID_DEBUG_ALLOC", "1")
+        .env_remove("CORVID_TRACE_PATH")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let count = |name: &str| -> i64 {
+        stderr.lines().find_map(|line| line.strip_prefix(&format!("{name}="))).unwrap().trim().parse().unwrap()
+    };
+    assert_eq!(count("ALLOCS"), count("RELEASES"), "{stderr}");
+}
+
+/// A recording from either tier replays on the other (native dispatch
+/// N5), with the provider gone: the interpreter replays a native
+/// recording and native code replays the interpreter's, for plain
+/// connector calls and for responses with their headers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_tier_replays_the_other_tiers_recording() {
+    for (program, provider_answers) in [(PROGRAM, false), (RESPONSE_PROGRAM, true)] {
+        let project = project_of(program);
+        let server = if provider_answers { response_provider().await } else { provider().await };
+        let traces = tempfile::tempdir().unwrap();
+        let binary = native_binary(&project);
+
+        let native_trace = traces.path().join("native.jsonl");
+        let recorded_natively = run_native(&binary, "real", Some(&server), &[("CORVID_TRACE_PATH", &native_trace)]);
+        let (interpreted, interpreter_trace) = interpreter_real(&project, &server, traces.path()).await;
+        drop(server);
+
+        assert_eq!(
+            interpreter_replay(&project, &native_trace).await,
+            Value::String(recorded_natively.clone().into()),
+            "the interpreter replays a native recording"
+        );
+        let replayed_natively = run_native(&binary, "replay", None, &[("CORVID_REPLAY_TRACE_PATH", &interpreter_trace)]);
+        assert_eq!(Value::String(replayed_natively.into()), interpreted, "native code replays an interpreter recording");
+    }
+}

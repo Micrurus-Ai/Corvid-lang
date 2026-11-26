@@ -324,7 +324,9 @@ impl<'a> Checker<'a> {
                 | BuiltIn::Response
                 | BuiltIn::Conflict
                 // B03 — a `RegexMatch` comes only from the regex methods.
-                | BuiltIn::RegexMatch => {
+                | BuiltIn::RegexMatch
+                // B01 — a `JsonError` comes only from `from_json`.
+                | BuiltIn::JsonError => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),

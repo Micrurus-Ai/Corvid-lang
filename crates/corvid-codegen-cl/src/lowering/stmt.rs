@@ -169,6 +169,11 @@ fn lower_stmt(
                     } else if field.ty == Type::Float && value.ty == Type::Int {
                         rhs = builder.ins().fcvt_from_sint(F64, rhs);
                     }
+                    // The assigned value holds the field's refinement (B09).
+                    if let Type::Struct(id) = ty {
+                        let owner = runtime.ir_types.get(id).map(|t| t.name.as_str()).unwrap_or_default();
+                        super::expr::hold_refinement(builder, module, runtime, owner, field, rhs, *span)?;
+                    }
                     if is_refcounted_type(&field.ty) {
                         let old = builder.ins().load(I64, MemFlags::trusted(), record, offset);
                         builder.ins().store(MemFlags::trusted(), rhs, record, offset);

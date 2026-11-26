@@ -123,6 +123,14 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_secret_eq(a, b) -> 1 | 0`: `==` on two secrets, in
     /// constant time (native dispatch N3).
     pub secret_eq: FuncId,
+    /// `corvid_int_to_string`, `corvid_float_to_string`,
+    /// `corvid_bool_to_string`: `to_string()` on the scalars.
+    pub int_to_string: FuncId,
+    pub float_to_string: FuncId,
+    pub bool_to_string: FuncId,
+    /// `corvid_response_header(headers, name) -> Option<String>`:
+    /// `response.header(name)` (native dispatch N4).
+    pub response_header: FuncId,
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,

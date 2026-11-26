@@ -207,6 +207,13 @@ pub fn connector_calls_from_json(text: &str) -> Result<std::collections::HashMap
     serde_json::from_str(text).map_err(|e| format!("the embedded connector specs do not read back: {e}"))
 }
 
+/// `response.header(name)`: the value of the first response header
+/// called `name`, compared without regard to case, as HTTP names are.
+/// The interpreter and native code both answer through this.
+pub fn response_header<'a>(headers: impl IntoIterator<Item = (&'a str, &'a str)>, wanted: &str) -> Option<&'a str> {
+    headers.into_iter().find(|(name, _)| name.eq_ignore_ascii_case(wanted)).map(|(_, value)| value)
+}
+
 /// Derive the real-mode dispatch specs for every connector operation in
 /// a lowered file, keyed by the operation's tool name. This is the
 /// single projection from IR to dispatch spec — the driver installs the
@@ -304,7 +311,12 @@ pub fn connector_calls_from_ir(
 /// Whether the `on failure` variant of an operation's error type has a
 /// field for the reason (the checker allows none or one `String`).
 fn failure_variant_takes_reason(ir: &corvid_ir::IrFile, return_ty: &corvid_types::Type, variant: &str) -> bool {
-    let corvid_types::Type::Result(_, err) = return_ty else { return false };
+    // A streamed operation maps failures into its `Result` events.
+    let mapped = match return_ty {
+        corvid_types::Type::Stream(item) => item.as_ref(),
+        other => other,
+    };
+    let corvid_types::Type::Result(_, err) = mapped else { return false };
     let corvid_types::Type::Struct(id) = err.as_ref() else { return false };
     ir.types
         .iter()

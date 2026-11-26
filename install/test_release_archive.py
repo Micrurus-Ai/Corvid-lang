@@ -166,25 +166,19 @@ def exercise_installation(root, expected_version, work, browser_matrix):
     echoed = run("run", "src/python_tools_example.cor", message, cwd=python_project)
     if json.loads(echoed) != message:
         raise RuntimeError(f"The generated Python tool returned {echoed!r}")
+    # A native build links the installed runtime library: 42 only if both
+    # the checked multiply and the floored Float remainder are right.
     (python_project / "src/numbers_example.cor").write_text(
         "agent twice(value: Int) -> Int:\n    return value * 2\n\n"
-        "agent remainder(value: Float) -> Float:\n    return value % 2.0\n",
+        "agent remainder(value: Float) -> Float:\n    return value % 2.0\n\n"
+        "agent main() -> Int:\n    if remainder(-7.5) == -1.5:\n        return twice(21)\n    return 0\n",
         encoding="utf-8",
     )
-    run("build", "src/numbers_example.cor", "--target", "python", cwd=python_project)
-    # Isolated mode ensures a checkout or a user-installed runtime cannot satisfy the import.
-    host = """import sys
-sys.path[:0] = sys.argv[1:]
-from corvid_runtime import run_sync
-from numbers_example import twice, remainder
-print(run_sync(twice, 21), run_sync(remainder, -7.5))
-"""
-    values = subprocess.check_output(
-        [sys.executable, "-I", "-c", host, str(root / "runtime-py"), str(python_project / "target/py")],
-        cwd=python_project, env=env, text=True,
-    ).strip()
-    if values != "42 -1.5":
-        raise RuntimeError(f"Python host received unexpected agent results: {values!r}")
+    run("build", "src/numbers_example.cor", cwd=python_project)
+    binary = python_project / "target/bin" / ("numbers_example.exe" if windows else "numbers_example")
+    values = subprocess.check_output([binary], cwd=python_project, env=env, text=True).strip()
+    if values != "42":
+        raise RuntimeError(f"The native build returned unexpected agent results: {values!r}")
     run("new", "notes")
     project = work / "notes"
     run("check", cwd=project)

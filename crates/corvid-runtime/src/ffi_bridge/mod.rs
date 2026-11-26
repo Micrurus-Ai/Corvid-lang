@@ -45,7 +45,9 @@ use crate::errors::RuntimeError;
 use std::path::PathBuf;
 
 mod equality;
+mod number_text;
 mod secret_object;
+mod response_exports;
 mod approval_exports;
 mod bytes;
 // Phase 33S0: scaffolded modules for the executing I/O surfaces.
@@ -203,7 +205,6 @@ pub(crate) fn panic_if_replay_runtime_error(context: &str, err: &RuntimeError) {
         RuntimeError::ReplayTraceLoad { .. }
             | RuntimeError::ReplayDivergence(_)
             | RuntimeError::InvalidReplayMutation { .. }
-            | RuntimeError::CrossTierReplayUnsupported { .. }
     ) {
         panic!("{context}: {err}");
     }

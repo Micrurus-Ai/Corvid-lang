@@ -34,7 +34,7 @@ pub use determinism::{
     KNOWN_NONDETERMINISTIC_BUILTINS,
 };
 pub use effects::{
-    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost,
+    analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost, compute_worst_case_cost_with_types,
     render_cost_tree, AgentEffectSummary, ComposedProfile, ConstraintViolation, CostEstimate,
     CostNodeKind, CostTreeNode, CostWarning, CostWarningKind, EffectProfile, EffectRegistry,
     ProvenanceViolation,
@@ -48,11 +48,11 @@ pub use repl::{CheckedTurn, ReplLocal, ReplSession, ReplTurnBuild, REPL_RESULT_N
 pub use builtin_methods::{
     builtin_method, builtin_type_method, builtin_type_receiver, decimal_rounding_mode, duration_reading_unit, is_hmac_key_type, json_error_fields, number_literal_text, refine_builtin_method_kind, regex_match_fields, type_method,
     BuiltinMethodKind, BuiltinMethodSig, JSON_ERROR_TYPE_ID, REGEX_MATCH_TYPE_ID, RESPONSE_FIELDS,
-    RESPONSE_TYPE_ID,
+    RESPONSE_RECORD_IDS, RESPONSE_TYPE_ID,
 };
 pub use table_ops::{table_call_target, table_decl, table_method_target, TableOp};
 pub use type_receiver::{type_receiver, TypeReceiver};
-pub use builtin_methods::CONFLICT_TYPE_ID;
+pub use builtin_methods::{CONFLICT_TYPE_ID, UNRESOLVED_DEF_ID};
 pub use types::{ConflictCase, ConflictCases, Type};
 
 #[cfg(test)]

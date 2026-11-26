@@ -231,3 +231,20 @@ async fn each_tier_replays_its_clock_reads_ids_and_draws_exactly() {
     let (interpreted, interpreter_trace) = interpreter_record(&project, traces.path()).await;
     assert_eq!(interpreter_replay(&project, &interpreter_trace).await, interpreted);
 }
+
+/// Clock reads, IDs and draws replay exactly on the other tier (native
+/// dispatch N5): the interpreter gives back a native recording's values,
+/// and native code an interpreter recording's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_tier_replays_the_other_tiers_clock_reads_ids_and_draws() {
+    let project = project();
+    let traces = tempfile::tempdir().unwrap();
+    let binary = native_binary(&project);
+
+    let native_trace = traces.path().join("native.jsonl");
+    let recorded_natively = run_native(&binary, &[("CORVID_TRACE_PATH", &native_trace)]);
+    assert_eq!(interpreter_replay(&project, &native_trace).await, recorded_natively);
+
+    let (interpreted, interpreter_trace) = interpreter_record(&project, traces.path()).await;
+    assert_eq!(run_native(&binary, &[("CORVID_REPLAY_TRACE_PATH", &interpreter_trace)]), interpreted);
+}

@@ -8,10 +8,12 @@ mod time;
 mod time_zones;
 mod currency;
 mod json_forms;
+mod json_error_type;
 mod text_methods;
 mod bytes;
 mod hmac;
 mod secrets;
+mod comparison_literals;
 mod passwords;
 mod signatures;
 
@@ -1652,6 +1654,51 @@ agent notify_members() -> String:
     assert!(unbounded(&all), "a query without take has no bound: {:?}", all.warnings);
 }
 
+/// B09 Refine-3: a query loop ending in `take(search.limit)` runs at most
+/// `limit`'s `between` maximum times, because every value of a refined
+/// field holds its refinement. An unrefined count has no bound.
+#[test]
+fn a_query_loop_is_bounded_by_a_refined_take() {
+    let program = |limit: &str| {
+        format!(
+            "\
+effect paid_notice:
+    cost: $0.30
+
+tool notify(name: String) -> String uses paid_notice
+
+database site:
+    engine: sqlite
+    location: \"site.sqlite\"
+
+table Member:
+    key id: Int
+    name: String
+
+type Search:
+    limit: {limit}
+
+@budget($1.00)
+agent notify_members(search: Search) -> String:
+    sent = \"\"
+    for member in Member.all().take(search.limit):
+        sent = notify(member.name)
+    return sent
+"
+        )
+    };
+    let unbounded = |c: &crate::Checked| c.warnings.iter().any(|w| matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. }));
+
+    let three = check(&program("Int where between(1, 3)"));
+    assert!(!has_effect_violation(&three, "cost") && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let fifty = check(&program("Int where between(1, 50)"));
+    assert!(has_effect_violation(&fifty, "cost"), "fifty notices at $0.30 exceed $1.00: {:?}", fifty.errors);
+
+    let unrefined = check(&program("Int"));
+    assert!(unbounded(&unrefined), "an unrefined count has no bound: {:?}", unrefined.warnings);
+}
+
 #[test]
 fn a_connector_operations_cost_counts_toward_the_budget() {
     // Regression (slice 52h-3): a connector `operation` resolves as a
@@ -2944,8 +2991,8 @@ connector jobs:
 
 /// A `Stream<T>` operation declares how its events arrive; nothing else
 /// declares `streams:`; a stream is the whole result and does not combine
-/// with `response: text` or `on failure`; `until` is for server-sent
-/// events; a mock is the `List<T>` of events.
+/// with `response: text`; `on failure` needs `Result` events; `until` is
+/// for server-sent events; a mock is the `List<T>` of events.
 #[test]
 fn streamed_operations_are_checked() {
     let program = |operation: &str| {
@@ -2997,7 +3044,18 @@ connector provider:
     let with_failure = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Delta(q)]\n",
     ));
-    assert!(has(&with_failure, "cannot also declare `on failure`"), "{with_failure:?}");
+    assert!(has(&with_failure, "so each event is a `Result`"), "{with_failure:?}");
+
+    // Decision 7: over `Result` events, `on failure` ends the stream with
+    // one final `Err` event.
+    let result_events = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(result_events.is_empty(), "{result_events:?}");
+    let wrong_variant = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Missing\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(has(&wrong_variant, "not a variant of its error type"), "{wrong_variant:?}");
 
     let until_lines = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines until \"end\"\n        mock: [Delta(q)]\n",

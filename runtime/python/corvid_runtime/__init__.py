@@ -1,49 +1,19 @@
-"""Corvid runtime — the Python library that generated .cor programs call into.
+"""Write Corvid tools in Python.
 
-Public surface:
-    tool_call, approve_gate, llm_call           # called by generated code
-    tool                                         # @tool decorator for users
-    register_tools, register_prompts             # called by generated modules
-    run, run_sync                                # run an agent under a trace
-    CorvidError and subclasses                   # runtime errors
-    testing                                      # test helpers
+A project's `tools.py` imports `tool` and decorates each implementation:
+
+    from corvid_runtime import tool
+
+    @tool("get_order")
+    async def get_order(order_id: str):
+        ...
+
+`corvid serve` and `corvid run` load the file and call the functions as
+the program's tools, with tracing, approval and replay.
 """
 
 from __future__ import annotations
 
-from .approvals import approve_gate, set_approver
-from .core import run, run_sync, tool_call
-from .errors import (
-    ApprovalDenied,
-    ApprovalTimeout,
-    CorvidError,
-    DangerousCallWithoutApprove,
-    NoModelConfigured,
-    UnknownModel,
-    UnknownPrompt,
-    UnknownTool,
-)
-from .llm import llm_call, register_adapter
-from .registry import register_prompts, register_tools, tool
+from .registry import tool
 
-__all__ = [
-    "approve_gate",
-    "llm_call",
-    "register_adapter",
-    "register_prompts",
-    "register_tools",
-    "run",
-    "run_sync",
-    "set_approver",
-    "tool",
-    "tool_call",
-    # errors
-    "ApprovalDenied",
-    "ApprovalTimeout",
-    "CorvidError",
-    "DangerousCallWithoutApprove",
-    "NoModelConfigured",
-    "UnknownModel",
-    "UnknownPrompt",
-    "UnknownTool",
-]
+__all__ = ["tool"]

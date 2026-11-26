@@ -489,6 +489,50 @@ impl Type {
         }
     }
 
+    /// Offer this type, and then each type inside it, to `replace`, the
+    /// mutable twin of [`Type::mentions`]. When `replace` rewrites a type
+    /// it returns true and its parts are not visited. Returns whether
+    /// anything was replaced. Like `mentions`, it does not enter a
+    /// declared record's fields.
+    pub fn replace_within(&mut self, replace: &mut dyn FnMut(&mut Type) -> bool) -> bool {
+        if replace(self) {
+            return true;
+        }
+        match self {
+            Type::List(inner)
+            | Type::Option(inner)
+            | Type::Tainted(inner)
+            | Type::Grounded(inner)
+            | Type::Stream(inner)
+            | Type::Partial(inner)
+            | Type::ResumeToken(inner)
+            | Type::Upload(inner)
+            | Type::Page(inner)
+            | Type::Response(inner)
+            | Type::Conflict(inner, _)
+            | Type::Weak(inner, _) => inner.replace_within(replace),
+            Type::Map(a, b) | Type::Result(a, b) => {
+                let a = a.replace_within(replace);
+                b.replace_within(replace) | a
+            }
+            Type::Function { params, ret, .. } => {
+                let mut found = ret.replace_within(replace);
+                for param in params {
+                    found |= param.replace_within(replace);
+                }
+                found
+            }
+            Type::RouteParams(params) => {
+                let mut found = false;
+                for (_, param) in params {
+                    found |= param.replace_within(replace);
+                }
+                found
+            }
+            _ => false,
+        }
+    }
+
     /// Is this type compatible with `other` in a value-assignment position?
     ///
     /// v0.1 is intentionally lenient: structurally identical types match,

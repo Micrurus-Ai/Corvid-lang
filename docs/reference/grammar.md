@@ -426,8 +426,16 @@ into `T` as it arrives, and the declared `timeout` bounds opening the
 response and then the wait for each event. `until "[DONE]"` names the
 event data that ends a server-sent stream cleanly, for providers that
 close with a sentinel that is not JSON. A failure ends the stream with an
-error, so a streamed operation declares no `on failure`, `response: text`
-or `async:`. Its mock is the `List<T>` of its events. A stream the
+error, unless the operation returns `Stream<Result<T, E>>` and declares
+`on failure -> Variant`: then each event arrives as `Ok(T)`, and an
+outage (a failure to open, the per-event timeout, a broken connection, an
+event that is not JSON or does not decode, an open circuit breaker)
+arrives as one final `Err(Variant(reason))`, after which the stream
+ends, so a `for` loop over it never raises for an outage. A replay that
+diverges and a budget stop are still raised. The final `Err` is recorded
+with the delivered events and replays with them. A streamed operation
+declares no `response: text` or `async:`. Its mock is the `List<T>` of
+its events. A stream the
 program stops reading closes the upstream connection, and the trace
 records the events delivered, marked `cancelled`.
 

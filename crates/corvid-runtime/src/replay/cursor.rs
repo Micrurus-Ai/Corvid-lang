@@ -16,6 +16,15 @@ impl TraceCursor {
         self.next
     }
 
+    /// The index of the next event [`Self::next_event`] will return,
+    /// past any dispatch metadata such as an `llm.usage` host event. A
+    /// report that names the step of that event reads this, so a host
+    /// event recorded between a call and its result never shifts it.
+    pub(crate) fn next_event_step(&mut self, events: &[TraceEvent]) -> usize {
+        self.skip_dispatch_metadata(events);
+        self.next
+    }
+
     pub(crate) fn next_event(&mut self, events: &[TraceEvent]) -> TraceEvent {
         self.skip_dispatch_metadata(events);
         let event = events

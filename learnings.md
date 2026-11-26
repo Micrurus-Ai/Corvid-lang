@@ -1,5 +1,21 @@
 # Corvid — learnings
 
+`JsonError` can now be written in a signature: `agent explain(problem: JsonError) -> String` takes the error `from_json` returns, and `agent read(text: String) -> Result<Reading, JsonError>` passes it to the caller. Before, naming it was an undefined-name error, though `from_json` returned it. [Typed decoding](docs/reference/stdlib/json.md#typed-decoding-and-encoding)
+
+The `corvid_runtime` Python package now holds only `@tool`, the decorator a project's `tools.py` uses to supply tool implementations to `corvid serve` and `corvid run`. `tool_call`, `approve_gate`, `llm_call`, `run_sync`, `register_adapter` and the `testing` helpers served the retired Python build target and are gone; model calls, approvals and traces belong to the Corvid runtime. A `tools.py` that imports only `tool` works unchanged. [Python tools](runtime/python/README.md)
+
+A `match` arm can now call a tool or a prompt in native code (`Err(problem) -> random_token(16)`, `Some(v) -> score(v)`); such a program used to run on the interpreter, or needed a helper agent around the call.
+
+A streamed connector call can now fail as a value: declare `-> Stream<Result<Delta, ModelError>>` with `on failure -> Unreachable`, and each event arrives as `Ok(delta)` while an outage (the provider not answering, a stalled or broken stream, an event that does not decode, an open circuit breaker) arrives as one final `Err(Unreachable(reason))`. A `for` loop over the stream then never crashes for an outage. [Connector grammar](docs/reference/grammar.md#connector-declarations)
+
+A literal in a comparison now takes the type of the other side: `s.price == Some(10)` works when `price` is an `Option<Decimal>`, and `home == "Europe/Berlin"` when `home` is a `TimeZone` (an unknown zone is still a compile error). Only literals are read this way; a `String` variable still never compares with a `TimeZone`. [Decimal](docs/reference/decimal.md)
+
+A run recorded by a native binary now replays on the interpreter, and an interpreter recording replays in a native binary: tool and connector calls, prompts, approvals, clock reads, IDs and draws come back exactly as recorded. If the two tiers would have recorded the run differently, replay stops at the first event that differs, as it does on one tier. The shadow daemon replays either tier's traces with either executor. [Replay](docs/internals/effect-spec/14-replay.md)
+
+A connector operation that returns `Response<Charge>` now runs as native code: `r.status()`, `r.body()` and `r.header("ETag")` give the same answers in a native binary, and `Set-Cookie` still never reaches the program. [Response](docs/reference/functions.md#response)
+
+A native program now prints a `Float` result, writes one into a prompt and records one in a trace exactly as the interpreter does: `0.1` stays `0.1`, where native code used to write `0.10000000000000001`. `to_string()` on `Int`, `Float` and `Bool` now runs in native code too.
+
 The TypeScript SDK's low-level `client.subscribe(path, keyFields, observer)`
 shares a WebSocket across a client's subscriptions. Use `observer.rows` to
 display the ordered result, clear it on `observer.error`, and call the
@@ -14,7 +30,7 @@ A program that holds a `Secret` now runs as native code: it can read one with `s
 
 A program that reads the clock (`time_now`, `time_now_utc`, `time_monotonic_ms`), parses or formats times (`time_parse_iso`, `time_format_iso`), draws random numbers (`random_int`, `random_float`), makes UUIDs (`uuid_v4`, `uuid_v7`) or reads a secret envelope (`secret_read`) now runs as native code, and records and replays those values exactly as the interpreter does. Importing `std/secrets` for `secret_read` no longer keeps a program on the interpreter; calling `secret`, `random_token` or `hash_password` still does, until native `Secret` lands. A replayed `Float` is now read back exactly: before, a recorded `random_float` could come back one digit off and replay reported a divergence. [Native dispatch](docs/proposals/native-dispatch.md)
 
-A program that calls a connector now runs as native code in `real` and `replay` modes: `corvid run` picks native code for it, and `corvid build` builds it. The binary records, replays and applies `[http] allow` exactly as the interpreter does, and writes the same trace. Run it on its own with `CORVID_CONNECTOR_MODE=real` (or `replay`) and `CORVID_HTTP_ALLOW=api.example.com`; without a mode it refuses to start. A connector with `circuit_breaker`, a streamed, file, `Response` or provider-protocol operation, and `--mode mock` still run on the interpreter, and `corvid run` says why. A trace recorded natively replays natively, and an interpreter trace on the interpreter. [Native dispatch](docs/proposals/native-dispatch.md)
+A program that calls a connector now runs as native code in `real` and `replay` modes: `corvid run` picks native code for it, and `corvid build` builds it. The binary records, replays and applies `[http] allow` exactly as the interpreter does, and writes the same trace. Run it on its own with `CORVID_CONNECTOR_MODE=real` (or `replay`) and `CORVID_HTTP_ALLOW=api.example.com`; without a mode it refuses to start. A connector with `circuit_breaker`, a streamed, file or provider-protocol operation, and `--mode mock` still run on the interpreter (`Response` operations joined native code in N4), and `corvid run` says why. A trace recorded natively replays natively, and an interpreter trace on the interpreter. [Native dispatch](docs/proposals/native-dispatch.md)
 
 Send a file to a provider with `POST "/files" body file`, where `file` is an `Upload` (sent with its own content type) or `Bytes` (sent as `application/octet-stream`), or send a form with files with `multipart receipt`, where `receipt` is a record: text fields become text parts, a `List` repeats its part, a `None` field is left out, and `Upload` or `Bytes` fields become file parts. The trace keeps a file's name, type, size and SHA-256, never its content, so an uploaded document stays out of every recording, and replay matches the same file by digest. [Connector grammar](docs/reference/grammar.md#connector-declarations)
 
@@ -8265,7 +8281,13 @@ You never declare a table index: `corvid migrate plan` reads every query the tab
 
 A `Bytes` field is stored as the bytes themselves on SQLite and Postgres, so a table can keep a token's hash and find its row with `ApiKey.where(fn (k) -> k.token_hash == token.utf8().sha256())`. `Bytes` has no order, so `order_by` on one is a compile error. Store and compare a hash, never the secret: the database's lookup is not constant-time as `==` in Corvid is. A raw `std.db` query still shows a binary cell as `<blob:redacted>`. [Binary values](docs/reference/tables.md#binary-values)
 
-`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. Declare a live list with `live "/boards/{board}/cards" -> Card` in a `server` block, its body one query: `return Card.where(fn (c) -> c.board == path.board)`. It checks and appears in the contract now; `corvid serve` refuses to start it until the WebSocket transport lands. [Real-time connections](docs/proposals/real-time.md)
+`corvid migrate plan` and `corvid migrate up --program` compile the named file exactly as `corvid check` does, so a table module may import `std:ui`, `std:time` or its sibling modules. `corvid build src/main.cor` builds a native binary in `target/bin/`. The Python build target is retired; call a Corvid agent from Python with `corvid build --target cdylib --abi-descriptor` and `corvid bind python`, or over HTTP with the generated Python client. [Building](docs/book/16-building.md)
+
+Declare a live list with `live "/boards/{board}/cards" -> Card` in a `server` block, its body one query: `return Card.where(fn (c) -> c.board == path.board)`. It checks and appears in the contract now; `corvid serve` refuses to start it until the WebSocket transport lands. [Real-time connections](docs/proposals/real-time.md)
+
+`@budget` bounds a loop over `Member.all().take(search.limit)` by `limit`'s `between` maximum, so a refined count is as good as a literal one. [Tables](docs/reference/tables.md)
+
+Refined values are checked in native code too, with the interpreter's message, so a program that builds refined records from computed values compiles with `corvid build`.
 
 A field refinement holds for every value: `Person(969, "Ada")` against `age: Int where between(0, 150)` is a compile error, and a computed out-of-range age stops the run where the record is built or the field assigned, naming the field, the refinement and the value. Check an untrusted number before building the record. [Field refinements](docs/book/05-types.md#field-refinements)
 
