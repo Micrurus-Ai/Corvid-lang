@@ -146,7 +146,7 @@ impl Runtime {
 
     /// Run a write; the number of rows it changed.
     async fn table_execute(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<u64, RuntimeError> {
-        let changed = match self.table_connection(table).await? {
+        let changed = match self.table_connection(table).await.map_err(|e| named(table, e))? {
             TableConnection::Sqlite(handle) => {
                 self.db_registry().execute_queued(&handle, sql, params).await.map(|r| r.rows_affected)
             }
@@ -158,7 +158,7 @@ impl Runtime {
 
     /// Run a read; its rows in [`TableRef::columns`] order.
     async fn table_select(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<Vec<Row>, RuntimeError> {
-        let rows = match self.table_connection(table).await? {
+        let rows = match self.table_connection(table).await.map_err(|e| named(table, e))? {
             TableConnection::Sqlite(handle) => self
                 .db_registry()
                 .query_table_rows(handle.handle_id, sql, params)
@@ -411,19 +411,29 @@ fn key_condition(table: &TableRef<'_>, key: &[DbValue], first: usize) -> Result<
         .join(" AND "))
 }
 
-/// A failure ending a database's transaction, with the database named.
+/// A failure of a database's connection or transaction, with the
+/// database named: an outage `try` can retry or catch.
 fn named_database(database: &str, error: RuntimeError) -> RuntimeError {
-    RuntimeError::Other(format!("database `{database}`: {error}"))
+    match error {
+        already @ RuntimeError::DatabaseFailed { .. } => already,
+        other => RuntimeError::DatabaseFailed { database: database.to_string(), message: other.to_string() },
+    }
 }
 
-/// Name the missing table and the commands that create it.
+/// A table operation's failure, with its database named, and a missing
+/// table told the commands that create it.
 fn named(table: &TableRef<'_>, error: RuntimeError) -> RuntimeError {
+    if let RuntimeError::DatabaseFailed { .. } = error {
+        return error;
+    }
     let text = error.to_string();
-    if text.contains("no such table") {
-        return RuntimeError::Other(format!(
+    let message = if text.contains("no such table") {
+        format!(
             "table `{}` does not exist in its database yet; run `corvid migrate plan`, review the migration it writes, then `corvid migrate up`",
             table.name
-        ));
-    }
-    error
+        )
+    } else {
+        text
+    };
+    RuntimeError::DatabaseFailed { database: table.database.to_string(), message }
 }

@@ -1224,6 +1224,42 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-26 - One rule for what an outage is (TE-1)
+
+`try ... else` must catch outages and never bugs or decisions. Building
+the rule it needs found three weaknesses, all fixed here:
+- **`try ... retry` retried every error.** That included a division by
+  zero, which fails the same way every time, and a denied approval,
+  which re-asked a person who had said no. Retry now uses the outage
+  rule and re-raises anything else at once. Tests count the attempts:
+  one for a division by zero and one for a denied approval; three for
+  a failing tool and three for an unusable reply.
+- **A table failure was `RuntimeError::Other(text)`.** It could not be
+  told apart from an internal error, and a connection failure skipped
+  the code that names the database. Table and database failures are
+  now `DatabaseFailed { database, message }`: the connection, every
+  statement, and a transaction's begin, commit and rollback.
+- **Replay rebuilt every recorded failure as `Other`.** So a failure
+  that was an outage live would not be one in replay, and `else` would
+  branch differently. `replay::recorded_failure` now records whether a
+  failure was an outage, and every site that records one goes through
+  it: table calls, tool calls, protocol calls and the secret-scrubbed
+  path. Replay rebuilds `RuntimeError::Recorded { message, outage }`.
+  A trace from before records no kind and replays as no outage, as it
+  did before.
+
+`Marshal` had meant two things. A model's reply, a tool's result or a
+provider's response that does not fit its declared type is now
+`UnusableReply`, an outage. `with repair` asks the model again exactly
+on that kind. The program's own values failing to convert, and
+debugger overrides, stay `Marshal`, a bug.
+
+The rule is a closed `match` over every error kind, with no wildcard.
+A new kind must be classified when it is added, so nothing becomes an
+outage, or stops being one, by accident.
+
+---
+
 ## 2026-11-26 - Connector queries write request text as routes read it
 
 The typed reader left one narrowing behind, filed under "Narrowing is

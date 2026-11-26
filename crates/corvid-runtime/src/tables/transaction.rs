@@ -51,7 +51,7 @@ impl Runtime {
         let id = format!("{}:{resolved}", engine.name());
         let mut opened = None;
         self.recorded_table_call(&format!("table:{database}.begin"), Vec::new(), || async {
-            opened = Some(self.open_transaction(&resolved, engine).await?);
+            opened = Some(self.open_transaction(&resolved, engine).await.map_err(|e| named_database(database, e))?);
             Ok(J::Null)
         })
         .await?;

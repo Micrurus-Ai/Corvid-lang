@@ -110,6 +110,10 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] One typed reader for path segments and query fields (the item under B14 below).
 - [x] Connector query fields take the same shape (done 2026-11-26: the checker uses `query_field_shape`, the encoder writes each value with `json_request_text`, the reverse of what a route reads, and a test sends `?fingerprint=aGk&status=Paid&status=Refunded`). Before, `is_query_scalar` in the checker listed its own types (no `Bytes`, no plain variants), and the connector's query encoder writes them. Make it `text_parameters::query_field_shape`, with the encoder writing a variant by its name and `Bytes` as base64url, so a value goes out exactly as a route reads it in. One shape for request text, both directions.
 - [ ] `try ... else`, built under the amended grammar law. [Proposal](proposals/recoverable-failures.md)
+  - [x] TE-1. One outage rule (`RuntimeError::is_outage`, `InterpError::is_outage`) for `retry` and `else`; table and database failures typed as `DatabaseFailed`, connection errors included; a reply that does not fit its type typed `UnusableReply`, apart from the program's own `Marshal`; every recorded failure keeps whether it was an outage, so replay decides the same. `retry` now stops at once on a bug or a decision.
+  - [ ] TE-2. `try ... else` through the parser, checker, IR, cost analysis and interpreter.
+  - [ ] TE-3. `try ... else` in native code; until then a native build refuses it by name.
+  - [ ] The fallback sees which failure happened (`else (failure) -> ...`), once the failure value's type is proposed.
 - [ ] B10 shared actions, built under the amended grammar law. [Proposal](proposals/shared-actions.md)
 - [ ] JSON key renaming, built under the amended grammar law. [Proposal](proposals/json-field-keys.md)
 - [ ] Variant payload refinements and the duration literal, built under the amended grammar law.
