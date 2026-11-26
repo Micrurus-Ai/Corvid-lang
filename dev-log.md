@@ -104,6 +104,48 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native user tools through the runtime call (B2b)
+
+Native code called a tool of the program's own through its typed C
+wrapper, `__corvid_tool_<name>`. Around that call sat a replay branch per
+return type and a trace encoding of its own. So a tool whose signature
+held a `Decimal`, a time value, a record with an `Option`, or a `Secret`
+sent the program to the interpreter.
+
+Now `ToolRegistry::call` falls back to the host registry, where every
+linked `#[tool]` registers its JSON entry point at startup. It runs the
+entry point on a blocking thread, because the macro's wrapper calls
+`block_on` itself. Native code calls every tool through
+`corvid_runtime_call`: arguments in the public form, secrets redacted
+and revealed, the answer decoded through the embedded plan, the call
+recorded and replayed by the runtime. A grounded answer is grounded
+after the call, as before.
+
+Found while building: once nothing called the wrapper symbols, the
+linker dropped the tools library's objects, and with them the startup
+registration. So each called tool now gets an exported data object
+holding the address of its JSON entry point. The tool stays linked, and
+a tool nobody implemented is still a link error, as it was.
+
+Removed: the direct calls and their replay branches, the typed
+`corvid_invoke_tool_*` and `corvid_replay_tool_call_*` families, the
+tool trace exports, `corvid_runtime_is_replay`, and the two modules that
+explained the old refusals. The tier picker now refuses a user tool only
+when a type has no native JSON form, or when the tool returns a
+`Secret`, which only the runtime's tools produce.
+
+Filed: native run-start and `approve` traces still encode non-scalar
+arguments with a second, hand-written JSON mapping.
+
+Tests: `native_user_tools.rs` calls a tool taking a record that holds
+`None` and a variant, plus a `Decimal`, and answering a record, on both
+tiers. The value and the recorded arguments match. The parity suite's
+tool tests run through the runtime call. The tier picker's tests now
+expect a `Decimal` tool, a `Bytes` tool, a clock tool and a tool taking
+a secret to be native.
+
+---
+
 ## 2026-11-26 - Tool calls exchange the public JSON form (B2a)
 
 Found while starting B2: the interpreter sent a tool its arguments in its

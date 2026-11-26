@@ -34,9 +34,7 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
-pub mod secret_boundary;
 pub mod text_scalar;
-pub mod text_scalar_boundary;
 pub mod time_methods;
 pub use time_methods::is_native_time_method;
 

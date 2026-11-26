@@ -158,65 +158,6 @@ fn emit_run_completed(result: Value) {
     });
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_call(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    let arg_tags = unsafe { borrow_corvid_string(&arg_types) };
-    let args = unsafe { decode_trace_values(arg_tags, argc, args_ptr) };
-    let runtime = runtime();
-    emit(TraceEvent::ToolCall {
-        ts_ms: now_ms(),
-        run_id: runtime.tracer().run_id().to_string(),
-        tool: tool_name,
-        args,
-    });
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_result_null(tool: CorvidString) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    emit_tool_result(tool_name, Value::Null);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_result_int(tool: CorvidString, value: i64) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    emit_tool_result(tool_name, scalar_result_int(value));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_result_bool(tool: CorvidString, value: i8) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    emit_tool_result(tool_name, scalar_result_bool(value));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_result_float(tool: CorvidString, value: f64) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    emit_tool_result(tool_name, scalar_result_float(value));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_trace_tool_result_string(tool: CorvidString, value: CorvidString) {
-    let tool_name = unsafe { borrow_corvid_string(&tool) }.to_owned();
-    emit_tool_result(tool_name, unsafe { scalar_result_string(value) });
-}
-
-fn emit_tool_result(tool: String, result: Value) {
-    let runtime = runtime();
-    emit(TraceEvent::ToolResult {
-        ts_ms: now_ms(),
-        run_id: runtime.tracer().run_id().to_string(),
-        tool,
-        result,
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::decode_trace_values;

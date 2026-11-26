@@ -2074,16 +2074,13 @@ impl<'ir> Interpreter<'ir> {
                     })?
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                let result = tool_json::tool_value_json(
-                    &result_value, result_decode_ty, &self.types_by_id, crate::public_json::SecretArgument::Recorded,
-                )
-                .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(format!("tool `{callee_name}` result: {problem}")), span))?;
-                let result = match &echo_scrub {
-                    Some(revealed) => revealed.scrub_json(result),
-                    None => result,
-                };
-
                 if self.should_yield_boundary() {
+                    // The debugger sees the answer as the tool sent it.
+                    let result = tool_json::debugger_view(&result_value, result_decode_ty, &self.types_by_id);
+                    let result = match &echo_scrub {
+                        Some(revealed) => revealed.scrub_json(result),
+                        None => result,
+                    };
                     let action = self
                         .maybe_yield(StepEvent::AfterToolCall {
                             tool_name: callee_name.to_string(),

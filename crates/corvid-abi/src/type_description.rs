@@ -172,8 +172,8 @@ pub fn emit_type_description(
         },
         // The ABI descriptor names a `Secret` parameter's type so a
         // host sees the declaration; no value of it ever crosses the
-        // boundary (native code refuses `Secret`, see
-        // `corvid_codegen_cl::secret_boundary`, and it has no JSON form).
+        // boundary: a secret reaches a tool only through the runtime's
+        // revealed argument form, and it has no JSON form of its own.
         Type::Secret => TypeDescription::Struct {
             name: "Secret".to_string(),
         },

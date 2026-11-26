@@ -101,21 +101,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub bench_next_trial: FuncId,
     pub bench_finish_trial: FuncId,
     // Runtime init/shutdown + replay bridges.
-    pub runtime_is_replay: FuncId,
-    pub replay_tool_call_nothing: FuncId,
-    pub replay_tool_call_int: FuncId,
-    pub replay_tool_call_bool: FuncId,
-    pub replay_tool_call_float: FuncId,
-    pub replay_tool_call_string: FuncId,
     // Live host-registered tool dispatch (library targets): the
     // cdylib/staticlib calls these instead of a link-time
     // `__corvid_tool_<name>` symbol.
-    pub invoke_tool_nothing: FuncId,
-    pub invoke_tool_int: FuncId,
-    pub invoke_tool_bool: FuncId,
-    pub invoke_tool_float: FuncId,
-    pub invoke_tool_string: FuncId,
-    pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
     /// `corvid_register_connectors(specs)`: install the embedded
     /// connector specs before `corvid_runtime_init`.
@@ -197,12 +185,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub trace_run_completed_bool: FuncId,
     pub trace_run_completed_float: FuncId,
     pub trace_run_completed_string: FuncId,
-    pub trace_tool_call: FuncId,
-    pub trace_tool_result_null: FuncId,
-    pub trace_tool_result_int: FuncId,
-    pub trace_tool_result_bool: FuncId,
-    pub trace_tool_result_float: FuncId,
-    pub trace_tool_result_string: FuncId,
     pub literal_counter: std::cell::Cell<u64>,
     /// When true, codegen-level scattered
     /// `emit_retain` / `emit_release` sites are skipped because the

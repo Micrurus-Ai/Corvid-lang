@@ -47,18 +47,20 @@ impl ToolRegistry {
         self.tools.insert(name.into(), boxed);
     }
 
-    /// Dispatch a tool call. Returns `UnknownTool` if no handler exists.
+    /// Dispatch a tool call. A name with no handler here is looked up
+    /// among the host's tools: each `#[tool]` linked into a native binary
+    /// registers there at startup, and an embedding host registers its
+    /// own. Returns `UnknownTool` when neither holds it.
     pub async fn call(
         &self,
         name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value, RuntimeError> {
-        let handler = self
-            .tools
-            .get(name)
-            .ok_or_else(|| RuntimeError::UnknownTool(name.to_string()))?
-            .clone();
-        handler(args).await
+        match self.tools.get(name).cloned() {
+            Some(handler) => handler(args).await,
+            None if crate::catalog_c_api::host_tool_registered(name) => call_host_tool(name, args).await,
+            None => Err(RuntimeError::UnknownTool(name.to_string())),
+        }
     }
 
     /// Whether a handler is registered for `name`. Useful for diagnostics.
@@ -85,6 +87,21 @@ impl ToolRegistry {
             self.tools.insert(name, handler);
         }
     }
+}
+
+/// Run a host tool. Its entry point takes the arguments as one JSON
+/// array and may wait on the tokio runtime itself (a `#[tool]` runs its
+/// `async fn` with `block_on`), so it runs on a blocking thread, never
+/// on the task that awaits it.
+async fn call_host_tool(name: &str, args: Vec<serde_json::Value>) -> Result<serde_json::Value, RuntimeError> {
+    let failed = |message: String| RuntimeError::ToolFailed { tool: name.to_string(), message };
+    let args_json = serde_json::to_string(&args).map_err(|e| failed(format!("its arguments are not JSON: {e}")))?;
+    let tool = name.to_string();
+    let answer = tokio::task::spawn_blocking(move || crate::catalog_c_api::dispatch_host_tool(&tool, &args_json))
+        .await
+        .map_err(|e| failed(format!("the implementation stopped: {e}")))?
+        .ok_or_else(|| failed("the implementation returned no answer".into()))?;
+    serde_json::from_str(&answer).map_err(|e| failed(format!("its answer is not JSON: {e}")))
 }
 
 #[cfg(test)]

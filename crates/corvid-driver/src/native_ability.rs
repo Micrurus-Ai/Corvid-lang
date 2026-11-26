@@ -82,12 +82,10 @@ pub enum NotNativeReason {
     /// Builtin methods on built-in receiver types (`String.length()`
     /// and the 45d/45e/45f batches) are interpreter-only in 45c.
     BuiltinMethodNotNative,
-    /// B06 — a tool or prompt whose signature holds a `Decimal`, time,
-    /// currency or locale type; see
-    /// `corvid_codegen_cl::text_scalar_boundary`.
-    TextScalarAtBoundary {
+    /// A tool of the program's own whose argument or answer type has no
+    /// native JSON form.
+    ToolTypeNotNative {
         name: String,
-        type_name: String,
     },
     /// A prompt whose argument or reply type has no native JSON form
     /// (a function, a stream, a map with non-text keys, `JsonValue`).
@@ -95,10 +93,6 @@ pub enum NotNativeReason {
         name: String,
         type_name: String,
     },
-    /// A secret passed to or returned by a tool other than the runtime's
-    /// own, where native code cannot keep it out of the record. See
-    /// `corvid_codegen_cl::secret_boundary`.
-    SecretNotNative,
 }
 
 impl std::fmt::Display for NotNativeReason {
@@ -157,15 +151,9 @@ impl std::fmt::Display for NotNativeReason {
                 write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
-            Self::SecretNotNative => write!(
+            Self::ToolTypeNotNative { name } => write!(
                 f,
-                "{}; the auto-dispatcher runs the interpreter tier, which keeps a secret's text out of every record",
-                corvid_codegen_cl::secret_boundary::SECRET_REQUIREMENT
-            ),
-            Self::TextScalarAtBoundary { name, type_name } => write!(
-                f,
-                "program calls `{name}`: {}",
-                corvid_codegen_cl::text_scalar_boundary::text_scalar_boundary_requirement(type_name)
+                "tool `{name}` sends or reads a type with no native JSON form; the auto-dispatcher runs the interpreter tier"
             ),
             Self::UnsupportedMatch => write!(f, "this match pattern or arm requires the interpreter"),
             Self::UnsupportedEquality => write!(f, "comparison of these value types requires the interpreter"),
@@ -200,6 +188,19 @@ fn is_native_option_expr_type(ty: &Type) -> bool {
 
 fn is_native_result_type(ty: &Type) -> bool {
     matches!(ty, Type::Result(ok, err) if is_native_value_type(ok) && is_native_value_type(err))
+}
+
+/// Whether native code can call a tool of the program's own: every
+/// parameter and the answer have a native JSON form, a grounded answer
+/// as its plain type (the call grounds it afterwards).
+fn user_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> bool {
+    context.tools.iter().find(|t| t.id == tool_id).is_some_and(|tool| {
+        let mut plain = tool.clone();
+        if let Type::Grounded(inner) = &tool.return_ty {
+            plain.return_ty = (**inner).clone();
+        }
+        corvid_codegen_cl::native_runtime_call_types(&plain, context.types)
+    })
 }
 
 /// Walk the IR and return `Ok(())` if every construct is native-able,
@@ -359,24 +360,6 @@ fn scan_stmt(stmt: &IrStmt, current_return_ty: &Type, context: ScanContext<'_>) 
     }
 }
 
-/// The text-held scalar type a tool or prompt call passes or returns,
-/// which native tool and prompt bridges have no form for.
-fn text_scalar_at_boundary(call: &IrExpr, context: ScanContext<'_>) -> Option<Type> {
-    let types = |id| context.types.iter().find(|ty| ty.id == id).cloned();
-    let IrExprKind::Call { args, .. } = &call.kind else { return None };
-    std::iter::once(&call.ty)
-        .chain(args.iter().map(|arg| &arg.ty))
-        .find_map(|ty| corvid_codegen_cl::text_scalar_boundary::held_text_scalar(ty, &types))
-}
-
-/// Whether a tool's declared signature holds a `Secret`, in a record
-/// field too.
-fn tool_takes_or_returns_secret(tool_id: corvid_resolve::DefId, context: ScanContext<'_>) -> bool {
-    let types_by_id: std::collections::HashMap<_, _> = context.types.iter().map(|ty| (ty.id, ty)).collect();
-    context.tools.iter().find(|t| t.id == tool_id).is_some_and(|tool| {
-        tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty)).any(|ty| corvid_ir::holds_secret(ty, &types_by_id))
-    })
-}
 
 fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) -> Result<(), NotNativeReason> {
     if let Some((receiver, key)) = corvid_codegen_cl::native_string_map_lookup(expr) {
@@ -512,17 +495,18 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                     }
                     return Ok(());
                 }
-                // A tool of the program's own whose signature holds a
-                // secret: native code would record its arguments without
-                // redaction. The runtime's tools (`hash_password`) passed
-                // the arm above.
-                IrCallKind::Tool { def_id, .. } if tool_takes_or_returns_secret(*def_id, context) => {
-                    return Err(NotNativeReason::SecretNotNative)
-                }
                 IrCallKind::Tool { .. } if !context.has_tools_lib => {
                     return Err(NotNativeReason::ToolCall {
                         name: callee_name.clone(),
                     })
+                }
+                // A tool of the program's own is a runtime-owned call too
+                // (native scalar boundaries B2b): its arguments and answer
+                // cross in the public JSON form, secrets redacted and
+                // revealed and text-held scalars checked, so it needs only
+                // a native JSON form for each.
+                IrCallKind::Tool { def_id, .. } if !user_tool_is_native(*def_id, context) => {
+                    return Err(NotNativeReason::ToolTypeNotNative { name: callee_name.clone() })
                 }
                 IrCallKind::Prompt { .. } if args.iter().any(|arg| matches!(arg.ty, Type::Function { .. })) => {
                     return Err(NotNativeReason::PromptToolsRequireInterpreter);
@@ -551,14 +535,6 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 | IrCallKind::Fixture { .. }
                 | IrCallKind::StructConstructor { .. }
                 | IrCallKind::Unknown => {}
-            }
-            if matches!(kind, IrCallKind::Tool { .. }) {
-                if let Some(held) = text_scalar_at_boundary(expr, context) {
-                    return Err(NotNativeReason::TextScalarAtBoundary {
-                        name: callee_name.clone(),
-                        type_name: held.display_name(),
-                    });
-                }
             }
             if matches!(kind, IrCallKind::Fixture { .. }) {
                 return Err(NotNativeReason::TestFixtureNotNative {
@@ -733,10 +709,9 @@ tool quote(sku: String) -> Decimal
 agent main() -> String:
     return quote("a").to_string()
 "#).expect("valid program with a Decimal tool");
-        assert_eq!(
-            native_ability_with_tools(&ir, true),
-            Err(NotNativeReason::TextScalarAtBoundary { name: "quote".into(), type_name: "Decimal".into() })
-        );
+        // B2b: a tool of the program's own takes and returns a `Decimal`
+        // natively, through the runtime call.
+        assert_eq!(native_ability_with_tools(&ir, true), Ok(()));
 
         let ir = crate::compile_to_ir(r#"
 agent main() -> String:
@@ -768,10 +743,7 @@ agent main() -> Decimal:
         }
         let ir = crate::compile_to_ir("tool fetch() -> List<Bytes>\nagent main() -> Int:\n    return fetch().length()\n")
             .expect("valid bytes tool program");
-        assert_eq!(
-            native_ability_with_tools(&ir, true),
-            Err(NotNativeReason::TextScalarAtBoundary { name: "fetch".into(), type_name: "Bytes".into() })
-        );
+        assert_eq!(native_ability_with_tools(&ir, true), Ok(()));
     }
 
     #[test]
@@ -788,15 +760,19 @@ agent main() -> Decimal:
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability_with_tools(&ir, true), Ok(()), "{src}");
         }
-        // A tool of the program's own that takes or returns a secret
-        // would record it without redaction; an HMAC keyed by a secret and
-        // the secret methods wait for native secret cryptography.
+        // B2b: a tool of the program's own that takes or returns a secret
+        // runs natively; the runtime call records `<redacted>` and reveals
+        // the text only to the tool.
         for src in [
-            "tool key() -> Secret\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return sign(key(), \"body\")\n",
+            "effect secrets_read:\n    reversible: true\n\ntool secret(name: String) -> Result<Secret, String> uses secrets_read\ntool sign(key: Secret, body: String) -> String\nagent main() -> String:\n    return match secret(\"KEY\"):\n        Ok(key) -> sign(key, \"body\")\n        Err(problem) -> problem\n",
         ] {
             let ir = crate::compile_to_ir(src).expect("valid secret program");
-            assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::SecretNotNative), "{src}");
+            assert_eq!(native_ability_with_tools(&ir, true), Ok(()), "{src}");
         }
+        // Only the runtime's own tools produce a secret; one of the
+        // program's own returning one stays on the interpreter.
+        let ir = crate::compile_to_ir("tool key() -> Secret\nagent main() -> Int:\n    k = key()\n    return 1\n").expect("valid");
+        assert_eq!(native_ability_with_tools(&ir, true), Err(NotNativeReason::ToolTypeNotNative { name: "key".into() }));
         // N3b: the cryptography a secret keys runs natively.
         for src in [
             "agent mac(key: Secret) -> Bytes:\n    return \"body\".utf8().hmac_sha256(key)\n\nagent main() -> Int:\n    return 1\n",
@@ -805,8 +781,6 @@ agent main() -> Decimal:
             let ir = crate::compile_to_ir(src).expect("valid secret program");
             assert_eq!(native_ability(&ir), Ok(()), "{src}");
         }
-        let reason = NotNativeReason::SecretNotNative.to_string();
-        assert!(reason.contains("tool of the program's own") && reason.contains("records its arguments without redaction"), "{reason}");
     }
 
     #[test]
@@ -831,10 +805,7 @@ tool now() -> Instant
 agent main() -> String:
     return now().to_string()
 "#).expect("valid program with a clock tool");
-        assert_eq!(
-            native_ability_with_tools(&ir, true),
-            Err(NotNativeReason::TextScalarAtBoundary { name: "now".into(), type_name: "Instant".into() })
-        );
+        assert_eq!(native_ability_with_tools(&ir, true), Ok(()));
     }
 
     /// B1b: a prompt whose arguments and reply have a native JSON form

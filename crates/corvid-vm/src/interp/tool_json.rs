@@ -74,3 +74,15 @@ pub(crate) fn tool_result(json: J, ty: &Type, types: &HashMap<DefId, &IrType>) -
     }
     decode_public_json(&json, ty, types, UnknownFields::Ignore).map_err(|error| error.to_string())
 }
+
+/// A tool's answer as the step debugger shows it: the public form, or for
+/// a type that has none (a connector `Response`, a runtime handle) the
+/// interpreter's own form, decided by the type.
+pub(crate) fn debugger_view(value: &Value, ty: &Type, types: &HashMap<DefId, &IrType>) -> J {
+    if ty.mentions(&|ty| matches!(ty, Type::Response(_) | Type::DbHandle | Type::JsonBuilder)) {
+        return value_to_json(value);
+    }
+    encode_tool_argument(value, ty, types, SecretArgument::Recorded)
+        .unwrap_or_else(|problem| serde_json::json!({ "unencodable": problem }))
+}
+

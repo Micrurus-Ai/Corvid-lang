@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+A tool of the program's own written in Rust with `#[tool]` now runs in native code whatever its signature holds: records, lists, `Option`, sum types, `Decimal`, time values, and a `Secret` argument, which the trace records as `<redacted>` and only the tool receives as text. Native code calls it through the runtime, as the interpreter does, so both tiers send it the same JSON, read its answer with the same checks and record the same call. A `#[tool]` that is not linked into the binary is still a link error.
+
 A tool now receives its arguments, and is read back, in the same JSON form `to_json` writes: a Python, host or Rust tool gets `None` as `null` and a variant as `{"tag": "variant", "type": ..., "variant": ..., "fields": [...]}` instead of `{"tag": "some", ...}`, and an answer that does not fit the tool's declared return type is refused with the field it got wrong. A recording made earlier whose tool arguments hold an `Option` or a variant no longer replays; record it again.
 
 A prompt that takes or returns a record, a list, an `Option`, a `Result`, a sum type, a `Decimal` or a time value now runs in native code; such a program used to run on the interpreter. Both tiers show the model the same text and schema, and record the same call. [Prompt declarations](docs/reference/grammar.md#prompt-declarations)
