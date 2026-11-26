@@ -279,7 +279,7 @@ fn emit_api(contract: &ApplicationContract) -> String {
     }
     let pending = if contract.actions.iter().any(|a| a.approval.is_some()) { " type ApprovalPending," } else { "" };
     out.push_str(&format!(
-        "import {{ CorvidClient, type AgentStream,{pending} type Page, type RouteShape, type RouteStream }} from \"@corvid/client\";\n",
+        "import {{ CorvidClient,{pending} type Page, type RouteShape, type RouteStream }} from \"@corvid/client\";\n",
     ));
     // Import every generated type so method signatures resolve.
     if !contract.types.is_empty() {
@@ -296,14 +296,11 @@ fn emit_api(contract: &ApplicationContract) -> String {
     }
     out.push_str(&routes.method);
 
+    // A client calls the backend through its declared actions. Public
+    // agents and prompts get no method: no server answers a call to one,
+    // and serving one would open what no source declared callable.
     for action in &contract.actions {
         out.push_str(&action_method(action));
-    }
-    for agent in &contract.agents {
-        out.push_str(&callable_method(agent, "agent"));
-    }
-    for prompt in &contract.prompts {
-        out.push_str(&callable_method(prompt, "prompt"));
     }
 
     // Auth helpers from the identity block (slice 51h).
@@ -328,7 +325,7 @@ fn live_methods(contract: &ApplicationContract) -> String {
         servers.entry(&live.server).or_insert_with(Vec::new).push(live);
     }
     let mut group = "live".to_owned();
-    while contract.agents.iter().chain(&contract.prompts).any(|c| c.name == group) {
+    while contract.actions.iter().any(|a| a.callable.name == group) {
         group.push('_');
     }
     let mut out = format!("  readonly {group} = {{\n");
@@ -478,49 +475,23 @@ fn action_method(action: &crate::app_contract::ContractAction) -> String {
         (Some(_), Some(only)) => sanitize_ident(&only.name),
         _ => format!("{{ {} }}", c.inputs.iter().map(|p| sanitize_ident(&p.name)).collect::<Vec<_>>().join(", ")),
     };
+    let name = sanitize_ident(&c.name);
+    let params = params.join(", ");
+    let orig = &c.name;
+    if c.capabilities.streaming {
+        // The server answers a streaming action with the route stream
+        // protocol.
+        let item = generic_inner(&c.output_type).unwrap_or_else(|| "unknown".to_string());
+        return format!(
+            "  /** Calls the `{orig}` action and reads its stream. */\n  {name}({params}): RouteStream<{item}> {{\n    return this.client.actionStream<{item}>(\"{orig}\", {input});\n  }}\n\n"
+        );
+    }
     let result = ts_type(&c.output_type);
     let ret = if action.approval.is_some() { format!("{result} | ApprovalPending") } else { result.clone() };
     let cast = if action.approval.is_some() { String::new() } else { format!(" as Promise<{result}>") };
     format!(
-        "  /** Calls the `{orig}` action. */\n  {name}({params}): Promise<{ret}> {{\n    return this.client.action<{result}>(\"{orig}\", {input}){cast};\n  }}\n\n",
-        name = sanitize_ident(&c.name),
-        params = params.join(", "),
-        orig = c.name,
+        "  /** Calls the `{orig}` action. */\n  {name}({params}): Promise<{ret}> {{\n    return this.client.action<{result}>(\"{orig}\", {input}){cast};\n  }}\n\n"
     )
-}
-
-fn callable_method(c: &crate::app_contract::ContractCallable, kind: &str) -> String {
-    let params: Vec<String> = c
-        .inputs
-        .iter()
-        .map(|p| format!("{}: {}", sanitize_ident(&p.name), ts_type(&p.type_name)))
-        .collect();
-    let arg_obj = c
-        .inputs
-        .iter()
-        .map(|p| sanitize_ident(&p.name))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let name = sanitize_ident(&c.name);
-
-    if c.capabilities.streaming {
-        // A streaming callable returns a typed event stream the client
-        // parses from SSE.
-        let inner = generic_inner(&c.output_type).unwrap_or_else(|| "unknown".to_string());
-        format!(
-            "  {name}({params}): AgentStream<{inner}> {{\n    return this.client.stream(\"{orig}\", {{ {arg_obj} }});\n  }}\n\n",
-            params = params.join(", "),
-            orig = c.name,
-        )
-    } else {
-        let ret = ts_type(&c.output_type);
-        let _ = kind;
-        format!(
-            "  {name}({params}): Promise<{ret}> {{\n    return this.client.invoke(\"{orig}\", {{ {arg_obj} }});\n  }}\n\n",
-            params = params.join(", "),
-            orig = c.name,
-        )
-    }
 }
 
 /// Map a contract type name to a TypeScript type. Generic wrappers
@@ -690,14 +661,54 @@ tool stream_answer(m: String) -> Stream<String>
 ",
         );
         let api = &files_api(&contract);
-        // Non-streaming → Promise<Answer> via client.invoke.
-        assert!(api.contains("classify(question: string): Promise<Answer>"));
-        assert!(api.contains("this.client.invoke(\"classify\", { question })"));
-        // Streaming → AgentStream<string> via client.stream.
-        assert!(api.contains("chat(message: string): AgentStream<string>"));
-        assert!(api.contains("this.client.stream(\"chat\", { message })"));
+        // No server answers a call to a public agent, so the client offers
+        // none: a frontend calls the backend through declared actions.
+        assert!(!api.contains("classify("), "{api}");
+        assert!(!api.contains("chat("), "{api}");
+        assert!(!api.contains("/agents"), "{api}");
         // Reuses the shipped transport, never regenerates it.
         assert!(api.contains("import { CorvidClient"));
+    }
+
+    /// Every call the generated client makes names a `CorvidClient` method
+    /// whose endpoint `corvid serve` answers, so a generated call can never
+    /// target a path no server serves.
+    #[test]
+    fn every_generated_call_reaches_a_served_endpoint() {
+        let contract = contract_for(
+            "identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed(\"public\")
+
+type Note:
+    text: String
+
+action save(note: Note) -> Note requires authenticated:
+    return note
+
+action watch(topic: String) -> Stream<String> requires authenticated:
+    yield topic
+
+public agent helper(x: Int) -> Int:
+    return x
+",
+        );
+        let api = files_api(&contract);
+        let served = ["action", "actionStream", "routeStream", "subscribe", "login", "session", "logout"];
+        let calls: Vec<&str> = api
+            .match_indices("this.client.")
+            .map(|(at, _)| {
+                let rest = &api[at + "this.client.".len()..];
+                &rest[..rest.find(|c: char| !c.is_alphanumeric()).unwrap_or(rest.len())]
+            })
+            .collect();
+        assert!(!calls.is_empty());
+        for call in calls {
+            assert!(served.contains(&call), "the client calls `{call}`, which no served endpoint answers:\n{api}");
+        }
+        assert!(api.contains("watch(topic: string): RouteStream<string>"), "{api}");
     }
 
     #[test]

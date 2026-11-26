@@ -5,13 +5,13 @@
 //! TypeScript starter the developer OWNS and modifies: the generated
 //! typed client (`src/corvid/`, reusing slice 51l), a configured
 //! `CorvidClient`, and an `App.tsx` that wires a sign-in row plus a
-//! form/stream per public agent using the `@corvid/react` components.
+//! form per action using the `@corvid/react` components.
 //! Unlike the client/hooks/components (which are shipped and reused),
 //! these files are a STARTING POINT — regenerate a fresh project, then
 //! edit freely; nothing here is overwritten on a re-run you don't ask
 //! for.
 
-use crate::app_contract::{ApplicationContract, ContractCallable};
+use crate::app_contract::{ApplicationContract, ContractAction, ContractCallable};
 use crate::ts_client::{emit_ts_client, GeneratedFile};
 
 /// Generate the React starter project files for a contract.
@@ -51,11 +51,11 @@ fn app_tsx(contract: &ApplicationContract) -> String {
         .join(", ");
 
     let mut sections = String::new();
-    for agent in &contract.agents {
-        sections.push_str(&agent_section(agent));
+    for action in &contract.actions {
+        sections.push_str(&action_section(action, contract));
     }
-    if contract.agents.is_empty() {
-        sections.push_str("      <p>No public agents in this contract yet.</p>\n");
+    if contract.actions.is_empty() {
+        sections.push_str("      <p>No actions in this contract yet. Declare an `action` to give this page something to call.</p>\n");
     }
 
     let signin = if providers.is_empty() {
@@ -66,7 +66,7 @@ fn app_tsx(contract: &ApplicationContract) -> String {
 
     format!(
         "// Starter page — you own this file; edit freely.\n\
-import {{ CorvidAgentForm, CorvidStream, CorvidSignIn }} from \"@corvid/react\";\n\
+import {{ CorvidAgentForm, CorvidSignIn }} from \"@corvid/react\";\n\
 import {{ client, api }} from \"./client\";\n\n\
 export default function App() {{\n  \
 return (\n    \
@@ -76,38 +76,43 @@ return (\n    \
     )
 }
 
-fn agent_section(agent: &ContractCallable) -> String {
-    let name = &agent.name;
-    if agent.capabilities.streaming {
-        // A streaming agent: a Start-driven stream over its first input.
-        let arg = agent.inputs.first().map(|p| p.name.clone()).unwrap_or_default();
-        let params = agent
-            .inputs
-            .iter()
-            .map(|p| format!("{}: string", p.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let call_args = agent.inputs.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join(", ");
-        format!(
-            "      <section>\n        <h2>{name}</h2>\n        <CorvidStream stream={{({params}) => api.{name}({call_args})}} args={{[\"\"]}} />\n      </section>\n      {{/* first input: {arg} */}}\n"
-        )
-    } else {
-        let fields = agent
-            .inputs
-            .iter()
-            .map(|p| format!("{{ name: \"{}\" }}", p.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let call = agent
-            .inputs
-            .iter()
-            .map(|p| coerce_field(&p.name, &p.type_name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "      <section>\n        <h2>{name}</h2>\n        <CorvidAgentForm fields={{[{fields}]}} call={{(v) => api.{name}({call})}} />\n      </section>\n"
-        )
+/// A form for one action. Its fields are the record's fields when the
+/// action takes one record, otherwise its parameters; the call goes
+/// through the generated `api` method, so a changed input fails to
+/// compile here.
+fn action_section(action: &ContractAction, contract: &ApplicationContract) -> String {
+    let c: &ContractCallable = &action.callable;
+    let name = &c.name;
+    if c.capabilities.streaming {
+        // The React components read an agent's event stream; a route
+        // stream component is on the frontend roadmap.
+        return format!(
+            "      {{/* `{name}` streams its result; show it with a route-stream component once @corvid/react has one. */}}\n"
+        );
     }
+    let record = action
+        .input_type
+        .as_ref()
+        .and_then(|ty| contract.types.iter().find(|t| &t.name == ty));
+    let (fields, call) = match record {
+        Some(record) => {
+            let fields: Vec<String> = record.fields.iter().map(|f| format!("{{ name: \"{}\" }}", f.key())).collect();
+            let value: Vec<String> = record
+                .fields
+                .iter()
+                .map(|f| format!("{}: {}", f.key(), coerce_field(f.key(), &f.type_name)))
+                .collect();
+            (fields, format!("{{ {} }}", value.join(", ")))
+        }
+        None => (
+            c.inputs.iter().map(|p| format!("{{ name: \"{}\" }}", p.name)).collect(),
+            c.inputs.iter().map(|p| coerce_field(&p.name, &p.type_name)).collect::<Vec<_>>().join(", "),
+        ),
+    };
+    format!(
+        "      <section>\n        <h2>{name}</h2>\n        <CorvidAgentForm fields={{[{fields}]}} call={{(v) => api.{name}({call})}} />\n      </section>\n",
+        fields = fields.join(", "),
+    )
 }
 
 /// Map a form field (always a string) into the agent's parameter type.
@@ -217,7 +222,7 @@ VITE_CORVID_BACKEND=http://localhost:8080 npm run dev   # point at `corvid serve
   Regenerate with `corvid generate frontend` (or `corvid contract
   ts-client`) whenever the Corvid source changes.
 - `src/client.ts` — the configured `CorvidClient` + `Api`.
-- `src/App.tsx` — a starter page with a form per public agent and a
+- `src/App.tsx` — a starter page with a form per action and a
   sign-in row. Replace it with your product UI; the hooks
   (`@corvid/react`) are the real building blocks.
 "#;
@@ -255,13 +260,18 @@ mod tests {
         first_login: open
         tenant: fixed(\"public\")
 
-public agent classify(question: String) -> String:
+public type Card:
+    title: String
+    points: Int
+
+action classify(question: String) -> String requires authenticated:
     return question
 
-public agent chat(message: String) -> Stream<String>:
-    return stream_answer(message)
+action add_card(card: Card) -> Card requires authenticated:
+    return card
 
-tool stream_answer(m: String) -> Stream<String>
+public agent helper(x: Int) -> Int:
+    return x
 ",
         ));
         let names: Vec<&str> = files.iter().map(|f| f.filename.as_str()).collect();
@@ -281,9 +291,11 @@ tool stream_answer(m: String) -> Stream<String>
         let app = &files.iter().find(|f| f.filename == "src/App.tsx").unwrap().contents;
         // Sign-in from the identity providers.
         assert!(app.contains("CorvidSignIn client={client} providers={[\"google\"]}"));
-        // A form for the non-streaming agent, a stream for the streaming one.
-        assert!(app.contains("call={(v) => api.classify(v.question)}"));
-        assert!(app.contains("stream={(message: string) => api.chat(message)}"));
+        // A form per action: its parameters, or the record it takes.
+        assert!(app.contains("call={(v) => api.classify(v.question)}"), "{app}");
+        assert!(app.contains("call={(v) => api.add_card({ title: v.title, points: Number(v.points) })}"), "{app}");
+        // A public agent is not callable from a page.
+        assert!(!app.contains("helper"), "{app}");
 
         // Generated applications are reproducible inputs: direct
         // dependencies are exact versions, never moving `*`/caret ranges.
@@ -301,7 +313,7 @@ tool stream_answer(m: String) -> Stream<String>
     #[test]
     fn numeric_fields_are_coerced() {
         let files = emit_react_frontend(&contract_for(
-            "public agent score(n: Int) -> Int:
+            "action score(n: Int) -> Int requires anyone:
     return n
 ",
         ));

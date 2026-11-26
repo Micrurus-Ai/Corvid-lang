@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+The generated TypeScript client calls the backend through actions only. It no longer has methods for public agents or prompts, which posted to `/agents/<name>` where no server answered; declare an `action` for what a page or a client should call. An action returning `Stream<T>` gives a `RouteStream<T>`. Client calls now send the CSRF token, so signed-in POSTs work from a browser. A private type an action takes or returns is now published in the contract, so it appears in `types.ts` and OpenAPI. The dev console and the React scaffold list actions. [CLI: actions](docs/reference/cli.md#actions)
+
 The TypeScript client from `corvid contract ts-client` has a method per action: `await api.move_card(move)` or `await api.rename(3, "Ship")`, typed from the contract. An action with `@approval` returns `T | ApprovalPending`; check `result.kind === "approval_pending"` and poll `result.poll` for the decision. [CLI: actions](docs/reference/cli.md#actions)
 
 A map keyed by a `Decimal`, a time value, a currency, a locale or `Bytes`, or holding such values, now runs in native code. A `Decimal` key is found by value, so `prices[1.00]` and `prices[1.0]` are the same entry, as on the interpreter. A map literal's keys also take the declared key type now: `prices: Map<Decimal, String> = {1.0: "one"}` and `rates: Map<Currency, Int> = {"EUR": 1}` check, where before the keys read as a `Float` and a `String`.

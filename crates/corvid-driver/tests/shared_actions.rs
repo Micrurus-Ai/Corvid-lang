@@ -130,6 +130,10 @@ fn the_contract_says_when_one_record_is_the_whole_input() {
     let contract = compile_to_application_contract_with_config(&format!("{IDENTITY}{BOARD}"), "app.cor", "test", None)
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
     assert_eq!(contract.actions[0].input_type.as_deref(), Some("MoveCard"));
+    let published: Vec<&str> = contract.types.iter().map(|t| t.name.as_str()).collect();
+    for name in ["MoveCard", "Column", "Moved"] {
+        assert!(published.contains(&name), "an action's private types are published for its callers: {published:?}");
+    }
     assert_eq!(contract.actions[1].input_type, None, "`ping` takes no record");
 }
 

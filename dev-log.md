@@ -1583,6 +1583,39 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - Every generated call reaches a served endpoint (B10-2b-6)
+
+The generated TypeScript client, the dev console and the React
+scaffold called public agents at `/agents/<name>` and
+`/agents/<name>/stream`, which neither server answers. Serving them
+was rejected: it would open every public agent to outside callers with
+no policy the source declared. So the backend's outside surface is its
+actions: `CorvidClient.invoke` and `stream` are gone, the client emits
+methods only for actions (a streaming one returns `RouteStream<T>` via
+the new `actionStream`, sharing the route stream reader), and the
+console and scaffold list actions. A test walks the generated `api.ts`
+and fails if any `this.client.<call>` is not one whose endpoint `corvid
+serve` answers.
+
+Found and fixed while doing it:
+- **The client sent no CSRF token.** Every cookie-authenticated POST
+  from it, action or route stream, would get `403`. Each state-changing
+  request now copies the `corvid_csrf` cookie into `X-CSRF-Token`.
+- **A private type an action used was not published** (its own
+  commit). Types were published for public agents and routes only, so
+  `MoveCard` was undefined in `types.ts` and a dangling `$ref` in
+  OpenAPI. A test now checks the action's types are in the contract,
+  and fails without the fix.
+
+Told the frontend roadmap: `useCorvidStream` reads `AgentStream`, which
+no generated call returns any more; the route-stream hook already
+planned there is now the one a streaming action needs. Not run: the
+Node route-stream script (`scripts/verify_generated_route_stream.py`),
+since this machine has Node only on Windows and `corvid` only in WSL;
+the transport typechecks under the package's strict `tsconfig`.
+
+---
+
 ## 2026-11-26 - Action methods in the TypeScript client (B10-2b-4)
 
 `corvid contract ts-client` emits one method per action, posting to

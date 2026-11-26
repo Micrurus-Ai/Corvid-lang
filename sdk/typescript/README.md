@@ -9,21 +9,24 @@ glue**.
 
 - **`@corvid/client`** (`client/`) — the generic transport, shipped once
   and reused by every app. It owns the cross-cutting behavior:
-  - session-cookie auth (`credentials: "include"`) and the
-    `/auth/{provider}/login|logout|session` helpers,
-  - the typed agent **event protocol** over SSE
-    (`started`/`chunk`/`tool_started`/`tool_completed`/`approval_required`/`completed`/`failed`),
+  - session-cookie auth (`credentials: "include"`), the
+    `/auth/{provider}/login|logout|session` helpers, and the CSRF token
+    every state-changing request copies from the `corvid_csrf` cookie,
+  - **action** calls (`POST /actions/<name>`), where an action with
+    `@approval` resolves to `ApprovalPending` while a reviewer decides,
   - the **route stream** protocol (`chunk`/`completed`/`failed`, plus
     `interrupted` for a lost connection) that `corvid serve` sends for a
-    route returning `Stream<T>`,
+    route or an action returning `Stream<T>`,
   - typed errors (`CorvidError`, carrying the `@status` code and the
     parsed error-enum body),
   - cursor **pagination** (`Page<Item>`, `paginate(...)`).
 - **Generated `types.ts` + `api.ts`** — produced per app by
   `corvid contract ts-client`. `types.ts` is one `interface` per record
   and a discriminated union per sum/error type (with a `…Meta` map for
-  `@status`/`@ui`); `api.ts` is a thin, typed `Api` class whose methods
-  delegate to `@corvid/client`. Nothing cross-cutting is regenerated —
+  `@status`/`@ui`); `api.ts` is a thin, typed `Api` class with one method
+  per `action`, delegating to `@corvid/client`. A public agent gets no
+  method: a client reaches the backend only through what the source
+  declares callable. Nothing cross-cutting is regenerated —
   upgrades to streaming, approvals, grounding, or pagination happen in
   the one shipped package.
 
@@ -39,8 +42,8 @@ import { Api } from "./sdk/generated/api";
 
 const api = new Api(new CorvidClient({ baseUrl: "https://api.example.com" }));
 
-const answer = await api.classify("hello");            // typed result
-for await (const event of api.chat("hi")) {            // typed SSE events
+const moved = await api.move_card({ card: 3, to: { variant: "Done" }, position: 0 }); // an action
+for await (const event of api.watch_board(7)) {        // an action returning Stream<T>
   if (event.kind === "chunk") render(event.value);
 }
 api.loginWith_google();                                // auth helper
