@@ -138,7 +138,16 @@ fn build_server_emits_runnable_local_http_binary() {
     assert!(ready.contains(r#"{"ready":true}"#), "{ready}");
 
     let root = http_get(addr, "/");
-    assert!(root.contains("HTTP/1.1 200 OK"), "{root}");
+    if !root.contains("HTTP/1.1 200 OK") {
+        // The body carries only a fixed sentence by design; the reason
+        // is in the server's log, so show it.
+        let _ = child.0.kill();
+        let mut log = String::new();
+        if let Some(mut stderr) = child.0.stderr.take() {
+            let _ = stderr.read_to_string(&mut log);
+        }
+        panic!("GET / failed:\n{root}\nserver log:\n{log}");
+    }
     assert!(root.contains(r#""result":"hello from corvid""#), "{root}");
 
     let rejected = http_request(
@@ -217,6 +226,10 @@ fn build_server_emits_runnable_local_http_binary() {
         "{timeout}"
     );
     assert!(timeout.contains(r#""kind":"handler_timeout""#), "{timeout}");
+    assert!(
+        timeout.contains(&corvid_driver::public_failure::timeout_detail(0)),
+        "the timeout sentence is the one `corvid serve` sends: {timeout}"
+    );
 
     drop(timeout_child);
 
@@ -318,7 +331,60 @@ fn build_server_emits_runnable_local_http_binary() {
         failed_handler.contains(r#""kind":"handler_spawn_failed""#),
         "{failed_handler}"
     );
+    assert!(
+        failed_handler.contains(&corvid_driver::public_failure::handler_not_started().detail),
+        "{failed_handler}"
+    );
+    let handler_name = handler.file_name().unwrap().to_string_lossy().to_string();
+    assert!(!failed_handler.contains(&handler_name), "the handler's path stays out of the body: {failed_handler}");
     drop(isolated_child);
+
+    // A handler that fails writes its error, which can hold a URL or a
+    // file path, to its stderr. The body carries the fixed sentence
+    // `corvid serve` sends, and only the server's log carries the text.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(
+            &handler,
+            "#!/bin/sh\necho 'GET http://10.0.0.7:8080/admin refused; see /Users/ops/app/secrets.toml' >&2\nexit 3\n",
+        )
+        .expect("write a failing handler");
+        std::fs::set_permissions(&handler, std::fs::Permissions::from_mode(0o755)).expect("make it runnable");
+        let leaky_child = Command::new(&server)
+            .env("CORVID_PORT", "0")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn failing-handler server");
+        let mut leaky_child = ChildGuard(leaky_child);
+        let stdout = leaky_child.0.stdout.take().expect("failing-handler server stdout");
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let start = Instant::now();
+        while line.is_empty() && start.elapsed() < Duration::from_secs(10) {
+            reader.read_line(&mut line).expect("read failing-handler listening line");
+        }
+        let leaky_addr = line.trim().strip_prefix("listening: http://").expect("failing-handler listening prefix").to_string();
+        let leaked = http_get(&leaky_addr, "/");
+        assert!(leaked.contains("HTTP/1.1 500 Internal Server Error"), "{leaked}");
+        assert!(leaked.contains(r#""kind":"handler_failed""#), "{leaked}");
+        assert!(leaked.contains(&corvid_driver::public_failure::handler_failed().detail), "{leaked}");
+        for leak in ["10.0.0.7", "/admin", "/Users", "secrets.toml"] {
+            assert!(!leaked.contains(leak), "`{leak}` leaked into the body: {leaked}");
+        }
+        drop(leaky_child.0.stdin.take());
+        let _ = leaky_child.0.kill();
+        let mut log = String::new();
+        if let Some(mut stderr) = leaky_child.0.stderr.take() {
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut log);
+        }
+        assert!(
+            log.contains("corvid.server.failure") && log.contains("secrets.toml"),
+            "the operator's log keeps the full error: {log}"
+        );
+    }
     std::fs::rename(&hidden_handler, &handler).expect("restore handler binary");
 
     let invalid_config = Command::new(&server)

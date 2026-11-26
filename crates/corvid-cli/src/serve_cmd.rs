@@ -1694,7 +1694,8 @@ fn finish(
 fn failure_response(route: &str, err: &RunError) -> Response {
     let failure = public_failure(err);
     log_failure(route, &failure, &err.user_facing_detail());
-    (failure.status, Json(failure.body())).into_response()
+    let status = StatusCode::from_u16(failure.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, Json(failure.body())).into_response()
 }
 
 /// If the interpreter error carries an `ApprovalQueued` from the

@@ -16,6 +16,7 @@ mod dimension_artifact;
 mod dimension_registry;
 pub mod mcp_codegen;
 pub mod modules;
+pub mod public_failure;
 pub use corvid_codegen_wasm::FORM_CONTROLS_JS;
 pub mod skills;
 pub mod proof_replay;
