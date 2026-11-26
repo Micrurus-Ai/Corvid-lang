@@ -34,7 +34,7 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 | 9 | Joins and aggregates in table queries and `live`. | Windows session | needs a proposal |
 | 10 | The TS client reads served streams, and serve's stream `error` event sends a typed failure, not Rust debug text. | Codex | frontend |
 | 11 | `corvid serve` refuses `live` until RT-3 lands. Unblocked on 2026-11-26 (session watching, removal revisions). | Codex | frontend |
-| 12 | Native gaps: streams, B06 types at tool and prompt boundaries (proposed, [native scalar boundaries](native-scalar-boundaries.md)), tables, `llm.usage` events in native runs. `find_regex` and `+=` on decimals and times landed on 2026-11-26, and a native prompt's `String` argument now renders as its JSON form, as on the interpreter (B1a); next is B1, prompts in the public JSON form on both tiers. | Mac session | native |
+| 12 | Native gaps: streams, B06 types at tool and prompt boundaries (proposed, [native scalar boundaries](native-scalar-boundaries.md)), tables, `llm.usage` events in native runs. `find_regex` and `+=` on decimals and times landed on 2026-11-26, and a native prompt's `String` argument now renders as its JSON form, as on the interpreter (B1a); prompts exchange the public JSON form with a model on both tiers (B1); next is B1b, native prompts through the public plan for lists, records, `Option`, variants and text-held scalars. | Mac session | native |
 | 13 | Scale: incremental live matching, uploads held in memory, `verify_password` on the agent's thread. | Windows session | scale |
 
 Items 1 to 6 come before the rest of the roadmap order, because each is a hole or a block a first real application hits. The roadmap records that amendment.

@@ -222,47 +222,26 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
 }
 
 fn schema_for_type(ty: &ContractType) -> Value {
+    use corvid_public_json::schema;
     if !ty.variants.is_empty() {
-        let mut alternatives = Vec::with_capacity(ty.variants.len());
-        for variant in &ty.variants {
-            let count = variant.fields.len();
-            let mut fields = json!({"type": "array", "minItems": count, "maxItems": count});
-            let mut required = vec!["variant"];
-            if count > 0 {
-                fields["prefixItems"] = variant.fields.iter().map(schema_for_field).collect();
-                required.push("fields");
-            }
-            alternatives.push(json!({
-                "type": "object",
-                "required": required,
-                "properties": {
-                    "tag": {"const": "variant"},
-                    "type": {"const": ty.name},
-                    "variant": {"const": variant.name},
-                    "fields": fields
-                }
-            }));
-        }
-        return json!({"oneOf": alternatives});
+        return schema::sum(
+            ty.variants
+                .iter()
+                .map(|variant| schema::variant(&ty.name, &variant.name, variant.fields.iter().map(schema_for_field).collect()))
+                .collect(),
+        );
     }
-    let mut properties = Map::new();
-    let mut required = Vec::new();
-    for field in &ty.fields {
-        properties.insert(field.name.clone(), schema_for_field(field));
-        // Corvid fields are non-optional unless the type is Option<T>;
-        // scalars/named are always required.
-        if !field.type_name.starts_with("Option<") {
-            required.push(Value::String(field.name.clone()));
-        }
-    }
-    let mut schema = Map::new();
-    schema.insert("type".into(), json!("object"));
-    schema.insert("properties".into(), Value::Object(properties));
-    if !required.is_empty() {
-        schema.insert("required".into(), Value::Array(required));
-    }
-    schema.insert("additionalProperties".into(), json!(false));
-    Value::Object(schema)
+    schema::record(
+        ty.fields
+            .iter()
+            .map(|field| schema::RecordField {
+                name: field.name.clone(),
+                schema: schema_for_field(field),
+                // Corvid fields are non-optional unless the type is Option<T>.
+                optional: field.type_name.starts_with("Option<"),
+            })
+            .collect(),
+    )
 }
 
 fn schema_for_field(field: &ContractField) -> Value {
@@ -372,28 +351,13 @@ fn schema_for_type_name(name: &str) -> Value {
             "Conflict" => conflict_schema(inner),
             // OpenAPI 3.1 is JSON Schema 2020-12, which has no
             // `nullable`; `None` is `null` in the type itself.
-            "Option" => nullable(schema_for_type_name(inner)),
-            "List" => json!({ "type": "array", "items": schema_for_type_name(inner) }),
+            "Option" => corvid_public_json::schema::nullable(schema_for_type_name(inner)),
+            "List" => corvid_public_json::schema::list(schema_for_type_name(inner)),
             "Result" => {
                 // Result<T, E> → `{"tag": "ok", "ok": T}` or
                 // `{"tag": "err", "err": E}`; `tag` is optional on input.
                 let (ok, err) = inner.split_once(',').unwrap_or((inner, "String"));
-                json!({
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "properties": { "tag": { "const": "ok" }, "ok": schema_for_type_name(ok.trim()) },
-                            "required": ["ok"],
-                            "additionalProperties": false
-                        },
-                        {
-                            "type": "object",
-                            "properties": { "tag": { "const": "err" }, "err": schema_for_type_name(err.trim()) },
-                            "required": ["err"],
-                            "additionalProperties": false
-                        }
-                    ]
-                })
+                corvid_public_json::schema::result(schema_for_type_name(ok.trim()), schema_for_type_name(err.trim()))
             }
             _ => json!({ "$ref": format!("#/components/schemas/{name}") }),
         };
@@ -405,42 +369,16 @@ fn schema_for_type_name(name: &str) -> Value {
 /// The schema of `Conflict<row>`, one alternative per case, in the shape
 /// [`schema_for_type`] gives a declared sum type.
 fn conflict_schema(row: &str) -> Value {
-    let alternatives: Vec<Value> = corvid_types::ConflictCase::ALL
-        .into_iter()
-        .map(|case| {
-            let count = usize::from(case.field().is_some());
-            let mut fields = json!({"type": "array", "minItems": count, "maxItems": count});
-            let mut required = vec!["variant"];
-            if count > 0 {
-                fields["prefixItems"] = json!([schema_for_type_name(row)]);
-                required.push("fields");
-            }
-            json!({
-                "type": "object",
-                "required": required,
-                "properties": {
-                    "tag": {"const": "variant"},
-                    "type": {"const": "Conflict"},
-                    "variant": {"const": case.name()},
-                    "fields": fields
-                }
+    use corvid_public_json::schema;
+    schema::sum(
+        corvid_types::ConflictCase::ALL
+            .into_iter()
+            .map(|case| {
+                let payload = case.field().map(|_| schema_for_type_name(row)).into_iter().collect();
+                schema::variant("Conflict", case.name(), payload)
             })
-        })
-        .collect();
-    json!({"oneOf": alternatives})
-}
-
-/// Allow `null` alongside `schema`: add it to a simple `type`, or wrap
-/// a reference or composite schema in `anyOf`.
-fn nullable(schema: Value) -> Value {
-    match schema.get("type") {
-        Some(Value::String(kind)) => {
-            let mut schema = schema.clone();
-            schema["type"] = json!([kind, "null"]);
-            schema
-        }
-        _ => json!({ "anyOf": [schema, { "type": "null" }] }),
-    }
+            .collect(),
+    )
 }
 
 /// Whether a route body type (or the type it directly references)

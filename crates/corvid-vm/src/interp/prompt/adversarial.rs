@@ -1,9 +1,7 @@
-use crate::conv::json_to_value;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::interp::Interpreter;
 use crate::step::{StepAction, StepEvent};
 use crate::value::Value;
-use crate::value_to_json;
 use corvid_ast::Span;
 use corvid_ir::IrPrompt;
 use corvid_runtime::{contradiction_flag, trace_text, TraceEvent};
@@ -37,7 +35,7 @@ impl<'ir> Interpreter<'ir> {
                 .await?;
             if let StepAction::Override(val) = action {
                 let value =
-                    json_to_value(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
+                    super::from_model_json(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::Marshal(format!(
                                 "prompt `{callee_name}` override: {e}"
@@ -50,7 +48,7 @@ impl<'ir> Interpreter<'ir> {
                         prompt, &value,
                     ),
                     tokens: super::super::effect_compose::estimate_tokens(
-                        &value_to_json(&value).to_string(),
+                        &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                     ),
                     cost: prompt.effect_cost,
                     value,
@@ -87,9 +85,9 @@ impl<'ir> Interpreter<'ir> {
             self.charge_cost(verdict.cost, span)?;
         }
 
-        let proposed_json = value_to_json(&proposed.value);
-        let challenge_json = value_to_json(&challenge.value);
-        let verdict_json = value_to_json(&verdict.value);
+        let proposed_json = self.model_json(&proposed.value, &proposer.return_ty, span)?;
+        let challenge_json = self.model_json(&challenge.value, &challenger.return_ty, span)?;
+        let verdict_json = self.model_json(&verdict.value, &adjudicator.return_ty, span)?;
         let contradiction = contradiction_flag(callee_name, &verdict_json)
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         if contradiction {
@@ -128,7 +126,7 @@ impl<'ir> Interpreter<'ir> {
                 .await?;
             if let StepAction::Override(val) = action {
                 let value =
-                    json_to_value(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
+                    super::from_model_json(val, &prompt.return_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::Marshal(format!(
                                 "prompt `{callee_name}` override: {e}"
@@ -141,7 +139,7 @@ impl<'ir> Interpreter<'ir> {
                         prompt, &value,
                     ),
                     tokens: super::super::effect_compose::estimate_tokens(
-                        &value_to_json(&value).to_string(),
+                        &self.model_json(&value, &prompt.return_ty, span)?.to_string(),
                     ),
                     cost: proposed.cost + challenge.cost + verdict.cost,
                     value,
