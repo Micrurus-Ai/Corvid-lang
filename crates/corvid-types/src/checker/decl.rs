@@ -1934,11 +1934,25 @@ impl<'a> Checker<'a> {
             )));
             return;
         }
-        let Type::Result(_, err) = self.type_ref_to_type(&op.return_ty) else {
-            self.errors.push(invalid(format!(
-                "operation `{operation}` maps failures to `{}`, so it returns a `Result` whose error type declares that variant",
-                variant.name
-            )));
+        // A streamed operation maps failures into its events: each event
+        // is `Ok`, and an outage is one final `Err` (decision 7).
+        let returned = self.type_ref_to_type(&op.return_ty);
+        let (streamed, mapped) = match (&op.streams, returned) {
+            (Some(_), Type::Stream(item)) => (true, *item),
+            (_, returned) => (false, returned),
+        };
+        let Type::Result(_, err) = mapped else {
+            self.errors.push(invalid(if streamed {
+                format!(
+                    "operation `{operation}` streams and maps failures to `{}`, so each event is a `Result` whose error type declares that variant: `Stream<Result<Event, Error>>`",
+                    variant.name
+                )
+            } else {
+                format!(
+                    "operation `{operation}` maps failures to `{}`, so it returns a `Result` whose error type declares that variant",
+                    variant.name
+                )
+            }));
             return;
         };
         let decl = match err.as_ref() {
@@ -1967,8 +1981,9 @@ impl<'a> Checker<'a> {
 impl<'a> Checker<'a> {
     /// A streamed operation returns `Stream<T>` as its whole result and
     /// declares how events are framed; nothing else declares `streams:`.
-    /// Its failures end the stream with an error, so it cannot also read
-    /// text, map failures with `on failure`, or run an `async:` protocol.
+    /// Its failures end the stream with an error, or with a final `Err`
+    /// event when it declares `on failure` over `Stream<Result<T, E>>`;
+    /// it cannot also read text or run an `async:` protocol.
     fn check_operation_stream(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
         let invalid = |message: String| {
             TypeError::new(
@@ -2010,7 +2025,6 @@ impl<'a> Checker<'a> {
             }
             let conflicts = [
                 (op.response_text, "`response: text`"),
-                (op.on_failure.is_some(), "`on failure` (a streamed failure ends the stream with an error)"),
                 (op.protocol.is_some(), "an `async:` protocol"),
             ];
             for (present, what) in conflicts {

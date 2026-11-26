@@ -1,6 +1,6 @@
 # Proposal: typed failures in streams, and one stream protocol for both tiers
 
-Status: **proposed 2026-11-26, waiting for frontend agreement.** Owner: backend and AI development, macOS session. Part 2 changes the event protocol a served stream sends, which the TypeScript client parses, so the proposal goes to frontend development (Codex) through the owner before either side changes.
+Status: **part 1 (slice S1) built 2026-11-26; part 2 proposed, waiting for frontend agreement.** Owner: backend and AI development, macOS session. Part 2 changes the event protocol a served stream sends, which the TypeScript client parses, so the proposal goes to frontend development (Codex) through the owner before either side changes.
 
 ## Part 1: `Stream<Result<T, E>>` with `on failure`
 

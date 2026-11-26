@@ -75,9 +75,21 @@ impl Runtime {
             Ok(opened)
         }
         .await;
+        // `on failure` over `Stream<Result<T, E>>` (decision 7): each event
+        // is recorded and yielded as `Ok`, and an outage as one final `Err`
+        // event, after which the stream ends complete. Governance failures
+        // (replay divergence above, budgets in the caller) never reach this
+        // and stay loud.
+        let on_failure = spec.on_failure.clone();
         let opened = match opened {
             Ok(opened) => opened,
             Err(error) => {
+                if let Some((variant, takes_reason)) = &on_failure {
+                    let item = crate::connectors::failure_result(variant, *takes_reason, &failure_reason(&error));
+                    recording.events.push(item.clone());
+                    recording.finish("complete", None);
+                    return Ok(Box::pin(futures::stream::once(async move { Ok(item) })));
+                }
                 recording.finish("error", Some(error.to_string()));
                 return Err(error);
             }
@@ -104,11 +116,22 @@ impl Runtime {
                         }
                         FramedEvent::Data(text) => match serde_json::from_str::<serde_json::Value>(&text) {
                             Ok(value) => {
+                                let value = match &on_failure {
+                                    Some(_) => serde_json::json!({ "tag": "ok", "ok": value }),
+                                    None => value,
+                                };
                                 recording.events.push(value.clone());
                                 yield Ok(value);
                             }
                             Err(err) => {
                                 let error = stream_error(&operation, format!("an event that is not JSON ({err}): {text}"));
+                                if let Some((variant, takes_reason)) = &on_failure {
+                                    let item = crate::connectors::failure_result(variant, *takes_reason, &failure_reason(&error));
+                                    recording.events.push(item.clone());
+                                    recording.finish("complete", None);
+                                    yield Ok(item);
+                                    break;
+                                }
                                 recording.finish("error", Some(error.to_string()));
                                 yield Err(error);
                                 break;
@@ -134,6 +157,13 @@ impl Runtime {
                     Ok(events) => ready.extend(events),
                     Err(message) => {
                         let error = stream_error(&operation, message);
+                        if let Some((variant, takes_reason)) = &on_failure {
+                            let item = crate::connectors::failure_result(variant, *takes_reason, &failure_reason(&error));
+                            recording.events.push(item.clone());
+                            recording.finish("complete", None);
+                            yield Ok(item);
+                            break;
+                        }
                         recording.finish("error", Some(error.to_string()));
                         yield Err(error);
                         break;
@@ -142,6 +172,15 @@ impl Runtime {
             }
         };
         Ok(Box::pin(stream))
+    }
+}
+
+/// The reason an `on failure` variant carries: the failure's message, as
+/// a request's `on failure` reason is.
+fn failure_reason(error: &RuntimeError) -> String {
+    match error {
+        RuntimeError::ToolFailed { message, .. } => message.clone(),
+        other => other.to_string(),
     }
 }
 

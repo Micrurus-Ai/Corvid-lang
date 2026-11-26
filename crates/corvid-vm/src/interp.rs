@@ -366,7 +366,9 @@ impl<'ir> Interpreter<'ir> {
                     )
                 })?;
                 if let (Some(_), Type::Stream(event_ty)) = (op.streams, result_decode_ty) {
-                    return self.open_connector_stream(callee_name, wire_args, event_ty, span).await;
+                    return self
+                        .open_connector_stream(callee_name, wire_args, event_ty, op.on_failure.as_deref(), tool.breaker.is_some(), span)
+                        .await;
                 }
                 let revealed = wire_args.revealed();
                 let wire_args = wire_args.recorded;
@@ -533,11 +535,19 @@ impl<'ir> Interpreter<'ir> {
     /// decode each event into `T` as it arrives, through the public JSON
     /// mapping. Dropping the returned stream aborts the producer, which
     /// drops the HTTP response and closes the upstream connection.
+    /// With `on failure` over `Result` events (decision 7), an event that
+    /// does not decode becomes the stream's final `Err` event, as the
+    /// runtime makes an outage one. With a circuit breaker, a stream that
+    /// ends with an `Err` event counts as one consecutive failure and a
+    /// stream that ends cleanly resets the count, the rule a request
+    /// follows.
     async fn open_connector_stream(
         &self,
         callee_name: &str,
         wire_args: connector_json::ConnectorArguments,
         event_ty: &Type,
+        on_failure: Option<&str>,
+        counts_for_breaker: bool,
         span: Span,
     ) -> Result<Value, InterpError> {
         let events = self
@@ -549,19 +559,40 @@ impl<'ir> Interpreter<'ir> {
         let types: std::sync::Arc<Vec<IrType>> = std::sync::Arc::new(self.ir.types.clone());
         let event_ty = event_ty.clone();
         let name = callee_name.to_string();
+        let on_failure = on_failure.map(str::to_string);
+        let breaker = counts_for_breaker.then(|| self.breaker_state.clone());
         stream.spawn_producer(async move {
             let types_by_id: HashMap<DefId, &IrType> = types.iter().map(|t| (t.id, t)).collect();
             let mut events = events;
+            let mut ended_in_failure = false;
             while let Some(item) = futures::StreamExt::next(&mut events).await {
                 let next = match item {
-                    Ok(json) => connector_json::connector_result(json, &event_ty, &types_by_id).map_err(|e| {
-                        InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)
-                    }),
+                    Ok(json) => match connector_json::connector_result(json, &event_ty, &types_by_id) {
+                        Ok(value) => Ok(value),
+                        Err(problem) => match &on_failure {
+                            Some(variant) => connector_json::failure_value(variant, &problem, &event_ty, &types_by_id)
+                                .map_err(|e| InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {e}")), span)),
+                            None => Err(InterpError::new(InterpErrorKind::Marshal(format!("connector `{name}`: {problem}")), span)),
+                        },
+                    },
                     Err(e) => Err(InterpError::new(InterpErrorKind::Runtime(e), span)),
                 };
-                let failed = next.is_err();
-                if !sender.send(next).await || failed {
+                // An `Err` event ends the stream: the runtime yields an
+                // outage last, and an undecodable event ends it here.
+                let final_err = matches!(next, Ok(Value::ResultErr(_)));
+                ended_in_failure = final_err || next.is_err();
+                let stop = next.is_err() || (on_failure.is_some() && final_err);
+                if !sender.send(next).await || stop {
                     break;
+                }
+            }
+            if let Some(state) = breaker {
+                let mut state = state.lock().expect("breaker state poisoned");
+                let count = state.entry(name.clone()).or_insert(0);
+                if ended_in_failure {
+                    *count += 1;
+                } else {
+                    *count = 0;
                 }
             }
         });
@@ -1925,7 +1956,9 @@ impl<'ir> Interpreter<'ir> {
                     // rule other tools follow: an error, or an `Err`
                     // result (a mapped status or an `on failure`
                     // variant), counts as one consecutive failure.
-                    if tool.breaker.is_some() {
+                    // A stream counts when it ends, in its producer
+                    // (`open_connector_stream`), not when it opens.
+                    if tool.breaker.is_some() && !matches!(&outcome, Ok(Value::Stream(_))) {
                         let failed = matches!(&outcome, Err(_) | Ok(Value::ResultErr(_)));
                         let mut state = self.breaker_state.lock().expect("breaker state poisoned");
                         let count = state.entry(callee_name.to_string()).or_insert(0);
