@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
 
     /// Where `ty` holds a type `is_target` picks out, followed through
     /// type arguments and declared records as [`Self::secret_reached`]
-    /// describes. The secret rules and the `Actor` input rule share it.
+    /// describes. The secret rules and the `Caller` input rule share it.
     pub(super) fn type_reached(&mut self, ty: &Type, is_target: fn(&Type) -> bool) -> Option<String> {
         self.type_reached_in(ty, is_target, &mut Vec::new())
     }

@@ -1,10 +1,10 @@
 //! The shape of an action's input, as every caller outside Corvid code
 //! sends it: a form, a JSON client, an assistant, the CLI.
 //!
-//! A parameter of type `Actor` is the caller, filled from the verified
+//! A parameter of type `Caller` is the caller, filled from the verified
 //! session and never part of the input. Of the other parameters: one of
 //! a declared type is the whole input, so `action move_card(move:
-//! MoveCard, by: Actor)` reads a `MoveCard` and a form posts `card`, `to`
+//! MoveCard, by: Caller)` reads a `MoveCard` and a form posts `card`, `to`
 //! and `position`. Anything else reads an object with one field per
 //! parameter: `action rename(card: Int, title: String)` reads `{"card":
 //! 3, "title": "..."}`.

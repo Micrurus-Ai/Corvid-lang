@@ -196,10 +196,10 @@ const GUARDED: &str = r#"identity users:
 action archive(card: Int) -> Int requires permission("board.edit"):
     return card
 
-action claim(card: Int, by: Actor) -> String requires authenticated:
+action claim(card: Int, by: Caller) -> String requires authenticated:
     return by.tenant + "/" + by.id + " claims " + card.to_string()
 
-action retire(card: Int, by: Actor) -> Int requires permission("board.edit"):
+action retire(card: Int, by: Caller) -> Int requires permission("board.edit"):
     return card
 
 server board:

@@ -59,7 +59,7 @@ pub enum NotNativeReason {
     /// `try ... else` (recoverable failures TE-2) runs on the interpreter
     /// until native code catches outages (TE-3).
     TryElseNotNative,
-    /// An agent takes an `Actor`. The interpreter checks a called
+    /// An agent takes a `Caller`. The interpreter checks a called
     /// action's `requires` against the actor passed in (B10); native code
     /// does not yet, so it refuses rather than skip the check.
     CallerNotNative { agent: String },
@@ -124,7 +124,7 @@ impl std::fmt::Display for NotNativeReason {
             ),
             Self::CallerNotNative { agent } => write!(
                 f,
-                "`{agent}` takes an `Actor`, whose action policy the interpreter checks on every call; native code does not yet (shared actions B10, on the roadmap)"
+                "`{agent}` takes a `Caller`, whose action policy the interpreter checks on every call; native code does not yet (shared actions B10, on the roadmap)"
             ),
             Self::TryElseNotNative => write!(
                 f,

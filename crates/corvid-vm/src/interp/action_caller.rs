@@ -1,9 +1,9 @@
 //! Code calling an action with a caller (B10): the action's `requires`
-//! holds for the `Actor` passed in, as it holds for a request.
+//! holds for the `Caller` passed in, as it holds for a request.
 //!
 //! A request reaches an action only after `corvid serve` checks its
-//! session. A Corvid caller (a route, a worker, another agent) passes an
-//! `Actor` it got from a verified session, and this check stops a route
+//! session. A Corvid caller (a route, a worker, another agent) passes a
+//! `Caller` it got from a verified session, and this check stops a route
 //! that requires less from lending its caller to an action that requires
 //! more: `requires authenticated` cannot call through to `requires
 //! permission("board.edit")` for a caller without that permission.

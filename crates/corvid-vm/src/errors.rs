@@ -111,7 +111,7 @@ pub enum InterpErrorKind {
     /// An approval action was denied or failed at runtime.
     ApprovalDenied(String),
 
-    /// Code called an action, passing a caller (`Actor`) that lacks what
+    /// Code called an action, passing a caller (`Caller`) that lacks what
     /// the action's `requires` names. A decision, never an outage.
     CallerLacksAuthority { action: String, caller: String, missing: String },
 

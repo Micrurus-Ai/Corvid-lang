@@ -1551,9 +1551,13 @@ two different failure envelopes for the same stops.
 
 ## 2026-11-26 - An action reads its caller (B10-2b-1)
 
-`action claim(card: Int, by: Actor) -> Card requires authenticated:`.
-`Actor` is a new type name for the record a signed-in route already
-binds as `actor`. Serve fills an `Actor` parameter from the verified
+`action claim(card: Int, by: Caller) -> Card requires authenticated:`.
+`Caller` is a new type name for the record a signed-in route already
+binds as `actor`. It is not named `Actor` because `std/auth` already
+exports a constructible `Actor` record that describes an actor; a
+`Caller` is a different thing, which only a verified session produces.
+The gate caught the clash: every reference app imports `std/auth`'s
+`Actor`. Serve fills a `Caller` parameter from the verified
 session and leaves it out of the input, the contract and OpenAPI. Code
 passes one along, and the interpreter checks the action's `requires`
 against it before the body runs: a route with `requires authenticated`
@@ -1568,8 +1572,8 @@ caller would have to flow from the calling code unseen; with a
 parameter the signature says the action reads its caller, and the
 compiler sees each place one is passed.
 
-An `Actor` comes only from a session. The checker refuses an `Actor`
-parameter on a `requires anyone` action, and an `Actor` inside an
+A `Caller` comes only from a session. The checker refuses a `Caller`
+parameter on a `requires anyone` action, and a `Caller` inside an
 action's other inputs, a route's path, query or body, or a prompt's
 result, where the sender could name any caller. The secret-boundary
 walk now takes the type to look for, so both rules follow records the
@@ -1577,11 +1581,11 @@ same way.
 
 Found and fixed: the checker and the IR lowerer each defined the actor
 record; both now use `Type::actor()` (its own commit). The type also
-displays as `Actor` in errors instead of "route path params".
+displays as `Caller` in errors instead of "route path params".
 
-Narrowed: native builds refuse an `Actor` parameter by name
+Narrowed: native builds refuse a `Caller` parameter by name
 (`CallerNotNative`), since native code does not run the caller check
-yet; a `test` cannot build an `Actor`. Both are on the roadmap first in
+yet; a `test` cannot build a `Caller`. Both are on the roadmap first in
 B10.
 
 ---

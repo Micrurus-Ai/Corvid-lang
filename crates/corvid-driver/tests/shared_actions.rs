@@ -138,7 +138,7 @@ type Card:
     id: Int
     owner: String
 
-action claim(card: Int, by: Actor) -> Card requires permission("board.edit"):
+action claim(card: Int, by: Caller) -> Card requires permission("board.edit"):
     return Card(card, by.tenant + "/" + by.id)
 
 server board:
@@ -158,20 +158,20 @@ fn an_action_reads_its_caller_and_code_passes_one_along() {
 
 #[test]
 fn only_a_verified_session_supplies_an_actor() {
-    let found = errors("action claim(card: Int, by: Actor) -> Int requires anyone:\n    return card\n");
+    let found = errors("action claim(card: Int, by: Caller) -> Int requires anyone:\n    return card\n");
     assert!(found.iter().any(|m| m.contains("`requires anyone` verifies no caller")), "{found:#?}");
 
     let forged = format!(
-        "{IDENTITY}type Claim:\n    card: Int\n    by: Actor\n\naction claim(claim: Claim) -> Int requires authenticated:\n    return claim.card\n"
+        "{IDENTITY}type Claim:\n    card: Int\n    by: Caller\n\naction claim(claim: Claim) -> Int requires authenticated:\n    return claim.card\n"
     );
     let found = errors(&forged);
     assert!(
-        found.iter().any(|m| m.contains("an `Actor` cannot be part of an action's input in field `Claim.by`")),
+        found.iter().any(|m| m.contains("a `Caller` cannot be part of an action's input in field `Claim.by`")),
         "a client could name any caller: {found:#?}"
     );
 
     let route = format!(
-        "{IDENTITY}type Claim:\n    by: Actor\n\nserver api:\n    route POST \"/claim\" body Claim -> json String:\n        return claim_owner(body)\n\nagent claim_owner(c: Claim) -> String:\n    return c.by.id\n"
+        "{IDENTITY}type Claim:\n    by: Caller\n\nserver api:\n    route POST \"/claim\" body Claim -> json String:\n        return claim_owner(body)\n\nagent claim_owner(c: Claim) -> String:\n    return c.by.id\n"
     );
     let found = errors(&route);
     assert!(found.iter().any(|m| m.contains("a route's path, query or body")), "{found:#?}");

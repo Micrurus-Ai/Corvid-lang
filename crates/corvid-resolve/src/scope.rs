@@ -153,10 +153,10 @@ pub enum BuiltIn {
     /// and a signature can return `Result<T, JsonError>`; only
     /// `from_json` constructs one.
     JsonError,
-    /// B10 — `Actor`, the signed-in caller. Nameable so an action can
+    /// B10 — `Caller`, the signed-in caller. Nameable so an action can
     /// take its caller as a parameter and an agent can pass one along;
     /// only a verified session produces one.
-    Actor,
+    Caller,
 }
 
 /// Kind of top-level declaration, for error messages and later passes.
@@ -279,7 +279,7 @@ impl SymbolTable {
         self.builtins.insert("RegexMatch".into(), BuiltIn::RegexMatch);
         // B01 — see the `BuiltIn::JsonError` docstring.
         self.builtins.insert("JsonError".into(), BuiltIn::JsonError);
-        self.builtins.insert("Actor".into(), BuiltIn::Actor);
+        self.builtins.insert("Caller".into(), BuiltIn::Caller);
     }
 
     /// Insert a top-level declaration.

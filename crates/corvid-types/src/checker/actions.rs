@@ -30,9 +30,9 @@ impl<'a> Checker<'a> {
         });
     }
 
-    /// An `Actor` comes only from a verified session. An action's
-    /// parameter of type `Actor` is its caller, which needs a signed-in
-    /// policy; an `Actor` anywhere a request, a client or a model supplies
+    /// A `Caller` comes only from a verified session. An action's
+    /// parameter of type `Caller` is its caller, which needs a signed-in
+    /// policy; a `Caller` anywhere a request, a client or a model supplies
     /// the value would let the sender name any caller, so it is refused:
     /// inside an action's input, in a route's path, query or body, and in
     /// a prompt's result.
