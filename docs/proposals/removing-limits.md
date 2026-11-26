@@ -30,7 +30,7 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 | 5 | ~~Variant payload fields take refinements, as record fields do.~~ Done 2026-11-26. | Mac session | grammar |
 | 6 | ~~The duration literal, `30 seconds`.~~ Done 2026-11-26, with the calendar-unit compile error. | Mac session | grammar |
 | 7 | A connector call with the signed-in user's own credential (per-call bearer token). | Windows session | needs a proposal |
-| 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). | Windows session | needs a proposal |
+| 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). [Proposal](verified-webhooks.md), posted for review 2026-11-26. | Windows session | grammar |
 | 9 | Joins and aggregates in table queries and `live`. | Windows session | needs a proposal |
 | 10 | ~~The TS client reads served streams, and serve's stream `error` event sends a typed failure, not Rust debug text.~~ Done 2026-11-26 ([stream failures S2](stream-failures.md)): `chunk`, `completed` and a sanitized `failed`, read by the generated client's `api.route(...)`. | Mac session | frontend |
 | 11 | `corvid serve` refuses `live` until RT-3 lands. Unblocked on 2026-11-26 (session watching, removal revisions). | Codex | frontend |
