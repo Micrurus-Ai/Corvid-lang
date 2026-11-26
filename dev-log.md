@@ -37,6 +37,48 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Typed failures in streamed connector calls (stream failures S1)
+
+A streamed operation that returns `Stream<Result<T, E>>` and declares
+`on failure -> Variant` now delivers each event as `Ok(T)`, and an outage
+as one final `Err(Variant(reason))`, after which the stream ends. A
+`for` loop over it never raises for an outage, which settles the loop
+case in the recoverable-failures proposal: `try ... else` could not
+reach a failure a loop raised.
+
+**Where each failure is mapped, once.**
+- *Runtime.* Each event is recorded and yielded wrapped as `Ok`. A
+  failure to open, the per-event timeout, a broken connection and an
+  event that is not JSON become the final `Err`. It is recorded with the
+  delivered events and the stream ends `complete`, so replay yields the
+  same items with no special case.
+- *Interpreter.* An event that is JSON but does not decode as the event
+  type becomes the final `Err`; the decoding happens there. An open
+  circuit breaker answers with a one-`Err` stream.
+- *Breaker.* A stream counts for its breaker when it ends: ending in
+  `Err` is one consecutive failure, and ending cleanly resets the count.
+  The tool call's own accounting skips streams, because a short stream's
+  producer could otherwise finish first and have its failure overwritten
+  by the reset at open.
+
+**Governance stays loud.** A replay that diverges is raised before any
+mapping, and a test pins it. The budget path never reaches the stream
+code.
+
+**Tests.** `connector_stream_failures.rs` covers:
+- clean events, each arriving as `Ok`;
+- a non-JSON event and an undecodable one;
+- a failed open;
+- a stall, whose recording and replay give back the same text;
+- the breaker opening after one failed stream, with no second request;
+- mock mode;
+- a diverging replay staying loud.
+
+Checker tests cover the accepted form, a plain `Stream<T>` with
+`on failure` and an unknown variant.
+
+---
+
 ## 2026-11-26 - A comparison's literal takes the other side's type
 
 `s.price == Some(10)` against an `Option<Decimal>`, `zone == "UTC"`

@@ -311,7 +311,12 @@ pub fn connector_calls_from_ir(
 /// Whether the `on failure` variant of an operation's error type has a
 /// field for the reason (the checker allows none or one `String`).
 fn failure_variant_takes_reason(ir: &corvid_ir::IrFile, return_ty: &corvid_types::Type, variant: &str) -> bool {
-    let corvid_types::Type::Result(_, err) = return_ty else { return false };
+    // A streamed operation maps failures into its `Result` events.
+    let mapped = match return_ty {
+        corvid_types::Type::Stream(item) => item.as_ref(),
+        other => other,
+    };
+    let corvid_types::Type::Result(_, err) = mapped else { return false };
     let corvid_types::Type::Struct(id) = err.as_ref() else { return false };
     ir.types
         .iter()

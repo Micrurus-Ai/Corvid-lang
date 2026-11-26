@@ -300,6 +300,17 @@ pub(super) fn failure_value(
     return_ty: &Type,
     types_by_id: &HashMap<DefId, &IrType>,
 ) -> Result<Value, String> {
+    // A streamed operation answers a failure that happens before it
+    // opens (an open circuit breaker) with a stream of one final `Err`
+    // event, as the runtime answers a failure to open (decision 7).
+    if let Type::Stream(item) = return_ty {
+        let value = failure_value(variant, reason, item, types_by_id)?;
+        let (sender, stream) = crate::value::StreamValue::channel(super::effect_compose::default_stream_backpressure());
+        stream.spawn_producer(async move {
+            let _ = sender.send(Ok(value)).await;
+        });
+        return Ok(Value::Stream(stream));
+    }
     let takes_reason = match return_ty {
         Type::Result(_, err) => match err.as_ref() {
             Type::Struct(id) => types_by_id

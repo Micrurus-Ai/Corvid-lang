@@ -2991,8 +2991,8 @@ connector jobs:
 
 /// A `Stream<T>` operation declares how its events arrive; nothing else
 /// declares `streams:`; a stream is the whole result and does not combine
-/// with `response: text` or `on failure`; `until` is for server-sent
-/// events; a mock is the `List<T>` of events.
+/// with `response: text`; `on failure` needs `Result` events; `until` is
+/// for server-sent events; a mock is the `List<T>` of events.
 #[test]
 fn streamed_operations_are_checked() {
     let program = |operation: &str| {
@@ -3044,7 +3044,18 @@ connector provider:
     let with_failure = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Delta(q)]\n",
     ));
-    assert!(has(&with_failure, "cannot also declare `on failure`"), "{with_failure:?}");
+    assert!(has(&with_failure, "so each event is a `Result`"), "{with_failure:?}");
+
+    // Decision 7: over `Result` events, `on failure` ends the stream with
+    // one final `Err` event.
+    let result_events = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Broken\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(result_events.is_empty(), "{result_events:?}");
+    let wrong_variant = messages(program(
+        "    operation deltas(q: String) -> Stream<Result<Delta, Problem>> uses read:\n        GET \"/d\"\n        streams: json_lines\n        on failure -> Missing\n        mock: [Ok(Delta(q))]\n",
+    ));
+    assert!(has(&wrong_variant, "not a variant of its error type"), "{wrong_variant:?}");
 
     let until_lines = messages(program(
         "    operation deltas(q: String) -> Stream<Delta> uses read:\n        GET \"/d\"\n        streams: json_lines until \"end\"\n        mock: [Delta(q)]\n",
