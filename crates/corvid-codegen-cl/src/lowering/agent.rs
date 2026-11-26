@@ -112,48 +112,18 @@ pub(super) fn define_extern_c_wrapper(
                     call_args.push(value);
                     converted_string_params.push(value);
                 }
-                // Slice 33Q8: struct extern-c parameter — receive a
-                // `*const c_char` JSON buffer from the C caller,
-                // convert to an owned CorvidString, hand to the
-                // 20n-C struct decoder, release the temporary
-                // string, then pass the decoded struct pointer to
-                // the inner agent. On parse failure the decoder
-                // returns NULL; the wrapper traps so a C caller
-                // sees an honest abort instead of a delayed crash
-                // when the inner reads a NULL field. The traceable
-                // v1 contract is documented in
-                // docs/reference/exported-abi.md.
-                Type::Struct(def_id) => {
+                // A record argument: the C caller's `const char*` JSON in
+                // the public form (the JSON a route takes), decoded by the
+                // embedded plan. A buffer that is not one traps, so the
+                // caller sees an honest abort rather than a later crash.
+                // The contract is in docs/reference/exported-abi.md.
+                ty @ Type::Struct(_) => {
                     let from_cstr_ref =
                         module.declare_func_in_func(runtime.string_from_cstr, builder.func);
                     let from_cstr_call = builder.ins().call(from_cstr_ref, &[raw]);
                     let json_str = builder.inst_results(from_cstr_call)[0];
-
-                    let decoder_fid =
-                        lookup_or_emit_struct_decoder(module, runtime, *def_id, param.span)?;
-                    let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
-                    let decode_call = builder.ins().call(decoder_ref, &[json_str]);
-                    let struct_ptr = builder.inst_results(decode_call)[0];
-
-                    // The decoder reads from json_str without taking
-                    // ownership — release the temporary now.
+                    let struct_ptr = lower_json_decode_or_trap(&mut builder, module, runtime, ty, json_str, param.span)?;
                     emit_release(&mut builder, module, runtime, json_str);
-
-                    let zero_i64 = builder.ins().iconst(I64, 0);
-                    let decode_failed =
-                        builder.ins().icmp(IntCC::Equal, struct_ptr, zero_i64);
-                    let ok_b = builder.create_block();
-                    let fail_b = builder.create_block();
-                    builder.ins().brif(decode_failed, fail_b, &[], ok_b, &[]);
-
-                    builder.switch_to_block(fail_b);
-                    builder.seal_block(fail_b);
-                    builder
-                        .ins()
-                        .trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
-
-                    builder.switch_to_block(ok_b);
-                    builder.seal_block(ok_b);
                     call_args.push(struct_ptr);
                     converted_struct_params.push(struct_ptr);
                 }
@@ -245,14 +215,11 @@ pub(super) fn define_extern_c_wrapper(
                 emit_grounded_handle_store(&mut builder, grounded_handle_ptr, handle);
                 builder.ins().return_(&[result]);
             }
-            // Slice 33Q8: struct extern-c return — call the 20n-C
-            // encoder to turn the struct pointer into a CorvidString
-            // JSON value, convert that to a C string for the C ABI
-            // caller, then release the JSON CorvidString and the
-            // struct itself (the wrapper owns the result the inner
-            // produced). The caller frees the returned `*mut c_char`
-            // via the runtime's standard `corvid_string_free` helper.
-            Type::Struct(def_id) => {
+            // A record result leaves as an owned `const char*` holding its
+            // public JSON form, through the embedded plan: the JSON a
+            // route returns and `corvid run` prints. The caller frees it
+            // with `corvid_free_string`.
+            ty @ Type::Struct(_) => {
                 let result = *results.first().ok_or_else(|| {
                     CodegenError::cranelift(
                         format!(
@@ -263,11 +230,7 @@ pub(super) fn define_extern_c_wrapper(
                         agent.span,
                     )
                 })?;
-                let to_json_fid =
-                    lookup_or_emit_struct_to_json(module, runtime, *def_id, agent.span)?;
-                let to_json_ref = module.declare_func_in_func(to_json_fid, builder.func);
-                let to_json_call = builder.ins().call(to_json_ref, &[result]);
-                let json_str = builder.inst_results(to_json_call)[0];
+                let json_str = lower_json_encode(&mut builder, module, runtime, ty, result, agent.span)?;
 
                 let into_cstr_ref =
                     module.declare_func_in_func(runtime.string_into_cstr, builder.func);

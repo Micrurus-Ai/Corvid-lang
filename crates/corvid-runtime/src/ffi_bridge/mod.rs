@@ -60,7 +60,6 @@ mod db_exports;
 mod decimal;
 mod http_exports;
 mod io_exports;
-mod json_exports;
 mod llm_dispatch;
 mod native_scalar;
 mod prompt_exports;
@@ -72,13 +71,6 @@ mod tokio_handle;
 mod tool_iter;
 mod typed_json;
 pub use approval_exports::{corvid_approve_sync, corvid_citation_verify_or_panic};
-pub use json_exports::{
-    corvid_json_field_present, corvid_json_get_field_bool, corvid_json_get_field_float,
-    corvid_json_get_field_int, corvid_json_get_field_str, corvid_json_object_finish,
-    corvid_json_object_new, corvid_json_object_set_bool, corvid_json_object_set_float,
-    corvid_json_object_set_int, corvid_json_object_set_str, corvid_json_parse,
-    corvid_json_release,
-};
 pub use prompt_exports::corvid_prompt_call_typed;
 pub(crate) use state::bridge;
 pub use state::{

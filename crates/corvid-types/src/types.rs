@@ -253,11 +253,7 @@ pub enum Type {
     /// natural conversion path; the JSON `null` / numbers /
     /// strings / arrays / objects all map directly.
     ///
-    /// Codegen backends refuse to lower this type until cdylib
-    /// codegen lands in a follow-up slice (the C-ABI exports
-    /// `corvid_json_parse` / `corvid_json_get_field_*` already
-    /// exist in `corvid-runtime::ffi_bridge::json_exports`, so
-    /// the cdylib bridging is plumbing rather than primitives).
+    /// Native code refuses this type; it has no native form yet.
     JsonValue,
 
     /// Compiler-known `JsonBuilder` — an opaque, mutable builder

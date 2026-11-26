@@ -149,26 +149,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// uses: the interpreter's request and repair rule, the reply read
     /// through the embedded public JSON plan.
     pub prompt_call_typed: FuncId,
-    /// Generic JSON parse / build primitives. Used inside codegen-
-    /// emitted per-struct decoder and encoder functions. Runtime
-    /// stays type-agnostic; the language-aware decoding logic lives
-    /// in codegen.
-    pub json_parse: FuncId,
-    pub json_release: FuncId,
-    pub json_field_present: FuncId,
-    pub json_get_field_int: FuncId,
-    pub json_get_field_bool: FuncId,
-    pub json_get_field_float: FuncId,
-    pub json_get_field_str: FuncId,
-    /// JSON-object build-side primitives. Used by codegen-emitted
-    /// per-struct `to_json` encoders to assemble a JSON object in
-    /// source-order matching `IrType.fields`.
-    pub json_object_new: FuncId,
-    pub json_object_set_int: FuncId,
-    pub json_object_set_bool: FuncId,
-    pub json_object_set_float: FuncId,
-    pub json_object_set_str: FuncId,
-    pub json_object_finish: FuncId,
     pub citation_verify_or_panic: FuncId,
     pub trace_run_started: FuncId,
     /// `corvid_trace_run_completed_json`: a run's result as public JSON text.
@@ -210,22 +190,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_alloc_typed(size, &typeinfo)`.
     pub variant_typeinfos: HashMap<(DefId, u32), cranelift_module::DataId>,
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
-    /// Per-struct-type JSON-decoder functions. Emitted lazily on
-    /// first reference (a prompt with `Type::Struct(def_id)` return)
-    /// and cached so subsequent prompts returning the same struct
-    /// re-use one decoder. `RefCell` because emission paths hold
-    /// `&RuntimeFuncs` immutably; same pattern as `tool_wrapper_ids`.
-    /// Each decoder has the C-ABI signature `(CorvidString) -> i64`
-    /// (returns the heap struct pointer or `0` on parse failure).
-    pub struct_decoders: std::cell::RefCell<HashMap<DefId, FuncId>>,
-    /// Per-struct-type JSON-encoder functions. Emitted lazily on
-    /// first reference (an entry agent returning that struct, or
-    /// any other site that needs JSON serialisation) and cached.
-    /// Mirror of `struct_decoders`; same `RefCell` rationale (the
-    /// emission paths hold `&RuntimeFuncs` immutably). Each
-    /// encoder has the C-ABI signature `(struct_ptr: i64) -> i64`
-    /// returning a fresh `CorvidString` (refcount 1).
-    pub struct_to_json: std::cell::RefCell<HashMap<DefId, FuncId>>,
     /// Per-concrete-list-type typeinfo data symbols,
     /// keyed by the element `Type` (so `List<Int>` maps on `Type::Int`,
     /// `List<List<String>>` maps on `Type::List(Box::new(Type::String))`).

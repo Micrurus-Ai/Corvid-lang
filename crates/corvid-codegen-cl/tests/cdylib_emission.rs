@@ -713,3 +713,68 @@ fn cdylib_struct_boundary_c_header_documents_json_schema() {
         "schema for return value must mention the `note` field. got:\n{header}"
     );
 }
+
+const RENAMED_BOUNDARY_SRC: &str = r#"
+@json(case: camel)
+type Ticket:
+    ticket_id: String
+    @json(key: "amount-cents")
+    amount_cents: Int
+
+@json(case: camel)
+type Receipt:
+    is_ok: Bool
+    note_text: String
+"#;
+
+/// The JSON keys in the header's schema for `ty_name`'s boundary role.
+fn header_schema_keys(header: &str, role_heading: &str) -> std::collections::BTreeSet<String> {
+    let start = header.find(role_heading).unwrap_or_else(|| panic!("`{role_heading}` in:\n{header}"));
+    let schema: String = header[start + role_heading.len()..]
+        .lines()
+        .skip(1)
+        .take_while(|line| line.starts_with("//   "))
+        .map(|line| line.trim_start_matches("//   "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let schema: serde_json::Value = serde_json::from_str(&schema).unwrap_or_else(|err| panic!("schema JSON: {err}\n{schema}"));
+    schema["properties"].as_object().expect("properties").keys().cloned().collect()
+}
+
+/// A record crossing the C ABI is its public JSON form, and the header
+/// documents exactly that form: renamed by `@json(case:)` and
+/// `@json(key:)` through the one key rule `to_json()` uses. The header's
+/// keys, the keys a host sends, and the keys it receives are one set.
+#[test]
+fn a_renamed_record_crosses_the_c_abi_under_the_keys_the_header_documents() {
+    let src = format!(
+        "{RENAMED_BOUNDARY_SRC}\npub extern \"c\"\nagent finalize_ticket(ticket: Ticket @borrowed) -> Receipt:\n    return Receipt(true, ticket.ticket_id)\n"
+    );
+    let bundle = frontend_of(&src);
+    let header = emit_header(&bundle.ir, &HeaderOptions { library_name: "renamed_ticket".into() });
+    let sent_keys = header_schema_keys(&header, "// JSON shape for parameter `ticket`:");
+    let returned_keys = header_schema_keys(&header, "// JSON shape for return value `return`:");
+    assert_eq!(sent_keys, ["amount-cents", "ticketId"].map(String::from).into_iter().collect());
+    assert_eq!(returned_keys, ["isOk", "noteText"].map(String::from).into_iter().collect());
+
+    let produced = build_cdylib(&src, "renamed_ticket_cdylib");
+    // SAFETY: symbols are loaded from the just-built library and invoked with valid ABI values.
+    unsafe {
+        let lib = load_library_leaked(&produced);
+        let finalize: libloading::Symbol<unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char> =
+            lib.get(b"finalize_ticket").expect("resolve finalize_ticket");
+        let free: libloading::Symbol<unsafe extern "C" fn(*const c_char)> =
+            lib.get(b"corvid_free_string").expect("resolve corvid_free_string");
+        let input = CString::new(r#"{"ticketId":"vip-007","amount-cents":42}"#).unwrap();
+        let mut observation = 0u64;
+        let output_ptr = finalize(input.as_ptr(), &mut observation as *mut u64);
+        assert!(!output_ptr.is_null(), "extern wrapper returned NULL");
+        let output = CStr::from_ptr(output_ptr).to_str().unwrap().to_owned();
+        free(output_ptr);
+        // The public form `to_json()` writes: sorted keys, renamed.
+        assert_eq!(output, r#"{"isOk":true,"noteText":"vip-007"}"#);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let keys: std::collections::BTreeSet<String> = parsed.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys, returned_keys, "the keys received are the keys the header documents");
+    }
+}

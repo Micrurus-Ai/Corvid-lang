@@ -150,6 +150,51 @@ pub(super) fn lower_json_decode(
     Ok(result)
 }
 
+/// Decode `text` (public JSON) into a value of `target` through the
+/// embedded plan, trapping when it is not one: an `extern "c"` agent's
+/// record argument, which has no `Result` to carry the failure back to
+/// its C caller. Strict, as `from_json_strict` and as the generated C
+/// header's schema says (`additionalProperties: false`): an unknown key
+/// is refused rather than ignored.
+pub(super) fn lower_json_decode_or_trap(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    target: &Type,
+    text: ClValue,
+    span: Span,
+) -> Result<ClValue, CodegenError> {
+    let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
+    if !native_public_json_type(target, &types) {
+        return Err(CodegenError::not_supported(
+            format!("decoding JSON into `{}` - a type in it has no native form", target.display_name()),
+            span,
+        ));
+    }
+    let (plan, plan_len, table) = json_plan(module, runtime, target, span)?;
+    let plan = module.declare_data_in_func(plan, builder.func);
+    let plan = builder.ins().symbol_value(I64, plan);
+    let plan_len = builder.ins().iconst(I64, plan_len);
+    let table = module.declare_data_in_func(table, builder.func);
+    let table = builder.ins().symbol_value(I64, table);
+    let strict = builder.ins().iconst(I64, 1);
+    let slot = builder.create_sized_stack_slot(clir::StackSlotData::new(clir::StackSlotKind::ExplicitSlot, 8, 3));
+    let payload = builder.ins().stack_addr(I64, slot, 0);
+    let decode = module.declare_func_in_func(runtime.json_decode_typed, builder.func);
+    let call = builder.ins().call(decode, &[text, plan, plan_len, table, strict, payload]);
+    let tag = builder.inst_results(call)[0];
+    let ok = builder.ins().icmp_imm(IntCC::Equal, tag, i64::from(RESULT_TAG_OK));
+    let ok_b = builder.create_block();
+    let fail_b = builder.create_block();
+    builder.ins().brif(ok, ok_b, &[], fail_b, &[]);
+    builder.switch_to_block(fail_b);
+    builder.seal_block(fail_b);
+    builder.ins().trap(cranelift_codegen::ir::TrapCode::INTEGER_OVERFLOW);
+    builder.switch_to_block(ok_b);
+    builder.seal_block(ok_b);
+    Ok(builder.ins().stack_load(I64, slot, 0))
+}
+
 /// Lower `value.to_json()`; `value` is the receiver, lowered as a slot.
 pub(super) fn lower_json_encode(
     builder: &mut FunctionBuilder,

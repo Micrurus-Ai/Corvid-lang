@@ -2,6 +2,30 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Records cross the C ABI in the public JSON form
+
+The last place a record crossed in a second shape. A `pub extern "c"`
+agent's record parameter was decoded by `struct_decode.rs`, and its record
+result encoded by `struct_encode.rs`. Both used Corvid field names in source
+order, took scalar fields only, and ran through a JSON handle store of
+their own in the runtime (`ffi_bridge/json_exports.rs`). Meanwhile the
+generated header's schema comment came from `schema_for`, which already
+uses `IrField::key()`. So for a renamed record the header documented keys the
+wire did not use.
+
+Both directions now go through the embedded public plan
+(`lower_json_encode`, and a new `lower_json_decode_or_trap` for an argument
+that has no `Result` to fail into). The decode is strict, matching the
+header's `additionalProperties: false`. The two struct modules, fifteen
+runtime declarations and the runtime's JSON handle exports are deleted.
+Agreed with the Windows session first. Nothing it owns reads this JSON, and
+at its request a test holds the header's keys, the keys a host sends and
+the keys it receives to one set, for a record renamed by `@json(case:)` and
+`@json(key:)`.
+
+Filed: the checker still accepts only flat scalar records at the C
+boundary, although the wire now carries any public shape.
+
 ### Diagnostic codes DC-2: every diagnostic declares its code
 
 Lexer, parser, resolver and warning kinds now declare codes, keeping every

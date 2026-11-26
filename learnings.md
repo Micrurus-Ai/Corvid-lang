@@ -8419,3 +8419,7 @@ A program whose entry agent returns a `List`, `Option` or `Result`, or takes a r
 
 Each error the type checker reports prints a code of its own: `[E0516] error: ... has no exact Float value`, where most used to print `E0000`. Codes are grouped by area. `E01` covers effects and approval, `E02` types, `E03` names, `E04` JSON and records, `E05` scalars such as `Decimal` and time, `E06` tables, `E07` actions and routes, `E08` connectors and `E09` streams, prompts, tools and agents. Codes that existed before are unchanged (`E0101`, `E0201` to `E0209`, `E0250`), and a code stays the same when an error's message is reworded. Lexer, parser and name errors, warnings (`W0251`), import errors (`E033x`) and build refusals (`E1001`) carry declared codes too, so no diagnostic prints `E0000` any more.
 
+### A record crossing the C ABI is its public JSON
+
+A `pub extern "c"` agent's record parameter and record result travel as the record's public JSON. That is the JSON a route takes and returns, with `@json(key:)` and `@json(case:)` renames applied and keys sorted, and it is exactly what the generated header's schema comment shows. A parameter is decoded strictly: JSON with an unknown key, a missing field or the wrong shape stops the call. Before, records crossed under their Corvid field names in declaration order, even where the header documented renamed keys.
+
