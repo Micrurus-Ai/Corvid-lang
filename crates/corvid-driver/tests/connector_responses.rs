@@ -23,6 +23,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [mock, real, replay]
     operation charge(id: String) -> Response<Charge> uses http_read:
         GET "/v1/charges/{{id}}"

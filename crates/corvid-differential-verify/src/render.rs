@@ -814,6 +814,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
         push_indent(indent + 1, out);
         out.push_str(&format!("redirects: {}\n", redirects.as_str()));
     }
+    if let Some(published) = connector.published {
+        push_indent(indent + 1, out);
+        out.push_str(if published { "published: yes\n" } else { "published: no\n" });
+    }
     if let Some(retry) = connector.retry {
         push_indent(indent + 1, out);
         out.push_str(&format!("retry: {retry}\n"));

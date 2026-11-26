@@ -55,8 +55,9 @@ pub struct ApplicationContract {
     /// to run in, and the operations it exposes. This is the static
     /// advertised surface (what the app CAN do); the mode a given
     /// deployment actually SELECTED is recorded in the runtime's
-    /// `connector.mode_selected` startup event, not here. Empty when the
-    /// program declares no connectors.
+    /// `connector.mode_selected` startup event, not here. Only connectors
+    /// that declare `published: yes` are listed; a `published: no`
+    /// connector is backend only. Empty when none is published.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<ContractConnector>,
     /// What the connector operations send and read. Never serialized:
@@ -604,7 +605,9 @@ pub fn emit_application_contract(
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Connector(c) => Some(contract_connector(c)),
+            // Only a connector that declares `published: yes` is listed;
+            // the private wire description below keeps every connector.
+            Decl::Connector(c) if c.published == Some(true) => Some(contract_connector(c)),
             _ => None,
         })
         .collect();
@@ -1390,6 +1393,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: same_host
+    published: yes
     base_url: \"https://api.github.com\"
     auth: bearer(secret(\"GITHUB_TOKEN\"))
     modes: [mock, replay, real]
@@ -1433,11 +1437,34 @@ connector github:
         assert!(!json.contains("bearer"), "no auth scheme in the contract");
     }
 
+    /// `published: no` keeps a connector out of the published contract:
+    /// no name, URL, paths or protocol. The private wire description the
+    /// backend's own checks read still carries it.
+    #[test]
+    fn an_unpublished_connector_is_absent_from_the_published_contract() {
+        let src = |published: &str| {
+            format!(
+                "effect http_read:\n    cost: 0.0\n\ntype Repo:\n    name: String\n\nconnector vault:\n    timeout: 10s\n    redirects: never\n    published: {published}\n    base_url: \"https://vault.internal.example\"\n    modes: [real]\n    operation read(id: String) -> Repo uses http_read:\n        GET \"/secrets/{{id}}\"\n"
+            )
+        };
+        let hidden = contract_for(&src("no"));
+        assert!(hidden.connectors.is_empty(), "an unpublished connector is not listed");
+        let json = serde_json::to_string(&hidden).expect("contract serializes");
+        assert!(!json.contains("vault"), "no trace of the connector in the published JSON: {json}");
+        assert!(!json.contains("/secrets/"), "no operation path in the published JSON");
+        assert_eq!(hidden.connector_wire.operations[0].connector, "vault", "the backend still knows the connector");
+
+        let listed = contract_for(&src("yes"));
+        assert_eq!(listed.connectors.len(), 1);
+        assert_eq!(listed.connectors[0].name, "vault");
+    }
+
     #[test]
     fn a_verified_provider_protocol_is_frontend_consumable_contract_data() {
         let contract = contract_for(r#"connector video:
     timeout: 10s
     redirects: never
+    published: yes
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
@@ -2262,7 +2289,7 @@ server admin_api:
     #[test]
     fn a_valid_connector_compiles() {
         let errors = check_errors_of(
-            "connector github:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
+            "connector github:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://api.github.com\"\n    auth: bearer(secret(\"GITHUB_TOKEN\"))\n    retry: 3\n    modes: [real]\n    operation get_repo(owner: String, repo: String) -> String uses http_read:\n        GET \"/repos/{owner}/{repo}\"\n",
         );
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
@@ -2270,7 +2297,7 @@ server admin_api:
     #[test]
     fn connector_non_absolute_base_url_is_rejected() {
         let errors = check_errors_of(
-            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"api.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -2285,7 +2312,7 @@ server admin_api:
     #[test]
     fn connector_path_placeholder_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation get(id: String) -> String:\n        GET \"/items/{itemId}\"\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -2300,7 +2327,7 @@ server admin_api:
     #[test]
     fn connector_duplicate_operation_and_zero_retry_rejected() {
         let dup = check_errors_of(
-            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation ping() -> String:\n        GET \"/ping\"\n    operation ping() -> String:\n        GET \"/ping2\"\n",
         );
         assert!(
             dup.iter().any(|e| matches!(
@@ -2311,7 +2338,7 @@ server admin_api:
             "expected a duplicate-operation rejection, got {dup:?}"
         );
         let retry = check_errors_of(
-            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    retry: 0\n    operation ping() -> String:\n        GET \"/ping\"\n",
         );
         assert!(
             retry.iter().any(|e| matches!(
@@ -2326,7 +2353,7 @@ server admin_api:
     #[test]
     fn connector_body_must_reference_a_parameter() {
         let errors = check_errors_of(
-            "connector svc:\n    timeout: 10s\n    redirects: never\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
+            "connector svc:\n    timeout: 10s\n    redirects: never\n    published: no\n    base_url: \"https://svc.example.com\"\n    operation post(id: String) -> String uses http_write:\n        POST \"/items\" body payload\n",
         );
         assert!(
             errors.iter().any(|e| matches!(

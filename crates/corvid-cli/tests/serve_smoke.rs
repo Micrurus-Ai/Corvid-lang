@@ -2730,6 +2730,7 @@ effect http_read:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2799,6 +2800,7 @@ effect http_read:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2852,6 +2854,7 @@ connector github:
     base_url: "https://api.github.com"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
@@ -3465,6 +3468,7 @@ connector provider:
     base_url: "http://provider.test"
     timeout: 30s
     redirects: never
+    published: no
     modes: [real]
     operation deltas(topic: String) -> Stream<Delta> uses provider_read:
         GET "/deltas/{topic}"

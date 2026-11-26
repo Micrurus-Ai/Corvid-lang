@@ -23,6 +23,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation charge(new: NewCharge) -> Charge uses http_write:
         POST "/v1/charges" body new

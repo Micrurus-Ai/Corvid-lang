@@ -31,6 +31,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     modes: [mock, real]
@@ -63,6 +64,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     modes: [mock, real]
@@ -92,6 +94,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     rate_limit: 1 per 3600s
@@ -423,6 +426,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "http://api.example.com"
     auth: bearer(secret("{token_env}"))
     retry: 3
@@ -531,6 +535,7 @@ connector files:
     base_url: "http://api.example.com"
     timeout: {timeout}
     redirects: {redirects}
+    published: no
     modes: [real]
     operation fetch(id: String) -> Repo uses http_read:
         GET "/files/{{id}}"
@@ -653,6 +658,7 @@ connector files:
     auth: bearer(secret("{TOKEN_ENV}"))
     timeout: 10s
     redirects: same_host
+    published: no
     retry: 2
     modes: [real, replay]
     operation fetch(id: String) -> Repo uses http_read:

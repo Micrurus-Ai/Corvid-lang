@@ -754,6 +754,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: allowed_hosts
+    published: no
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -937,6 +938,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     retry: 3
@@ -972,6 +974,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]

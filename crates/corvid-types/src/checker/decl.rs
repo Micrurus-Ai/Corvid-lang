@@ -609,6 +609,15 @@ impl<'a> Checker<'a> {
                 decl.span,
             ));
         }
+        if decl.published.is_none() {
+            self.errors.push(invalid(
+                format!(
+                    "connector `{}` must declare whether the published contract lists it: add `published: no` (backend only) or `published: yes` (its name, URL, paths and protocol are listed at /.well-known/corvid). There is no default: which outside services an app calls, and where, is a security decision",
+                    decl.name.name
+                ),
+                decl.span,
+            ));
+        }
 
         // Each operation: a unique name, a path that starts with `/`, and
         // `{placeholders}` that name declared parameters.

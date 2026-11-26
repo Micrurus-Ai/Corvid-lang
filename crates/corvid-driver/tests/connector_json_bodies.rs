@@ -33,6 +33,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
 {operations}
 {main}"#
@@ -249,6 +250,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation charges(filter: ChargeQuery, request_id: String) -> List<Charge> uses http_write:
         GET "/v1/charges" query filter
@@ -302,6 +304,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation charges(filter: ChargeQuery) -> List<Charge> uses http_write:
         GET "/v1/charges" query filter

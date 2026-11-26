@@ -25,6 +25,42 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Each connector declares whether the published contract lists it
+
+The published Application Contract at `/.well-known/corvid` listed every
+connector's name, URL, operation paths and provider protocol, a default
+from slice 52g-3d. Which outside services an app calls, and where, maps
+its vendors for anyone who reads the contract, so under "no hidden
+defaults" the source now decides: each connector declares `published: yes`
+or `published: no`, and leaving the line out is a compile error that names
+the connector and both values. `published: no` keeps the connector out of
+the contract and out of the generated TypeScript client's protocol types;
+the backend's private wire description, startup check, modes and traces
+are unchanged. Frontend development agreed to the
+[proposal](docs/proposals/connector-publication.md) on 2026-11-26.
+
+Simpler forms considered are in the proposal: a three-value
+`publish: everything | protocol_only | nothing` (no program needs the
+middle value yet), hiding by default (a default the law forbids), a
+project-wide setting (publication is a property of each integration) and
+other words (`published:` matches the endpoint's name).
+
+Every connector in the repository's examples, book chapter, references,
+tours and tests now declares the line: `published: no` everywhere except
+the contract and client tests, which declare `published: yes` because they
+check what is listed. New tests: a `published: no` connector leaves no
+name or path in the published JSON while the wire description keeps it;
+its protocol types are absent from the generated client; omission is the
+one compile error; a wrong value and a repeated line are parse errors.
+
+The proposal's route check (refuse a route that exposes an unpublished
+protocol's intent state) has nothing to check yet: no Corvid type carries
+a protocol's state to a route today, and the client's status types come
+only from the contract. The check lands with the first such type; the
+roadmap says so.
+
+---
+
 ## 2026-11-26 - A native prompt's text argument reads as its JSON form
 
 The grammar says a prompt parameter "renders as its JSON form", and the

@@ -746,6 +746,7 @@ connector github:
     auth: bearer(secret("GITHUB_TOKEN"))
     timeout: 10s
     redirects: never
+    published: no
     retry: 3
     rate_limit: 60 per 60s
     circuit_breaker: 5

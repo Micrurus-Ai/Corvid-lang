@@ -585,6 +585,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: yes
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]
@@ -651,6 +652,18 @@ agent main() -> Job uses http_write:
         assert!(
             !types.contains("Status = string"),
             "the status type must never widen to `string`"
+        );
+    }
+
+    /// A protocol on a `published: no` connector is backend only, so the
+    /// generated client carries none of its types: a frontend that
+    /// imports them stops compiling, and the choice shows in both tiers.
+    #[test]
+    fn an_unpublished_connector_generates_no_protocol_types() {
+        let types = emit_types(&contract_for(&SRC.replace("published: yes", "published: no")));
+        assert!(
+            !types.contains("ShippingSubmitShipment"),
+            "an unpublished protocol must not reach the client; got:\n{types}"
         );
     }
 

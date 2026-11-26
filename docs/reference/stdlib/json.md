@@ -393,6 +393,7 @@ connector users:
     hosts: allowed_hosts
     timeout: 10s
     redirects: never
+    published: no
     modes: [real, replay]
     operation user_at(url: String) -> Result<User, FetchError> uses http_read:
         GET url

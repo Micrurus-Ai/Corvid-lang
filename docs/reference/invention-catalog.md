@@ -661,6 +661,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s                          # omit → compile error
     redirects: allowed_hosts              # never | same_host | allowed_hosts
+    published: no                         # yes lists it at /.well-known/corvid
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -922,6 +923,7 @@ connector github:
     auth: bearer(secret("GITHUB_TOKEN"))
     timeout: 10s                          # omit → compile error; no default
     redirects: never                      # never | same_host | allowed_hosts
+    published: no                         # omit → compile error; no default
     rate_limit: 60 per 60s
     modes: [mock, replay, real]           # omit → compile error; no default
     operation get_repo(owner: String, repo: String) -> Result<Repo, GithubError> uses http_read:

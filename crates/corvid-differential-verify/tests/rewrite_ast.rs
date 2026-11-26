@@ -20,6 +20,7 @@ fn connector_round_trips_through_ast_printer() {
     let source = r#"connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: header("X-Api-Key", secret("KEY"))
     retry: 3

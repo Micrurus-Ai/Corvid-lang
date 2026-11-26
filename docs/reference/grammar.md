@@ -389,6 +389,13 @@ credential to another origin, and refuses a 301, 302 or 303 that would turn
 a request other than `GET` or `HEAD` into a `GET`. An operation may declare
 its own `timeout:`, which replaces the connector's for that operation.
 
+Every connector also declares `published: yes` or `published: no`, and
+omitting it is a compile error. `published: yes` lists the connector (its
+name, URL, operation paths and provider protocol) in the published
+Application Contract at `/.well-known/corvid`, and the generated
+TypeScript client gets its protocol types. `published: no` keeps it out of
+both: the backend still runs, checks and traces it as before.
+
 `query <param>` names a record parameter whose fields become the query
 string, through the public JSON mapping: a scalar field is one
 `name=value` pair, an `Option` field is left out when it is `None`, and a
@@ -465,6 +472,7 @@ connector_item    ::= 'base_url' ':' STRING_LITERAL NEWLINE
                     | 'auth' ':' connector_auth NEWLINE
                     | 'timeout' ':' INT 's' NEWLINE
                     | 'redirects' ':' redirect_policy NEWLINE
+                    | 'published' ':' ('yes' | 'no') NEWLINE
                     | ('retry' | 'circuit_breaker') ':' INT NEWLINE
                     | 'rate_limit' ':' INT 'per' INT 's'? NEWLINE
                     | 'modes' ':' '[' (connector_mode (',' connector_mode)* ','?)? ']' NEWLINE

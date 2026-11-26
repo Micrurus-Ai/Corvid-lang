@@ -1,6 +1,6 @@
 # Proposal: declared publication of outbound integrations
 
-Status: **proposed 2026-11-26, waiting for frontend agreement.** Owner: backend and AI development, macOS session. It changes what `corvid serve` publishes, which the TypeScript client reads, so it goes to frontend development (Codex) through the owner before anything published changes.
+Status: **agreed by frontend development and built 2026-11-26 (P1).** The route check waits for a type that carries protocol state to a route; see "As built" below. Owner: backend and AI development, macOS session. It changes what `corvid serve` publishes, which the TypeScript client reads, so it goes to frontend development (Codex) through the owner before anything published changes.
 
 ## Problem
 
@@ -62,3 +62,11 @@ connector payments:
 
 - What `[http] allow` permits, which stays in `corvid.toml`.
 - Publishing a connector's private wire description (request and response records), which stays unpublished.
+
+## As built (P1, 2026-11-26)
+
+- `published: yes | no` parses as a connector item; a wrong value and a repeated line are parse errors.
+- Omitting it is reported through the existing connector configuration error (the one `timeout:` and `redirects:` use) with the message the decision section gives, rather than a code of its own: the three required connector policies read and are found the same way.
+- The contract lists only `published: yes` connectors; the private wire description keeps every connector. The TypeScript client follows the contract, so it needed no change of its own.
+- The route check is not built: no Corvid type carries a protocol's intent state to a route today, so there is nothing for it to refuse. It is on the roadmap, to land with the first such type.
+

@@ -65,6 +65,7 @@ effect http_read:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://carrier.example.com"
     modes: [mock, real]
     operation quote_carrier(zip: String) -> Carrier uses http_read:

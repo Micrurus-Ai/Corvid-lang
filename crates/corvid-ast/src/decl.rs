@@ -495,6 +495,13 @@ pub struct ConnectorDecl {
     /// be sent next is a security decision, never a default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redirects: Option<RedirectPolicy>,
+    /// `published: yes | no` — whether the published Application
+    /// Contract (`/.well-known/corvid`) lists this connector: its name,
+    /// URL, paths and protocol. Required: which outside services an app
+    /// calls, and where, is a security decision, never a default.
+    /// `None` only while the checker reports the missing line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<bool>,
     /// `modes: [mock, replay, real]` — the execution modes this
     /// connector is ALLOWED to run in (slice 52g-3b). There is no
     /// default: a connector must declare its allowed modes, and the

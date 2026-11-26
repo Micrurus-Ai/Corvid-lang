@@ -1427,6 +1427,7 @@ test lookup_trace from_trace "traces/lookup.jsonl":
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     modes: [real]
     operation generate(input: String) -> String dangerous:
