@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+`JsonError` can now be written in a signature: `agent explain(problem: JsonError) -> String` takes the error `from_json` returns, and `agent read(text: String) -> Result<Reading, JsonError>` passes it to the caller. Before, naming it was an undefined-name error, though `from_json` returned it. [Typed decoding](docs/reference/stdlib/json.md#typed-decoding-and-encoding)
+
 The `corvid_runtime` Python package now holds only `@tool`, the decorator a project's `tools.py` uses to supply tool implementations to `corvid serve` and `corvid run`. `tool_call`, `approve_gate`, `llm_call`, `run_sync`, `register_adapter` and the `testing` helpers served the retired Python build target and are gone; model calls, approvals and traces belong to the Corvid runtime. A `tools.py` that imports only `tool` works unchanged. [Python tools](runtime/python/README.md)
 
 A literal in a comparison now takes the type of the other side: `s.price == Some(10)` works when `price` is an `Option<Decimal>`, and `home == "Europe/Berlin"` when `home` is a `TimeZone` (an unknown zone is still a compile error). Only literals are read this way; a `String` variable still never compares with a `TimeZone`. [Decimal](docs/reference/decimal.md)

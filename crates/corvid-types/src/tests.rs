@@ -8,6 +8,7 @@ mod time;
 mod time_zones;
 mod currency;
 mod json_forms;
+mod json_error_type;
 mod text_methods;
 mod bytes;
 mod hmac;

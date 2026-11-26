@@ -134,6 +134,24 @@ agent main() -> String:
     assert_eq!(text, "sku / String / a number");
 }
 
+/// `JsonError` written in a signature: the error passes to a helper
+/// agent and is read there, on both tiers, and released once.
+#[test]
+fn a_json_error_passes_to_a_helper_agent_that_names_its_type() {
+    let text = assert_parity_text(
+        r#"
+agent explain(problem: JsonError) -> String:
+    return problem.path + ": " + problem.message
+
+agent main() -> String:
+    return match Line.from_json("{\"sku\": 5, \"quantity\": 2}"):
+        Ok(line) -> line.sku
+        Err(problem) -> explain(problem)
+"#,
+    );
+    assert!(text.starts_with("sku: "), "{text}");
+}
+
 #[test]
 fn strict_decoding_refuses_undeclared_keys_on_both_tiers() {
     let text = assert_parity_text(

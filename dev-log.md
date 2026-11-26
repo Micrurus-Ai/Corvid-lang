@@ -902,6 +902,26 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - `JsonError` in signatures (B01)
+
+`T.from_json` returned `Result<T, JsonError>`, but a program could not
+write `JsonError` itself: the checker knew the name and the
+resolver did not, so `agent explain(problem: JsonError)` was an
+undefined-name error. Helper agents that format or log a decode failure,
+and agents that pass the error on as `Result<T, JsonError>`, could not
+be written. The resolver now registers it as it does `RegexMatch`, and
+naming it as a value stays a `TypeAsValue` error, since only
+`from_json` builds one. Native code already lowered `JsonError` to an
+ordinary record, so a parity test passing it to a helper agent holds both
+tiers to one result with nothing leaked. The parent roadmap item for
+`Conflict<T>` is ticked too: all its slices had shipped.
+
+The Dependabot alerts that the last push reported were not examined:
+`gh` is not installed here, and installing `cargo-audit` was not
+permitted in this session. They are reported to the owner.
+
+---
+
 ## 2026-11-25 - The Python package holds only `@tool`
 
 The `corvid_runtime` Python package was a parallel runtime for the
