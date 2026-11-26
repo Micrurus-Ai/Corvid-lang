@@ -110,6 +110,15 @@ action rename(card: Int, title: String) -> String requires anyone:
 
 action ping() -> String requires anyone:
     return "pong"
+
+action label(card: Int, labels: List<String>, note: Option<String>) -> String requires anyone:
+    shown = match note:
+        Some(text) -> text
+        None -> "no note"
+    return card.to_string() + ": " + labels.join(", ") + " (" + shown + ")"
+
+action nudge(card: Int, move: MoveCard) -> Int requires anyone:
+    return card + move.position
 "#;
 
 #[test]
@@ -143,8 +152,24 @@ fn an_input_the_types_refuse_is_a_400_naming_the_field() {
     let (status, reply) = post_json(&app, "/actions/rename", &json!({"card": 3, "title": "Ship", "owner": "x"}), &[]);
     assert_eq!(status, 400, "an undeclared field is refused: {reply}");
 
-    let (status, reply) = post_form(&app, "/actions/rename", "card=3&title=Ship");
-    assert_eq!(status, 415, "a form posts only to an action taking one record, for now: {reply}");
+    let (status, reply) = post_form(&app, "/actions/rename", "card=three&title=Ship");
+    assert_eq!(status, 400, "a form field that does not read as its type: {reply}");
+    assert!(reply["detail"].as_str().unwrap().contains("card"), "{reply}");
+
+    let (status, reply) = post_form(&app, "/actions/nudge", "card=1&move=x");
+    assert_eq!(status, 415, "a record parameter beside others cannot come from one form field: {reply}");
+}
+
+#[test]
+fn a_form_posts_one_field_per_parameter() {
+    let app = serve(BOARD, |_| {});
+    let (status, reply) = post_form(&app, "/actions/rename", "card=3&title=Ship+it");
+    assert_eq!((status, &reply), (200, &json!("Ship it #3")));
+
+    let (status, reply) = post_form(&app, "/actions/label", "card=3&labels=urgent&labels=blocked");
+    assert_eq!((status, &reply), (200, &json!("3: urgent, blocked (no note)")), "a repeated name fills a list; an optional may be left out");
+    let (status, reply) = post_form(&app, "/actions/label", "card=3&note=soon");
+    assert_eq!((status, &reply), (200, &json!("3:  (soon)")));
 }
 
 fn seed_actor(data: &Path, actor: &str, role: Option<&str>) -> Vec<(String, String)> {

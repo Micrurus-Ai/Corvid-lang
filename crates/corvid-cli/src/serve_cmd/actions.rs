@@ -31,7 +31,7 @@ use corvid_vm::{decode_public_json, UnknownFields};
 
 use super::{
     approval_runtime, bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish,
-    invalid_body, reply_encoding, urlencoded_record, ServeState,
+    invalid_body, reply_encoding, urlencoded_record, urlencoded_value, urlencoded_values, ServeState,
 };
 
 /// What one action's endpoint needs at request time.
@@ -167,14 +167,30 @@ fn decode_input(
         }
         "application/x-www-form-urlencoded" => {
             let text = std::str::from_utf8(body).map_err(|_| bad_request("invalid_form", "form body must be UTF-8"))?;
+            let refused = |err: String| bad_request("invalid_form", &err);
             match &endpoint.whole_input {
-                Some(ty) => urlencoded_record(text, ty, types_by_id, "form")
-                    .map(|value| vec![value])
-                    .map_err(|err| bad_request("invalid_form", &err)),
-                None if endpoint.params.is_empty() => Ok(Vec::new()),
-                None => Err(unsupported(
-                    "a form posts to an action that takes one record; send this action's parameters as JSON",
-                )),
+                Some(ty) => urlencoded_record(text, ty, types_by_id, "form").map(|value| vec![value]).map_err(refused),
+                // One form field per parameter, read by the same rule as a
+                // record's fields.
+                None => {
+                    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
+                    if let Some((name, _)) = endpoint
+                        .params
+                        .iter()
+                        .find(|(_, ty)| corvid_types::text_parameters::query_field_shape(ty, &plain).is_none())
+                    {
+                        return Err(unsupported(&format!(
+                            "parameter `{name}` of `{}` cannot come from a form field; send this action JSON",
+                            endpoint.name
+                        )));
+                    }
+                    let given = urlencoded_values(text).map_err(refused)?;
+                    endpoint
+                        .params
+                        .iter()
+                        .map(|(name, ty)| urlencoded_value(&given, name, ty, types_by_id, "form").map_err(refused))
+                        .collect()
+                }
             }
         }
         _ => Err(unsupported("expected application/json or application/x-www-form-urlencoded")),

@@ -1583,6 +1583,20 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - A form posts to any action (B10-2b-3)
+
+A form posted only to an action taking one record; any other answered
+`415`. Now a form posts one field per parameter, read by the
+query-field rule: a text type once, an `Option` left out when absent, a
+`List` by repeating the name. A refactor commit first split the record
+reader into `urlencoded_values` (parse the text) and `urlencoded_value`
+(read one name as a type), so a record's fields and an action's
+parameters read through the same code. A parameter no form field can
+carry, such as a record beside others, answers `415` naming it, before
+the text is read.
+
+---
+
 ## 2026-11-26 - An action's approvals queue under its `@approval` (B10-2b-2)
 
 An `approve` inside an action was denied, because the process runtime's
