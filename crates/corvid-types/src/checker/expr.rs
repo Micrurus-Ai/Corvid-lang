@@ -30,6 +30,14 @@ impl<'a> Checker<'a> {
             {
                 self.check_decimal_literal(value, *span)
             }
+            // An integer literal where a `Float` is meant is one, when a
+            // `Float` holds it exactly (`ratio: Float = 1`).
+            Expr::Literal { value: Literal::Int(n), span } if matches!(expected, Some(Type::Float)) => {
+                if !int_is_exact_float(*n) {
+                    self.errors.push(TypeError::new(TypeErrorKind::FloatLiteralInexact { literal: *n }, *span));
+                }
+                Type::Float
+            }
             // B06 — likewise for a `Currency` and a `Locale`.
             Expr::Literal { value: Literal::String(code), span } if matches!(expected, Some(Type::Currency)) => {
                 self.check_currency_literal(code, *span)
@@ -943,3 +951,11 @@ fn unify_replay_arm_type_for_else(
         }
     }
 }
+
+/// Whether a `Float` holds `n` exactly: every whole number within 2^53,
+/// and beyond it only those the conversion does not round.
+pub(crate) fn int_is_exact_float(n: i64) -> bool {
+    let float = n as f64;
+    float >= -(2f64.powi(63)) && float < 2f64.powi(63) && float as i64 == n
+}
+

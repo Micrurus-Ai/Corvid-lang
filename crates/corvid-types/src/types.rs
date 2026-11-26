@@ -551,13 +551,13 @@ impl Type {
 
     /// Is this type compatible with `other` in a value-assignment position?
     ///
-    /// v0.1 is intentionally lenient: structurally identical types match,
-    /// `Unknown` matches anything (to avoid error cascades), and `Int`
-    /// implicitly coerces to `Float` in typing-friendly contexts.
+    /// Structurally identical types match and `Unknown` matches anything
+    /// (to avoid error cascades). An `Int` never widens to a `Float`
+    /// silently: an integer literal in a `Float` slot is typed `Float` by
+    /// the checker, and a value converts with `.to_float()`.
     pub fn is_assignable_to(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
-            (Type::Int, Type::Float) => true, // widening
             (Type::List(a), Type::List(b)) => a.is_assignable_to(b),
             (Type::Map(ka, va), Type::Map(kb, vb)) => {
                 ka.is_assignable_to(kb) && va.is_assignable_to(vb)

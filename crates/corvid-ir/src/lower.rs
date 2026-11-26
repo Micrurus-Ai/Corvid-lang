@@ -1519,6 +1519,10 @@ impl<'a> Lowerer<'a> {
                         .unwrap_or(corvid_decimal::Decimal::ZERO),
                 ))
             }
+            // An integer literal the checker typed `Float` (exact by its check).
+            Expr::Literal { value: Literal::Int(n), .. } if matches!(ty, Type::Float) => {
+                IrExprKind::Literal(IrLiteral::Float(*n as f64))
+            }
             // B06 — string literals the checker typed `Currency` or
             // `Locale`, read with the parser the checker used.
             Expr::Literal { value: Literal::String(code), .. } if matches!(ty, Type::Currency) => {

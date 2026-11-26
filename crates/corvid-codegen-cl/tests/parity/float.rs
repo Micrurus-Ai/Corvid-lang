@@ -110,3 +110,13 @@ fn scalars_to_string_alike() {
     );
     assert_eq!(text, "0.1 2.0 -7 true false inf");
 }
+
+/// An integer literal where a `Float` is meant is a `Float` on both
+/// tiers: as a binding, an argument, a field and a list element. Native
+/// code used to stop with a Cranelift verifier error, and the interpreter
+/// kept an `Int` that `to_string()` then refused.
+#[test]
+fn integer_literals_in_float_slots_are_floats_on_both_tiers() {
+    let src = "type Point:\n    x: Float\n    y: Float\n\nagent half(x: Float) -> Float:\n    return x / 2.0\n\nagent main() -> Float:\n    ratio: Float = 3\n    p = Point(1, -2)\n    xs: List<Float> = [1, 2.5]\n    return ratio + half(3) + p.y + xs[0]\n";
+    assert_eq!(assert_parity_text(src), "3.5");
+}

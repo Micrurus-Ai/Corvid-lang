@@ -481,6 +481,9 @@ pub enum TypeErrorKind {
     /// B06 — a duration literal that names no exact length: a calendar
     /// unit, a fraction of a nanosecond, or a value out of range.
     DurationLiteralInvalid { message: String },
+    /// An integer literal where a `Float` is meant that no `Float` holds
+    /// exactly (beyond 2^53), so reading it as one would round it.
+    FloatLiteralInexact { literal: i64 },
     /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
     /// empty or name one key twice.
     JsonKeyInvalid { type_name: String, message: String },
@@ -1040,6 +1043,9 @@ impl TypeErrorKind {
             }
             Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
             Self::DurationLiteralInvalid { message } => message.clone(),
+            Self::FloatLiteralInexact { literal } => {
+                format!("`{literal}` has no exact `Float` value, so reading it as one would round it")
+            }
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
             Self::AtomicBlockRefused { message } => message.clone(),
@@ -1249,6 +1255,7 @@ impl TypeErrorKind {
                 ("Decimal", "Int") => "convert with `.to_decimal()`, which is exact".into(),
                 ("Decimal", "Float") => "convert with `.to_decimal()`, which keeps the digits the Float shows, or declare the value as a `Decimal` from the start".into(),
                 ("Float", "Decimal") => "convert with `.to_float()`, which gives the nearest Float".into(),
+                ("Float", "Int") => "write the number as a `Float` literal (`3.0`), or convert a value with `.to_float()`, which gives the nearest Float; an `Int` is never widened silently".into(),
                 _ => format!("change the value to produce a `{expected}`, or update the signature"),
             }),
             Self::InvalidDecimalLiteral { .. } => Some(
@@ -1536,6 +1543,9 @@ impl TypeErrorKind {
             ),
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
+            ),
+            Self::FloatLiteralInexact { .. } => Some(
+                "a `Float` holds every whole number up to 9007199254740992 (2^53) exactly; write the nearest value you mean as a `Float` literal, or keep it an `Int`".into(),
             ),
             Self::DurationLiteralInvalid { .. } => Some(
                 "a duration is a number and one of nanoseconds, microseconds, milliseconds, seconds, minutes or hours, such as `30 seconds` or `1.5 hours`".into(),

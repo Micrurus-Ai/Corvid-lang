@@ -8395,3 +8395,7 @@ A host that loads an `approve_site` approver from source runs it on Corvid's app
 
 `corvid run` prints a `Float` result the way `to_string()` writes it, on the interpreter and in native code alike: an agent returning `2.0` prints `2.0`, where it used to print `2`. A `Float` inside a printed list or record, and one interpolated into text, reads the same way. A whole number printed with a point is a `Float`, and one without is an `Int`. A very large `Float` prints every digit in native code too, where it used to be cut off.
 
+### An `Int` never becomes a `Float` silently
+
+An integer literal where a `Float` is meant is a `Float`: `ratio: Float = 3`, `half(3)` for a `Float` parameter, `Point(1, -2)` for `Float` fields and `[1, 2.5]` as a `List<Float>` all work on both tiers. A literal a `Float` cannot hold exactly, beyond 9007199254740992, is a compile error. An `Int` value is never widened silently, because large values would round: `x: Float = n` is a compile error whose hint names `n.to_float()`, and a `List<Int>` is not a `List<Float>`. Arithmetic that mixes an `Int` and a `Float` still gives a `Float`.
+

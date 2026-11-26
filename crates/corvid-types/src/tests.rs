@@ -8756,3 +8756,31 @@ fn map_literal_keys_take_the_expected_key_type() {
     let bad = errors("agent main() -> Int:\n    rates: Map<Currency, Int> = {\"EURO\": 1}\n    return rates.length()\n");
     assert!(!bad.is_empty(), "an unknown currency code is refused at the key");
 }
+
+/// An integer literal where a `Float` is meant is a `Float`, when a
+/// `Float` holds it exactly; an `Int` value never widens silently, alone
+/// or inside a list, and the mismatch says how to convert it.
+#[test]
+fn integer_literals_become_floats_by_slot_and_int_values_never_widen() {
+    let errors = |src: &str| -> Vec<(String, Option<String>)> {
+        check(src).errors.iter().map(|e| (e.kind.message(), e.kind.hint())).collect()
+    };
+    for ok in [
+        "agent main() -> Float:\n    x: Float = 3\n    return x\n",
+        "agent main() -> Float:\n    return -3\n",
+        "agent half(x: Float) -> Float:\n    return x / 2.0\n\nagent main() -> Float:\n    return half(3)\n",
+        "type P:\n    x: Float\n\nagent main() -> Float:\n    return P(1).x\n",
+        "agent main() -> Float:\n    xs: List<Float> = [1, 2.5]\n    return xs[0]\n",
+        "agent main() -> Float:\n    return 9007199254740992\n",
+    ] {
+        assert!(errors(ok).is_empty(), "{ok}: {:?}", errors(ok));
+    }
+    let value = errors("agent main() -> Float:\n    n = 3\n    x: Float = n\n    return x\n");
+    assert_eq!(value.len(), 1, "{value:?}");
+    assert!(value[0].0.contains("expected `Float`, got `Int`"), "{value:?}");
+    assert!(value[0].1.as_deref().unwrap_or_default().contains(".to_float()"), "{value:?}");
+    let list = errors("agent main() -> Int:\n    ns = [1, 2]\n    xs: List<Float> = ns\n    return 0\n");
+    assert!(!list.is_empty(), "a `List<Int>` is not a `List<Float>`");
+    let inexact = errors("agent main() -> Float:\n    return 9007199254740993\n");
+    assert!(inexact[0].0.contains("no exact `Float` value"), "{inexact:?}");
+}

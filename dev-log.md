@@ -2,6 +2,28 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Integer literals in `Float` slots, and no silent widening
+
+The roadmap said an `Int` in a `Float` slot was not converted at run time.
+Reproducing it showed three faults. The interpreter kept an `Int`, which
+`to_string()` refused. Native code stopped with a Cranelift verifier error
+(`i64` where `f64` was expected). And the checker's widening rule recursed, so
+a `List<Int>` passed as a `List<Float>`.
+
+The roadmap suggested inserting a conversion at slot sites. That would make
+`x: Float = n` round silently for an `n` above 2^53, against the rule that
+nothing rounds without being written, so it was rejected. The widening is
+removed instead. An integer literal in a `Float` slot is typed `Float` by the
+checker, the way number literals already become `Decimal`s, and lowered as a
+`Float` literal. One beyond a `Float`'s exact range is a compile error
+(`FloatLiteralInexact`). A value converts with `.to_float()`, which the type
+mismatch's hint names. Nothing in the corpus, the examples or `std` relied on
+the widening. Arithmetic mixing an `Int` and a `Float` keeps giving a `Float`.
+
+Found and filed: diagnostics get their codes by matching message text, so
+new errors print `E0000`. The interpreter prints a `String` result quoted and
+native code prints it bare; that is added to the command-line printing item.
+
 ### A printed `Float` reads as one
 
 `to_string()` writes `2.0` for a whole-number `Float`, the language's rule
