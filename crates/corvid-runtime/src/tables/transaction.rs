@@ -14,6 +14,7 @@
 //! serves them from the trace and never opens the database.
 
 use super::{named_database, resolve_location, TableConnection, TableEngine};
+use crate::db::DbValue;
 use crate::errors::RuntimeError;
 use crate::Runtime;
 use corvid_ast::DatabaseLocation;
@@ -71,7 +72,11 @@ impl Runtime {
     pub async fn table_commit(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
         let database = transaction.database.clone();
         let tables = transaction.written.take();
-        self.end_transaction(transaction, "commit", "COMMIT").await?;
+        // Other processes on Postgres hear of the block through a
+        // notification sent inside it, which Postgres delivers only if
+        // the block commits (RT-6).
+        let notify = (!tables.is_empty()).then(|| super::shared_commits::notify_statement(&self.instance_id, &database, &tables));
+        self.end_transaction(transaction, "commit", "COMMIT", notify).await?;
         // Only now are the block's writes visible, so only now announced.
         self.announce_commit(&database, tables);
         Ok(())
@@ -79,7 +84,7 @@ impl Runtime {
 
     /// Undo an `atomic:` block's writes.
     pub async fn table_rollback(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
-        self.end_transaction(transaction, "rollback", "ROLLBACK").await
+        self.end_transaction(transaction, "rollback", "ROLLBACK", None).await
     }
 
     async fn open_transaction(
@@ -111,7 +116,13 @@ impl Runtime {
         }
     }
 
-    async fn end_transaction(&self, transaction: TableTransaction, op: &str, sql: &str) -> Result<(), RuntimeError> {
+    async fn end_transaction(
+        &self,
+        transaction: TableTransaction,
+        op: &str,
+        sql: &str,
+        notify: Option<(&'static str, [DbValue; 4])>,
+    ) -> Result<(), RuntimeError> {
         let TableTransaction { database, connection, _writer_turn, .. } = transaction;
         self.recorded_table_call(&format!("table:{database}.{op}"), Vec::new(), || async {
             match &connection {
@@ -120,6 +131,14 @@ impl Runtime {
                 }
                 Some(TableConnection::PostgresHeld(held)) => {
                     let mut borrowed = held.lock().await;
+                    if let Some((notify, params)) = &notify {
+                        if let Err(error) = borrowed.connection().execute(notify, params).await {
+                            // Nothing is committed: the block fails whole.
+                            let _ = borrowed.connection().execute("ROLLBACK", &[]).await;
+                            borrowed.discard();
+                            return Err(named_database(&database, error));
+                        }
+                    }
                     if let Err(error) = borrowed.connection().execute(sql, &[]).await {
                         // The transaction may still be open on it.
                         borrowed.discard();

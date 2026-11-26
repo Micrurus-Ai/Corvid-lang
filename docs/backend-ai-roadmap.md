@@ -257,7 +257,7 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 - [ ] RT-3. The WebSocket transport in `corvid serve`: subscriptions, `requires` on subscribe and on session change, heartbeat, reconnect with a fresh snapshot (Codex).
 - [ ] RT-4. Typed subscriptions in the generated TypeScript client and the Corvid browser binding (Codex, F08).
 - [ ] RT-5. Action calls over the live connection, after B10 (Codex).
-- [ ] RT-6. Several server processes share commits through Postgres `LISTEN`/`NOTIFY` (this session).
+- [x] RT-6. Several server processes share commits through Postgres `LISTEN`/`NOTIFY`. Each committed write sends a notification stamped with its schema; an `atomic:` block sends it inside its transaction, so a rollback reaches nobody. `Runtime::share_table_commits` forwards other processes' commits into the local feed and skips its own. A dropped listener reconnects and announces an empty table set, meaning any table may have changed. [How RT-3 uses it](proposals/real-time.md#built-in-rt-6-commits-shared-between-server-processes)
 
 **B05 complete HTTP client** (in progress, macOS session). [Proposal](proposals/http-client.md)
 

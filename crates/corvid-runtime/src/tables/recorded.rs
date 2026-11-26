@@ -56,7 +56,11 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "insert"), args, || async {
-                Ok(checked_write_json(self.table_insert_live(table, row).await?))
+                let outcome = self.table_insert_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "insert", &outcome)?;
@@ -72,7 +76,11 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "save"), args, || async {
-                Ok(checked_write_json(self.table_save_live(table, row).await?))
+                let outcome = self.table_save_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "save", &outcome)?;
@@ -88,7 +96,11 @@ impl Runtime {
         let args = vec![row_json(&row)];
         let outcome = self
             .recorded_table_call(&call_name(table, "delete"), args, || async {
-                Ok(checked_write_json(self.table_delete_live(table, row).await?))
+                let outcome = self.table_delete_live(table, row).await?;
+                if outcome.is_ok() {
+                    self.notify_other_processes(table).await?;
+                }
+                Ok(checked_write_json(outcome))
             })
             .await?;
         let outcome = checked_write_outcome(table.name, "delete", &outcome)?;

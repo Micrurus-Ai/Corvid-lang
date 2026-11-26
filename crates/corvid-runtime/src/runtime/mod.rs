@@ -163,6 +163,9 @@ pub struct Runtime {
     /// (B14). Clones of a `Runtime` share it, so a server's runs feed one
     /// stream.
     pub(crate) table_commits: tokio::sync::broadcast::Sender<crate::tables::TableCommit>,
+    /// This process's tag on the commits it shares through Postgres, so
+    /// it can skip its own when they come back (B14 RT-6).
+    pub(crate) instance_id: std::sync::Arc<str>,
 }
 
 /// The durable job a run is executing under (slice 52h-2): the SQLite

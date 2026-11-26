@@ -861,6 +861,47 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - Commits shared between server processes (B14 RT-6)
+
+An application served by several processes on one Postgres database
+needs a write through one process to reach live subscribers on the
+others. Every committed table write on Postgres now also sends
+`pg_notify('corvid_commits', …)`. An `atomic:` block sends its
+notification inside its transaction, so Postgres itself guarantees that
+a rolled-back block reaches nobody. `Runtime::share_table_commits`
+listens on one named connection and forwards other processes' commits
+into the local feed. Each runtime has a random 128-bit instance id and
+skips its own notifications, so a subscriber hears a commit once. A
+listener that loses its connection reconnects with backoff and then
+announces an empty table set, which means "any table may have changed",
+so subscribers re-run their queries instead of missing a commit.
+
+Found while building it: Postgres notification channels are
+database-wide, not per schema, so two applications in two schemas of one
+Postgres would have heard each other's commits. The server now stamps
+`current_schema()` into the payload, and each listener keeps only its
+own schema's commits. If a write commits but its notification cannot be
+sent, the run fails loudly and says the write committed, rather than a
+subscriber missing it.
+
+Considered and rejected:
+- **A polling table of commits.** It adds latency and a table to
+  migrate, where `NOTIFY` already has the transactional delivery rule
+  that is needed.
+- **Sending the notification after `COMMIT`.** A crash between the
+  two would lose it; sent inside the transaction, it commits or not
+  with the writes.
+
+Tested on Postgres, with two runtimes standing in for two processes:
+- a write and an `atomic:` block reach the other process;
+- a conflict and a rollback reach nobody;
+- no process hears its own commit twice;
+- sharing works in both directions;
+- after both listening connections are terminated, each reconnects,
+  announces "anything may have changed", and hears new commits.
+
+---
+
 ## 2026-11-25 - The change feed for live subscriptions (B14 RT-2)
 
 A `live` subscriber needs to hear about committed writes and receive the

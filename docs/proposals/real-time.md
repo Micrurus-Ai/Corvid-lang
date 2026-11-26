@@ -139,6 +139,16 @@ Two pieces in `corvid_runtime::tables`, and one loop RT-3 runs per subscription:
 
 The loop: after `subscribe` and the first `snapshot` (the `__live__<path>` agent run with the subscriber's `path` and `actor`), on each `TableCommit` whose `database` is the live's and whose `tables` include its table, run the snapshot agent again, convert its rows, call `live_changes`, send the result, and keep the new rows as `previous`. The database stays the one judge of which rows match and in what order; a commit that touches other rows produces `Unchanged`. Re-running the query on each relevant commit is the reference behavior; an incremental matcher that checks only the written rows is a later optimization (on the roadmap), tested against this one.
 
+## Built in RT-6: commits shared between server processes
+
+Several `corvid serve` processes on one Postgres database each have their own commit feed, so a write through one must reach subscribers connected to another.
+
+- Every committed table write on Postgres also sends `pg_notify('corvid_commits', payload)`, where the payload is `{"origin", "schema", "database", "tables"}`. A write outside an `atomic:` block sends it once the write succeeds. An `atomic:` block sends it inside its transaction, just before `COMMIT`, so Postgres delivers it only if the block commits; a rolled-back block reaches nobody. The server stamps `current_schema()` itself, because a channel is shared by every schema of a Postgres database: two applications in two schemas never hear each other.
+- **`Runtime::share_table_commits(database, location, tls)`** opens one listening connection (named `corvid commit listener` in `pg_stat_activity`) and forwards commits that other processes made in its schema on that database into this process's feed. It skips its own, which it announced locally already, so a subscriber hears each commit once.
+- If the listening connection drops, it reconnects at once and then with backoff up to 30 seconds. After reconnecting it announces a `TableCommit` with an **empty `tables` set**, meaning "any table in this database may have changed". **RT-3: treat an empty set as touching every live on that database** and re-run each one's snapshot query; `live_changes` then sends only what actually changed.
+- If a write commits but its notification cannot be sent, the run fails loudly, saying the write committed. No subscriber silently misses it. If an `atomic:` block's notification fails, the block is rolled back and fails as a whole.
+- RT-3 calls `share_table_commits` once at startup for each `engine: postgres` database that a `live` reads. SQLite databases stay per-process, because one SQLite file is served by one process.
+
 ## Non-scope
 
 - `take(n)` in a `live` query. Keeping a moving top-N correct needs the rows just outside the window; a later slice.

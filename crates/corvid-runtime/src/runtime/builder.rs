@@ -497,6 +497,7 @@ impl RuntimeBuilder {
             // A slow subscriber that falls this far behind is told it
             // lagged and takes a fresh snapshot (B14).
             table_commits: tokio::sync::broadcast::channel(1024).0,
+            instance_id: crate::tables::new_instance_id(),
         }
     }
 }
