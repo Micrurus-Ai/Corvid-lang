@@ -18,7 +18,7 @@ The table below is the execution order for the browser frontend. The detailed de
 
 ### Ordered tasks
 
-F08 live reconnect acceptance awaits session notifications in serve. The query adapter consumes RT-2 commits and takes a fresh snapshot on reopen. The RT-3 socket lifecycle can be exercised independently. The end-to-end case still needs an offline edit in the reconnect snapshot followed by a committed edit on that same subscription. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
+F08 live reconnect acceptance awaits the auth runtime's session observer. The SQLite query test covers an offline edit in the reopened snapshot followed by a matching commit on the same subscription. Once serve can start a live app, repeat that sequence over an authenticated browser socket. Also verify that logout or expiry closes an idle socket and that an authority change stops delivery of rows the subscriber can no longer read. [Live subscription protocol](proposals/real-time.md#frontend-agreement-and-wire-protocol)
 
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
