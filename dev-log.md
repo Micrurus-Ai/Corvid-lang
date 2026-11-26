@@ -43,6 +43,46 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Native loops release a carried local each time round
+
+A reference-counted local first bound inside a native loop body and read
+after the loop leaked every iteration's value but the last. For example,
+`for word in words: last = word + "!"` followed by `return last` kept
+two of three strings alive. Native lowering lowers the body once, so the
+`Let` was lowered as a first binding and released nothing. The ownership
+analysis agreed it was a first binding, so neither side released the
+previous value.
+
+**The fix, one rule for both sides.** `dataflow::loop_carried_locals`
+finds each refcounted local whose first binding is inside a loop and that
+is read outside that loop. Both lowering and the analysis treat it as a
+parameter:
+- lowering binds it at function entry with no value, in the outermost
+  scope;
+- the analysis counts it as bound from the start.
+
+So the `Let` in the loop is a rebinding that releases the previous value
+(the first time, there is none). A local read only within its iteration
+is not carried, so it still dies at its last read. A read before a local's
+first binding is refused by the resolver, so it cannot occur inside a
+loop either.
+
+**Simpler options considered.** Binding every body local before the loop
+would also stop the leak, but the analysis already drops a local that
+dies within its iteration. The extra release would double-free it.
+Liveness at the loop head would be the exact criterion, but liveness runs
+on the analysis's own graph, which depends on this set. The syntactic
+rule gives the same answer for every loop the language allows.
+
+**Tests.** Parity tests under the leak detector cover:
+- the original `for` loop, with and without the local declared before it;
+- a nested loop;
+- a `while` loop;
+- a record;
+- a `break`.
+
+---
+
 ## 2026-11-26 - Tool and prompt calls in native match arms
 
 A native `match` arm can now call a tool or a prompt:
@@ -985,6 +1025,42 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-26 - Watching a session for live sockets (B14 RT-3)
+
+Codex's RT-3 transport was blocked: a live socket must validate its
+session and register for changes atomically, then close or re-authorize
+when the session ends or its authority changes. `serve` had the
+interface and no implementation. The session store
+(`SessionAuthRuntime`) now has `observe_session`, which returns a
+`watch::Receiver<SessionState>`:
+- `Invalid` on logout, revocation, a role taken away, rotation and
+  expiry;
+- `Active` again when a role is granted or the actor record changes, so
+  the socket re-checks what it may see.
+
+Atomicity comes from one lock. `observe_session` validates and
+registers while holding the watcher lock. Every mutation writes the
+database first and then notifies under that lock. So a change either
+happens before the check, which then fails, or reaches a watcher that is
+already registered.
+
+Expiry is the one change no call makes, so a timer makes it. A rotated
+session keeps its id, so each watch has a generation, and the old
+token's timer cannot end the new token's watch; a test holds that.
+
+Considered: polling the store from each socket. It is simpler, but it
+leaves a revoked session working until the next poll, which the
+real-time proposal rules out ("takes effect at once").
+
+Found and fixed in its own commit: two audit events with the same kind,
+session and trace in the same millisecond got the same id. The second
+insert hit the primary key and failed the session check it was
+recording. `serve` passes a random trace id per request, so it was not
+hit there, but any caller reusing a trace id was. Audit ids now carry a
+random part, and events list in the order they were written.
 
 ---
 

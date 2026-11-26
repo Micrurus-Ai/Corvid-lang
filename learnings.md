@@ -4,6 +4,8 @@
 
 The `corvid_runtime` Python package now holds only `@tool`, the decorator a project's `tools.py` uses to supply tool implementations to `corvid serve` and `corvid run`. `tool_call`, `approve_gate`, `llm_call`, `run_sync`, `register_adapter` and the `testing` helpers served the retired Python build target and are gone; model calls, approvals and traces belong to the Corvid runtime. A `tools.py` that imports only `tool` works unchanged. [Python tools](runtime/python/README.md)
 
+A native program that binds a text, list or record value inside a loop and uses it after the loop no longer keeps every iteration's value in memory; only the last one survives the loop, as on the interpreter.
+
 A `match` arm can now call a tool or a prompt in native code (`Err(problem) -> random_token(16)`, `Some(v) -> score(v)`); such a program used to run on the interpreter, or needed a helper agent around the call.
 
 A streamed connector call can now fail as a value: declare `-> Stream<Result<Delta, ModelError>>` with `on failure -> Unreachable`, and each event arrives as `Ok(delta)` while an outage (the provider not answering, a stalled or broken stream, an event that does not decode, an open circuit breaker) arrives as one final `Err(Unreachable(reason))`. A `for` loop over the stream then never crashes for an outage. [Connector grammar](docs/reference/grammar.md#connector-declarations)

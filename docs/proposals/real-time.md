@@ -143,6 +143,20 @@ Two pieces in `corvid_runtime::tables`, and one loop RT-3 runs per subscription:
 
 The loop: after `subscribe` and the first `snapshot` (the `__live__<path>` agent run with the subscriber's `path` and `actor`), on each `TableCommit` whose `database` is the live's and whose `tables` include its table, run the snapshot agent again, convert its rows, call `live_changes`, send the result, and keep the new rows as `previous`. The database stays the one judge of which rows match and in what order; a commit that touches other rows produces `Unchanged`. Re-running the query on each relevant commit is the reference behavior; an incremental matcher that checks only the written rows is a later optimization (on the roadmap), tested against this one.
 
+## Built for RT-3: watching a session
+
+A live socket outlives the request that opened it, so it has to hear when its session ends or its authority changes. `SessionAuthRuntime::observe_session(raw_token, trace_id)` (in `corvid_runtime`) validates a session cookie's token and registers a watcher in one step, returning a `tokio::sync::watch::Receiver<SessionState>` that starts at `Active`. It must be called inside a Tokio runtime, which times the session's expiry.
+
+| What happens | Published |
+| --- | --- |
+| Logout or `revoke_session` | `Invalid` |
+| A role taken away (`revoke_actor_role` revokes the actor's sessions) | `Invalid` to every session of the actor |
+| Rotation (`rotate_session`, including on a privilege change): the old token no longer works | `Invalid` |
+| The session's expiry time passes | `Invalid` |
+| A role granted, or the actor record updated (`upsert_actor`) | `Active`, so the socket re-checks each subscription |
+
+`Invalid` is final; the client logs in again and reconnects. Validation and registration happen under the watcher lock, and every change writes the database before it notifies under that same lock, so a logout can never fall between the check and the registration. A session nobody watches leaves no entry behind. RT-3's `SessionObserver` maps onto it directly: `observe_session(token)` calls `auth.observe_session(token, trace_id)`, maps an error to `401`, and maps `SessionState` to `SessionStatus`, or uses `SessionState` in its place.
+
 ## Built in RT-6: commits shared between server processes
 
 Several `corvid serve` processes on one Postgres database each have their own commit feed, so a write through one must reach subscribers connected to another.
