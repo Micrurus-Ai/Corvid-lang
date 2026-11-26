@@ -13,7 +13,7 @@
 //!   a `Bool`.
 //! - **Boundaries.** A route's inputs and response, a store field, a
 //!   table column, a prompt's parameters and result, a connector
-//!   operation, `ask` and `choose`, and the `main` agent's signature
+//!   operation, `ask` and `choose`, an action's signature, and the `main` agent's signature
 //!   cannot hold a secret, directly or in a field of a record they
 //!   hold. Each would hand the text to a client, a database, a model, a
 //!   person or the terminal.
@@ -41,6 +41,7 @@ enum Boundary {
     PromptResult,
     ConnectorOperation,
     MainAgent,
+    ActionSignature,
 }
 
 impl Boundary {
@@ -53,6 +54,7 @@ impl Boundary {
             Boundary::PromptResult => "a prompt's result",
             Boundary::ConnectorOperation => "a connector operation's signature",
             Boundary::MainAgent => "the `main` agent's signature",
+            Boundary::ActionSignature => "an action's inputs and result",
         }
     }
 
@@ -70,6 +72,9 @@ impl Boundary {
             Boundary::PromptResult => "a model cannot produce a secret; return the text the model writes as a `String`",
             Boundary::ConnectorOperation => {
                 "a connector's credential is declared once on the connector, as `auth`, and never travels in its operations; pass a secret to a `tool` instead"
+            }
+            Boundary::ActionSignature => {
+                "an action is called by a form, a client or an assistant, which supply its inputs and read its result as JSON; read the secret inside with `secret(name)` from std/secrets and return what it proves, such as a `Bool`"
             }
             Boundary::MainAgent => {
                 "`main` is called from the command line, which prints its result and passes its arguments as text; read the secret inside with `secret(name)` and return what it proves, such as a `Bool`"
@@ -177,6 +182,9 @@ impl<'a> Checker<'a> {
                     for op in &connector.operations {
                         self.refuse_in_signature(&op.params, &op.return_ty, Boundary::ConnectorOperation);
                     }
+                }
+                Decl::Agent(agent) if agent.action.is_some() => {
+                    self.refuse_in_signature(&agent.params, &agent.return_ty, Boundary::ActionSignature);
                 }
                 Decl::Agent(agent) if agent.name.name == "main" => {
                     self.refuse_in_signature(&agent.params, &agent.return_ty, Boundary::MainAgent);
