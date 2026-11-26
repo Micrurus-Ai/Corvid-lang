@@ -284,43 +284,28 @@ fn parse_args_for_entry_agent(
             args.len()
         );
     }
+    // Each argument is read by the request-text rule a path segment, a
+    // query field, a form field and a `corvid act` flag use, so every
+    // text type (`Decimal`, `Duration`, `Instant`, a plain choice, ...)
+    // is accepted here too.
+    let types_by_id: std::collections::HashMap<_, _> = ir.types.iter().map(|t| (t.id, t)).collect();
     let mut parsed = Vec::with_capacity(args.len());
     for (param, raw) in chosen.params.iter().zip(args.iter()) {
-        let value = match &param.ty {
-            corvid_types::Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| {
-                anyhow::anyhow!(
-                    "cannot parse `{raw}` as Int for parameter `{}` of agent `{}`",
-                    param.name,
-                    chosen.name
-                )
-            })?),
-            corvid_types::Type::Float => Value::Float(raw.parse::<f64>().map_err(|_| {
-                anyhow::anyhow!(
-                    "cannot parse `{raw}` as Float for parameter `{}` of agent `{}`",
-                    param.name,
-                    chosen.name
-                )
-            })?),
-            corvid_types::Type::Bool => match raw.as_str() {
-                "true" => Value::Bool(true),
-                "false" => Value::Bool(false),
-                _ => anyhow::bail!(
-                    "cannot parse `{raw}` as Bool for parameter `{}` of agent `{}` \
-                     (expected `true` or `false`)",
-                    param.name,
-                    chosen.name
-                ),
-            },
-            corvid_types::Type::String => {
-                Value::String(std::sync::Arc::<str>::from(raw.as_str()))
-            }
-            other => anyhow::bail!(
-                "parameter `{}` of agent `{}` has type `{}` which is not \
-                 supported as a CLI argument; only `Int` / `Float` / `Bool` / \
-                 `String` parameters can receive `corvid run` positional args",
+        let value = match corvid_vm::public_json::decode_request_text(raw, &param.ty, &types_by_id) {
+            Some(Ok(value)) => value,
+            Some(Err(reason)) => anyhow::bail!(
+                "cannot parse `{raw}` as {} for parameter `{}` of agent `{}`: {reason}",
+                param.ty.display_name(),
+                param.name,
+                chosen.name
+            ),
+            None => anyhow::bail!(
+                "parameter `{}` of agent `{}` has type `{}`, which a command-line argument cannot carry; \
+                 an argument is one of {}",
                 param.name,
                 chosen.name,
-                other.display_name()
+                param.ty.display_name(),
+                corvid_types::text_parameters::TEXT_TYPES
             ),
         };
         parsed.push(value);
