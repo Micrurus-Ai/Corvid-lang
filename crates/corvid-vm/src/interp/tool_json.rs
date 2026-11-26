@@ -25,11 +25,13 @@ use crate::conv::{json_to_value, value_to_json};
 use crate::public_json::{decode_public_json, encode_tool_argument, SecretArgument};
 use crate::value::Value;
 
-/// A type holding a database connection or a JSON builder anywhere, such
-/// as `db_open`'s `Result<DbHandle, String>`: a handle into the runtime,
-/// which only the runtime's own tools take and which has no public form.
-fn crosses_as_handle(ty: &Type) -> bool {
-    ty.mentions(&|ty| matches!(ty, Type::DbHandle | Type::JsonBuilder))
+/// A type holding a value the runtime keeps anywhere, such as
+/// `db_open`'s `Result<DbHandle, String>`: a database connection, a JSON
+/// builder, or an uploaded file, which a connector sends by its bytes and
+/// records by digest. Only the runtime's own tools take these, and they
+/// have no public form.
+fn crosses_as_handle(ty: &Type, types: &HashMap<DefId, &IrType>) -> bool {
+    corvid_ir::holds(ty, types, &|ty| matches!(ty, Type::DbHandle | Type::JsonBuilder | Type::Upload(_)))
 }
 
 /// One value as a tool call carries it, given its declared type.
@@ -39,7 +41,7 @@ pub(crate) fn tool_value_json(
     types: &HashMap<DefId, &IrType>,
     secrets: SecretArgument,
 ) -> Result<J, String> {
-    if crosses_as_handle(ty) {
+    if crosses_as_handle(ty, types) {
         return Ok(value_to_json(value));
     }
     // A grounded value given where its plain type is declared is that
@@ -69,7 +71,7 @@ pub(crate) fn tool_arguments(
 
 /// A tool's answer read as its declared return type.
 pub(crate) fn tool_result(json: J, ty: &Type, types: &HashMap<DefId, &IrType>) -> Result<Value, String> {
-    if crosses_as_handle(ty) {
+    if crosses_as_handle(ty, types) {
         return json_to_value(json, ty, types).map_err(|e| e.to_string());
     }
     decode_public_json(&json, ty, types, UnknownFields::Ignore).map_err(|error| error.to_string())
@@ -79,7 +81,7 @@ pub(crate) fn tool_result(json: J, ty: &Type, types: &HashMap<DefId, &IrType>) -
 /// a type that has none (a connector `Response`, a runtime handle) the
 /// interpreter's own form, decided by the type.
 pub(crate) fn debugger_view(value: &Value, ty: &Type, types: &HashMap<DefId, &IrType>) -> J {
-    if ty.mentions(&|ty| matches!(ty, Type::Response(_) | Type::DbHandle | Type::JsonBuilder)) {
+    if crosses_as_handle(ty, types) || corvid_ir::holds(ty, types, &|ty| matches!(ty, Type::Response(_))) {
         return value_to_json(value);
     }
     encode_tool_argument(value, ty, types, SecretArgument::Recorded)

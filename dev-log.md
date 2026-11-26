@@ -137,6 +137,20 @@ when a type has no native JSON form, or when the tool returns a
 Filed: native run-start and `approve` traces still encode non-scalar
 arguments with a second, hand-written JSON mapping.
 
+The batch gate caught three more problems with B2a, fixed in their own
+commit:
+- An `Upload`, including one in a record field, has no public form. It
+  crosses as the runtime's own value, as database handles do.
+- `path_parent` and `path_filename` answered an `Option` in the internal
+  tagged envelope, the only runtime tools that still did. They now
+  answer the text or `null`.
+- The record-aware type walk the secret check used is now
+  `corvid_ir::holds`, shared by the secret check and the runtime-value
+  check.
+
+A native-secrets test that pinned the old refusal now checks that a
+tool taking a secret needs only its tools library.
+
 Tests: `native_user_tools.rs` calls a tool taking a record that holds
 `None` and a variant, plus a `Decimal`, and answering a record, on both
 tiers. The value and the recorded arguments match. The parity suite's

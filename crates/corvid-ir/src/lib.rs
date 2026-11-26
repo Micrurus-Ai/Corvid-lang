@@ -10,7 +10,7 @@ pub use imports::imported_source_modules;
 pub mod lower;
 mod expr_visit;
 mod secret_types;
-pub use secret_types::holds_secret;
+pub use secret_types::{holds, holds_secret};
 mod type_visit;
 pub mod types;
 
