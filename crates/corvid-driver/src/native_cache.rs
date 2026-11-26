@@ -84,6 +84,9 @@ fn cache_key_for(source: &str, dup_drop_pass: bool) -> String {
     feed_bytes(source.as_bytes(), &mut h);
     feed_bytes(b"|cl=", &mut h);
     feed_bytes(env!("CARGO_PKG_VERSION").as_bytes(), &mut h);
+    // The backend id stamps the code generator, the Rust runtime and
+    // every workspace crate they build from, so an edit to any of them
+    // invalidates cached binaries.
     feed_bytes(b"|backend=", &mut h);
     feed_bytes(corvid_codegen_cl::NATIVE_BACKEND_ID.as_bytes(), &mut h);
     // The ownership pass changes the emitted code, so a binary built

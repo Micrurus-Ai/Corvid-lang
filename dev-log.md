@@ -2,6 +2,36 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native builds check the runtime they link
+
+A native build linked whatever `libcorvid_runtime.a` was on disk. After a
+runtime change, a test failed to link a new export until someone rebuilt the
+archive by hand. This happened four times in native dispatch, last in the
+previous slice. Worse, a build could link an old runtime with no error. The
+native cache had the same weakness: its key hashed the C runtime and the code
+generator's own sources, so an edit to the Rust runtime or to `corvid-ir`
+reused a binary built from the old code. And linking a binary and linking a
+library each had their own lookup; only the library build rebuilt a missing
+archive.
+
+A new build-dependency crate, `corvid-source-stamp`, hashes a crate's
+sources and those of every workspace crate it depends on. Paths are
+relative to the workspace root, and tests are left out. `corvid-runtime`
+exports a symbol named after its stamp. One lookup, `runtime_staticlib.rs`,
+serves both links. It reads the archive's symbol index, about 33 MB of the
+333 MB debug archive, and caches the result per process. A stale development
+archive is rebuilt, and any other stale archive is refused. `NATIVE_BACKEND_ID`
+is the code generator's closure stamp now. Comparing file times, hashing the
+archive's bytes, checking only the declared export list, and referencing
+the stamp from generated code were considered; the
+[proposal](docs/proposals/native-runtime-stamp.md) says why each loses.
+
+Proof: unit tests read indexed, unindexed and non-archive files; a native
+test refuses an archive stamped by other sources and links the current one.
+Appending a comment to a runtime source and then running the trace test that
+had failed on a stale archive rebuilt the archive and passed. The
+concurrent-rebuild race in tests stays filed.
+
 ### Native run and approval traces in the public JSON form
 
 Native traces recorded a run's arguments and an `approve`'s arguments with a

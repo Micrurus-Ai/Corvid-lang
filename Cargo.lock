@@ -788,6 +788,7 @@ dependencies = [
  "corvid-public-json",
  "corvid-resolve",
  "corvid-runtime",
+ "corvid-source-stamp",
  "corvid-syntax",
  "corvid-test-paths",
  "corvid-time",
@@ -801,7 +802,6 @@ dependencies = [
  "criterion",
  "libloading",
  "serde_json",
- "sha2 0.10.9",
  "target-lexicon",
  "tempfile",
  "tokio",
@@ -1069,6 +1069,7 @@ dependencies = [
  "corvid-public-json",
  "corvid-resolve",
  "corvid-runtime-core",
+ "corvid-source-stamp",
  "corvid-syntax",
  "corvid-test-paths",
  "corvid-text",
@@ -1146,6 +1147,13 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "wiremock",
+]
+
+[[package]]
+name = "corvid-source-stamp"
+version = "0.0.1"
+dependencies = [
+ "sha2 0.10.9",
 ]
 
 [[package]]

@@ -20,6 +20,8 @@ crate-type = ["lib", "staticlib"]
 # `corvid_release`, `corvid_string_from_bytes`, etc.) the ABI and FFI
 # bridge layers use.
 cc = "1"
+# The runtime stamp a native build checks the linked archive against.
+corvid-source-stamp = { workspace = true }
 
 [dependencies]
 async-stream = "0.3"

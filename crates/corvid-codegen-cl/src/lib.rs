@@ -292,7 +292,9 @@ fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
     ))
 }
 
-/// Build-time fingerprint of this native backend's source and target triple.
+/// Build-time fingerprint of the sources this native backend is built
+/// from (its own, the runtime's and every workspace crate they depend
+/// on) and its target triple; see `corvid-source-stamp`.
 pub const NATIVE_BACKEND_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/native-backend-id.txt"));
 
 fn span_zero() -> corvid_ast::Span {

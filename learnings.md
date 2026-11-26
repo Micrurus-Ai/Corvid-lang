@@ -8381,3 +8381,7 @@ To create a UUID, `import "std:uuid" use uuid_v4, uuid_v7`. `uuid_v4()` is rando
 
 A trace records a run's arguments, its result and each `approve`'s arguments in the public JSON form, by their declared types: the same JSON a route returns, with a field renamed by `@json(key:)` under its JSON name and a `Secret` as `<redacted>`. Both tiers record the same values, and a native run now records any result, not only a number, a `Bool` or a `String`. A value with no JSON form, such as a stream, is still recorded, in the interpreter's own form, so recording never stops a run.
 
+### A native build checks the runtime it links
+
+A native build links the `corvid-runtime` staticlib only if it holds the runtime the compiler was built from. Every archive holding the runtime exports a symbol named after a stamp of the runtime's sources, and the build checks the archive's symbol index for the compiler's stamp before linking. In a source checkout, a stale archive is rebuilt automatically. Any other stale archive, such as one set by `CORVID_RUNTIME_STATICLIB_OVERRIDE` or shipped with an install, is refused with an error that names it and the command that rebuilds it. Cached native binaries are keyed by the same kind of stamp, so `corvid run` rebuilds after any change to the compiler or runtime sources.
+

@@ -62,5 +62,21 @@ fn main() {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
     std::fs::write(out.join("native_runtime_inputs.rs"), inputs)
         .expect("write native cache inputs");
+
+    // The runtime's stamp, exported as a symbol named after it, so a
+    // native build can check that an archive holds this runtime.
+    let stamp = &corvid_source_stamp::closure_stamp()[..32];
+    std::fs::write(
+        out.join("runtime_stamp.rs"),
+        format!(
+            "/// The symbol every archive holding this runtime exports.\n\
+             pub const RUNTIME_STAMP_SYMBOL: &str = \"corvid_runtime_stamp_{stamp}\";\n\
+             #[no_mangle]\n\
+             #[used]\n\
+             #[allow(non_upper_case_globals)]\n\
+             pub static corvid_runtime_stamp_{stamp}: u8 = 0;\n"
+        ),
+    )
+    .expect("write runtime stamp");
     println!("cargo:rerun-if-changed=build.rs");
 }
