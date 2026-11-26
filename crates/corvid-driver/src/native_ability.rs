@@ -59,6 +59,10 @@ pub enum NotNativeReason {
     /// `try ... else` (recoverable failures TE-2) runs on the interpreter
     /// until native code catches outages (TE-3).
     TryElseNotNative,
+    /// An agent takes an `Actor`. The interpreter checks a called
+    /// action's `requires` against the actor passed in (B10); native code
+    /// does not yet, so it refuses rather than skip the check.
+    CallerNotNative { agent: String },
     StreamLoweringNotImplemented,
     TestFixtureNotNative {
         name: String,
@@ -117,6 +121,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::ToolCall { name } => write!(
                 f,
                 "program calls tool `{name}` - pass `--with-tools-lib <path>` pointing at your compiled `#[tool]` staticlib, or let auto-dispatch fall back to the interpreter"
+            ),
+            Self::CallerNotNative { agent } => write!(
+                f,
+                "`{agent}` takes an `Actor`, whose action policy the interpreter checks on every call; native code does not yet (shared actions B10, on the roadmap)"
             ),
             Self::TryElseNotNative => write!(
                 f,
@@ -277,6 +285,9 @@ pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Res
         }
     }
     for agent in &ir.agents {
+        if agent.params.iter().any(|p| corvid_types::action_input::is_caller(&p.ty)) {
+            return Err(NotNativeReason::CallerNotNative { agent: agent.name.clone() });
+        }
         if agent.params.iter().map(|p| &p.ty).chain(std::iter::once(&agent.return_ty))
             .any(|ty| matches!(ty, Type::Map(_, _)) && !corvid_codegen_cl::native_string_map(ty)) {
             return Err(NotNativeReason::UnsupportedMap);

@@ -1549,6 +1549,43 @@ server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
 
+## 2026-11-26 - An action reads its caller (B10-2b-1)
+
+`action claim(card: Int, by: Actor) -> Card requires authenticated:`.
+`Actor` is a new type name for the record a signed-in route already
+binds as `actor`. Serve fills an `Actor` parameter from the verified
+session and leaves it out of the input, the contract and OpenAPI. Code
+passes one along, and the interpreter checks the action's `requires`
+against it before the body runs: a route with `requires authenticated`
+that calls an action with `requires permission("board.edit")` gets
+`403 insufficient_authority` for a caller without the permission.
+Without that check a weaker route could lend its caller to a stronger
+action, so "every caller is checked" would hold only over HTTP.
+
+Considered: an implicit `actor` in a signed-in action's body, as routes
+have. Rejected because an action is also called from code, so the
+caller would have to flow from the calling code unseen; with a
+parameter the signature says the action reads its caller, and the
+compiler sees each place one is passed.
+
+An `Actor` comes only from a session. The checker refuses an `Actor`
+parameter on a `requires anyone` action, and an `Actor` inside an
+action's other inputs, a route's path, query or body, or a prompt's
+result, where the sender could name any caller. The secret-boundary
+walk now takes the type to look for, so both rules follow records the
+same way.
+
+Found and fixed: the checker and the IR lowerer each defined the actor
+record; both now use `Type::actor()` (its own commit). The type also
+displays as `Actor` in errors instead of "route path params".
+
+Narrowed: native builds refuse an `Actor` parameter by name
+(`CallerNotNative`), since native code does not run the caller check
+yet; a `test` cannot build an `Actor`. Both are on the roadmap first in
+B10.
+
+---
+
 ## 2026-11-26 - `POST /actions/<name>` (B10-2a)
 
 `corvid serve` answers one endpoint per action. The order is fixed:

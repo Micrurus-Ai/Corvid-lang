@@ -334,7 +334,9 @@ impl<'a> Checker<'a> {
                 // B03 — a `RegexMatch` comes only from the regex methods.
                 | BuiltIn::RegexMatch
                 // B01 — a `JsonError` comes only from `from_json`.
-                | BuiltIn::JsonError => {
+                | BuiltIn::JsonError
+                // B10 — an `Actor` comes only from a verified session.
+                | BuiltIn::Actor => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),

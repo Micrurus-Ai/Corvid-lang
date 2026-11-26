@@ -195,7 +195,44 @@ const GUARDED: &str = r#"identity users:
 
 action archive(card: Int) -> Int requires permission("board.edit"):
     return card
+
+action claim(card: Int, by: Actor) -> String requires authenticated:
+    return by.tenant + "/" + by.id + " claims " + card.to_string()
+
+action retire(card: Int, by: Actor) -> Int requires permission("board.edit"):
+    return card
+
+server board:
+    route POST "/cards/{card: Int}/retire" -> json Int requires authenticated:
+        return retire(path.card, actor)
 "#;
+
+#[test]
+fn a_route_cannot_lend_its_caller_to_an_action_that_requires_more() {
+    let mut editor = Vec::new();
+    let mut viewer = Vec::new();
+    let app = serve(GUARDED, |data| {
+        editor = seed_actor(data, "editor-1", Some("editor"));
+        viewer = seed_actor(data, "viewer-1", None);
+    });
+    let (status, reply) = post_json(&app, "/cards/5/retire", &json!({}), &viewer);
+    assert_eq!((status, reply["error"].as_str()), (403, Some("insufficient_authority")), "{reply}");
+    let (status, reply) = post_json(&app, "/cards/5/retire", &json!({}), &editor);
+    assert_eq!((status, &reply), (200, &json!(5)));
+}
+
+#[test]
+fn an_action_reads_its_verified_caller_and_a_sent_one_is_refused() {
+    let mut editor = Vec::new();
+    let app = serve(GUARDED, |data| editor = seed_actor(data, "editor-1", Some("editor")));
+
+    let (status, reply) = post_json(&app, "/actions/claim", &json!({"card": 3}), &editor);
+    assert_eq!((status, &reply), (200, &json!("public/editor-1 claims 3")));
+
+    let forged = json!({"card": 3, "by": {"id": "someone-else", "tenant": "other"}});
+    let (status, reply) = post_json(&app, "/actions/claim", &forged, &editor);
+    assert_eq!(status, 400, "the caller is never read from the input: {reply}");
+}
 
 #[test]
 fn who_may_call_is_checked_before_the_input_is_read() {

@@ -25,7 +25,7 @@ use corvid_ast::{HttpMethod, RouteResponseKind};
 use corvid_driver::{run_ir_with_runtime, Value};
 use corvid_ir::{IrRoutePolicy, IrType};
 use corvid_resolve::DefId;
-use corvid_types::action_input::{whole_input_type, ACTIONS_PATH};
+use corvid_types::action_input::{is_caller, whole_input_type, ACTIONS_PATH};
 use corvid_types::Type;
 use corvid_vm::{decode_public_json, UnknownFields};
 
@@ -40,8 +40,11 @@ struct ActionEndpoint {
     agent: String,
     path: String,
     policy: IrRoutePolicy,
+    /// The input parameters, callers left out.
     params: Vec<(String, Type)>,
     whole_input: Option<Type>,
+    /// For each declared parameter, in order: whether it is the caller.
+    callers: Vec<bool>,
 }
 
 /// One `(path, handler)` per declared action.
@@ -54,7 +57,16 @@ pub(super) fn endpoints(state: &ServeState) -> anyhow::Result<Vec<(String, Metho
             .iter()
             .find(|agent| agent.id == action.agent)
             .ok_or_else(|| anyhow::anyhow!("action `{}` has no lowered body", action.name))?;
-        let params: Vec<(String, Type)> = agent.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect();
+        let callers: Vec<bool> = agent.params.iter().map(|p| is_caller(&p.ty)).collect();
+        if callers.iter().any(|caller| *caller) && !action.policy.requires_auth() {
+            anyhow::bail!("action `{}` reads its caller but requires no sign-in", action.name);
+        }
+        let params: Vec<(String, Type)> = agent
+            .params
+            .iter()
+            .filter(|p| !is_caller(&p.ty))
+            .map(|p| (p.name.clone(), p.ty.clone()))
+            .collect();
         let endpoint = Arc::new(ActionEndpoint {
             name: action.name.clone(),
             agent: agent.name.clone(),
@@ -62,6 +74,7 @@ pub(super) fn endpoints(state: &ServeState) -> anyhow::Result<Vec<(String, Metho
             policy: action.policy.clone(),
             whole_input: whole_input_type(params.iter().map(|(_, ty)| ty)).cloned(),
             params,
+            callers,
         });
         let path = endpoint.path.clone();
         let handler = on(
@@ -82,20 +95,32 @@ async fn run_action(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
-    let actor = if endpoint.policy.requires_auth() {
+    let enforced = if endpoint.policy.requires_auth() {
         match enforce_route_policy(&state, &endpoint.policy, HttpMethod::Post, &endpoint.path, &headers) {
-            Ok(enforced) => Some(enforced.actor),
+            Ok(enforced) => Some(enforced),
             Err(refused) => return refused,
         }
     } else {
         None
     };
+    let actor = enforced.as_ref().map(|e| &e.actor);
 
     let types_by_id: HashMap<DefId, &IrType> = state.ir.types.iter().map(|t| (t.id, t)).collect();
-    let args = match decode_input(&endpoint, &headers, &body, &types_by_id) {
-        Ok(args) => args,
+    let inputs = match decode_input(&endpoint, &headers, &body, &types_by_id) {
+        Ok(inputs) => inputs,
         Err(refused) => return refused,
     };
+    // Each caller parameter takes the verified actor; startup refused an
+    // action that reads its caller without requiring a sign-in.
+    let mut inputs = inputs.into_iter();
+    let args: Vec<Value> = endpoint
+        .callers
+        .iter()
+        .map(|caller| match (caller, &enforced) {
+            (true, Some(enforced)) => enforced.value.clone(),
+            _ => inputs.next().unwrap_or(Value::Nothing),
+        })
+        .collect();
 
     state.runtime.emit_host_event(
         "action",

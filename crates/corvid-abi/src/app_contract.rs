@@ -647,14 +647,19 @@ pub fn emit_application_contract(
         .iter()
         .filter_map(|decl| match decl {
             Decl::Agent(a) => a.action.as_ref().map(|spec| {
-                let param_types: Vec<&corvid_types::Type> =
-                    a.params.iter().filter_map(|p| checked.type_refs.get(&p.ty.span())).collect();
-                let whole = param_types.len() == a.params.len()
-                    && corvid_types::action_input::whole_input_type(param_types.into_iter()).is_some();
+                // The caller is filled from the session, so it is not input.
+                let inputs: Vec<(corvid_ast::Param, &corvid_types::Type)> = a
+                    .params
+                    .iter()
+                    .filter_map(|p| checked.type_refs.get(&p.ty.span()).map(|ty| (p.clone(), ty)))
+                    .filter(|(_, ty)| !corvid_types::action_input::is_caller(ty))
+                    .collect();
+                let whole = corvid_types::action_input::whole_input_type(inputs.iter().map(|(_, ty)| *ty)).is_some();
+                let params: Vec<corvid_ast::Param> = inputs.iter().map(|(p, _)| p.clone()).collect();
                 ContractAction {
-                    callable: contract_callable(&a.name.name, &a.params, &a.return_ty, &a.effect_row, registry, &names),
+                    callable: contract_callable(&a.name.name, &params, &a.return_ty, &a.effect_row, registry, &names),
                     policy: contract_policy(&spec.policy),
-                    input_type: whole.then(|| names.name(&a.params[0].ty)),
+                    input_type: whole.then(|| names.name(&params[0].ty)),
                 }
             }),
             _ => None,

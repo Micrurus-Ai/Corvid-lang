@@ -357,6 +357,7 @@ impl Type {
             "JsonBuilder" => Type::JsonBuilder,
             "JsonError" => Type::JsonError,
             "RegexMatch" => Type::RegexMatch,
+            "Actor" => Type::actor(),
             _ => return None,
         })
     }
@@ -430,6 +431,7 @@ impl Type {
             Type::JsonBuilder => "JsonBuilder".into(),
             Type::JsonError => "JsonError".into(),
             Type::RegexMatch => "RegexMatch".into(),
+            Type::RouteParams(_) if *self == Type::actor() => "Actor".into(),
             Type::RouteParams(_) => "route path params".into(),
             Type::Unknown => "<unknown>".into(),
         }

@@ -283,6 +283,11 @@ pub enum TypeErrorKind {
     ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
     /// A route declared at the path an action is served at.
     ActionPathTaken { action: String, path: String },
+    /// An action reads its caller (an `Actor` parameter) but requires no
+    /// sign-in, so no caller is ever verified.
+    ActionCallerWithoutSignIn { action: String, param: String },
+    /// An `Actor` where a request, a client or a model supplies the value.
+    ActorFromInput { place: String, at: String },
     /// A route's `query` record with a field the server cannot read
     /// from a query string; `field` is empty when the query type is not
     /// a record at all.
@@ -883,6 +888,12 @@ impl TypeErrorKind {
             ),
             Self::ActionPathTaken { action, path } => {
                 format!("route `{path}` takes the path action `{action}` is served at")
+            }
+            Self::ActionCallerWithoutSignIn { action, param } => format!(
+                "action `{action}` reads its caller as `{param}`, but `requires anyone` verifies no caller"
+            ),
+            Self::ActorFromInput { place, at } => {
+                format!("an `Actor` cannot be part of {place}{at}: the sender could name any caller")
             }
             Self::RoutePathParamType { path, param, ty } => {
                 format!("path parameter `{param}` of `{path}` is `{ty}`, which a path segment cannot be read as")
@@ -1647,6 +1658,12 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
                 "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
+            Self::ActionCallerWithoutSignIn { .. } => Some(
+                "require a signed-in caller, such as `requires authenticated`, or remove the `Actor` parameter".into(),
+            ),
+            Self::ActorFromInput { .. } => Some(
+                "an `Actor` comes only from the verified session: give an action an `Actor` parameter of its own, or read `actor` in a route that requires a sign-in".into(),
+            ),
             Self::ActionPathTaken { .. } => Some(
                 "every action is served at `POST /actions/<name>`; give the route another path, or call the action from it".into(),
             ),

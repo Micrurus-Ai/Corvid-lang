@@ -252,12 +252,21 @@ impl<'a> Checker<'a> {
     /// among its type arguments, `Some(" in field `T.f`")` when a
     /// declared record or variant holds one, `None` when it holds none.
     pub(super) fn secret_reached(&mut self, ty: &Type) -> Option<String> {
-        self.secret_reached_in(ty, &mut Vec::new())
+        self.type_reached(ty, |ty| matches!(ty, Type::Secret))
     }
 
-    fn secret_reached_in(&mut self, ty: &Type, seen: &mut Vec<(String, DefId)>) -> Option<String> {
+    /// Where `ty` holds a type `is_target` picks out, followed through
+    /// type arguments and declared records as [`Self::secret_reached`]
+    /// describes. The secret rules and the `Actor` input rule share it.
+    pub(super) fn type_reached(&mut self, ty: &Type, is_target: fn(&Type) -> bool) -> Option<String> {
+        self.type_reached_in(ty, is_target, &mut Vec::new())
+    }
+
+    fn type_reached_in(&mut self, ty: &Type, is_target: fn(&Type) -> bool, seen: &mut Vec<(String, DefId)>) -> Option<String> {
+        if is_target(ty) {
+            return Some(String::new());
+        }
         match ty {
-            Type::Secret => Some(String::new()),
             Type::Struct(id) => {
                 let key = (String::new(), *id);
                 if seen.contains(&key) {
@@ -265,7 +274,7 @@ impl<'a> Checker<'a> {
                 }
                 let decl = self.types_by_id.get(id).copied()?;
                 seen.push(key);
-                let found = self.secret_in_declaration(decl, None, seen);
+                let found = self.target_in_declaration(decl, None, is_target, seen);
                 seen.pop();
                 found
             }
@@ -279,7 +288,7 @@ impl<'a> Checker<'a> {
                     .and_then(|modules| modules.lookup_by_path(Path::new(&imported.module_path)))?;
                 let decl = imported_type_decl(module, imported.def_id)?;
                 seen.push(key);
-                let found = self.secret_in_declaration(decl, Some(module), seen);
+                let found = self.target_in_declaration(decl, Some(module), is_target, seen);
                 seen.pop();
                 found
             }
@@ -292,22 +301,22 @@ impl<'a> Checker<'a> {
             | Type::ResumeToken(inner)
             | Type::Upload(inner)
             | Type::Page(inner)
-            | Type::Weak(inner, _) => self.secret_reached_in(inner, seen),
+            | Type::Weak(inner, _) => self.type_reached_in(inner, is_target, seen),
             Type::Map(a, b) | Type::Result(a, b) => {
-                let first = self.secret_reached_in(a, seen);
-                first.or_else(|| self.secret_reached_in(b, seen))
+                let first = self.type_reached_in(a, is_target, seen);
+                first.or_else(|| self.type_reached_in(b, is_target, seen))
             }
             Type::Function { params, ret, .. } => {
                 for param in params {
-                    if let Some(at) = self.secret_reached_in(param, seen) {
+                    if let Some(at) = self.type_reached_in(param, is_target, seen) {
                         return Some(at);
                     }
                 }
-                self.secret_reached_in(ret, seen)
+                self.type_reached_in(ret, is_target, seen)
             }
             Type::RouteParams(params) => {
                 for (_, param) in params {
-                    if let Some(at) = self.secret_reached_in(param, seen) {
+                    if let Some(at) = self.type_reached_in(param, is_target, seen) {
                         return Some(at);
                     }
                 }
@@ -317,12 +326,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The first field of a declared record or sum type that holds a
-    /// `Secret`, as ` in field `T.f``.
-    fn secret_in_declaration(
+    /// The first field of a declared record or sum type that holds the
+    /// target type, as ` in field `T.f``.
+    fn target_in_declaration(
         &mut self,
         decl: &TypeDecl,
         module: Option<&corvid_resolve::ResolvedModule>,
+        is_target: fn(&Type) -> bool,
         seen: &mut Vec<(String, DefId)>,
     ) -> Option<String> {
         let fields: Vec<&Field> =
@@ -336,7 +346,7 @@ impl<'a> Checker<'a> {
                 None => self.type_ref_to_type(&field.ty),
             };
             self.errors.truncate(mark);
-            if let Some(through) = self.secret_reached_in(&field_ty, seen) {
+            if let Some(through) = self.type_reached_in(&field_ty, is_target, seen) {
                 return Some(format!(" in field `{}.{}`{through}", decl.name.name, field.name.name));
             }
         }

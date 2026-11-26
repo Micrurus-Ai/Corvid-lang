@@ -133,6 +133,50 @@ fn the_contract_says_when_one_record_is_the_whole_input() {
     assert_eq!(contract.actions[1].input_type, None, "`ping` takes no record");
 }
 
+const CALLER: &str = r#"
+type Card:
+    id: Int
+    owner: String
+
+action claim(card: Int, by: Actor) -> Card requires permission("board.edit"):
+    return Card(card, by.tenant + "/" + by.id)
+
+server board:
+    route POST "/cards/{card: Int}/claim" -> json Card requires authenticated:
+        return claim(path.card, actor)
+"#;
+
+#[test]
+fn an_action_reads_its_caller_and_code_passes_one_along() {
+    let found = errors(&format!("{IDENTITY}{CALLER}"));
+    assert!(found.is_empty(), "{found:#?}");
+    let contract = compile_to_application_contract_with_config(&format!("{IDENTITY}{CALLER}"), "app.cor", "test", None)
+        .unwrap_or_else(|errors| panic!("{errors:#?}"));
+    let inputs: Vec<&str> = contract.actions[0].callable.inputs.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(inputs, ["card"], "the caller is filled from the session, never sent");
+}
+
+#[test]
+fn only_a_verified_session_supplies_an_actor() {
+    let found = errors("action claim(card: Int, by: Actor) -> Int requires anyone:\n    return card\n");
+    assert!(found.iter().any(|m| m.contains("`requires anyone` verifies no caller")), "{found:#?}");
+
+    let forged = format!(
+        "{IDENTITY}type Claim:\n    card: Int\n    by: Actor\n\naction claim(claim: Claim) -> Int requires authenticated:\n    return claim.card\n"
+    );
+    let found = errors(&forged);
+    assert!(
+        found.iter().any(|m| m.contains("an `Actor` cannot be part of an action's input in field `Claim.by`")),
+        "a client could name any caller: {found:#?}"
+    );
+
+    let route = format!(
+        "{IDENTITY}type Claim:\n    by: Actor\n\nserver api:\n    route POST \"/claim\" body Claim -> json String:\n        return claim_owner(body)\n\nagent claim_owner(c: Claim) -> String:\n    return c.by.id\n"
+    );
+    let found = errors(&route);
+    assert!(found.iter().any(|m| m.contains("a route's path, query or body")), "{found:#?}");
+}
+
 #[test]
 fn action_stays_an_ordinary_name_elsewhere() {
     let found = errors("agent run(action: String) -> String:\n    return action\n");

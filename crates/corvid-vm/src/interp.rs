@@ -7,6 +7,8 @@
 //! backend, which will also be async-native. Behavioural parity is what
 //! makes this interpreter useful as a correctness oracle.
 
+#[path = "interp/action_caller.rs"]
+mod action_caller;
 #[path = "interp/effect_compose.rs"]
 mod effect_compose;
 #[path = "interp/expr.rs"]
@@ -2141,6 +2143,7 @@ impl<'ir> Interpreter<'ir> {
                     })
                     .await?;
                 }
+                self.check_action_caller(agent, &arg_values, span)?;
 
                 let mut sub = Interpreter::new(self.ir, self.runtime);
                 sub.mock_tools = self.mock_tools.clone();

@@ -51,6 +51,7 @@ impl InterpErrorKind {
             | Self::NotImplemented(_)
             | Self::MissingReturn
             | Self::ApprovalDenied(_)
+            | Self::CallerLacksAuthority { .. }
             | Self::DispatchFailed(_)
             | Self::Marshal(_)
             | Self::Other(_) => false,
@@ -109,6 +110,10 @@ pub enum InterpErrorKind {
 
     /// An approval action was denied or failed at runtime.
     ApprovalDenied(String),
+
+    /// Code called an action, passing a caller (`Actor`) that lacks what
+    /// the action's `requires` names. A decision, never an outage.
+    CallerLacksAuthority { action: String, caller: String, missing: String },
 
     /// A tool or prompt couldn't be dispatched.
     DispatchFailed(String),
@@ -172,6 +177,9 @@ impl fmt::Display for InterpErrorKind {
                 write!(f, "approval denied for action `{action}`")
             }
             Self::Timeout { milliseconds } => write!(f, "timed out after {milliseconds}ms"),
+            Self::CallerLacksAuthority { action, caller, missing } => {
+                write!(f, "action `{action}` requires {missing}, which caller `{caller}` does not hold")
+            }
             Self::DispatchFailed(msg) => write!(f, "call dispatch failed: {msg}"),
             Self::Runtime(err) => write!(f, "{err}"),
             Self::Marshal(msg) => write!(f, "marshalling error: {msg}"),
