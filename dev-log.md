@@ -861,6 +861,35 @@ that the runtime's encoding matches it.
 
 ---
 
+## 2026-11-25 - The change feed for live subscriptions (B14 RT-2)
+
+A `live` subscriber needs to hear about committed writes and receive the
+difference. The runtime now has a commit feed: a broadcast of
+`TableCommit { database, tables }`. A table write outside an `atomic:`
+block announces its table once the write succeeds; inside a block the
+transaction collects the tables it wrote and announces them when it
+commits, so a rolled-back block announces nothing and a subscriber never
+sees an undone write. A conflict writes nothing and announces nothing.
+`TableRef` now carries its database's name so the announcement can say
+which database changed.
+
+The difference is `live_changes`, a pure function from the rows a
+subscriber holds and the new ordered result to the wire changes: removals
+first, then each row not already in place is added or updated at its
+destination index, so applying them in order yields the new result
+exactly. Tests apply every change list to the old rows with the client's
+algorithm and compare, across every reordering and dropped row of a small
+result; heavier churn than the result's size becomes a snapshot.
+
+The transport re-runs a live's snapshot query on each commit that
+touches its table, so the database stays the one judge of matching and
+order. Considered: matching each written row against the filter in
+memory, which is faster but is a second implementation of the query's
+semantics; it is filed as a later optimization, to be tested against the
+re-run.
+
+---
+
 ## 2026-11-25 - Lowering's fallback id names no record
 
 IR lowering used `DefId(u32::MAX)` in eight places for a reference it

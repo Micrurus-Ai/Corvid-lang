@@ -130,6 +130,15 @@ Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route para
 1. **Path parameters are read as `path.board`**, as a route reads them. A subscription handler receives the same path record as a route handler.
 2. **Typed path placeholders, agreed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. The generated client takes its parameter types from the contract. A client subscribing to board 7 sends the concrete path `/boards/7/cards`.
 
+## Built in RT-2: the change feed RT-3 forwards
+
+Two pieces in `corvid_runtime::tables`, and one loop RT-3 runs per subscription:
+
+1. **`Runtime::subscribe_table_commits()`** returns a broadcast receiver of `TableCommit { database, tables }`. A write outside an `atomic:` block is announced once it succeeds; an `atomic:` block announces the set of tables it wrote when it commits, and nothing when it rolls back; a conflict writes nothing and announces nothing. Clones of one `Runtime` share the feed, so every run a server makes feeds it. A receiver more than 1,024 commits behind gets `RecvError::Lagged`; the subscription then sends a fresh `snapshot`.
+2. **`live_changes(previous, next)`** takes the rows a subscriber last received and the new ordered result, both as `LiveRow { key, revision, row }` (`LiveRow::from_json(row, keys)` builds one from the public JSON of a row), and returns `Unchanged`, `Changes(Vec<LiveChange>)` or `Snapshot(rows)`. Changes put removals first, then walk the new result in order, adding or updating each row not already at its index, so a client that applies them in order holds the new result exactly (`apply_live_changes` is that client, and the tests hold the two together). When more changes than rows would be needed, it returns the snapshot instead, as the wire protocol allows. `LiveChangeKind::wire_name` gives `added`, `updated` and `removed`.
+
+The loop: after `subscribe` and the first `snapshot` (the `__live__<path>` agent run with the subscriber's `path` and `actor`), on each `TableCommit` whose `database` is the live's and whose `tables` include its table, run the snapshot agent again, convert its rows, call `live_changes`, send the result, and keep the new rows as `previous`. The database stays the one judge of which rows match and in what order; a commit that touches other rows produces `Unchanged`. Re-running the query on each relevant commit is the reference behavior; an incremental matcher that checks only the written rows is a later optimization (on the roadmap), tested against this one.
+
 ## Non-scope
 
 - `take(n)` in a `live` query. Keeping a moving top-N correct needs the rows just outside the window; a later slice.

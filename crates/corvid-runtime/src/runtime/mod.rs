@@ -159,6 +159,10 @@ pub struct Runtime {
     /// is what makes "a protocol operation requires a durable job"
     /// enforceable rather than advisory.
     durable_job: Option<DurableJobContext>,
+    /// Every committed table write, announced for live subscriptions
+    /// (B14). Clones of a `Runtime` share it, so a server's runs feed one
+    /// stream.
+    pub(crate) table_commits: tokio::sync::broadcast::Sender<crate::tables::TableCommit>,
 }
 
 /// The durable job a run is executing under (slice 52h-2): the SQLite

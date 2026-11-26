@@ -28,6 +28,8 @@ pub struct TableTransaction {
     /// `None` during a replay, which never opens the database.
     pub(super) connection: Option<TableConnection>,
     _writer_turn: Option<tokio::sync::OwnedMutexGuard<()>>,
+    /// The tables written inside the block, announced at commit (B14).
+    pub(super) written: super::live::WrittenTables,
 }
 
 impl std::fmt::Debug for TableTransaction {
@@ -56,12 +58,23 @@ impl Runtime {
             Some((connection, turn)) => (Some(connection), turn),
             None => (None, None),
         };
-        Ok(TableTransaction { id, database: database.to_string(), connection, _writer_turn: writer_turn })
+        Ok(TableTransaction {
+            id,
+            database: database.to_string(),
+            connection,
+            _writer_turn: writer_turn,
+            written: Default::default(),
+        })
     }
 
     /// Commit an `atomic:` block's writes.
     pub async fn table_commit(&self, transaction: TableTransaction) -> Result<(), RuntimeError> {
-        self.end_transaction(transaction, "commit", "COMMIT").await
+        let database = transaction.database.clone();
+        let tables = transaction.written.take();
+        self.end_transaction(transaction, "commit", "COMMIT").await?;
+        // Only now are the block's writes visible, so only now announced.
+        self.announce_commit(&database, tables);
+        Ok(())
     }
 
     /// Undo an `atomic:` block's writes.

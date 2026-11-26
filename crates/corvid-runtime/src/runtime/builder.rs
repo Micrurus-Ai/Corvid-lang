@@ -494,6 +494,9 @@ impl RuntimeBuilder {
             // ordinary run has no durable job, which is exactly what
             // makes protocol execution refuse outside one.
             durable_job: None,
+            // A slow subscriber that falls this far behind is told it
+            // lagged and takes a fresh snapshot (B14).
+            table_commits: tokio::sync::broadcast::channel(1024).0,
         }
     }
 }
