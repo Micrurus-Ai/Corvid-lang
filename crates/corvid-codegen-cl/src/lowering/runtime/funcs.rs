@@ -160,6 +160,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_from_int: FuncId,
     pub string_from_bool: FuncId,
     pub string_from_float: FuncId,
+    /// `corvid_string_json_quote`: a String's JSON form, for a prompt
+    /// argument.
+    pub string_json_quote: FuncId,
     pub approve_sync: FuncId,
     // Typed prompt bridges, one per return type.
     pub prompt_call_int: FuncId,

@@ -25,6 +25,28 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - A native prompt's text argument reads as its JSON form
+
+The grammar says a prompt parameter "renders as its JSON form", and the
+interpreter renders a `String` argument quoted and escaped:
+`Greet "Ann \"A\""`. Native code inserted the raw text, `Greet Ann "A"`.
+So the same program sent the model different text on each tier, and its
+native recordings could not match an interpreter run. It now renders
+through `corvid_string_json_quote` at run time and through `serde_json`
+when the arguments are constants. A parity test compares the recorded
+prompt text on both tiers for a string with quotes, a backslash, a
+newline, a tab and a non-ASCII letter, which shows the two escapers
+agree.
+
+Found while starting slice B1 of the native scalar boundaries proposal,
+which also found that prompts use the interpreter's internal JSON form
+(an `Option` as a tagged envelope) for arguments, the schema shown to the
+model and replies, rather than the public form. The proposal now records
+the decision to move prompts to the public form on both tiers before
+native prompts are routed through the public plan.
+
+---
+
 ## 2026-11-26 - Compound assignment on Decimal and time values in native code
 
 `total += price` on a `Decimal` local, and `+=` and `-=` on a `Duration`
