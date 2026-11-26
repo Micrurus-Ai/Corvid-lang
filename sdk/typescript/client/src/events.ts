@@ -29,3 +29,36 @@ export interface AgentStream<T> extends AsyncIterable<AgentEvent<T>> {
   /** Await the final value, ignoring intermediate events. */
   result(): Promise<T>;
 }
+
+/**
+ * The public answer to a server failure: a code naming the kind of stop
+ * and a sentence safe to show a person. It never holds the server's own
+ * error text.
+ */
+export interface RouteFailure {
+  error: string;
+  detail: string;
+}
+
+/**
+ * One event of a route that returns `Stream<Item>`. A typed `Err` item the
+ * program handles arrives as a `chunk`, like `Ok`; `failed` is a server
+ * failure; `interrupted` means the connection was lost before the server
+ * said `completed` or `failed`. Each is the last event when it occurs,
+ * except `chunk`.
+ */
+export type RouteEvent<Item> =
+  | { kind: "chunk"; value: Item }
+  | { kind: "completed"; value: null }
+  | { kind: "failed"; error: RouteFailure }
+  | { kind: "interrupted" };
+
+/**
+ * A route's stream of items plus `result()`, which resolves to `null` when
+ * the route completes and rejects with a `CorvidError` on `failed` or
+ * `interrupted`. A route stream has no final value; an agent's does
+ * (`AgentStream`).
+ */
+export interface RouteStream<Item> extends AsyncIterable<RouteEvent<Item>> {
+  result(): Promise<null>;
+}

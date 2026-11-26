@@ -51,6 +51,7 @@ connector shop:
     base_url: "http://api.shop.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation place(filter: OrderFilter, order: NewOrder, request_id: String) -> Order uses http_write:
         POST "/v1/orders" query filter body order

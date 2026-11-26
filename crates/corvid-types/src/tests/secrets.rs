@@ -302,6 +302,7 @@ fn a_connector_operation_takes_no_secret() {
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     modes: [real]
     operation create_repo(token: Secret) -> Repo:

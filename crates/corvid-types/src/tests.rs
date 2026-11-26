@@ -1717,6 +1717,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     modes: [real]
     operation push_repo(owner: String) -> Repo dangerous uses http_write:
@@ -1752,6 +1753,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.github.com\"
     retry: 3
     modes: [real]
@@ -1798,6 +1800,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: no
     base_url: \"https://api.example.com\"
     modes: [real]
     operation submit_job(order: String) -> Job dangerous uses http_write:
@@ -2387,6 +2390,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2405,6 +2409,7 @@ const VERIFIED_PROVIDER_PROTOCOL: &str = r#"
 connector video:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://video.example.com"
     retry: 3
     modes: [real]
@@ -2481,6 +2486,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2519,6 +2525,7 @@ type NewIssue:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2551,6 +2558,7 @@ type NewIssue:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -2582,6 +2590,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2630,7 +2639,7 @@ connector svc:
     };
     let has = |messages: &[String], needle: &str| messages.iter().any(|m| m.contains(needle));
 
-    let declared = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    let declared = messages(connector("    timeout: 10s\n    redirects: never\n    published: no\n", ""));
     assert!(declared.is_empty(), "{declared:?}");
 
     let no_timeout = messages(connector("    redirects: never\n", ""));
@@ -2645,11 +2654,22 @@ connector svc:
         "{no_redirects:?}"
     );
 
-    let zero = messages(connector("    timeout: 0s\n    redirects: never\n", ""));
+    let no_publication = messages(connector("    timeout: 10s\n    redirects: never\n", ""));
+    assert_eq!(no_publication.len(), 1, "{no_publication:?}");
+    assert!(
+        has(&no_publication, "connector `svc` must declare whether the published contract lists it")
+            && has(&no_publication, "`published: no`")
+            && has(&no_publication, "`published: yes`"),
+        "{no_publication:?}"
+    );
+    let listed = messages(connector("    timeout: 10s\n    redirects: never\n    published: yes\n", ""));
+    assert!(listed.is_empty(), "{listed:?}");
+
+    let zero = messages(connector("    timeout: 0s\n    redirects: never\n    published: no\n", ""));
     assert!(has(&zero, "`timeout: 0s`"), "{zero:?}");
 
     let too_long = messages(connector(
-        "    timeout: 10s\n    redirects: never\n",
+        "    timeout: 10s\n    redirects: never\n    published: no\n",
         "        timeout: 7200s\n",
     ));
     assert!(has(&too_long, "operation `ping` declares `timeout: 7200s`"), "{too_long:?}");
@@ -2682,6 +2702,7 @@ connector svc:
     auth: header("X-Api-Key", secret("SVC_KEY"))
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
 {operation}"#
         )
@@ -2769,6 +2790,7 @@ connector payments:
     base_url: "https://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [mock, real]
     operation charge(id: String) -> Response<Charge> uses http_read:
         GET "/v1/charges/{{id}}"
@@ -2878,7 +2900,7 @@ type Page:
     };
     let has = |m: &[String], needle: &str| m.iter().any(|x| x.contains(needle));
     let any_host = |operation: &str| {
-        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    modes: [real]\n{operation}")
+        format!("connector web:\n    hosts: allowed_hosts\n    timeout: 10s\n    redirects: allowed_hosts\n    published: no\n    modes: [real]\n{operation}")
     };
 
     let fine = messages(program(&any_host(
@@ -2892,7 +2914,7 @@ type Page:
     assert!(has(&path_on_any_host, "take the whole URL as a parameter"), "{path_on_any_host:?}");
 
     let url_on_base = messages(program(
-        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
+        "connector api:\n    base_url: \"https://api.example.com\"\n    timeout: 10s\n    redirects: never\n    published: no\n    modes: [real]\n    operation fetch(url: String) -> String uses http_read:\n        GET url\n",
     ));
     assert!(has(&url_on_base, "but the connector has a `base_url`"), "{url_on_base:?}");
 
@@ -2926,6 +2948,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation fetch(url: String) -> {ret} uses http_read:
         GET url
@@ -2968,6 +2991,7 @@ connector jobs:
     base_url: "https://jobs.example.com"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation submit(input: String) -> Result<Job, JobError> dangerous uses http_write:
         POST "/jobs" body input
@@ -3012,6 +3036,7 @@ connector provider:
     base_url: "https://provider.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [mock, real]
 {operation}"#
         )
@@ -3097,6 +3122,7 @@ connector storage:
     base_url: "https://storage.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
 {operation}"#
         )
@@ -3148,6 +3174,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3176,6 +3203,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3201,6 +3229,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3234,6 +3263,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [mock]
@@ -3260,6 +3290,7 @@ type Repo:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -3294,6 +3325,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]
@@ -3329,6 +3361,7 @@ type GithubError:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     auth: bearer(secret("GITHUB_TOKEN"))
     modes: [real]

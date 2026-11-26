@@ -1,5 +1,5 @@
 import { connectionForPage } from "./live-connection.js";
-import { livePath } from "./live-path.js";
+import { fillPath } from "./path.js";
 
 const connection = connectionForPage(location.origin);
 
@@ -27,7 +27,7 @@ class CorvidLiveList extends HTMLElement {
       const args = JSON.parse(this.dataset.arguments);
       if (!Array.isArray(args) || args.length !== route.path_params.length) throw Error("Invalid live path arguments.");
       const values = Object.fromEntries(route.path_params.map(({name}, i) => [name, args[i]]));
-      this.#release = connection.subscribe(livePath(route.path, values), route.key_fields, {
+      this.#release = connection.subscribe(fillPath(route.path, values), route.key_fields, {
         rows: rows => {
           if (this.#mount !== mount) return;
           try {

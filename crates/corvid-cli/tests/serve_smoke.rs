@@ -1590,7 +1590,7 @@ server test_serve_q10_api:
     std::fs::write(&src_path, source).unwrap();
 
     let port = free_port();
-    let child = Command::new(corvid_bin())
+    let mut child = Command::new(corvid_bin())
         .arg("serve")
         .arg(&src_path)
         .arg("--listen")
@@ -1600,7 +1600,8 @@ server test_serve_q10_api:
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
-    let _guard = ServedApp(child);
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let guard = ServedApp(child);
 
     assert!(wait_until_ready(port), "server did not become ready on :{port}");
 
@@ -1643,17 +1644,18 @@ server test_serve_q10_api:
          finding. detail={detail:?}"
     );
 
-    // Sanity: the detail still carries the actionable message
-    // ("no handler registered") so we haven't just nuked all
-    // diagnostic content along with the span prefix.
+    // The body carries the public sentence, never the error's own text
+    // (stream failures S2); the actionable message, naming the
+    // unregistered tool, is in the operator's log.
+    assert_eq!(detail, "the request handler failed; the server log has the details");
+    drop(guard);
+    let mut log = String::new();
+    std::io::BufReader::new(stderr).read_to_string(&mut log).expect("read the server log");
     assert!(
-        detail.contains("no handler registered"),
-        "detail must still contain the actionable message after \
-         span-stripping: detail={detail:?}"
-    );
-    assert!(
-        detail.contains("classify_anything"),
-        "detail must still name the unregistered tool: detail={detail:?}"
+        log.contains("POST /classify failed (handler_failed)")
+            && log.contains("no handler registered")
+            && log.contains("classify_anything"),
+        "the log must keep the actionable message: {log}"
     );
 }
 
@@ -1723,7 +1725,7 @@ server secure_api:
 /// 52c-1 streaming gate. A `Stream<T>` route response executes as
 /// Server-Sent Events end-to-end: `corvid serve` consumes the
 /// interpreter's stream channel and flushes each yielded value as a
-/// `data: <json>` event, terminated by `event: done`. Proves the
+/// `chunk` event, terminated by `completed`. Proves the
 /// `streaming` RuntimeCapability is wired (the route STARTS under
 /// Contract Closure) AND that the transport carries the typed events.
 #[test]
@@ -1766,21 +1768,93 @@ server ticker_api:
 
     let (status, body) = http_get(port, "/ticks").expect("GET /ticks failed");
     assert_eq!(status, 200, "SSE response status (body={body})");
-    // Each yielded Tick is a `data:` event carrying its JSON; the stream
-    // terminates with `event: done`.
-    for needle in [
-        "data: {",
-        "\"n\":1",
-        "\"label\":\"first\"",
-        "\"n\":2",
-        "\"n\":3",
-        "event: done",
-    ] {
-        assert!(
-            body.contains(needle),
-            "SSE body must contain `{needle}`: body=\n{body}"
-        );
+    // Each yielded Tick is a `chunk` event carrying its public JSON; the
+    // stream ends with `completed`, whose data is `null`.
+    let events = sse_events(&body);
+    let names: Vec<&str> = events.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["chunk", "chunk", "chunk", "completed"], "body=\n{body}");
+    assert_eq!(events[0].1, serde_json::json!({"n": 1, "label": "first"}));
+    assert_eq!(events[2].1["n"], 3);
+    assert_eq!(events[3].1, serde_json::Value::Null);
+}
+
+/// The `(event, data)` pairs of a Server-Sent Events body, with each
+/// `data` parsed as JSON. Lines of the HTTP chunked framing are skipped.
+fn sse_events(body: &str) -> Vec<(String, serde_json::Value)> {
+    let mut events = Vec::new();
+    let mut name = String::from("message");
+    for line in body.lines().map(|line| line.trim_end_matches('\r')) {
+        if let Some(event) = line.strip_prefix("event: ") {
+            name = event.to_string();
+        } else if let Some(data) = line.strip_prefix("data: ") {
+            let value = serde_json::from_str(data).unwrap_or_else(|e| panic!("data `{data}` is not JSON: {e}"));
+            events.push((std::mem::replace(&mut name, String::from("message")), value));
+        }
     }
+    events
+}
+
+/// The stream protocol (stream failures, part 2) on a parameterized
+/// `Stream<Result<T, E>>` route: a typed `Err` item travels inside
+/// `chunk`, like `Ok`, and the stream still ends with `completed`. A
+/// failure the program did not turn into a value ends it with `failed`,
+/// whose `{error, detail}` holds a fixed sentence: the refused URL and the
+/// path in it reach the server log only, never the browser.
+#[test]
+fn a_route_stream_sends_typed_items_and_a_sanitized_failure() {
+    let source = repo_root().join("sdk/typescript/client/test/route_stream.cor");
+    let port = free_port();
+    let mut child = Command::new(corvid_bin())
+        .arg("serve")
+        .arg(&source)
+        .args(["--mode", "real", "--listen"])
+        .arg(format!("127.0.0.1:{port}"))
+        .env("CORVID_HTTP_ALLOW", "api.example.com")
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("spawn corvid serve: {e}"));
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let app = ServedApp(child);
+    assert!(wait_until_ready(port), "server did not become ready on :{port}");
+
+    let (status, body) = http_get(port, "/boards/7/feed").expect("GET feed");
+    assert_eq!(status, 200, "{body}");
+    let events = sse_events(&body);
+    assert_eq!(
+        events,
+        vec![
+            ("chunk".to_string(), serde_json::json!({"tag": "ok", "ok": {"text": "board 7"}})),
+            (
+                "chunk".to_string(),
+                serde_json::json!({"tag": "err", "err": {"tag": "variant", "type": "FeedError", "variant": "Paused", "fields": ["rate limited"]}}),
+            ),
+            ("completed".to_string(), serde_json::Value::Null),
+        ],
+        "body=\n{body}"
+    );
+
+    let (status, body) = http_get(port, "/boards/7/broken").expect("GET broken");
+    assert_eq!(status, 200, "{body}");
+    let events = sse_events(&body);
+    assert_eq!(events.len(), 2, "body=\n{body}");
+    assert_eq!(events[0], ("chunk".to_string(), serde_json::json!({"tag": "ok", "ok": {"text": "before"}})));
+    assert_eq!(events[1].0, "failed");
+    assert_eq!(events[1].1["error"], "handler_failed");
+    let detail = events[1].1["detail"].as_str().expect("a detail sentence");
+    for leak in ["127.0.0.1", "/Users/ops", "http", "SSRF", "["] {
+        assert!(!detail.contains(leak), "`{leak}` reached the browser: {detail}");
+    }
+
+    drop(app);
+    let mut log = String::new();
+    std::io::BufReader::new(stderr).read_to_string(&mut log).expect("read the server log");
+    assert!(
+        log.contains("GET /boards/{board}/broken failed (handler_failed)")
+            && log.contains("http://127.0.0.1:9/Users/ops/vault/notes/7"),
+        "the operator's log keeps the full error: {log}"
+    );
 }
 
 /// Minimal HTTP/1.1 multipart/form-data POST of a single file part.
@@ -2730,6 +2804,7 @@ effect http_read:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2799,6 +2874,7 @@ effect http_read:
 connector github:
     timeout: 10s
     redirects: never
+    published: no
     base_url: "https://api.github.com"
     modes: [mock, real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
@@ -2852,6 +2928,7 @@ connector github:
     base_url: "https://api.github.com"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
@@ -3428,7 +3505,10 @@ fn served_outbound_http_obeys_deadlines_and_client_cancellation() {
         let (upstream, _) = next();
         let (status, body) = deadline.join().unwrap();
         assert_eq!(status, 504, "{body}");
-        assert!(body.contains("timed out after 300ms"), "{body}");
+        assert!(
+            body.contains("\"error\":\"handler_timeout\"") && body.contains("within its 300 ms timeout"),
+            "{body}"
+        );
         closed(upstream);
 
         let redirected = scope.spawn(|| http_get(port, "/wait").unwrap());
@@ -3465,6 +3545,7 @@ connector provider:
     base_url: "http://provider.test"
     timeout: 30s
     redirects: never
+    published: no
     modes: [real]
     operation deltas(topic: String) -> Stream<Delta> uses provider_read:
         GET "/deltas/{topic}"

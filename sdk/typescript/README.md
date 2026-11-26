@@ -13,6 +13,9 @@ glue**.
     `/auth/{provider}/login|logout|session` helpers,
   - the typed agent **event protocol** over SSE
     (`started`/`chunk`/`tool_started`/`tool_completed`/`approval_required`/`completed`/`failed`),
+  - the **route stream** protocol (`chunk`/`completed`/`failed`, plus
+    `interrupted` for a lost connection) that `corvid serve` sends for a
+    route returning `Stream<T>`,
   - typed errors (`CorvidError`, carrying the `@status` code and the
     parsed error-enum body),
   - cursor **pagination** (`Page<Item>`, `paginate(...)`).
@@ -41,7 +44,23 @@ for await (const event of api.chat("hi")) {            // typed SSE events
   if (event.kind === "chunk") render(event.value);
 }
 api.loginWith_google();                                // auth helper
+
+// A route that returns Stream<Result<Delta, FeedError>>, called by its
+// method and path as declared; arguments are typed path values in order.
+for await (const event of api.route("GET /boards/{board}/feed", 7)) {
+  if (event.kind === "chunk") "ok" in event.value ? render(event.value.ok) : warn(event.value.err);
+  if (event.kind === "failed") showError(event.error.detail);  // safe to show
+  if (event.kind === "interrupted") offerRetry();               // connection lost
+}
+await api.route("GET /boards/{board}/feed", 7).result();       // null when it completes
 ```
+
+A typed `Err` item is a value inside `chunk`, handled in the same loop as
+`Ok`. `failed` is a server failure, and its `detail` is a fixed sentence
+that never holds a URL or path from the server's error. `interrupted`
+means the connection dropped before `completed` or `failed`. Only
+streaming routes are generated route calls so far; ordinary routes join
+the same `route()` method next.
 
 Define the backend once in Corvid; the frontend gets types, methods,
 streaming, auth, errors, and pagination for free.

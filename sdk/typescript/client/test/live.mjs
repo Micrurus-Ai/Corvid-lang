@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CorvidClient, CorvidError, livePath } from "../target/index.js";
+import { CorvidClient, CorvidError, fillPath } from "../target/index.js";
 
 // Drive the browser-facing WebSocket boundary without running an endpoint.
 function setup(t) {
@@ -153,11 +153,11 @@ test("the page shares a socket and keeps other owners active after one unmounts"
 });
 
 test("typed route arguments fill complete segments and retain literal values", () => {
-  assert.equal(livePath("/boards/{board}/{name}", {board: 7, name: "{board}/a b"}),
+  assert.equal(fillPath("/boards/{board}/{name}", {board: 7, name: "{board}/a b"}),
     "/boards/7/%7Bboard%7D%2Fa%20b");
-  assert.equal(livePath("/board-{board}", {board: 7}), "/board-7");
-  assert.throws(() => livePath("/{board}", {board: 2 ** 53}), /inexact/i);
-  assert.throws(() => livePath("/{board}", {}), /missing/i);
+  assert.equal(fillPath("/board-{board}", {board: 7}), "/board-7");
+  assert.throws(() => fillPath("/{board}", {board: 2 ** 53}), /inexact/i);
+  assert.throws(() => fillPath("/{board}", {}), /missing/i);
 });
 
 test("cleanup suppresses a queued terminal error for the released owner", async t => {

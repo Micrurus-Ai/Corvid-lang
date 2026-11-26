@@ -41,6 +41,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real, replay]
     operation charge(new: NewCharge) -> Result<Charge, ChargeError> uses http_write:
         POST "/v1/charges" body new
@@ -304,6 +305,7 @@ connector provider:
     base_url: "http://model.example"
     timeout: 1s
     redirects: never
+    published: no
     modes: [real]
     operation complete(question: String) -> Stream<Delta> uses model_read:
         POST "/v1/complete" body question
@@ -356,6 +358,7 @@ connector payments:
     base_url: "http://api.payments.example"
     timeout: 10s
     redirects: never
+    published: no
     modes: [real, replay]
     operation charge(id: String) -> Response<Charge> uses http_read:
         GET "/v1/charges/{id}"

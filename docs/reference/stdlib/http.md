@@ -27,6 +27,7 @@ connector web:
     hosts: allowed_hosts
     timeout: 10s
     redirects: allowed_hosts
+    published: no
     modes: [real, replay]
     operation page(url: String) -> Result<Response<String>, FetchError> uses http_read:
         GET url
@@ -42,7 +43,7 @@ agent status_of(url: String) -> Int uses http_read:
         Err(e) -> 0
 ```
 
-A connector calling one API declares `base_url: "https://api.example.com"` and gives each operation a path; `hosts: allowed_hosts`, as here, lets each call name its URL. Either way the request runs through the always-on SSRF block and the `[http] allow` list below, takes at most its declared `timeout`, and follows only the redirects its `redirects:` policy allows. With `on failure -> Unreachable`, a refused URL, a timeout, a network error, an unmapped error status or a body that does not match the declared type is an `Err(Unreachable(reason))` value; without it, the failure stops the program. `response: text` reads a page as a `String` instead of JSON, and `Response<Body>` gives the status and headers. The full grammar is in [connector declarations](../grammar.md#connector-declarations); the design is in the [HTTP client proposal](../../proposals/http-client.md).
+A connector calling one API declares `base_url: "https://api.example.com"` and gives each operation a path; `hosts: allowed_hosts`, as here, lets each call name its URL. Either way the request runs through the always-on SSRF block and the `[http] allow` list below, takes at most its declared `timeout`, and follows only the redirects its `redirects:` policy allows. `published: yes` or `published: no` says whether the app's published contract at `/.well-known/corvid` lists the connector; omitting it is a compile error. With `on failure -> Unreachable`, a refused URL, a timeout, a network error, an unmapped error status or a body that does not match the declared type is an `Err(Unreachable(reason))` value; without it, the failure stops the program. `response: text` reads a page as a `String` instead of JSON, and `Response<Body>` gives the status and headers. The full grammar is in [connector declarations](../grammar.md#connector-declarations); the design is in the [HTTP client proposal](../../proposals/http-client.md).
 
 ## Security model — `[http] allow` + always-on SSRF
 
@@ -181,6 +182,7 @@ connector hooks:
     hosts: allowed_hosts
     timeout: 5s
     redirects: never
+    published: no
     modes: [real, replay]
     operation notify(url: String, event: Event) -> Result<Receipt, DeliveryError> dangerous uses http_egress_post:
         POST url body event

@@ -25,7 +25,7 @@ pub(super) fn for_contract(
     }
     sdk_module!("errors.js");
     sdk_module!("live-rows.js");
-    sdk_module!("live-path.js");
+    sdk_module!("path.js");
     sdk_module!("live-connection.js");
     let mut module = String::from(include_str!(
         "../../../corvid-codegen-wasm/src/row_order.js"

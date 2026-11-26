@@ -7,8 +7,9 @@
 //!   union per sum/error type, so a frontend gets exhaustive, typed
 //!   handling of every value the surface exchanges (including the
 //!   `@status`/`@ui` error metadata from slice 51e).
-//! - `api.ts` — a typed method per public agent/prompt and per route,
-//!   plus the auth helpers derived from the `identity` block. Each
+//! - `api.ts` — a typed method per public agent/prompt, a `route()`
+//!   call for each route that returns a stream (keyed by its method and
+//!   path), plus the auth helpers derived from the `identity` block. Each
 //!   method is a one-liner that delegates to the generic
 //!   `@corvid/client` transport — the HTTP/SSE/session/error behavior
 //!   lives in that shipped package and is REUSED, never regenerated
@@ -263,20 +264,25 @@ fn emit_api(contract: &ApplicationContract) -> String {
     out.push_str(GENERATED_HEADER);
     out.push('\n');
     if !contract.live.is_empty() {
-        out.push_str("import { livePath } from \"@corvid/client\";\n");
+        out.push_str("import { fillPath } from \"@corvid/client\";\n");
     }
-    out.push_str("import { CorvidClient, type AgentStream, type Page } from \"@corvid/client\";\n");
+    out.push_str(
+        "import { CorvidClient, type AgentStream, type Page, type RouteShape, type RouteStream } from \"@corvid/client\";\n",
+    );
     // Import every generated type so method signatures resolve.
     if !contract.types.is_empty() {
         let names: Vec<&str> = contract.types.iter().map(|t| t.name.as_str()).collect();
         out.push_str(&format!("import type {{ {} }} from \"./types\";\n", names.join(", ")));
     }
     out.push('\n');
+    let routes = stream_routes(contract);
+    out.push_str(&routes.tables);
     out.push_str("export class Api {\n");
     out.push_str("  constructor(private readonly client: CorvidClient) {}\n\n");
     if !contract.live.is_empty() {
         out.push_str(&live_methods(contract));
     }
+    out.push_str(&routes.method);
 
     for agent in &contract.agents {
         out.push_str(&callable_method(agent, "agent"));
@@ -324,7 +330,7 @@ fn live_methods(contract: &ApplicationContract) -> String {
                 params.push(format!("{arg}: {}", ts_type(&param.type_name)));
                 arguments.push(format!("[{}]: {arg}", quote(&param.name)));
             }
-            let path = format!("livePath({}, {{ {} }})", quote(&live.path), arguments.join(", "));
+            let path = format!("fillPath({}, {{ {} }})", quote(&live.path), arguments.join(", "));
             params.push(format!("observer: import(\"@corvid/client\").LiveObserver<{row}>"));
             let keys = serde_json::to_string(&live.key_fields).expect("string key names");
             out.push_str(&format!(
@@ -336,6 +342,109 @@ fn live_methods(contract: &ApplicationContract) -> String {
     }
     out.push_str("  };\n\n");
     out
+}
+
+/// The generated code for calling the app's streaming routes: the
+/// `Routes` table and its runtime shapes, emitted before `Api`, and the
+/// `route` method inside it.
+struct StreamRoutes {
+    tables: String,
+    method: String,
+}
+
+/// Every route that returns `Stream<Item>`, keyed by its method and
+/// contract path (`"GET /boards/{board}/feed"`), so a call names the route
+/// as the source declares it and a changed path or parameter type fails to
+/// compile at every caller. Arguments are the path parameters in path
+/// order, then the query record, then the body.
+///
+/// Only streaming routes are generated so far; ordinary routes join the
+/// same table next (frontend roadmap). A streaming route with an `Upload`
+/// body is left out and named in a comment, because the client cannot yet
+/// send multipart.
+fn stream_routes(contract: &ApplicationContract) -> StreamRoutes {
+    let mut entries = Vec::new();
+    let mut example = None;
+    let mut shapes = Vec::new();
+    let mut skipped = Vec::new();
+    for route in &contract.routes {
+        let Some(item) = route
+            .pagination
+            .as_ref()
+            .filter(|p| p.style == crate::app_contract::PaginationStyle::Stream)
+            .map(|p| &p.item_type)
+        else {
+            continue;
+        };
+        let key = quote(&format!("{} {}", route.method, route.path));
+        if route.upload.is_some() {
+            skipped.push(key);
+            continue;
+        }
+        let mut args: Vec<String> = route
+            .path_params
+            .iter()
+            .map(|param| format!("{}: {}", sanitize_ident(&param.name), ts_type(&param.type_name)))
+            .collect();
+        if let Some(query) = &route.query_type {
+            args.push(format!("query: {}", ts_type(query)));
+        }
+        let body = match (&route.body_type, route.request_media_type.as_deref()) {
+            (None, _) => "null",
+            (Some(body), Some("application/x-www-form-urlencoded")) => {
+                args.push(format!("body: {}", ts_type(body)));
+                "\"form\""
+            }
+            (Some(body), _) => {
+                args.push(format!("body: {}", ts_type(body)));
+                "\"json\""
+            }
+        };
+        example.get_or_insert_with(|| {
+            let mut call = vec![key.clone()];
+            call.extend(route.path_params.iter().map(|param| sanitize_ident(&param.name)));
+            call.join(", ")
+        });
+        entries.push(format!(
+            "  {key}: {{ args: [{}]; reply: RouteStream<{}> }};\n",
+            args.join(", "),
+            ts_type(item)
+        ));
+        let params: Vec<String> = route.path_params.iter().map(|param| quote(&param.name)).collect();
+        shapes.push(format!(
+            "  {key}: {{ params: [{}], query: {}, body: {body} }},\n",
+            params.join(", "),
+            route.query_type.is_some()
+        ));
+    }
+    let mut tables = String::new();
+    for key in &skipped {
+        tables.push_str(&format!(
+            "// Not generated yet: {key} streams over an `Upload` body, which the client cannot send.\n"
+        ));
+    }
+    if entries.is_empty() {
+        if !skipped.is_empty() {
+            tables.push('\n');
+        }
+        return StreamRoutes { tables, method: String::new() };
+    }
+    tables.push_str("/** The app's streaming routes, by method and path as declared. */\nexport interface Routes {\n");
+    tables.extend(entries);
+    tables.push_str("}\n\nconst ROUTES: { readonly [K in keyof Routes]: RouteShape } = {\n");
+    tables.extend(shapes);
+    tables.push_str("};\n\n");
+
+    // `route` is a Corvid keyword, so no agent or prompt method can take
+    // the name.
+    let name = "route";
+    let example = example.unwrap_or_default();
+    let method = format!(
+        "  /** Call a declared streaming route, as in `api.{name}({example})`. */\n  \
+         {name}<K extends keyof Routes>(route: K, ...args: Routes[K][\"args\"]): Routes[K][\"reply\"] {{\n    \
+         return this.client.routeStream(route, ROUTES[route], args) as Routes[K][\"reply\"];\n  }}\n\n"
+    );
+    StreamRoutes { tables, method }
 }
 
 fn callable_method(c: &crate::app_contract::ContractCallable, kind: &str) -> String {
@@ -628,6 +737,7 @@ type Job:
 connector shipping:
     timeout: 10s
     redirects: never
+    published: yes
     base_url: "https://api.example.com"
     auth: bearer(secret("SHIPPING_TOKEN"))
     modes: [real]
@@ -694,6 +804,72 @@ agent main() -> Job uses http_write:
         assert!(
             !types.contains("Status = string"),
             "the status type must never widen to `string`"
+        );
+    }
+
+    /// Each streaming route is one `Routes` entry keyed by its method and
+    /// path, with its arguments in order (path values, query, body) and
+    /// the body's encoding; an `Upload` body is named, not generated, and
+    /// an ordinary route is not in the table yet.
+    #[test]
+    fn streaming_routes_become_typed_route_calls() {
+        let api = emit_api(&contract_for(
+            r#"
+type Tick:
+    n: Int
+
+type Filter:
+    since: Int
+
+agent ticks(n: Int) -> Stream<Tick>:
+    yield Tick(n)
+
+server app:
+    route GET "/boards/{board: Int}/ticks/{lane}" query Filter -> json Stream<Tick>:
+        return ticks(path.board)
+    route POST "/ticks" body Filter -> json Stream<Tick>:
+        return ticks(body.since)
+    route POST "/ticks/form" form Filter -> json Stream<Tick>:
+        return ticks(body.since)
+    @upload(max_bytes: 32, mime: "text/csv")
+    route POST "/ticks/upload" body Upload<Csv> -> json Stream<Tick>:
+        return ticks(body.size())
+    route GET "/count" -> json Int:
+        return 1
+"#,
+        ));
+        for expected in [
+            r#""GET /boards/{board}/ticks/{lane}": { args: [board: number, lane: string, query: Filter]; reply: RouteStream<Tick> };"#,
+            r#""POST /ticks": { args: [body: Filter]; reply: RouteStream<Tick> };"#,
+            r#""GET /boards/{board}/ticks/{lane}": { params: ["board", "lane"], query: true, body: null },"#,
+            r#""POST /ticks": { params: [], query: false, body: "json" },"#,
+            r#""POST /ticks/form": { params: [], query: false, body: "form" },"#,
+            r#"// Not generated yet: "POST /ticks/upload" streams over an `Upload` body"#,
+            r#"route<K extends keyof Routes>(route: K, ...args: Routes[K]["args"]): Routes[K]["reply"]"#,
+        ] {
+            assert!(api.contains(expected), "missing `{expected}` in:\n{api}");
+        }
+        assert!(!api.contains("/count"), "ordinary routes are not generated yet:\n{api}");
+        assert!(!api.contains(r#""POST /ticks/upload": {"#), "{api}");
+    }
+
+    /// An app without a streaming route gets no `Routes` table and no
+    /// route method.
+    #[test]
+    fn an_app_without_stream_routes_has_no_route_method() {
+        let api = emit_api(&contract_for(SRC));
+        assert!(!api.contains("interface Routes") && !api.contains("routeStream"), "{api}");
+    }
+
+    /// A protocol on a `published: no` connector is backend only, so the
+    /// generated client carries none of its types: a frontend that
+    /// imports them stops compiling, and the choice shows in both tiers.
+    #[test]
+    fn an_unpublished_connector_generates_no_protocol_types() {
+        let types = emit_types(&contract_for(&SRC.replace("published: yes", "published: no")));
+        assert!(
+            !types.contains("ShippingSubmitShipment"),
+            "an unpublished protocol must not reach the client; got:\n{types}"
         );
     }
 
