@@ -334,6 +334,22 @@ fn run_via_interpreter_tier(
     args: &[String],
     connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
+    let Some(rt) = interpreter_runtime(path, ir, connector_mode)? else {
+        return Ok(1);
+    };
+    run_entry_with_runtime(path, ir, args, rt)
+}
+
+/// The runtime a program runs on in the interpreter tier from the
+/// command line: the stdin approver, the trace, the project's io, http,
+/// rag and MCP policy, the connector mode and env-driven models. `None`
+/// when the connector startup check refused, with the refusals printed.
+/// `corvid run` and `corvid act` both build it here.
+pub fn interpreter_runtime(
+    path: &Path,
+    ir: &IrFile,
+    connector_mode: Option<corvid_ast::ConnectorMode>,
+) -> Result<Option<Runtime>, anyhow::Error> {
     let trace_dir = trace_dir_for(path);
     let tracer = Tracer::open(&trace_dir, corvid_runtime::fresh_run_id())
         .with_redaction(RedactionSet::from_env());
@@ -413,7 +429,7 @@ fn run_via_interpreter_tier(
             for refusal in &refusals {
                 eprintln!("{}", refusal.message());
             }
-            return Ok(1);
+            return Ok(None);
         }
     }
 
@@ -431,7 +447,10 @@ fn run_via_interpreter_tier(
             );
         }
     }
+    Ok(Some(rt))
+}
 
+fn run_entry_with_runtime(path: &Path, ir: &IrFile, args: &[String], rt: Runtime) -> Result<u8, anyhow::Error> {
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
