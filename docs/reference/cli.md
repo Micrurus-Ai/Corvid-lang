@@ -8,6 +8,20 @@ overview.
 
 ## Live client transport
 
+`corvid contract app` publishes each live declaration's `server`, `name`,
+`path`, ordered `path_params`, `row_type`, ordered `key_fields` and policy.
+Look up `row_type` in `types` for its public JSON fields. Both `route` and
+`live` accept `{board: Int}` in the source path. The contract path uses
+`{board}` and records its type separately. An unannotated segment is a String.
+
+`corvid contract ts-client` generates a method per live declaration. For
+`live "/boards/{board: Int}/cards" -> Card` on `board_app`, subscribe with
+`const stop = api.live.board_app.cards(7, observer)`. Path arguments appear
+in declaration order, followed by the observer. Its `rows` callback receives
+`readonly Card[]`. Call `stop()` when the component unmounts. If a public
+callable uses the name `live`, the generated group appends underscores until
+its name is available.
+
 The TypeScript SDK provides
 `CorvidClient.subscribe<Row>(path, keyFields, observer): () => void` for client
 bindings. The binding supplies the concrete encoded path and the ordered names
@@ -22,7 +36,7 @@ snapshot or change. Rows with the same key and revision keep their identity.
 result on error. A scoped denial yields a `CorvidError` with status 403 and
 body code `forbidden`. Session invalidation ends every subscription on the
 connection. Call the returned function when the owner unmounts. Multiple
-calls are safe. Generated live methods and the Corvid binding remain pending.
+calls are safe. The Corvid component binding remains pending.
 
 ## Project commands
 

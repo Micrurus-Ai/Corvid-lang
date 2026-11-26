@@ -205,7 +205,7 @@ impl<'a> Parser<'a> {
                 });
             }
         };
-        let path_params = parse_route_path_params(&path, path_span);
+        let (path, path_params) = parse_route_path_params(&path, path_span)?;
         self.expect(TokKind::Arrow, "`->` before the row type a `live` declaration delivers")?;
         let row = self.parse_type_ref()?;
         let row_span = row.span();
@@ -257,7 +257,7 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let path_params = parse_route_path_params(&path, path_span);
+        let (path, path_params) = parse_route_path_params(&path, path_span)?;
         let mut query_ty = None;
         let mut body_ty = None;
         let mut form_encoded = false;
@@ -555,30 +555,59 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn parse_route_path_params(path: &str, path_span: Span) -> Vec<RoutePathParam> {
+fn parse_route_path_params(path: &str, path_span: Span) -> Result<(String, Vec<RoutePathParam>), ParseError> {
     let mut params = Vec::new();
+    let mut template = String::new();
     let mut offset = 0usize;
     while let Some(open_rel) = path[offset..].find('{') {
         let open = offset + open_rel;
         let Some(close_rel) = path[open + 1..].find('}') else {
-            break;
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "unterminated path placeholder".into(),
+                    expected: "`}` after the path parameter".into(),
+                },
+                span: path_span,
+            });
         };
         let close = open + 1 + close_rel;
-        let name = path[open + 1..close].trim();
-        if !name.is_empty() && name.chars().all(is_route_param_char) {
-            let span = Span::new(path_span.start + open + 1, path_span.start + close);
-            params.push(RoutePathParam {
-                name: Ident::new(name.to_string(), span),
-                ty: TypeRef::Named {
-                    name: Ident::new("String", span),
-                    span,
+        template.push_str(&path[offset..open]);
+        let placeholder = path[open + 1..close].trim();
+        let (name, ty) = placeholder.split_once(':').unwrap_or((placeholder, "String"));
+        let (name, ty) = (name.trim(), ty.trim());
+        let span = Span::new(path_span.start + open + 1, path_span.start + close + 2);
+        let valid_name = !name.is_empty() && name.chars().all(is_route_param_char);
+        if !matches!(ty, "String" | "Int") || !valid_name {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("path placeholder `{{{placeholder}}}`"),
+                    expected: "`{name}`, `{name: String}` or `{name: Int}`".into(),
                 },
                 span,
             });
         }
+        if params.iter().any(|param: &RoutePathParam| param.name.name == name) {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: format!("repeated path parameter `{name}`"),
+                    expected: "a distinct name for each path parameter".into(),
+                },
+                span,
+            });
+        }
+        template.push_str(&format!("{{{name}}}"));
+        params.push(RoutePathParam {
+            name: Ident::new(name.to_string(), span),
+            ty: TypeRef::Named {
+                name: Ident::new(ty, span),
+                span,
+            },
+            span,
+        });
         offset = close + 1;
     }
-    params
+    template.push_str(&path[offset..]);
+    Ok((template, params))
 }
 
 fn is_route_param_char(ch: char) -> bool {

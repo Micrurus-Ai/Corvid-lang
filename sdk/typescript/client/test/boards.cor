@@ -11,10 +11,20 @@ database boards:
     location: "boards.sqlite"
 
 table Card:
-    key board: String
+    key board: Int
     key card: Int
     title: String
 
 server board_app:
-    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+    live "/boards/{board: Int}/cards" -> Card requires permission("board.view"):
         return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
+
+    route POST "/boards/{board: Int}/cards/{card: Int}/{title}" -> json String requires permission("board.view"):
+        return match Card.get(path.board, path.card):
+            Some(row) -> saved(Card.save(Card { title: path.title, ..row }))
+            None -> saved(Card.insert(Card(path.board, path.card, path.title)))
+
+fn saved(result: Result<Card, Conflict<Card>>) -> String:
+    return match result:
+        Ok(row) -> row.title
+        Err(_) -> "conflict"

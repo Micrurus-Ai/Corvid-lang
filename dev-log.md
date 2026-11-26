@@ -2,6 +2,17 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### RT-4 live row schemas and typed client generation
+
+The contract uses each reachable table's record and ordered keys. Generated
+subscriptions use the same path parameter types as the handler and release
+the SDK subscription through the returned function. A server-qualified name
+lets two servers independently declare a live list named `cards`.
+The generated client's type check covers a wrong path type, an omitted
+observer and an unknown row field. The Edge check reached the server startup
+gate for RT-3 (`E5204`). The component binding and a reconnect across
+committed edits remain open.
+
 ### Live subscriptions protocol agreement
 
 RT-4 SDK work exercises PR 46's snapshot, ordered change, unsubscribe and

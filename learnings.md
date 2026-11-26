@@ -19,8 +19,11 @@ A native program now prints a `Float` result, writes one into a prompt and recor
 The TypeScript SDK's low-level `client.subscribe(path, keyFields, observer)`
 shares a WebSocket across a client's subscriptions. Use `observer.rows` to
 display the ordered result, clear it on `observer.error`, and call the
-returned unsubscribe function on unmount. Generated methods need the row
-schema and key metadata from the contract. [Live client transport](docs/reference/cli.md#live-client-transport)
+returned unsubscribe function on unmount. With `live "/boards/{board: Int}/cards" -> Card`,
+`path.board` is an Int in Corvid. The generated TypeScript call is
+`const stop = api.live.board_app.cards(7, observer)`. Its observer receives
+the typed rows in query order. The table declaration supplies every key field,
+including both parts of a composite key. [Live client transport](docs/reference/cli.md#live-client-transport)
 
 Hashing and checking passwords now runs as native code: `hash_password(password, owasp_2023())` records the password as `<redacted>` and reveals it only to the hashing, exactly as on the interpreter, so a sign-up and log-in service builds into a native binary. The only secret use that still needs the interpreter is passing a secret to a tool you declared yourself. [Native code](docs/reference/cryptography.md#native-code)
 

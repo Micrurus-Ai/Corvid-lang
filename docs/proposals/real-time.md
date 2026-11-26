@@ -125,10 +125,14 @@ RT-1 shipped the declaration: it parses beside `route`, a body is checked to be 
 
 **The snapshot, for RT-3.** Each `live` lowers to a handler agent named `__live__<mangled path>` (`IrRoute::handler_agent`, with `response_kind: Live`), whose result is the snapshot: the query's rows, in its order, as `List<Row>`. RT-3 runs it exactly as it runs a GET route's handler, with the same `path` and `actor` arguments, so permission and row visibility are the route machinery's. RT-2 adds the change feed for an open subscription.
 
-Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route parameter record and the declared parameter type. The example above shows the agreed syntax; typed placeholders still require implementation.
+Frontend agreement for RT-3 and RT-4 (2026-11-25). Both tiers use the route parameter record and the declared parameter type.
 
 1. **Path parameters are read as `path.board`**, as a route reads them. A subscription handler receives the same path record as a route handler.
-2. **Typed path placeholders, agreed for `route` and `live` alike: `"/boards/{board: Int}/cards"`.** A path parameter is a `String` today, so `c.board == path.board` against an `Int` column does not check; with the placeholder, `path.board` is an `Int`, a request whose segment does not parse is refused before the handler runs, and the contract and the generated clients carry the type (the "typed path arguments" F08 asked for). An untyped `{board}` stays a `String`. The generated client takes its parameter types from the contract. A client subscribing to board 7 sends the concrete path `/boards/7/cards`.
+2. **Typed path placeholders** use the same syntax in `route` and `live`.
+   In `"/boards/{board: Int}/cards"`, `path.board` is an `Int`. A segment
+   that fails integer parsing is refused before the handler runs. An untyped
+   `{board}` stays a `String`. The generated client takes its parameter types
+   from the contract. A client subscribing to board 7 sends `/boards/7/cards`.
 
 ## Built in RT-2: the change feed RT-3 forwards
 
@@ -151,6 +155,13 @@ Several `corvid serve` processes on one Postgres database each have their own co
 
 ## RT-4 client implementation boundary
 
+The client extension takes ordered `key_fields` from the table declaration
+and publishes its record through the contract's ordinary `types` projection.
+A live entry identifies its server so that two servers may both declare
+`cards`. The generated caller uses `api.live.board_app.cards(board, observer)`
+and returns the SDK's unsubscribe function. The component binding needs that
+same route identity, path arguments and release operation.
+
 The SDK can reconcile the public JSON rows in a snapshot using the ordered key
 fields from the table declaration. For example, an Edit keyed by proposal and
 shelf needs both fields even when two proposals contain the same shelf number.
@@ -158,13 +169,7 @@ Retain the row object when its key and decimal revision match. A replacement
 snapshot determines the entire order and removes absent rows. The browser can
 then reuse unaffected component state. This adds no assistant access.
 
-At revision 6681008c, `ContractLive` provides the path, typed parameters,
-row type name and policy. The contract emitter collects record schemas from
-`Decl::Type`; a table is a `Decl::Table`. The backend contract needs to
-publish the live row's public field schema and ordered key fields. Guessing an
-id, using the first field, or asking the application author to repeat the key
-would disconnect the client from the declaration. Generated methods and
-`ui.live(board_app.cards, board)` depend on that input. PR 46 sends a public
+The generated method passes those keys to the SDK. PR 46 sends a public
 JSON row and a decimal revision, without a separate key. RT-2 owns delivery
 from committed writes. Integration requires both a fresh snapshot containing
 a missed edit and a later committed edit on the same subscription.
@@ -175,12 +180,21 @@ Node installed:
 ```sh
 tsc -p sdk/typescript/client --noEmit false --outDir sdk/typescript/client/target
 node --test --test-isolation=none sdk/typescript/client/test/live.mjs
+corvid contract ts-client sdk/typescript/client/test/boards.cor --out sdk/typescript/client/target/boards
+tsc -p sdk/typescript/client/test/tsconfig.live.json
 ```
 
 Inspect the public contract with
 `corvid contract app sdk/typescript/client/test/boards.cor --out -`. Its
 `Card` table has the composite key `board, card`. Keep F08 and F18 open until
 the generated subscription and component binding pass against a committed stream.
+
+On a build containing RT-3, run
+`python scripts/verify_generated_live_client.py --cli <corvid> --channel msedge`.
+The check uses RT-3's test login fixture and writes through a Corvid route.
+It disconnects a browser, commits while it is offline and checks the fresh
+snapshot and the next edit on the resumed socket. Component unmount through
+Corvid source still requires the browser list binding.
 
 ## Non-scope
 

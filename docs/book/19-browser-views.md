@@ -1137,6 +1137,27 @@ For example, a browser may ship `Blob.bytes()` before your installed toolchain d
 
 From the repository root, build the example with `python scripts/verify_file_preview.py --cli target/debug/corvid.exe --build-only`. This requires Node, npm and a built Corvid CLI. Serve it with `python -m http.server --directory examples/file_preview/target/site --bind 127.0.0.1 8000` and open `http://127.0.0.1:8000`. To run the browser assertions, replace `--build-only` with `--channel msedge`.
 
+## Subscribe to a board from TypeScript
+
+For rows from a live database query, the generated TypeScript client gets its
+row type and key from the table. For example, in the board fixture the path
+segment `{board: Int}` makes `path.board` an integer in the handler. Generate
+the client with `corvid contract ts-client sdk/typescript/client/test/boards.cor --out generated`.
+Pass the board number and an observer to the resulting method:
+
+```ts
+const stop = api.live.board_app.cards(7, {
+  rows(cards) { renderTitles(cards.map(card => card.title)); },
+  error() { renderTitles([]); },
+});
+// When the board view unmounts:
+stop();
+```
+
+Here `renderTitles` is the application's display function. Each update
+contains the whole ordered result. The returned function releases this
+observer. Live delivery requires an RT-3 server. [Live client transport](../reference/cli.md#live-client-transport)
+
 ## Window a long inventory
 
 For a list of 10,000 storage bins, give each row a fixed height of 32 CSS pixels. Call `first_row(scroll, height)` and `end_row(scroll, viewport, height, count)` to get the half-open range to mount. A spacer the height of the whole inventory keeps the scrollbar stable. Position each row at its index times its height and keep the focused link mounted until focus moves. The example calls `stock(bin)` for the visible quantity using the one-based bin number. [Corvid source](../../examples/windowed_inventory/src/inventory.cor) · [Function reference](../reference/functions.md#windowed-inventory-example)

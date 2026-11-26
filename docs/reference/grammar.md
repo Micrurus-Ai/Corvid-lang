@@ -316,6 +316,10 @@ route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
 # name everywhere but the start of a server-block declaration.
 live_decl         ::= 'live' STRING_LITERAL '->' type_ref route_policy? ':' INDENT block DEDENT
 
+# Inside either declaration's path string, {board} binds path.board as
+# String and {board: Int} binds it as Int. An explicit String is also valid.
+path_placeholder  ::= '{' IDENT (':' ('Int' | 'String'))? '}'
+
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref
 route_policy      ::= 'requires' route_requirement ('and' route_requirement)*

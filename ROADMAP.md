@@ -2,9 +2,11 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-- [ ] RT-4 / F08. SDK frame handling has focused client tests. Generate typed
-  subscriptions and bind component lifetimes once RT-1 supplies the public row
-  schema and ordered key. Verify a missed commit and a subsequent live edit
+- [ ] RT-4 / F08. Bind `ui.live(board_app.cards, board)` to the component
+  lifetime using the generated client's typed path and public row schema.
+  Connect incoming snapshots to the keyed row renderer. It currently takes
+  one String key and constructs its children from the initial list.
+  Verify a missed commit and a subsequent live edit
   against RT-2 and RT-3 before closing the F08 and F18 reconnect gates.
   [Contract dependency](docs/proposals/real-time.md#rt-4-client-implementation-boundary)
 - [ ] Verify full-width integer table keys across RT-2, RT-3 and both clients.
