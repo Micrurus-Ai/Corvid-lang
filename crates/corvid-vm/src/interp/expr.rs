@@ -11,6 +11,7 @@ pub(super) fn eval_literal(lit: &IrLiteral) -> Value {
         IrLiteral::Int(n) => Value::Int(*n),
         IrLiteral::Float(f) => Value::Float(*f),
         IrLiteral::Decimal(d) => Value::Decimal(*d),
+        IrLiteral::Duration(d) => Value::Duration(*d),
         IrLiteral::TimeZone(z) => Value::TimeZone(*z),
         IrLiteral::Currency(c) => Value::Currency(*c),
         IrLiteral::Locale(l) => Value::Locale(Arc::new(l.clone())),

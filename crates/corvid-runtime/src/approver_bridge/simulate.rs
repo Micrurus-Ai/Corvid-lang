@@ -202,6 +202,13 @@ impl MiniApproverProgram {
                 Literal::String(value) => MiniValue::String(value.clone()),
                 Literal::Bool(value) => MiniValue::Bool(*value),
                 Literal::Nothing => MiniValue::Nothing,
+                // Narrowed for now: the simulator has no duration value,
+                // so it refuses one rather than guessing (roadmap).
+                Literal::Duration { count, unit } => {
+                    return Err(format!(
+                        "the approver simulator does not evaluate durations yet (`{count} {unit}`); run the approver itself"
+                    ))
+                }
             }),
             Expr::Ident { name, .. } => env
                 .get(&name.name)

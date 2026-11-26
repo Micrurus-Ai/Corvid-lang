@@ -243,5 +243,9 @@ fn literal_arg_to_json(
         Literal::String(s) => serde_json::json!(s),
         Literal::Bool(b) => serde_json::json!(b),
         Literal::Nothing => serde_json::Value::Null,
+        // A duration's JSON form is its ISO 8601 text, as `to_json` writes it.
+        Literal::Duration { count, unit } => serde_json::json!(corvid_types::duration_literal_value(count, unit)
+            .map_err(|message| anyhow::anyhow!("schedule \"{}\": {message}", schedule.cron))?
+            .to_string()),
     })
 }

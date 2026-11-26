@@ -1132,6 +1132,11 @@ fn emit_expr(
                 "`Currency` and `Locale` have no WebAssembly form yet; they run on the interpreter and native tiers",
             ));
         }
+        IrExprKind::Literal(IrLiteral::Duration(_)) => {
+            return Err(WasmCodegenError::unsupported(
+                "`Duration` has no WebAssembly form yet; it runs on the interpreter and native tiers",
+            ));
+        }
         IrExprKind::Literal(IrLiteral::TimeZone(_)) => {
             return Err(WasmCodegenError::unsupported(
                 "`TimeZone` has no WebAssembly form yet; it runs on the interpreter and native tiers",

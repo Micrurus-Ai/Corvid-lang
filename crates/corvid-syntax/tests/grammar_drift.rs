@@ -311,6 +311,12 @@ memory prefs:
 "#,
     ),
     (
+        "duration_literals",
+        r#"agent wait(attempts: Int) -> Duration:
+    return attempts * 30 seconds + 1.5 minutes + 1 hour
+"#,
+    ),
+    (
         "refinements",
         r#"type Search:
     limit: Int where between(1, 50)
@@ -731,6 +737,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("type_decl", "record_types_and_stores"),
     ("type_field", "record_types_and_stores"),
     ("refinement", "refinements"),
+    ("duration_literal", "duration_literals"),
+    ("duration_unit", "duration_literals"),
     ("json_case_attr", "json_keys"),
     ("json_key_attr", "json_keys"),
     ("choice_variant", "choice_declaration"),

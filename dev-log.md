@@ -104,6 +104,42 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - The duration literal
+
+A duration could only come from subtracting instants or from parsing
+ISO text, so a timeout was `"PT30S".parse_duration()` and a match. Now it
+is `30 seconds`, decided in the
+[decimal and time proposal](docs/proposals/decimal-and-time.md) and built
+after the proposal stood a working day without a frontend objection.
+
+The parser reads a number followed by a unit word, singular or plural,
+as a literal that keeps the number's digits and the word as written. One
+function, `corvid_types::duration_literal_value`, reads the exact value
+for both the checker and IR lowering. It takes the digits as a decimal,
+never a float, so `1.5 minutes` is exactly 90 seconds. It refuses a
+fraction of a nanosecond and a value outside the duration range. It also
+refuses `days`, `weeks`, `months` and `years` with the reason and the two
+things a program usually means: `24 hours`, or a `ZonedTime` moved with
+`add_days`, `add_months` or `add_years`. The interpreter holds the
+`Duration`, native code its canonical text, and WebAssembly refuses it by
+name, as it refuses the other B06 literals. A number followed by a word
+was a parse error before, and every construct that reads a unit word
+itself (`within 30 seconds`, `every: 30s`, `retry 3 times`) parses its
+own number, so no program changes meaning.
+
+Found and strengthened: the time reference still said programs calling
+`time_now()` run on the interpreter, though it is native since native
+dispatch N2. Filed: the approver policy simulator has no duration value
+and refuses a duration literal by name.
+
+Tests: a parity test of literals in arithmetic, multiplication and
+comparison on both tiers. Checker tests cover a calendar unit, a
+fractional nanosecond and a type mismatch. Unit tests hold the parser's
+unit words in step with `corvid_time::TimeUnit`. Grammar drift evidence
+covers the new productions.
+
+---
+
 ## 2026-11-26 - Refinements on variant payload fields
 
 `| ColumnFull(limit: Int where between(1, 50))` was a parse error,

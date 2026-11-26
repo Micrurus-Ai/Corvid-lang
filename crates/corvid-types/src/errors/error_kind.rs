@@ -456,6 +456,9 @@ pub enum TypeErrorKind {
         field: String,
         message: String,
     },
+    /// B06 — a duration literal that names no exact length: a calendar
+    /// unit, a fraction of a nanosecond, or a value out of range.
+    DurationLiteralInvalid { message: String },
     /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
     /// empty or name one key twice.
     JsonKeyInvalid { type_name: String, message: String },
@@ -992,6 +995,7 @@ impl TypeErrorKind {
                 format!("field `{field}` on `{type_name}`: {message}")
             }
             Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
+            Self::DurationLiteralInvalid { message } => message.clone(),
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
             Self::AtomicBlockRefused { message } => message.clone(),
@@ -1488,6 +1492,9 @@ impl TypeErrorKind {
             ),
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
+            ),
+            Self::DurationLiteralInvalid { .. } => Some(
+                "a duration is a number and one of nanoseconds, microseconds, milliseconds, seconds, minutes or hours, such as `30 seconds` or `1.5 hours`".into(),
             ),
             Self::JsonKeyInvalid { .. } => Some(
                 "give each field its own non-empty key with `@json(key: \"...\")`; a field's key replaces the one its type's `@json(case:)` derives".into(),

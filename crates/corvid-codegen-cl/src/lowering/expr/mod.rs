@@ -594,6 +594,10 @@ pub(super) fn lower_expr(
         IrExprKind::Literal(IrLiteral::Float(n)) => Ok(builder.ins().f64const(*n)),
         // B06 — a native zone, currency or locale is its canonical
         // text: the IANA name, the ISO 4217 code, the BCP 47 tag.
+        // B06 — a native `Duration` is its canonical ISO 8601 text.
+        IrExprKind::Literal(IrLiteral::Duration(duration)) => {
+            lower_string_literal(builder, module, runtime, &duration.to_string(), expr.span)
+        }
         IrExprKind::Literal(IrLiteral::TimeZone(zone)) => {
             lower_string_literal(builder, module, runtime, &zone.to_string(), expr.span)
         }

@@ -414,12 +414,29 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A number just read, followed by a unit word, is a duration
+    /// literal (B06): `30 seconds`, `1.5 hours`. A number followed by a
+    /// word was a parse error before, so no program changes meaning.
+    fn duration_literal(&mut self, count: String, start: corvid_ast::Span) -> Option<Expr> {
+        let TokKind::Ident(word) = self.peek() else { return None };
+        corvid_ast::duration_unit(word)?;
+        let unit = word.clone();
+        self.bump();
+        Some(Expr::Literal {
+            value: Literal::Duration { count, unit },
+            span: start.merge(self.prev_span()),
+        })
+    }
+
     // primary := literal | IDENT | '(' expr ')' | '[' items? ']'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let start_span = self.peek_span();
         match self.peek().clone() {
             TokKind::Int(n) => {
                 self.bump();
+                if let Some(duration) = self.duration_literal(n.to_string(), start_span) {
+                    return Ok(duration);
+                }
                 Ok(Expr::Literal {
                     value: Literal::Int(n),
                     span: start_span,
@@ -427,6 +444,9 @@ impl<'a> Parser<'a> {
             }
             TokKind::Float { value: f, text } => {
                 self.bump();
+                if let Some(duration) = self.duration_literal(text.clone(), start_span) {
+                    return Ok(duration);
+                }
                 Ok(Expr::Literal {
                     value: Literal::Float { value: f, text },
                     span: start_span,

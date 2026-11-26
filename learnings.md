@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Write a duration as a number and a unit: `timeout = 30 seconds`, `deadline = now + 2 hours`, `attempts * 30 seconds`, `1.5 minutes`. The units run from `nanoseconds` to `hours`, singular or plural, and the number is read exactly. `30 days` is a compile error that explains why (a day in a time zone is 23, 24 or 25 hours) and suggests `24 hours` or `zoned.add_days(30)`. [Time](docs/reference/stdlib/time.md)
+
 A variant's payload field takes a refinement as a record field does: `| ColumnFull(limit: Int where between(1, 50))`. `ColumnFull(80)` is a compile error, a computed value out of range stops the program where the variant is built, a decoded one is refused at `fields[0]`, and the contract publishes the bounds. [Types](docs/reference/grammar.md#types-and-stores)
 
 A field can have a different JSON key from its name: `@json(key: "userId")` on the field, or `@json(case: camel)` (also `pascal`, `kebab`) before the `type` to derive every key from the snake_case names, `order_id` becoming `orderId`. HTTP bodies, `to_json`, `from_json`, prompts, OpenAPI and the generated clients use the key, an error path names it (`at orderId`), and code still writes `order.order_id`. Two fields with one key is a compile error. [Types](docs/reference/grammar.md#types-and-stores)

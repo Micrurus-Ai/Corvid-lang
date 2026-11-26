@@ -665,7 +665,18 @@ primary_expr      ::= literal
 
 bounded_ask       ::= 'ask' IDENT '(' expr ')' NEWLINE INDENT 'allow' IDENT 'once' NEWLINE 'within' INT 'seconds' NEWLINE DEDENT
 
-literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing'
+literal           ::= INT | FLOAT | STRING | 'true' | 'false' | 'Nothing' | duration_literal
+
+# B06: an exact length of time, `30 seconds`, `1.5 hours`,
+# `attempts * 30 seconds`. The count is read from its digits exactly and
+# must be a whole number of nanoseconds. The unit words are contextual,
+# singular or plural. `days`, `weeks`, `months` and `years` parse, and
+# are a compile error that says why: a day in a time zone is 23, 24 or
+# 25 hours, so write `24 hours` for an exact length or move a
+# `ZonedTime` with `add_days`, `add_months` or `add_years`.
+duration_literal  ::= (INT | FLOAT) duration_unit
+duration_unit     ::= 'nanosecond' 's'? | 'microsecond' 's'? | 'millisecond' 's'? | 'second' 's'?
+                    | 'minute' 's'? | 'hour' 's'? | 'day' 's'? | 'week' 's'? | 'month' 's'? | 'year' 's'?
 
 list_literal      ::= '[' (expr (',' expr)*)? ']'
 

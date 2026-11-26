@@ -8726,3 +8726,19 @@ fn variant_payload_fields_take_refinements() {
     let wrong = errors("type Problem:\n    | Named(label: String where between(1, 5))\n");
     assert!(wrong.iter().any(|m| m.contains("requires an Int field")), "{wrong:?}");
 }
+
+/// B06: a duration literal is a `Duration`; a calendar unit and a
+/// fraction of a nanosecond are compile errors with the reason.
+#[test]
+fn duration_literals_check_and_explain_calendar_units() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent wait() -> Duration:\n    return 3 * 30 seconds + 1.5 minutes\n").is_empty());
+    let days = errors("agent wait() -> Duration:\n    return 30 days\n");
+    assert!(days.iter().any(|m| m.contains("`30 days` has no fixed length") && m.contains("add_days")), "{days:?}");
+    let week = errors("agent wait() -> Duration:\n    return 1 week\n");
+    assert!(week.iter().any(|m| m.contains("`1 week` has no fixed length")), "{week:?}");
+    let fraction = errors("agent wait() -> Duration:\n    return 0.5 nanoseconds\n");
+    assert!(fraction.iter().any(|m| m.contains("not a whole number of nanoseconds")), "{fraction:?}");
+    let mismatch = errors("agent wait() -> Int:\n    return 30 seconds\n");
+    assert!(!mismatch.is_empty(), "a duration is not an Int");
+}

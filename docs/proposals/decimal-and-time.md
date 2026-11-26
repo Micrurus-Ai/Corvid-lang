@@ -182,7 +182,7 @@ Recorded under the project's syntax simplicity rule.
 
 1. **Decimal on the interpreter.** The `corvid-decimal` crate, the `Decimal` type, literals typed by context, `parse_decimal`, the conversions, the operators and the compile error for mixing with `Float`, rounded division, the rounding and other methods, and a compile error for `Decimal` at JSON boundaries until slice 5.
 2. **Duration and Instant on the interpreter.** The `corvid-time` crate, the two types, the operators, parsing and formatting, epoch conversion, `time_now` in `std/time`, and time at tool and prompt boundaries as text.
-2b. **The duration literal** (`30 seconds`) with the calendar-unit diagnostic, after agreement with frontend development.
+2b. **The duration literal** (`30 seconds`) with the calendar-unit diagnostic. *Built 2026-11-26*, after the proposal stood a working day without a frontend objection: the parser reads a number followed by a unit word, singular or plural, keeping the digits; `corvid_types::duration_literal_value` reads it exactly for the checker and for lowering.
 3. **Time zones on the interpreter.** `TimeZone`, `ZonedTime`, zone literals checked by their slot, conversion, `parse_local_time` with its errors for gaps and folds, `parse_zoned_time`, calendar arithmetic, the Berlin daylight-saving acceptance test, and the scheduler moved onto `corvid-time`.
 3b. **The tz database version in the trace header**, with replay reporting a mismatch.
 4. **Currency formatting.** `Currency`, `Locale`, `format_currency` and `minor_digits` with CLDR data.
