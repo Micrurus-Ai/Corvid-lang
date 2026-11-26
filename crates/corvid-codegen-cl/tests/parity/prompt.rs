@@ -208,3 +208,16 @@ agent main() -> Grounded<String>:
         "stderr did not contain citation failure: {stderr}"
     );
 }
+
+/// A prompt call in a `match` arm compiles natively and runs only on the
+/// arm taken.
+#[test]
+fn a_prompt_call_in_a_match_arm() {
+    assert_parity_with_mock_llm(
+        "prompt score(x: Int) -> Int:\n    \"\"\"Score {x}\"\"\"\n\nagent pick(x: Option<Int>) -> Int:\n    return match x:\n        Some(v) -> score(v)\n        None -> 0\n\nagent main() -> Int:\n    return pick(Some(3)) + pick(None)\n",
+        serde_json::json!(7),
+        7,
+        "mock-1",
+        "score",
+    );
+}

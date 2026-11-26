@@ -37,6 +37,32 @@ The first hosted run finished both Edge views and stopped in Firefox when Tab fr
 
 ---
 
+## 2026-11-26 - Tool and prompt calls in native match arms
+
+A native `match` arm can now call a tool or a prompt:
+`Err(problem) -> random_token(16)` or `Some(v) -> score(v)`. Before, a
+program with one stayed on the interpreter ("this match pattern or arm
+requires the interpreter"), and the work-around was a one-line helper
+agent. Found while building N3.
+
+**Why it was safe to lift.** Arms already lower through the general
+`lower_expr`. What an arm must not do is leave a temporary to be
+released on a path that did not create it. A tool or prompt call releases
+its own temporaries before it returns, as an agent call does, so it
+behaves in an arm as it does anywhere. `supports_match` is the one rule;
+the code generator and the tier picker both read it.
+
+**Tests.** Parity tests under the leak detector cover:
+- user tools in two arms, each called only on the arm taken;
+- a runtime tool returning text in an arm, which is released on that arm's
+  path;
+- a prompt call in an arm.
+
+Also ticked: the roadmap line saying `Int.to_string()` and
+`Bool.to_string()` are interpreter-only, done with the number-text fix.
+
+---
+
 ## 2026-11-26 - Typed failures in streamed connector calls (stream failures S1)
 
 A streamed operation that returns `Stream<Result<T, E>>` and declares
@@ -953,6 +979,39 @@ The main-line session reviewed the proposal and asked for one wire
 description of connector bodies: slice 3 adds body types to the
 Application Contract from the same schema code routes use, with a test
 that the runtime's encoding matches it.
+
+---
+
+## 2026-11-25 - Dependencies past their security advisories
+
+Each push reported 16 Dependabot alerts on `main`. `cargo audit` on
+`Cargo.lock` found 19 advisories in 12 crates, and `npm audit` found 3
+across the npm lockfiles. All but one were fixed with patch-level
+updates inside the declared version ranges:
+- **TLS:** rustls (secrets exposed by `Debug`, handshake messages
+  accepted across encryption levels, a downgrade); rustls-webpki and
+  webpki-roots (distrusted intermediates).
+- **QUIC:** quinn-proto and quinn-udp, seven denial-of-service bugs.
+- **Other crates:** h2, tokio, tokio-postgres (a panic on a short
+  `DataRow`), url, crossbeam-epoch, ctutils, anyhow, rustix, and two
+  yanked releases.
+- **npm:** esbuild, fflate and brace-expansion.
+
+Found and fixed along the way: the VS Code extension's verify script
+required the `brace-expansion` override to be exactly `2.1.4`, which
+pinned a version that later advisories cover. It now requires an exact
+2.x release at or above the newest fix, and checks that the lockfile
+resolves every copy to it.
+
+The remaining advisory, the bundled C SQLite CVE, needs rusqlite 0.31
+to 0.43, a major version, so it is its own roadmap item. Running the
+audits in CI, so new advisories fail a build instead of arriving as a
+push notice, is filed too.
+
+The first test run failed on every Postgres test because the WSL disk
+was full and Postgres had stopped. The build cache held 56 GB, mostly
+stale test executables. Removing the executables untouched for two
+hours freed 16 GB without discarding compiled libraries.
 
 ---
 

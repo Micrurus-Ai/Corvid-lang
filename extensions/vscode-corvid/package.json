@@ -106,7 +106,7 @@
     "@types/vscode": "^1.90.0"
   },
   "overrides": {
-    "brace-expansion": "2.1.4"
+    "brace-expansion": "2.1.8"
   },
   "scripts": {
     "verify": "node ./scripts/verify.mjs"

@@ -37,8 +37,15 @@ fn operand_supported(expr: &IrExpr) -> bool {
                 && operand_supported(receiver)
                 && args.iter().all(operand_supported)
         }
+        // A tool or prompt call lowers in an arm as anywhere: each call
+        // releases its own temporaries before it returns, so nothing it
+        // allocates outlives the arm that made it.
         IrExprKind::Call {
-            kind: corvid_ir::IrCallKind::Agent { .. } | corvid_ir::IrCallKind::StructConstructor { .. } | corvid_ir::IrCallKind::EnumConstructor { .. },
+            kind: corvid_ir::IrCallKind::Agent { .. }
+                | corvid_ir::IrCallKind::StructConstructor { .. }
+                | corvid_ir::IrCallKind::EnumConstructor { .. }
+                | corvid_ir::IrCallKind::Tool { .. }
+                | corvid_ir::IrCallKind::Prompt { .. },
             args,
             ..
         } => args.iter().all(operand_supported),
