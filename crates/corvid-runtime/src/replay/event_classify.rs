@@ -41,6 +41,8 @@ pub(super) fn event_kind(event: &TraceEvent) -> &'static str {
         TraceEvent::HostEvent { .. } => "host_event",
         TraceEvent::HttpExchange { .. } => "http_exchange",
         TraceEvent::DbTiming { .. } => "db_timing",
+        TraceEvent::AgentStarted { .. } => "agent_started",
+        TraceEvent::AgentFinished { .. } => "agent_finished",
         TraceEvent::SeedRead { .. } => "seed_read",
         TraceEvent::ClockRead { .. } => "clock_read",
         TraceEvent::ModelSelected { .. } => "model_selected",

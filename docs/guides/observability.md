@@ -4,7 +4,9 @@
 > binary record every run as a trace, `target/trace/<run_id>.jsonl`. That
 > trace is the record replay reads, and the tools on this page read it
 > too: `corvid observe`, `corvid trace lineage` and `corvid eval promote`
-> derive a run's lineage from its trace. The run is the root. Each table
+> derive a run's lineage from its trace. The run is the root, and each
+> agent call that did something is an `agent` step holding the steps it
+> made, so the tree shows which agent did what. Each table
 > operation is a `db` step showing how long it waited for a connection or
 > a turn to write and how long it ran (`waited=0.031ms ran=0.241ms`;
 > `corvid.db.wait_us` and `corvid.db.statement_us` when exported). Each
@@ -16,8 +18,8 @@
 >
 > Not built yet:
 > - `corvid serve` records no trace.
-> - A call from one agent to another is not in the trace, so the steps sit
->   directly under the run.
+> - In compiled native code, calls from one agent to another are not nested:
+>   a native run's steps sit directly under the run.
 > - A running program exports nothing to OpenTelemetry. The
 >   `CORVID_OTEL_*` variables and a `corvid run --trace-out` flag do not
 >   exist.

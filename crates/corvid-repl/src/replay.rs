@@ -443,6 +443,14 @@ impl ReplaySession {
                     run_id: event_run_id,
                     ..
                 }
+                | TraceEvent::AgentStarted {
+                    run_id: event_run_id,
+                    ..
+                }
+                | TraceEvent::AgentFinished {
+                    run_id: event_run_id,
+                    ..
+                }
                 | TraceEvent::PromptCache {
                     run_id: event_run_id,
                     ..
@@ -771,6 +779,8 @@ fn first_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HostEvent { ts_ms, .. })
         | Some(TraceEvent::HttpExchange { ts_ms, .. })
         | Some(TraceEvent::DbTiming { ts_ms, .. })
+        | Some(TraceEvent::AgentStarted { ts_ms, .. })
+        | Some(TraceEvent::AgentFinished { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })
@@ -808,6 +818,8 @@ fn last_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HostEvent { ts_ms, .. })
         | Some(TraceEvent::HttpExchange { ts_ms, .. })
         | Some(TraceEvent::DbTiming { ts_ms, .. })
+        | Some(TraceEvent::AgentStarted { ts_ms, .. })
+        | Some(TraceEvent::AgentFinished { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })

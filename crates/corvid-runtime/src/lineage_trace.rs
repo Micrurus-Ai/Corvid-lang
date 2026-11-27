@@ -8,6 +8,9 @@
 //!
 //! Each run becomes one tree, whose trace id is the run id:
 //! - the root is the run (`Agent`, named after the agent it started);
+//! - an agent call that recorded steps (`AgentStarted` … `AgentFinished`)
+//!   is an `Agent` span, and its steps and the agents it called nest
+//!   under it; an agent that recorded nothing does not appear;
 //! - a call and its result become one span: `Db` for a table operation
 //!   (`table:<Table>.<op>`, named `<Table>.<op>`), `Tool` for any other
 //!   tool, `Prompt` for a model call, `Approval` for an approval. A call
@@ -63,6 +66,9 @@ struct RunLineage {
     spans: Vec<LineageEvent>,
     open: HashMap<String, VecDeque<usize>>,
     children: BTreeMap<String, u64>,
+    /// The agent calls open now, innermost last: a step belongs to the
+    /// innermost, and with none open, to the run.
+    agents: Vec<usize>,
     last_ms: u64,
 }
 
@@ -78,7 +84,7 @@ impl RunLineage {
             .unwrap_or_else(|| run_id.to_string());
         let mut root = LineageEvent::root(run_id, LineageKind::Agent, root_name, first_ms);
         root.replay_key = run_id.to_string();
-        let mut run = Self { spans: vec![root], open: HashMap::new(), children: BTreeMap::new(), last_ms: first_ms };
+        let mut run = Self { spans: vec![root], open: HashMap::new(), children: BTreeMap::new(), agents: Vec::new(), last_ms: first_ms };
         let mut completed = false;
         for event in events {
             run.last_ms = run.last_ms.max(event.ts_ms());
@@ -92,7 +98,7 @@ impl RunLineage {
                         Some(operation) => (LineageKind::Db, operation),
                         None => (LineageKind::Tool, tool.as_str()),
                     };
-                    run.open_span(0, kind, name, *ts_ms, format!("tool:{tool}"));
+                    run.open_span(run.current(), kind, name, *ts_ms, format!("tool:{tool}"));
                 }
                 TraceEvent::ToolResult { ts_ms, tool, result, .. } => {
                     // A call that failed records its failure as its result,
@@ -104,6 +110,15 @@ impl RunLineage {
                         LineageStatus::Ok
                     };
                     run.close_span(&format!("tool:{tool}"), status, *ts_ms);
+                }
+                TraceEvent::AgentStarted { ts_ms, agent, .. } => {
+                    let at = run.open_span(run.current(), LineageKind::Agent, agent, *ts_ms, String::new());
+                    run.agents.push(at);
+                }
+                TraceEvent::AgentFinished { ts_ms, ok, .. } => {
+                    if let Some(at) = run.agents.pop() {
+                        run.finish(at, if *ok { LineageStatus::Ok } else { LineageStatus::Failed }, *ts_ms);
+                    }
                 }
                 // Written just before the result that closes the earliest
                 // open call of the same name, so it belongs to that call.
@@ -135,7 +150,7 @@ impl RunLineage {
                     }
                 }
                 TraceEvent::LlmCall { ts_ms, prompt, model, .. } => {
-                    let at = run.open_span(0, LineageKind::Prompt, prompt, *ts_ms, format!("prompt:{prompt}"));
+                    let at = run.open_span(run.current(), LineageKind::Prompt, prompt, *ts_ms, format!("prompt:{prompt}"));
                     if let Some(model) = model {
                         run.spans[at].model_id = model.clone();
                     }
@@ -148,7 +163,7 @@ impl RunLineage {
                     }
                 }
                 TraceEvent::ApprovalRequest { ts_ms, label, .. } => {
-                    run.open_span(0, LineageKind::Approval, label, *ts_ms, format!("approval:{label}"));
+                    run.open_span(run.current(), LineageKind::Approval, label, *ts_ms, format!("approval:{label}"));
                 }
                 // An approval is decided once; whichever of the two
                 // events comes first closes it, and the other finds
@@ -160,7 +175,7 @@ impl RunLineage {
                     run.close_span(&format!("approval:{label}"), approval_status(*approved), *ts_ms);
                 }
                 TraceEvent::HttpExchange { ts_ms, operation, attempt, outcome, elapsed_ms, .. } => {
-                    let parent = run.latest_open(&format!("tool:{operation}")).unwrap_or(0);
+                    let parent = run.latest_open(&format!("tool:{operation}")).unwrap_or_else(|| run.current());
                     let kind = if *attempt > 1 { LineageKind::Retry } else { LineageKind::Tool };
                     let name = format!("{operation} attempt {attempt}");
                     let status = match outcome.as_str() {
@@ -178,6 +193,7 @@ impl RunLineage {
                         run.finish(at, LineageStatus::Failed, *ts_ms);
                     }
                     run.fail_open_spans(*ts_ms);
+                    run.fail_open_agents(*ts_ms);
                     run.finish(0, status, *ts_ms);
                 }
                 _ => {}
@@ -188,6 +204,7 @@ impl RunLineage {
             // still open failed to finish within the record.
             let last = run.last_ms;
             run.fail_open_spans(last);
+            run.fail_open_agents(last);
             run.finish(0, LineageStatus::Failed, last);
         }
         run.spans
@@ -228,6 +245,18 @@ impl RunLineage {
         let ended_ms = ended_ms.max(self.spans[at].started_ms);
         let span = std::mem::replace(&mut self.spans[at], LineageEvent::root("", LineageKind::Agent, "", 0));
         self.spans[at] = span.finish(status, ended_ms);
+    }
+
+    /// The innermost open agent call, or the run.
+    fn current(&self) -> usize {
+        self.agents.last().copied().unwrap_or(0)
+    }
+
+    /// Agent calls the record never saw finish failed to finish.
+    fn fail_open_agents(&mut self, ended_ms: u64) {
+        while let Some(at) = self.agents.pop() {
+            self.finish(at, LineageStatus::Failed, ended_ms);
+        }
     }
 
     fn fail_open_spans(&mut self, ended_ms: u64) {
@@ -299,6 +328,51 @@ mod tests {
         assert_eq!(lineage[0].replay_key, RUN, "the root names the run to replay");
         assert!(lineage[1..].iter().all(|span| span.parent_span_id == lineage[0].span_id));
         assert_eq!(lineage[1].latency_ms, 4);
+    }
+
+    #[test]
+    fn steps_nest_under_the_agent_calls_that_made_them() {
+        let agent_started = |ts_ms, agent: &str| TraceEvent::AgentStarted { ts_ms, run_id: RUN.into(), agent: agent.into() };
+        let agent_finished =
+            |ts_ms, agent: &str, ok| TraceEvent::AgentFinished { ts_ms, run_id: RUN.into(), agent: agent.into(), ok };
+        let lineage = lineage_from_trace(&[
+            started(0),
+            agent_started(1, "triage"),
+            tool_call(2, "table:Ticket.get"),
+            tool_result(3, "table:Ticket.get"),
+            agent_started(4, "notify"),
+            tool_call(5, "send_email"),
+            tool_result(6, "send_email"),
+            agent_finished(7, "notify", false),
+            agent_finished(8, "triage", true),
+            tool_call(9, "table:Ticket.save"),
+            tool_result(10, "table:Ticket.save"),
+            completed(11, None),
+        ]);
+        let parent_of = |name: &str| {
+            let span = lineage.iter().find(|s| s.name == name).unwrap();
+            lineage.iter().find(|p| p.span_id == span.parent_span_id).map(|p| p.name.as_str()).unwrap_or("")
+        };
+        assert_eq!(parent_of("triage"), "main");
+        assert_eq!(parent_of("Ticket.get"), "triage");
+        assert_eq!(parent_of("notify"), "triage");
+        assert_eq!(parent_of("send_email"), "notify");
+        assert_eq!(parent_of("Ticket.save"), "main", "a step after the agent returned belongs to its caller");
+        let notify = lineage.iter().find(|s| s.name == "notify").unwrap();
+        assert_eq!((notify.kind, notify.status, notify.started_ms, notify.ended_ms), (LineageKind::Agent, LineageStatus::Failed, 4, 7));
+        assert!(validate_lineage(&lineage).complete);
+    }
+
+    #[test]
+    fn an_agent_call_the_trace_never_saw_finish_fails() {
+        let lineage = lineage_from_trace(&[
+            started(0),
+            TraceEvent::AgentStarted { ts_ms: 1, run_id: RUN.into(), agent: "worker".into() },
+            tool_call(2, "lookup"),
+        ]);
+        let worker = lineage.iter().find(|s| s.name == "worker").unwrap();
+        assert_eq!(worker.status, LineageStatus::Failed);
+        assert_eq!(lineage.iter().find(|s| s.name == "lookup").unwrap().parent_span_id, worker.span_id);
     }
 
     #[test]

@@ -2195,7 +2195,12 @@ impl<'ir> Interpreter<'ir> {
                     ));
                 }
                 sub.bind_params(agent, arg_values)?;
-                let result = sub.run_body(agent).await.map(ExprFlow::Value);
+                // The call is a frame in the run's trace: it appears, with
+                // its steps nested under it, once it records a step.
+                let tracer = self.runtime.tracer().clone();
+                let result = corvid_runtime::agent_frames::within_agent(&tracer, callee_name, sub.run_body(agent))
+                    .await
+                    .map(ExprFlow::Value);
 
                 if self.should_yield_boundary() {
                     let result_json = match &result {

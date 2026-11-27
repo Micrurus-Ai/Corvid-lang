@@ -6,6 +6,43 @@ A fixed route still has an empty path argument. Native compilation used to rejec
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs L1b: which agent did what
+
+A run's tree now nests each step under the agent call that made it:
+
+```
+- agent main [ok]
+  - agent shelve [ok]
+    - db Shelf.insert [ok] waited=0.025ms ran=0.241ms
+  - agent shelve [ok]
+    - db Shelf.insert [ok] ...
+  - db Shelf.get [ok] ...
+```
+
+How it works, in `agent_frames.rs`:
+- **Lazy frames.** An agent call (the interpreter's `IrCallKind::Agent`
+  site) is a frame in a tokio task-local that writes nothing on entry.
+  `Tracer::emit` writes `AgentStarted` for every pending frame, outermost
+  first, before the first traced event inside it. Leaving writes
+  `AgentFinished` (with `ok`) only if the start was written.
+- **No cost for helpers.** In Corvid every function is an `agent`, so a
+  helper that records nothing must not appear. It costs a push and a pop,
+  and nothing when tracing is off.
+- **Parallel arms.** `Tracer::buffered` writes pending starts before
+  handing an arm its buffer, so no arm's buffer holds an ancestor's start,
+  which would otherwise be flushed after earlier arms' steps.
+- **Replay** skips both events through `is_dispatch_metadata`.
+
+Rejected:
+- **Recording every call** buries the steps under helpers.
+- **A static check** of whether an agent reaches a traced step would be a
+  second list of traced steps to keep in step with the runtime. The check
+  in `emit` needs no list.
+
+Narrowed, and scheduled as L1b-native: compiled native code keeps no
+frames yet, so a native run's steps sit directly under it. The guide says
+so.
+
 ### Npm dependency advisories
 
 The shared dependency workflow now checks every tracked npm lockfile and includes development dependencies. New lockfiles join the check automatically. Each package reports its own result, and the job fails on a high or critical finding or an audit error. All five current lockfiles reported zero advisories on 2026-11-27. The five open GitHub alerts on that date cover three Rust crates. The [backend dependency tracker](docs/backend-ai-roadmap.md) records the affected versions and upgrades.
@@ -49,6 +86,7 @@ passes through.
 ### F08 route stream integration
 
 The GET item loop and generated route call had competing implementations of `routeStream`, which prevented the SDK from compiling. Both call forms now read the existing server protocol through one decoder. The orders check exercises partial delivery followed by truncation, a failed frame or malformed JSON.
+
 
 ### Lineage from real runs L1d: a streamed call's usage counts
 

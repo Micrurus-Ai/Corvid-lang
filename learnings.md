@@ -8480,11 +8480,11 @@ The server `corvid build --target server` generates answers a failure with the b
 
 ### See what a run did with `corvid observe`
 
-Every `corvid run` records its trace under the project's `target/trace/`, and `corvid observe list`, `corvid observe show <run-id>` and `corvid trace lineage <run-id>` read that trace directly. The run is the root. Each table operation is a `db` step that shows how long it waited for a connection or a turn to write, and how long it ran (`- db Shelf.insert [ok] latency=2ms waited=0.031ms ran=1.940ms`). A wait that grows while running time stays flat means a Postgres database needs more `connections:`. Each other tool is a `tool` step, each model call a `prompt` step with its model, tokens and cost (`- prompt draft [ok] latency=840ms cost=$0.0042`), so `corvid observe list` totals what a run spent, each approval an `approval` step, and each HTTP attempt sits under its tool. `corvid eval promote target/trace/<run-id>.jsonl` turns a run into an eval fixture.
+Every `corvid run` records its trace under the project's `target/trace/`, and `corvid observe list`, `corvid observe show <run-id>` and `corvid trace lineage <run-id>` read that trace directly. The run is the root, and each agent call that did something is an `agent` step holding the steps it made; a helper that touched nothing does not appear. Each table operation is a `db` step that shows how long it waited for a connection or a turn to write, and how long it ran (`- db Shelf.insert [ok] latency=2ms waited=0.031ms ran=1.940ms`). A wait that grows while running time stays flat means a Postgres database needs more `connections:`. Each other tool is a `tool` step, each model call a `prompt` step with its model, tokens and cost (`- prompt draft [ok] latency=840ms cost=$0.0042`), so `corvid observe list` totals what a run spent, each approval an `approval` step, and each HTTP attempt sits under its tool. `corvid eval promote target/trace/<run-id>.jsonl` turns a run into an eval fixture.
 
 Not yet:
 - `corvid serve` records no trace.
-- Calls between agents are not nested.
+- In compiled native code, calls between agents are not nested yet.
 - Nothing is exported to OpenTelemetry while a program runs.
 
 [Observability](docs/guides/observability.md)

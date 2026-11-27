@@ -77,18 +77,26 @@ fn project_after_one_run() -> (tempfile::TempDir, PathBuf, String) {
 fn a_real_run_renders_as_a_lineage_tree_with_its_database_steps() {
     let (project, trace_dir, run_id) = project_after_one_run();
     let tree = corvid(&["trace", "lineage", &run_id, "--trace-dir", trace_dir.to_str().unwrap()], project.path());
-    let lines: Vec<&str> = tree.lines().map(str::trim_start).collect();
     assert!(!tree.contains("incomplete"), "a real run's lineage validates:\n{tree}");
+    let lines: Vec<&str> = tree.lines().collect();
     assert!(lines[0].contains("main") && lines[0].contains("[ok]"), "the run is the root:\n{tree}");
-    let steps: Vec<&str> = lines[1..].iter().map(|line| line.split(" [").next().unwrap()).collect();
+    // The shape, with indentation: each `shelve` call is an agent step
+    // holding the insert it made (L1b), and the `get` main made itself
+    // sits directly under the run.
+    let shape: Vec<&str> = lines[1..].iter().map(|line| line.split(" [").next().unwrap()).collect();
     assert_eq!(
-        steps,
-        vec!["- db Shelf.insert", "- db Shelf.insert", "- db Shelf.get"],
-        "each table operation is a database step, in the order it ran:\n{tree}"
+        shape,
+        vec![
+            "  - agent shelve",
+            "    - db Shelf.insert",
+            "  - agent shelve",
+            "    - db Shelf.insert",
+            "  - db Shelf.get",
+        ],
+        "each step sits under the agent call that made it, in the order it ran:\n{tree}"
     );
-    assert!(tree.lines().skip(1).all(|line| line.starts_with("  ")), "the steps sit under the run:\n{tree}");
     assert!(
-        lines[1..].iter().all(|line| line.contains(" waited=") && line.contains(" ran=")),
+        lines.iter().filter(|line| line.contains("- db ")).all(|line| line.contains(" waited=") && line.contains(" ran=")),
         "each database step shows its wait for a turn and its running time (L2):\n{tree}"
     );
 }

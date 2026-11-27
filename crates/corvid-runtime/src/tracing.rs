@@ -130,6 +130,12 @@ impl Tracer {
     /// buffer; flush them through THIS tracer (in arm order) with
     /// [`Tracer::flush_buffer`].
     pub fn buffered(&self) -> (Tracer, std::sync::Arc<std::sync::Mutex<Vec<TraceEvent>>>) {
+        // An arm's first step must not be the one that writes an
+        // enclosing agent's start: it would land in that arm's buffer,
+        // after earlier arms' steps. Write pending starts here, once.
+        if self.is_enabled() {
+            crate::agent_frames::write_pending_starts(&self.inner.run_id, |event| self.write_event(event));
+        }
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let tracer = Tracer {
             inner: std::sync::Arc::new(TracerInner {
@@ -169,8 +175,22 @@ impl Tracer {
         if !self.is_enabled() {
             return;
         }
-        // Arm buffering (46e): queue raw; redaction applies ONCE at
-        // flush through the parent tracer.
+        // An agent whose first traced step this is gets its start
+        // written first (lineage from real runs, L1b).
+        crate::agent_frames::write_pending_starts(&self.inner.run_id, |start| self.write_event(start));
+        self.write_event(event);
+        if let Some(start) = profile_start {
+            BENCH_TRACE_OVERHEAD_NS.fetch_add(
+                start.elapsed().as_nanos() as u64,
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Queue `event` in this arm's buffer, or redact and write it. Arm
+    /// buffering (46e) queues raw events; redaction applies once, when
+    /// the parent tracer flushes them.
+    fn write_event(&self, event: TraceEvent) {
         if let Some(buffer) = &self.inner.buffer {
             if let Ok(mut guard) = buffer.lock() {
                 guard.push(event);
@@ -179,12 +199,6 @@ impl Tracer {
         }
         let event = self.apply_redaction(event);
         self.inner.writer.append(&event);
-        if let Some(start) = profile_start {
-            BENCH_TRACE_OVERHEAD_NS.fetch_add(
-                start.elapsed().as_nanos() as u64,
-                Ordering::Relaxed,
-            );
-        }
     }
 
     fn apply_redaction(&self, event: TraceEvent) -> TraceEvent {

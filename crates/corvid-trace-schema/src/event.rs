@@ -244,6 +244,23 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
+    /// An agent call began, written just before the first traced step
+    /// it contains (an agent that records nothing leaves no events).
+    /// Its steps, and agents it calls, nest under it until the matching
+    /// `AgentFinished`. Evidence only: replay never substitutes it.
+    AgentStarted {
+        ts_ms: u64,
+        run_id: String,
+        agent: String,
+    },
+    /// The agent call opened by the latest unmatched `AgentStarted`
+    /// ended: `ok` is false when it ended in an error.
+    AgentFinished {
+        ts_ms: u64,
+        run_id: String,
+        agent: String,
+        ok: bool,
+    },
     /// Where one recorded table operation spent its time in the
     /// database. It is written just before the operation's `ToolResult`,
     /// and `tool` names the operation (`table:<Table>.<op>`). Waiting
@@ -435,6 +452,8 @@ impl TraceEvent {
             | Self::HostEvent { run_id, .. }
             | Self::HttpExchange { run_id, .. }
             | Self::DbTiming { run_id, .. }
+            | Self::AgentStarted { run_id, .. }
+            | Self::AgentFinished { run_id, .. }
             | Self::SeedRead { run_id, .. }
             | Self::ClockRead { run_id, .. }
             | Self::ModelSelected { run_id, .. }
@@ -472,6 +491,8 @@ impl TraceEvent {
             | Self::HostEvent { ts_ms, .. }
             | Self::HttpExchange { ts_ms, .. }
             | Self::DbTiming { ts_ms, .. }
+            | Self::AgentStarted { ts_ms, .. }
+            | Self::AgentFinished { ts_ms, .. }
             | Self::SeedRead { ts_ms, .. }
             | Self::ClockRead { ts_ms, .. }
             | Self::ModelSelected { ts_ms, .. }
