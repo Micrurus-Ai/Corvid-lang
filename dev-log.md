@@ -2,6 +2,36 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs: the gap, and the plan
+
+I started on the roadmap item to show pool wait in production, and found
+that a running program feeds no part of the observability stack:
+- `corvid observe`, `corvid trace lineage`, `corvid eval promote` and the
+  OTLP export read `<run_id>.lineage.jsonl`. Nothing writes that file;
+  only checked-in fixtures exist.
+- `corvid serve` builds its runtime with the null tracer, so a served
+  program records no trace.
+- The observability guide documented `CORVID_OTEL_ENDPOINT`,
+  `CORVID_OTEL_SERVICE_NAME`, `CORVID_OTEL_SAMPLE_RATE` and
+  `corvid run --trace-out`. No code reads any of them.
+- A compiled binary writes traces into `./target/trace` by default, and
+  so records arguments without the source saying so.
+
+What I did:
+- The guide now says plainly what runs today and links the plan, in its
+  own commit.
+- [Lineage from real runs](docs/proposals/lineage-from-runs.md) makes the
+  trace every run already writes the one record, and lineage a projection
+  of it (`lineage_from_trace`). Writing a second record beside the trace
+  was rejected, because two records of one run can drift.
+- L1 (the projection) and L2 (connection-wait and statement time on table
+  spans) add no syntax, so they come next.
+- L3 and L4, a `traces:` block a served program must declare (location,
+  retention, export, or `none`), are item 9 of the review brief. Tracing
+  served traffic on an environment variable alone would be a hidden
+  default for a privacy decision.
+- The slices are brought forward on the roadmap, because the docs misled.
+
 ### What a Postgres pool size buys
 
 `pool_under_concurrent_agents` is an ignored test in
