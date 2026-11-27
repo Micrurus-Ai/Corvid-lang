@@ -1462,7 +1462,7 @@ impl Runtime {
         };
         self.usage_ledger.record(usage_record.clone());
         self.emit_host_event(
-            "llm.usage",
+            crate::lineage_trace::LLM_USAGE_EVENT,
             serde_json::json!({
                 "prompt": usage_record.prompt,
                 "model": usage_record.model,

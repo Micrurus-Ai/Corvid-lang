@@ -156,6 +156,18 @@ async fn call_llm_records_normalized_usage_by_provider() {
                 && payload["total_tokens"] == 14
                 && payload["currency"] == "USD"
     )));
+
+    // Lineage from real runs (L1c): the run's derived lineage carries the
+    // same usage the ledger holds, on the prompt's span.
+    let lineage = crate::lineage_from_trace(&events);
+    let prompt = lineage
+        .iter()
+        .find(|span| span.kind == crate::LineageKind::Prompt)
+        .expect("the model call is a prompt span");
+    assert_eq!(prompt.name, "greet");
+    assert_eq!((prompt.tokens_in, prompt.tokens_out), (10, 4));
+    assert!((prompt.cost_usd - records[0].cost_usd).abs() < 1e-12, "lineage cost matches the ledger");
+    assert_eq!(prompt.model_id, "gpt");
 }
 
 #[tokio::test]

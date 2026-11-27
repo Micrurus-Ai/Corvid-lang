@@ -9,7 +9,8 @@
 > a turn to write and how long it ran (`waited=0.031ms ran=0.241ms`;
 > `corvid.db.wait_us` and `corvid.db.statement_us` when exported). Each
 > other tool is a `tool` step, each model call
-> a `prompt` step, each approval an `approval` step, and each HTTP attempt
+> a `prompt` step with its model, tokens and cost, each approval an
+> `approval` step, and each HTTP attempt
 > sits under its tool. A lineage file (`*.lineage.jsonl`) is still read as
 > written.
 >
@@ -17,7 +18,8 @@
 > - `corvid serve` records no trace.
 > - A call from one agent to another is not in the trace, so the steps sit
 >   directly under the run.
-> - Model calls carry their model but no token counts or cost.
+> - A streamed model call shows no token counts or cost, because the
+>   runtime does not record a streamed call's usage yet.
 > - A running program exports nothing to OpenTelemetry. The
 >   `CORVID_OTEL_*` variables and a `corvid run --trace-out` flag do not
 >   exist.

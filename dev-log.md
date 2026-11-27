@@ -2,6 +2,31 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs L1c: what a run's model calls cost
+
+A run's `prompt` steps now carry their tokens, cost and the model actually
+used, so `corvid observe list` totals what a run spent and `corvid trace
+lineage` prints `cost=$…` on each model call.
+
+No runtime change was needed. Every non-streamed model call already
+records an `llm.usage` host event in the trace, the same record the usage
+ledger and the cost observations get, just before its result:
+- **The projection.** It reads that event and gives the call's span its
+  tokens and cost. One record, so lineage, the ledger and `observe` cannot
+  disagree. A test runs a priced call through the real dispatch path and
+  checks that the lineage cost equals the ledger's.
+- **One constant.** The event's name is now `LLM_USAGE_EVENT`, used by
+  both the emitter and the reader.
+- **Bad costs.** A cost that is missing or not a finite number counts as
+  none, never as a negative or `NaN` total.
+
+Found and filed (L1d): **a streamed model call records no usage at all.**
+It is missing from the ledger, from `llm.usage` and from the cost
+observations, although the provider's last chunk carries it. Its tokens
+and cost count as nothing in `observe` and the usage totals. Whether
+run-time `@budget` accounting has the same hole is part of the filed
+item.
+
 ### Found: the native cycle collector frees live values
 
 Timing a decimal-heavy native loop (the roadmap's compact-`Decimal`
@@ -14,6 +39,7 @@ work. The collector's own fixtures allocate too little for it to run. What I
 checked and ruled out is in the roadmap item, now at the front of the order.
 An ignored test reproduces it. The decimal measurement waits on the fix,
 since the benchmark cannot finish natively.
+
 
 ### Lineage from real runs L2: a run shows where its database time went
 

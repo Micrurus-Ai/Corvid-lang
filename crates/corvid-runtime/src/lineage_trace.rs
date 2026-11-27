@@ -15,6 +15,8 @@
 //!   an answer, so it is `Ok`;
 //! - a table operation's `DbTiming` gives its `Db` span the time it
 //!   waited for a connection and the time its statements ran;
+//! - a model call's `llm.usage` record, the one the usage ledger also
+//!   gets, gives its `Prompt` span its tokens, cost and the model used;
 //! - an HTTP exchange is a child of the tool span it belongs to, and a
 //!   retried attempt is a `Retry` span;
 //! - a run that ended in an error has a failed root and an `Error` child.
@@ -29,6 +31,9 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// The prefix of a recorded table operation's tool name.
 const TABLE_TOOL_PREFIX: &str = "table:";
+
+/// The host event a model call's usage is recorded as.
+pub(crate) const LLM_USAGE_EVENT: &str = "llm.usage";
 
 /// The lineage of every run in `events`, one tree per run, in the order
 /// the runs start. Events of different runs may be interleaved.
@@ -106,6 +111,27 @@ impl RunLineage {
                     if let Some(at) = run.earliest_open(&format!("tool:{tool}")) {
                         run.spans[at].db_wait_us = *wait_us;
                         run.spans[at].db_statement_us = *statement_us;
+                    }
+                }
+                // The runtime records a model call's usage as an
+                // `llm.usage` host event just before its result: the
+                // model actually used (after any fallback), its tokens and
+                // its cost.
+                TraceEvent::HostEvent { name, payload, .. } if name == LLM_USAGE_EVENT => {
+                    let prompt = payload.get("prompt").and_then(|p| p.as_str()).unwrap_or_default();
+                    if let Some(at) = run.earliest_open(&format!("prompt:{prompt}")) {
+                        let span = &mut run.spans[at];
+                        let count = |key: &str| payload.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+                        span.tokens_in = count("prompt_tokens");
+                        span.tokens_out = count("completion_tokens");
+                        span.cost_usd = payload
+                            .get("cost_usd")
+                            .and_then(|v| v.as_f64())
+                            .filter(|cost| cost.is_finite() && *cost >= 0.0)
+                            .unwrap_or(0.0);
+                        if let Some(model) = payload.get("model").and_then(|m| m.as_str()).filter(|m| !m.is_empty()) {
+                            span.model_id = model.to_string();
+                        }
                     }
                 }
                 TraceEvent::LlmCall { ts_ms, prompt, model, .. } => {
@@ -337,6 +363,50 @@ mod tests {
             ]
         );
         assert_eq!(lineage[1].model_id, "claude-sonnet-5-5");
+    }
+
+    #[test]
+    fn a_prompt_carries_the_usage_recorded_for_it() {
+        let call = |ts_ms| TraceEvent::LlmCall {
+            ts_ms,
+            run_id: RUN.into(),
+            prompt: "draft".into(),
+            model: Some("primary".into()),
+            model_version: None,
+            rendered: None,
+            args: vec![],
+            sampling: None,
+        };
+        // On a fallback the runtime records the fallback model on the
+        // result and on the usage, as here.
+        let result = |ts_ms| TraceEvent::LlmResult {
+            ts_ms,
+            run_id: RUN.into(),
+            prompt: "draft".into(),
+            model: Some("fallback".into()),
+            model_version: None,
+            result: json!("text"),
+            chunk_boundaries: None,
+        };
+        let usage = |ts_ms, tokens_in: u64, cost: f64| TraceEvent::HostEvent {
+            ts_ms,
+            run_id: RUN.into(),
+            name: LLM_USAGE_EVENT.into(),
+            payload: json!({"prompt": "draft", "model": "fallback", "prompt_tokens": tokens_in, "completion_tokens": 7, "cost_usd": cost}),
+        };
+        let lineage = lineage_from_trace(&[
+            started(0),
+            call(1),
+            usage(2, 120, 0.0042),
+            result(2),
+            call(3),
+            usage(4, 80, f64::NAN),
+            result(4),
+            completed(5, None),
+        ]);
+        let usage: Vec<_> = lineage[1..].iter().map(|s| (s.tokens_in, s.tokens_out, s.cost_usd, s.model_id.as_str())).collect();
+        assert_eq!(usage[0], (120, 7, 0.0042, "fallback"), "the model actually used, after any fallback");
+        assert_eq!(usage[1], (80, 7, 0.0, "fallback"), "a cost that is not a number counts as none");
     }
 
     #[test]
