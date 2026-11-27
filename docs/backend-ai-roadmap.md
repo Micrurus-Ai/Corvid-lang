@@ -117,7 +117,14 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] B10 shared actions, built under the amended grammar law. [Proposal](proposals/shared-actions.md)
 - [ ] JSON key renaming, built under the amended grammar law. [Proposal](proposals/json-field-keys.md)
 - [x] Variant payload refinements and the duration literal, built under the amended grammar law (2026-11-26, Mac session).
-- [ ] Proposals, then builds: a per-call credential on connector operations, raw request bodies with a webhook verifier (B16), joins and aggregates in queries and `live`.
+- [ ] Proposals, then builds: a per-call credential on connector operations ([user credentials](proposals/user-credentials.md), C1 built), raw request bodies with a webhook verifier (B16), joins and aggregates in queries and `live`.
+- [ ] Aggregates and joins in table queries. [Proposal](proposals/query-aggregates-and-joins.md), 2026-11-26.
+  - [ ] J1. `count`, `sum`, `min`, `max`, with exact `Decimal` and `Duration` sums and a trap on `Int` overflow.
+  - [ ] J2. `count_by` and `sum_by` to a `Map`.
+  - [ ] J3. `keys().contains(row.col)` inside `where` (`IN (SELECT ...)`), and `contains` on a held list (`IN (values)`).
+  - [ ] J4. `by_key()`.
+  - [ ] J5. `live` over a query that filters by another table.
+  - [ ] J6. Native code.
 
 **Retire the Python build target** (decided by the owner 2026-11-25; brought forward under "Make what you find stronger", because the default build misled new users)
 
