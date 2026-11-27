@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Fixed: the native cycle collector freed live values
+
+The cause was in `corvid_alloc_typed`. It linked the new block into the live
+list, then ran the collector when the allocation count crossed the
+threshold, before returning the block. The collector took its roots only
+from compiled frames' stack maps. The new block was held by nothing but a
+local in the allocator, so it was swept, and the allocation that triggered a
+collection returned freed memory. The same blind spot covered anything a
+runtime function held in its own frame, like a list or JSON value it was
+building. That is why every failure fired exactly at the threshold and
+nowhere else, and why the stack maps and frame walk checked out.
+
+`corvid_gc` now finds its roots by trial deletion. It copies each block's
+reference count into a scratch field, subtracts every reference another
+heap block holds to it (through the same `trace_fn`s the sweep uses), and
+treats whatever remains as held from outside the heap. It marks from those
+roots and sweeps the rest, which are only unreachable cycles. No stack walk
+is needed, so runtime locals and the block being returned count. The
+reference counts are already exact, since every failing program ran
+correctly with the collector off. The verifier receives each root repeated
+by its outside count. `corvid_gc_from_roots`, which tests drive with explicit
+roots, is unchanged. The tracking node gains the scratch field plus padding,
+which keeps it a multiple of 16 bytes.
+
+Proof: the earlier failures (a `Decimal` total over 300 000 iterations, a
+string or list built in a loop, a chain of concatenations) are all correct
+at the default threshold and at `CORVID_GC_TRIGGER=10`. The reproducing
+`verifier_audit` test runs un-ignored. A new `cycle_collector` test drives
+the threshold collection from Rust: it frees an unreachable cycle, keeps a
+block only a local holds, and keeps a cycle with an outside reference.
+Filed: run the parity suite under `CORVID_GC_TRIGGER=10`, so collection
+stays exercised. Also recorded the decimal measurement this was found by:
+about 2.2 µs per native decimal operation.
+
 ### The dependency audit also runs daily
 
 A new RustSec advisory is published with no code change, so the audit,

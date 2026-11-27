@@ -8485,3 +8485,8 @@ Not yet:
 - Nothing is exported to OpenTelemetry while a program runs.
 
 [Observability](docs/guides/observability.md)
+
+### Native programs that allocate a lot no longer crash
+
+A compiled program that built a string, a list or a `Decimal` total in a loop, or otherwise allocated more than about ten thousand values, could stop with `corvid_release on already-freed allocation` or crash outright. The native memory collector freed values the program still held. It now keeps every value something still references, and frees only unreachable cycles, so these programs run to completion with the same results as the interpreter.
+

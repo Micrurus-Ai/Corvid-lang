@@ -104,6 +104,12 @@ typedef struct corvid_tracking_node {
     const void* last_release_pc;
     unsigned long long verify_epoch;
     unsigned long long verify_expected_tagged;
+    /* The collector's scratch count: the references to this block from
+     * outside the heap (collector.c, trial deletion). */
+    long long gc_external;
+    /* Keeps the node a multiple of 16 bytes, so payload alignment is
+     * unchanged. */
+    long long gc_reserved;
 } corvid_tracking_node;
 
 #define CORVID_TRACKING_BYTES (sizeof(corvid_tracking_node))

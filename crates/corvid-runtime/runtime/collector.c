@@ -5,6 +5,18 @@
  * (default 10_000 allocations), or when user/test code calls
  * `corvid_gc()` directly.
  *
+ * `corvid_gc` finds its roots by trial deletion, not by walking the stack:
+ * a block's references from other heap blocks are subtracted from its
+ * reference count, and whatever remains is held from outside the heap
+ * (a compiled frame, a runtime function's local, the block an allocation
+ * is about to return). Those blocks are the roots; everything reachable
+ * from them is kept, and the rest is unreachable cycles. It used to mark
+ * from compiled frames' stack maps only, which cannot see a runtime
+ * function's locals, so a collection inside an allocation freed the very
+ * block being allocated and anything a runtime function was building.
+ * The reference counts are the source of truth, so this is exact.
+ * `corvid_gc_from_roots` still marks from the roots it is given.
+ *
  * Complements the refcount fast path: acyclic data is freed
  * deterministically by `corvid_release` as soon as refcount hits 0.
  * The collector exists only to catch cycles - refs that form a loop
@@ -13,7 +25,6 @@
  * Dependencies:
  * - Heap header with typeinfo pointer + mark bit slot in refcount word
  * - `corvid_stack_maps` symbol + `corvid_stack_maps_find(pc)`
- * - Cranelift `preserve_frame_pointers` for RBP-chained stack walking
  */
 
 #include <stddef.h>
@@ -59,6 +70,12 @@ typedef struct corvid_tracking_node {
     const void* last_release_pc;
     unsigned long long verify_epoch;
     unsigned long long verify_expected_tagged;
+    /* The collector's scratch count: the references to this block from
+     * outside the heap (collector.c, trial deletion). */
+    long long gc_external;
+    /* Keeps the node a multiple of 16 bytes, so payload alignment is
+     * unchanged. */
+    long long gc_reserved;
 } corvid_tracking_node;
 
 #define CORVID_TRACKING_BYTES (sizeof(corvid_tracking_node))
@@ -77,7 +94,6 @@ typedef struct corvid_stack_map_entry {
     const uint32_t* ref_offsets;
 } corvid_stack_map_entry;
 
-extern const corvid_stack_map_entry* corvid_stack_maps_find(const void* return_pc);
 
 extern int corvid_gc_verify_mode;
 extern void corvid_gc_verify(void** roots, size_t n_roots);
@@ -143,16 +159,6 @@ static void corvid_gc_record_trigger(void) {
     r->cycle_index = corvid_gc_cycle_count++;
 }
 
-/* ---- frame-pointer walk -------------------------------------------- */
-
-static void* corvid_gc_capture_rbp(void) {
-#if defined(_MSC_VER)
-    return (char*)_AddressOfReturnAddress() - 8;
-#else
-    return __builtin_frame_address(0);
-#endif
-}
-
 /* ---- mark walk ---------------------------------------------------- */
 
 static int corvid_mark_block(corvid_header* h) {
@@ -170,47 +176,6 @@ static void corvid_gc_mark_marker(void* payload, void* ctx) {
     corvid_gc_mark_count_current++;
     if (h->typeinfo != NULL && h->typeinfo->trace_fn != NULL) {
         h->typeinfo->trace_fn(payload, corvid_gc_mark_marker, NULL);
-    }
-}
-
-static void corvid_gc_mark_stack(void* base_rbp) {
-    void** frame = (void**)base_rbp;
-    void** prev_frame = NULL;
-
-    const int FRAME_LIMIT = 256;
-    const uintptr_t STACK_RANGE_BYTES = 2 * 1024 * 1024;
-    const uintptr_t base_addr = (uintptr_t)base_rbp;
-    int frame_count = 0;
-
-    while (frame != NULL && frame_count < FRAME_LIMIT) {
-        frame_count++;
-        if (((uintptr_t)frame & 0x7) != 0) break;
-        if (prev_frame != NULL && frame <= prev_frame) break;
-
-        uintptr_t diff = (uintptr_t)frame > base_addr
-                             ? (uintptr_t)frame - base_addr
-                             : base_addr - (uintptr_t)frame;
-        if (diff > STACK_RANGE_BYTES) break;
-
-        void* return_pc = frame[1];
-        void* saved_rbp = frame[0];
-        if ((uintptr_t)return_pc < 0x1000) break;
-
-        void* sp_at_call = (char*)frame + 16;
-        const corvid_stack_map_entry* e = corvid_stack_maps_find(return_pc);
-        if (e != NULL) {
-            for (uint32_t i = 0; i < e->ref_count; i++) {
-                uint32_t offset = e->ref_offsets[i];
-                void** slot = (void**)((char*)sp_at_call + offset);
-                void* gc_ref = *slot;
-                if (gc_ref != NULL) {
-                    corvid_gc_mark_marker(gc_ref, NULL);
-                }
-            }
-        }
-
-        prev_frame = frame;
-        frame = (void**)saved_rbp;
     }
 }
 
@@ -268,6 +233,54 @@ static void corvid_gc_sweep(void) {
 
 static int corvid_gc_running = 0;
 
+/* Trial deletion: subtract each reference one heap block holds to
+ * another from the target's scratch count. */
+static void corvid_gc_subtract_internal(void* payload, void* ctx) {
+    (void)ctx;
+    if (payload == NULL) return;
+    corvid_header* h = (corvid_header*)((char*)payload - CORVID_HEADER_BYTES);
+    if (h->refcount_word == CORVID_REFCOUNT_IMMORTAL) return;
+    corvid_tracking_node* node = (corvid_tracking_node*)((char*)h - CORVID_TRACKING_BYTES);
+    node->gc_external--;
+}
+
+/* Mark every block that something outside the heap still references,
+ * and everything reachable from it. Returns the roots for the verifier,
+ * each repeated by its outside count, when `roots` is not NULL. */
+static size_t corvid_gc_mark_external(void*** roots_out) {
+    for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
+        corvid_header* h = (corvid_header*)((char*)n + CORVID_TRACKING_BYTES);
+        n->gc_external = h->refcount_word == CORVID_REFCOUNT_IMMORTAL ? 0 : (h->refcount_word & CORVID_RC_MASK);
+    }
+    for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
+        corvid_header* h = (corvid_header*)((char*)n + CORVID_TRACKING_BYTES);
+        if (h->refcount_word == CORVID_REFCOUNT_IMMORTAL) continue;
+        if (h->typeinfo != NULL && h->typeinfo->trace_fn != NULL) {
+            h->typeinfo->trace_fn((char*)h + CORVID_HEADER_BYTES, corvid_gc_subtract_internal, NULL);
+        }
+    }
+    size_t count = 0;
+    for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
+        if (n->gc_external > 0) count += (size_t)n->gc_external;
+    }
+    void** roots = NULL;
+    if (roots_out != NULL && count > 0) {
+        roots = (void**)malloc(count * sizeof(void*));
+    }
+    size_t at = 0;
+    for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
+        if (n->gc_external <= 0) continue;
+        corvid_header* h = (corvid_header*)((char*)n + CORVID_TRACKING_BYTES);
+        void* payload = (char*)h + CORVID_HEADER_BYTES;
+        if (roots != NULL) {
+            for (long long i = 0; i < n->gc_external; i++) roots[at++] = payload;
+        }
+        corvid_gc_mark_marker(payload, NULL);
+    }
+    if (roots_out != NULL) *roots_out = roots;
+    return roots != NULL ? at : 0;
+}
+
 void corvid_gc(void) {
     if (corvid_gc_running) return;
     corvid_gc_running = 1;
@@ -278,12 +291,13 @@ void corvid_gc(void) {
 
     corvid_gc_record_trigger();
 
-    void* base_rbp = corvid_gc_capture_rbp();
-    corvid_gc_mark_stack(base_rbp);
+    void** roots = NULL;
+    size_t n_roots = corvid_gc_mark_external(corvid_gc_verify_mode != 0 ? &roots : NULL);
 
-    if (corvid_gc_verify_mode != 0) {
-        corvid_gc_verify(NULL, 0);
+    if (corvid_gc_verify_mode != 0 && n_roots > 0) {
+        corvid_gc_verify(roots, n_roots);
     }
+    free(roots);
 
     corvid_gc_sweep();
 
