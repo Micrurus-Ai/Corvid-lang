@@ -2,6 +2,26 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `cargo audit` in CI
+
+The SQLite advisory (RUSTSEC-2026-0459) was found in a push notice, after
+the vulnerable version had been on `main` for a while. CI now has a
+`dependency-advisories` job that runs `cargo audit --deny warnings`, so a
+new vulnerability, yanked release or unmaintained crate fails the build
+when it appears.
+
+`.cargo/audit.toml` lists the only known findings by advisory ID: `chrono`,
+`chrono-tz`, `instant` and `ttf-parser`, all unmaintained with no successor
+release, none a vulnerability. Its comment says never to add a
+vulnerability there.
+
+Checked both ways locally with the same command: it exits 0 with the list,
+and 1 when one entry is removed. No vulnerability is open now that
+rusqlite is 0.43.
+
+Not done, and filed: `npm audit` for the npm packages, which are frontend
+development's, to be agreed with them.
+
 ### A `live` without `requires` is a compile error
 
 Who may watch a live query is a consequential choice. A `live` could be
