@@ -669,6 +669,21 @@ impl<'a> Checker<'a> {
                 self.check_column_is_queryable(table, column, value.span());
                 self.check_agent_value(row, value);
             }
+            // The body type-checks as ordinary code, so `contains` already
+            // requires the list's items to be the column's type.
+            QueryCondition::InList { column, values } => {
+                // `text.contains(row.title)` has the same shape and tests
+                // text, which the database does not run.
+                if !matches!(self.types.get(&values.span()), Some(Type::List(_))) {
+                    self.query_error(
+                        values.span(),
+                        "only `values.contains(row.column)` on a `List` can run in the database; testing whether text contains a column cannot",
+                    );
+                    return;
+                }
+                self.check_column_is_queryable(table, column, values.span());
+                self.check_agent_value(row, values);
+            }
         }
     }
 

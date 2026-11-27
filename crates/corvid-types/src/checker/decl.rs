@@ -265,6 +265,21 @@ impl<'a> Checker<'a> {
         if query.take.is_some() {
             invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
         }
+        // A list computed by the handler may come from another table,
+        // whose commits a live query does not watch yet (J5).
+        let filters_by_list = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => params.first().is_some_and(|row| {
+                crate::table_ops::query_condition(query.table, &row.name.name, body)
+                    .is_ok_and(|condition| condition.reads_a_list())
+            }),
+            _ => false,
+        };
+        if filters_by_list {
+            invalid(
+                self,
+                "filters by `values.contains(row.column)`; a live query cannot keep a list it computes current yet, because the list may come from another table".into(),
+            );
+        }
         if let Some((aggregate, _)) = query.aggregate {
             invalid(
                 self,

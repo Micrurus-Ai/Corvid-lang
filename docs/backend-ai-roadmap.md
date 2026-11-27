@@ -122,7 +122,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [x] J1. `count`, `sum`, `min`, `max`, with exact `Decimal` and `Duration` sums and a trap on `Int` overflow. Built 2026-11-26.
   - [x] J2. `count_by` and `sum_by` to a `Map`. Built 2026-11-26.
   - [ ] Maps that stay fast at scale. `MapValue` is a vector searched by `==`, so building a map of n keys (a `count_by` over many groups, a map literal, repeated `m[k] = v`) takes n² comparisons and each lookup is linear. Stronger: hashing that agrees with `==` (`Decimal` by value, `Grounded` by its inner value), with insertion order kept, and a benchmark at 100,000 keys. Found 2026-11-26 while building J2; it touches the core value representation both sessions use, so it is filed rather than changed in this slice.
-  - [ ] J3. `keys().contains(row.col)` inside `where` (`IN (SELECT ...)`), and `contains` on a held list (`IN (values)`).
+  - [ ] J3b. `Other.where(...).keys().contains(row.col)` as `IN (SELECT ...)` in one statement. This widens J3a past its 10,000-value list and reads both tables in one snapshot. It comes before J4, per the narrowing law.
+  - [x] J3a. `contains` on a held list inside `where` (`IN (values)`), `None` matched as `==` matches it. Built 2026-11-26; at most 10,000 values for now.
   - [ ] J4. `by_key()`.
   - [ ] J5. `live` over a query that filters by another table.
   - [ ] J6. Native code.

@@ -139,6 +139,9 @@ fn a_live_body_is_one_query_of_the_table_it_delivers() {
 
     let count = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all().count()\n");
     assert!(count.iter().any(|m| m.contains("ends in `count`; a live query delivers rows")), "{count:#?}");
+
+    let listed = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.where(fn (c) -> [1, 2].contains(c.card))\n");
+    assert!(listed.iter().any(|m| m.contains("a live query cannot keep a list it computes current yet")), "{listed:#?}");
 }
 
 #[test]

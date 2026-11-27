@@ -1254,6 +1254,8 @@ pub enum IrTableFilter {
     Not(Box<IrTableFilter>),
     Compare { column: String, op: corvid_types::table_ops::QueryCompare, value: Box<IrExpr> },
     Text { column: String, test: corvid_types::table_ops::QueryTextTest, value: Box<IrExpr> },
+    /// `values.contains(row.column)` (J3): the column holds one of a list.
+    InList { column: String, values: Box<IrExpr> },
 }
 
 impl IrTableFilter {
@@ -1272,7 +1274,7 @@ impl IrTableFilter {
                 right.collect_values(out);
             }
             Self::Not(inner) => inner.collect_values(out),
-            Self::Compare { value, .. } | Self::Text { value, .. } => out.push(value),
+            Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => out.push(value),
         }
     }
 
@@ -1285,7 +1287,7 @@ impl IrTableFilter {
                 right.for_each_value_mut(visit);
             }
             Self::Not(inner) => inner.for_each_value_mut(visit),
-            Self::Compare { value, .. } | Self::Text { value, .. } => visit(value),
+            Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => visit(value),
         }
     }
 }

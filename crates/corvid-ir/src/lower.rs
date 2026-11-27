@@ -2484,6 +2484,7 @@ impl<'a> Lowerer<'a> {
             C::And(left, right) => F::And(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
             C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
             C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner))),
+            C::InList { column, values } => F::InList { column: column.clone(), values: Box::new(self.lower_expr(values)) },
             C::Compare { column, op, value } => {
                 F::Compare { column: column.clone(), op: *op, value: Box::new(self.lower_expr(value)) }
             }

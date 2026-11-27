@@ -355,6 +355,22 @@ impl<'ir> Interpreter<'ir> {
                 let value = self.query_value(&next_operand(operands)?, column_type(column)?)?;
                 TableFilter::Text { column: column.clone(), test: *test, value }
             }
+            IrTableFilter::InList { column, .. } => {
+                let Value::List(items) = next_operand(operands)? else {
+                    return Err(format!("`contains` on column `{column}` needs a list"));
+                };
+                let items = items.iter_cloned();
+                if items.len() > corvid_runtime::tables::MOST_LIST_VALUES {
+                    return Err(format!(
+                        "`contains` on column `{column}` was given {} values; a query sends at most {} to the database",
+                        items.len(),
+                        corvid_runtime::tables::MOST_LIST_VALUES
+                    ));
+                }
+                let ty = column_type(column)?;
+                let values = items.iter().map(|item| self.query_value(item, ty)).collect::<Result<Vec<_>, _>>()?;
+                TableFilter::In { column: column.clone(), values }
+            }
         })
     }
 

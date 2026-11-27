@@ -2,6 +2,34 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Query J3a: `values.contains(row.column)` inside `where`
+
+`query_condition` now reads `list.contains(row.col)` as
+`QueryCondition::InList`, the list being an agent value computed before
+the query, as a compared value is. The same shape on text,
+`word.contains(row.owner)`, is refused by the checker: the expression type
+map shows the receiver is not a `List`. The lambda body type-checks as
+ordinary code, so `contains` already requires the list's items to have the
+column's type.
+
+The runtime's `TableFilter::In` binds each value as a parameter typed by
+the column, exactly as a compared value is bound. Because `IN` never
+matches `NULL` while `==` matches a missing value, a `None` in the list
+adds `OR column IS NULL`. An empty list is `false`.
+
+Tests, on every engine the harness runs:
+- each filter keeps exactly the rows the same test keeps when written in
+  Corvid over every row;
+- a list of board keys, an empty list and a list holding `None`;
+- `10.00` matching a stored `10` by value, combined with `not`;
+- the refusal for text, and the refusal in `live`.
+
+Narrowed, and filed at the front of the section as J3b: at most 10,000
+values per list, which both engines' parameter limits allow. The
+single-statement `IN (SELECT ...)` form removes the cap and reads both
+tables in one snapshot. `live` refuses a list filter until J5, because a
+list may come from a table it does not watch.
+
 ### Aggregates J2: `count_by` and `sum_by`
 
 The aggregate stage now holds its argument list, so `sum_by` can take

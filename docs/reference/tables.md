@@ -314,6 +314,17 @@ A `where` condition may use:
 | A string test on a column | `s.title.contains(word)`, `s.title.starts_with("A")`, `s.title.ends_with(suffix)` |
 | A `Bool` column | `s.archived` |
 | `and`, `or`, `not`, `true`, `false` | `not s.archived or s.shelf == 1` |
+| A column holding one of a list | `owners.contains(s.owner)`, `[1, 3].contains(s.shelf)` |
+
+`values.contains(s.column)` runs as `column IN (...)` with each value
+bound, and keeps exactly the rows the same test keeps in Corvid: a `None`
+in the list matches a missing value, an empty list keeps nothing, and a
+`Decimal` matches by value. The list is computed by the agent before the
+query runs, so it may come from another query. A list holds at most 10,000
+values for now; a larger one stops the run with its reason until the
+inner query runs inside the same statement ([J3b](../proposals/query-aggregates-and-joins.md)).
+A `live` query cannot filter by a list yet, because the list may come from
+a table it does not watch.
 
 The value on the other side of a comparison is computed by the agent
 before the query runs, so it may use the agent's variables and calls but

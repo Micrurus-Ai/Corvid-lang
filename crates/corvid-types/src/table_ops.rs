@@ -340,6 +340,21 @@ pub enum QueryCondition<'e> {
     Not(Box<QueryCondition<'e>>),
     Compare { column: String, op: QueryCompare, value: &'e Expr },
     Text { column: String, test: QueryTextTest, value: &'e Expr },
+    /// `values.contains(row.column)` (J3): the column holds one of a
+    /// list the agent computes before the query runs.
+    InList { column: String, values: &'e Expr },
+}
+
+impl QueryCondition<'_> {
+    /// Whether any part tests the column against a list (J3).
+    pub fn reads_a_list(&self) -> bool {
+        match self {
+            Self::InList { .. } => true,
+            Self::And(left, right) | Self::Or(left, right) => left.reads_a_list() || right.reads_a_list(),
+            Self::Not(inner) => inner.reads_a_list(),
+            Self::Const(_) | Self::Column(_) | Self::Compare { .. } | Self::Text { .. } => false,
+        }
+    }
 }
 
 /// Why part of a `where` condition cannot run in the database.
@@ -380,10 +395,16 @@ pub fn query_condition<'e>(
             }
         }
         Expr::Call { callee, args, span } => {
-            const ONLY: &str = "only `contains`, `starts_with` and `ends_with` calls on a column can run in the database";
+            const ONLY: &str = "only `contains`, `starts_with` and `ends_with` calls on a column, and `values.contains(row.column)` on a list, can run in the database";
             let Expr::FieldAccess { target, field, .. } = callee.as_ref() else { return refuse(*span, ONLY) };
             match (QueryTextTest::from_name(&field.name), query_column(table, row, target), args.as_slice()) {
                 (Some(test), Some(column), [value]) => Ok(QueryCondition::Text { column, test, value }),
+                // `values.contains(row.column)`: the list is the agent's,
+                // the column the argument.
+                (Some(QueryTextTest::Contains), None, [argument]) => match query_column(table, row, argument) {
+                    Some(column) => Ok(QueryCondition::InList { column, values: target }),
+                    None => refuse(*span, ONLY),
+                },
                 _ => refuse(*span, ONLY),
             }
         }

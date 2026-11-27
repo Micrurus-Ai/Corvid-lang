@@ -29,7 +29,14 @@ pub enum TableFilter {
     Not(Box<TableFilter>),
     Compare { column: String, op: QueryCompare, value: DbValue },
     Text { column: String, test: QueryTextTest, value: DbValue },
+    /// The column holds one of `values` (J3), each matched as `==`
+    /// matches it, a missing value included.
+    In { column: String, values: Vec<DbValue> },
 }
+
+/// The most values one `contains` list sends to the database. Each is a
+/// bound parameter, and both engines cap a statement's parameters.
+pub const MOST_LIST_VALUES: usize = 10_000;
 
 /// A whole query chain, ready to run.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -226,6 +233,27 @@ fn filter_sql(table: &TableRef<'_>, filter: &TableFilter, params: &mut Vec<DbVal
                 QueryTextTest::Contains => engine.contains(&column, &mark),
                 QueryTextTest::StartsWith => engine.starts_with(&column, &mark),
                 QueryTextTest::EndsWith => engine.ends_with(&column, &mark),
+            }
+        }
+        TableFilter::In { column, values } => {
+            // `IN` never matches `NULL`, while `==` matches a missing value
+            // with `None`, so a `None` in the list is its own test.
+            let present: Vec<&DbValue> = values.iter().filter(|v| **v != DbValue::Null).collect();
+            let missing = values.len() != present.len();
+            let marks: Vec<String> = present.iter().map(|value| bind(column, value)).collect();
+            let quoted = quote(column);
+            let mut tests = Vec::new();
+            if !marks.is_empty() {
+                tests.push(format!("{quoted} IN ({})", marks.join(", ")));
+            }
+            if missing {
+                tests.push(format!("{quoted} IS NULL"));
+            }
+            match tests.len() {
+                // An empty list holds nothing.
+                0 => engine.literal_bool(false).into(),
+                1 => tests.remove(0),
+                _ => format!("({})", tests.join(" OR ")),
             }
         }
     }
