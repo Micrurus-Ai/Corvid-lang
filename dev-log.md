@@ -2,6 +2,39 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Aggregates J1: `count`, `sum`, `min`, `max`
+
+A query chain may now end in an aggregate stage, read by the same
+`table_query_target` the checker, effects and lowering share. It becomes
+`IrExprKind::TableQuery { aggregate: Some(..) }`, so every IR walker that
+matches with `..` keeps working.
+
+How each stage runs:
+- `count` and an `Int` `sum` are one statement whose single aliased column
+  comes back through the existing recorded select. A narrowed `TableRef`
+  gives that one column, so recording and replay are the query's own.
+  SQLite's `sum` refuses an overflow, and on Postgres the `::bigint` cast
+  does.
+- `Decimal` and `Duration` sums read the column alone and add with the
+  interpreter's `eval_binop(Add)`. That is Corvid's checked `+`, so the
+  total has no second meaning.
+- `min` and `max` add no SQL. They run as the ordinary query ordered by
+  the column, without missing values, with `take(1)`. The database's
+  collations decide the order, and the row decodes as any row does.
+
+Refused, by name:
+- `order_by` or `take` before an aggregate;
+- a `Float` sum;
+- a non-column function;
+- an unorderable `min` or `max`;
+- an aggregate in `live`, which delivers rows.
+
+Tests: on every engine the harness runs, each aggregate equals the same
+computation written in Corvid over the rows, for a list with values and
+an empty one. `max` of decimals is `10.0` over `9.50`. An `Int` total
+past 64 bits fails the run. A recorded run replays. The refusals are
+tested too. This machine has no Postgres URL, so those runs covered SQLite.
+
 ### User credentials C1: an operation's own `auth: bearer(token)`
 
 A connector had one credential, the application's. Calls made as the

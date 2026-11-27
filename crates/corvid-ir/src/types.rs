@@ -1204,7 +1204,8 @@ pub enum IrExprKind {
 
     /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
     /// `Shelf.all()`, then optional `order_by`, `descending` and `take`.
-    /// It runs as one database query and has type `List<Shelf>`.
+    /// It runs as one database query and has type `List<Shelf>`, or the
+    /// aggregate's type when it ends in one.
     TableQuery {
         table: IrTable,
         /// `None` for `all()`.
@@ -1213,7 +1214,19 @@ pub enum IrExprKind {
         order: Option<String>,
         descending: bool,
         take: Option<Box<IrExpr>>,
+        /// `count()`, or `sum`, `min` or `max` of a column (aggregates J1).
+        aggregate: Option<IrQueryAggregate>,
     },
+}
+
+/// A query's last stage when it reduces the rows to one value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrQueryAggregate {
+    pub op: corvid_types::table_ops::QueryAggregate,
+    /// The column `sum`, `min` or `max` reads; `None` for `count`.
+    pub column: Option<String>,
+    /// The column's declared type, which decides how a `sum` is added.
+    pub column_ty: Option<Type>,
 }
 
 /// The expressions a query chain evaluates before it runs, in

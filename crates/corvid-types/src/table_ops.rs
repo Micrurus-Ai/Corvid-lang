@@ -123,6 +123,44 @@ pub struct TableQuery<'a, 'e> {
     pub order: Option<&'e Expr>,
     pub descending: bool,
     pub take: Option<&'e Expr>,
+    /// A last stage that reduces the rows to one value (aggregates J1):
+    /// `count()`, or `sum`, `min` or `max` with the function that reads
+    /// the column.
+    pub aggregate: Option<(QueryAggregate, Option<&'e Expr>)>,
+}
+
+/// A stage that turns a query's rows into one value, run by the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryAggregate {
+    /// `count() -> Int`.
+    Count,
+    /// `sum(fn (r) -> r.col)`, of the column's type.
+    Sum,
+    /// `min(fn (r) -> r.col) -> Option<T>`.
+    Min,
+    /// `max(fn (r) -> r.col) -> Option<T>`.
+    Max,
+}
+
+impl QueryAggregate {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "count" => Self::Count,
+            "sum" => Self::Sum,
+            "min" => Self::Min,
+            "max" => Self::Max,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Sum => "sum",
+            Self::Min => "min",
+            Self::Max => "max",
+        }
+    }
 }
 
 /// The query a method call names, when the call ends a query chain:
@@ -162,9 +200,25 @@ pub fn table_query_target<'a, 'e>(
         ("all", []) => None,
         _ => return None,
     };
-    let mut query = TableQuery { table, filter, order: None, descending: false, take: None };
+    let mut query = TableQuery { table, filter, order: None, descending: false, take: None, aggregate: None };
     let mut rank = 0;
     for (stage, stage_args, _) in stages.iter().rev() {
+        // An aggregate ends the chain. The checker refuses one after
+        // `order_by` or `take`, which cannot change it, by name.
+        if let Some(aggregate) = QueryAggregate::from_name(stage) {
+            let of = match (aggregate, *stage_args) {
+                (QueryAggregate::Count, []) => None,
+                (QueryAggregate::Count, _) => return None,
+                (_, [column]) => Some(column),
+                _ => return None,
+            };
+            if rank >= 4 {
+                return None;
+            }
+            query.aggregate = Some((aggregate, of));
+            rank = 4;
+            continue;
+        }
         let next = match (*stage, *stage_args) {
             ("order_by", [key]) if rank < 1 => {
                 query.order = Some(key);

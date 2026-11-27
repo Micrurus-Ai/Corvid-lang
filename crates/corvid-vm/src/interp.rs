@@ -1368,7 +1368,7 @@ impl<'ir> Interpreter<'ir> {
                 self.eval_table_op(*op, table, values, expr.span).await.map(ExprFlow::Value)
             },
 
-            IrExprKind::TableQuery { table, filter, order, descending, take } => {
+            IrExprKind::TableQuery { table, filter, order, descending, take, aggregate } => {
                 let mut operands = Vec::new();
                 for operand in corvid_ir::table_query_operands(filter, take) {
                     match self.eval_expr(operand).await?.into_value() {
@@ -1376,9 +1376,11 @@ impl<'ir> Interpreter<'ir> {
                         Err(v) => return Ok(ExprFlow::Propagate(v)),
                     }
                 }
-                self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span)
-                    .await
-                    .map(ExprFlow::Value)
+                match aggregate {
+                    Some(aggregate) => self.eval_table_aggregate(table, filter.as_ref(), aggregate, operands, expr.span).await,
+                    None => self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span).await,
+                }
+                .map(ExprFlow::Value)
             },
 
             IrExprKind::TryPropagate { inner } => {

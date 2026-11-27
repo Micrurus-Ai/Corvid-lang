@@ -331,6 +331,46 @@ note.
 
 A query uses `db_egress_read`, like `Shelf.get`, so pure `fn`s and
 `@deterministic` agents cannot run one.
+
+### Counts, totals and extremes
+
+A query may end in one stage that reduces its rows to one value, run by
+the database instead of reading every row:
+
+| Stage | Type | For no rows |
+| --- | --- | --- |
+| `.count()` | `Int` | `0` |
+| `.sum(fn (s) -> s.column)` | the column's type: `Int`, `Decimal` or `Duration` | `0` |
+| `.min(fn (s) -> s.column)`, `.max(...)` | `Option` of the column's type | `None` |
+
+```corvid
+agent shelf_summary(owner: String) -> String:
+    count = Shelf.where(fn (s) -> s.owner == owner).count()
+    return match Shelf.where(fn (s) -> s.owner == owner).max(fn (s) -> s.shelf):
+        Some(top) -> count.to_string() + " shelves, up to " + top.to_string()
+        None -> "no shelves"
+```
+
+- An `Int` total that does not fit in 64 bits stops the run with its
+  reason, as `+` does, never a wrapped or rounded number.
+- A `Decimal` or `Duration` total is exact: the column's values are read
+  and added with Corvid's own `+`, because SQLite stores both as text.
+- `sum` of a `Float` column is a compile error, because a float total
+  depends on the order the rows are added. Store an exact total as a
+  `Decimal`.
+- `min` and `max` compare values as `order_by` does, so `9.50` is less
+  than `10.0`, and they skip missing values. A column `order_by` refuses
+  is refused here too.
+- `order_by`, `descending` and `take` cannot change an aggregate, so a
+  chain with one is a compile error that says to remove them.
+- There is no `average`, because dividing needs a rounding decision.
+  Divide `sum` by `count` with the rounding you choose.
+- A `live` declaration delivers rows, so its query cannot end in one. A
+  live count is planned in [aggregates and joins](../proposals/query-aggregates-and-joins.md).
+
+A recorded run replays each aggregate from the trace, as it replays a
+query.
+
 ## Unique values
 
 A `unique` line names columns no two rows may share: `unique email` for

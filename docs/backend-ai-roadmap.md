@@ -119,7 +119,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Variant payload refinements and the duration literal, built under the amended grammar law (2026-11-26, Mac session).
 - [ ] Proposals, then builds: a per-call credential on connector operations ([user credentials](proposals/user-credentials.md), C1 built), raw request bodies with a webhook verifier (B16), joins and aggregates in queries and `live`.
 - [ ] Aggregates and joins in table queries. [Proposal](proposals/query-aggregates-and-joins.md), 2026-11-26.
-  - [ ] J1. `count`, `sum`, `min`, `max`, with exact `Decimal` and `Duration` sums and a trap on `Int` overflow.
+  - [x] J1. `count`, `sum`, `min`, `max`, with exact `Decimal` and `Duration` sums and a trap on `Int` overflow. Built 2026-11-26.
   - [ ] J2. `count_by` and `sum_by` to a `Map`.
   - [ ] J3. `keys().contains(row.col)` inside `where` (`IN (SELECT ...)`), and `contains` on a held list (`IN (values)`).
   - [ ] J4. `by_key()`.

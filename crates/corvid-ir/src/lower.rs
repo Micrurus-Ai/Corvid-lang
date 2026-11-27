@@ -2435,12 +2435,27 @@ impl<'a> Lowerer<'a> {
             Some(_) => return None,
             None => None,
         };
+        let aggregate = match query.aggregate {
+            None => None,
+            Some((op, None)) => Some(crate::types::IrQueryAggregate { op, column: None, column_ty: None }),
+            Some((op, Some(Expr::Lambda { params, body, .. }))) => {
+                let column = corvid_types::table_ops::query_column(query.table, &params.first()?.name.name, body)?;
+                let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
+                Some(crate::types::IrQueryAggregate {
+                    op,
+                    column_ty: Some(self.type_ref_to_type(&field.ty)),
+                    column: Some(column),
+                })
+            }
+            Some(_) => return None,
+        };
         Some(IrExprKind::TableQuery {
             table: self.ir_table(query.table)?,
             filter,
             order,
             descending: query.descending,
             take: query.take.map(|count| Box::new(self.lower_expr(count))),
+            aggregate,
         })
     }
 

@@ -265,6 +265,15 @@ impl<'a> Checker<'a> {
         if query.take.is_some() {
             invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
         }
+        if let Some((aggregate, _)) = query.aggregate {
+            invalid(
+                self,
+                format!(
+                    "ends in `{}`; a live query delivers rows, and a live count or total, which needs its own message to the browser, is not supported yet",
+                    aggregate.name()
+                ),
+            );
+        }
     }
 
     /// Validate an `identity Name:` block (slice 51g). The safe

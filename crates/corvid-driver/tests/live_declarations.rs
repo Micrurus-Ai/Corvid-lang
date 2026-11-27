@@ -136,6 +136,9 @@ fn a_live_body_is_one_query_of_the_table_it_delivers() {
 
     let take = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all().take(10)\n");
     assert!(take.iter().any(|m| m.contains("uses `take`")), "{take:#?}");
+
+    let count = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all().count()\n");
+    assert!(count.iter().any(|m| m.contains("ends in `count`; a live query delivers rows")), "{count:#?}");
 }
 
 #[test]

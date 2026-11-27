@@ -521,7 +521,73 @@ impl<'a> Checker<'a> {
             }
         }
         let _ = span;
-        Some(Type::List(Box::new(row)))
+        match query.aggregate {
+            None => Some(Type::List(Box::new(row))),
+            Some((aggregate, of)) => Some(self.check_query_aggregate(&query, &row, aggregate, of, method.span)),
+        }
+    }
+
+    /// An aggregate stage (J1): `count() -> Int`, `sum` of an `Int`,
+    /// `Decimal` or `Duration` column to that type, and `min` or `max` of
+    /// an orderable column to an `Option`. `order_by` and `take` cannot
+    /// change an aggregate, so the chain may not hold them.
+    fn check_query_aggregate(
+        &mut self,
+        query: &crate::table_ops::TableQuery<'_, '_>,
+        row: &Type,
+        aggregate: crate::table_ops::QueryAggregate,
+        of: Option<&Expr>,
+        span: Span,
+    ) -> Type {
+        use crate::table_ops::QueryAggregate;
+        let name = aggregate.name();
+        if query.order.is_some() || query.take.is_some() {
+            self.query_error(
+                span,
+                &format!("`{name}` reads every matching row, so `order_by`, `descending` and `take` cannot change it; remove them"),
+            );
+        }
+        let Some(of) = of else { return Type::Int };
+        let ty = self.check_expr_as(
+            of,
+            Some(&Type::Function { params: vec![row.clone()], ret: Box::new(Type::Unknown), effect: corvid_ast::Effect::Safe }),
+        );
+        self.require_function_of_row(of, &ty, row, name);
+        let column = match of {
+            Expr::Lambda { params, body, .. } => params.first().and_then(|p| column_read(query.table, p, body)),
+            _ => None,
+        };
+        let Some(column) = column else {
+            self.query_error(of.span(), &format!("`{name}` takes a function that reads one column, such as `fn (s) -> s.points`"));
+            return Type::Unknown;
+        };
+        let Some(field) = query.table.record.fields.iter().find(|f| f.name.name == column) else { return Type::Unknown };
+        let column_ty = self.type_ref_to_type(&field.ty);
+        match aggregate {
+            QueryAggregate::Count => Type::Int,
+            QueryAggregate::Sum => match crate::table_columns::untainted(&column_ty) {
+                Type::Int | Type::Decimal | Type::Duration => column_ty,
+                Type::Float => {
+                    self.query_error(of.span(), &format!("`sum` of the `Float` column `{column}` would depend on the order rows are added; store it as a `Decimal` for an exact total"));
+                    Type::Unknown
+                }
+                other => {
+                    self.query_error(
+                        of.span(),
+                        &format!("`sum` adds an `Int`, `Decimal` or `Duration` column; `{column}` is a `{}`", other.display_name()),
+                    );
+                    Type::Unknown
+                }
+            },
+            QueryAggregate::Min | QueryAggregate::Max => {
+                self.check_column_is_orderable(query.table, &column, of.span());
+                match column_ty {
+                    // A missing value is never the least or greatest.
+                    Type::Option(_) => column_ty,
+                    other => Type::Option(Box::new(other)),
+                }
+            }
+        }
     }
 
     fn require_function_of_row(&mut self, expr: &Expr, ty: &Type, row: &Type, stage: &str) {

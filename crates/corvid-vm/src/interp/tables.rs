@@ -141,6 +141,103 @@ impl<'ir> Interpreter<'ir> {
         Ok(Value::List(crate::value::ListValue::new(items)))
     }
 
+    /// A query that ends in an aggregate (J1). `count` and an `Int` `sum`
+    /// run in the database; a `Decimal` or `Duration` `sum` reads the
+    /// column alone and adds it with Corvid's own checked `+`, so the total
+    /// is exact; `min` and `max` are the first row in the column's order
+    /// among those with a value, so the database's own order decides.
+    pub(super) async fn eval_table_aggregate(
+        &mut self,
+        table: &IrTable,
+        filter: Option<&IrTableFilter>,
+        aggregate: &corvid_ir::IrQueryAggregate,
+        operands: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        use corvid_runtime::tables::TableAggregate;
+        use corvid_types::table_ops::QueryAggregate;
+        let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
+        let record = *self
+            .types_by_id
+            .get(&table.def_id)
+            .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
+        let mut operands = operands.into_iter();
+        let filter = match filter {
+            Some(filter) => Some(self.table_filter(record, filter, &mut operands).map_err(fail)?),
+            None => None,
+        };
+        let kinds = column_kinds(record);
+        let target = table_target(table, &kinds, self.table_transaction.as_deref()).map_err(fail)?;
+        let column = || aggregate.column.clone().ok_or_else(|| fail(format!("`{}` names no column", aggregate.op.name())));
+        let column_ty = aggregate.column_ty.clone().unwrap_or(Type::Unknown);
+        let whole = |values: Vec<DbValue>| match values.as_slice() {
+            [DbValue::Integer(n)] => Ok(Value::Int(*n)),
+            other => Err(fail(format!("`{}` on table `{}` read {other:?}, not one whole number", aggregate.op.name(), table.name))),
+        };
+        match aggregate.op {
+            QueryAggregate::Count => {
+                whole(self.runtime.table_aggregate(&target, filter.as_ref(), &TableAggregate::Count).await.map_err(runtime_error)?)
+            }
+            QueryAggregate::Sum if matches!(untainted(&column_ty), Type::Int) => whole(
+                self.runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::SumInteger(column()?))
+                    .await
+                    .map_err(runtime_error)?,
+            ),
+            QueryAggregate::Sum => {
+                let values = self
+                    .runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::Values(column()?))
+                    .await
+                    .map_err(runtime_error)?;
+                let mut total = match untainted(&column_ty) {
+                    Type::Decimal => Value::Decimal(corvid_decimal::Decimal::parse("0").map_err(|e| fail(e.to_string()))?),
+                    Type::Duration => {
+                        Value::Duration(corvid_time::Duration::from_nanoseconds(0).map_err(|e| fail(e.to_string()))?)
+                    }
+                    other => return Err(fail(format!("`sum` cannot add a `{}` column", other.display_name()))),
+                };
+                for stored in values {
+                    let value = self.from_column(stored, &column_ty).map_err(fail)?;
+                    total = super::eval_binop(corvid_ast::BinaryOp::Add, total, value, span, false)?;
+                }
+                Ok(total)
+            }
+            QueryAggregate::Min | QueryAggregate::Max => {
+                let column = column()?;
+                // The first row in the column's order whose column holds a
+                // value: the same `order_by`, and the same `== None` test,
+                // a query writes.
+                let present = TableFilter::Not(Box::new(TableFilter::Compare {
+                    column: column.clone(),
+                    op: corvid_types::table_ops::QueryCompare::Eq,
+                    value: DbValue::Null,
+                }));
+                let query = TableQuery {
+                    filter: Some(match filter {
+                        Some(condition) => TableFilter::And(Box::new(condition), Box::new(present)),
+                        None => present,
+                    }),
+                    order: Some(column.clone()),
+                    descending: aggregate.op == QueryAggregate::Max,
+                    take: Some(1),
+                };
+                let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
+                let Some(row) = rows.into_iter().next() else { return Ok(Value::OptionNone) };
+                let Value::Struct(row) = self.row_value(record, row).map_err(fail)? else {
+                    return Err(fail(format!("a `{}` row is not a record", table.name)));
+                };
+                let value = row.get_field(&column).ok_or_else(|| fail(format!("a `{}` row has no `{column}`", table.name)))?;
+                Ok(match value {
+                    // An `Option` column already holds its `Some`.
+                    some @ Value::OptionSome(_) => some,
+                    other => Value::OptionSome(BoxedValue::new(other)),
+                })
+            }
+        }
+    }
+
     /// The condition that keeps only the rows whose keys are in `keys`,
     /// each a [`corvid_runtime::tables::LiveRow::key`] text: the JSON array
     /// of the key fields' public JSON values, the form `live_key` writes.

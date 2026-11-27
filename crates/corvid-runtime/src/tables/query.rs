@@ -42,6 +42,56 @@ pub struct TableQuery {
     pub take: Option<i64>,
 }
 
+/// What an aggregate stage asks the database (aggregates J1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TableAggregate {
+    /// `count()`.
+    Count,
+    /// `sum` of an `Int` column, added by the database, which refuses a
+    /// total that leaves 64 bits on both engines.
+    SumInteger(String),
+    /// The column's stored values alone, for a sum the interpreter adds
+    /// exactly with its own `+` (`Decimal` and `Duration`: SQLite stores
+    /// both as text, so its `sum` would add floats).
+    Values(String),
+}
+
+/// The statement for an aggregate over the rows `filter` keeps, the
+/// column it returns, and its parameters.
+pub fn aggregate_sql(
+    table: &TableRef<'_>,
+    filter: Option<&TableFilter>,
+    aggregate: &TableAggregate,
+) -> (String, Vec<DbValue>) {
+    let mut params = Vec::new();
+    let selected = match aggregate {
+        TableAggregate::Count => format!("count(*) AS {}", quote(AGGREGATE_COLUMN)),
+        // `sum` of no rows is `NULL`; an empty total is 0. Postgres sums a
+        // `bigint` as `numeric`, and the cast back refuses one past 64 bits.
+        TableAggregate::SumInteger(column) => match table.engine.is_postgres() {
+            true => format!("coalesce(sum({}), 0)::bigint AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+            false => format!("coalesce(sum({}), 0) AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+        },
+        TableAggregate::Values(column) => {
+            let kind = column_kind_of(table, column);
+            table.engine.select_list(&TableRef { columns: std::slice::from_ref(column), kinds: std::slice::from_ref(&kind), ..*table })
+        }
+    };
+    let mut sql = format!("SELECT {selected} FROM {}", quote(table.name));
+    if let Some(filter) = filter {
+        sql.push_str(" WHERE ");
+        sql.push_str(&filter_sql(table, filter, &mut params));
+    }
+    (sql, params)
+}
+
+/// The name an aggregate's single result column is read back by.
+const AGGREGATE_COLUMN: &str = "corvid_aggregate";
+
+fn column_kind_of(table: &TableRef<'_>, column: &str) -> ColumnKind {
+    table.columns.iter().position(|c| c == column).map(|i| table.kinds[i]).unwrap_or(ColumnKind::Text)
+}
+
 /// The `SELECT` statement for `query` and its parameters.
 pub fn query_sql(table: &TableRef<'_>, query: &TableQuery) -> Result<(String, Vec<DbValue>), RuntimeError> {
     let mut params = Vec::new();
@@ -142,6 +192,41 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::Other(format!("the recorded outcome of `{}.query` is malformed", table.name)))?
             .iter()
             .map(json_row)
+            .collect()
+    }
+
+    /// Run an aggregate (aggregates J1), recorded as
+    /// `table:<Table>.aggregate` with its SQL and parameters; a replay
+    /// serves the recorded values. `Count` and `SumInteger` give one
+    /// value; `Values` gives the column's value in each row.
+    pub async fn table_aggregate(
+        &self,
+        table: &TableRef<'_>,
+        filter: Option<&TableFilter>,
+        aggregate: &TableAggregate,
+    ) -> Result<Vec<DbValue>, RuntimeError> {
+        let (sql, params) = aggregate_sql(table, filter, aggregate);
+        // The statement returns one column, read back by its name.
+        let (name, kind) = match aggregate {
+            TableAggregate::Count | TableAggregate::SumInteger(_) => (AGGREGATE_COLUMN.to_string(), ColumnKind::Integer),
+            TableAggregate::Values(column) => (column.clone(), column_kind_of(table, column)),
+        };
+        let columns = [name];
+        let kinds = [kind];
+        let selected = TableRef { columns: &columns, kinds: &kinds, ..*table };
+        let args = vec![J::String(sql.clone()), J::Array(params.iter().map(value_json).collect())];
+        let outcome = self
+            .recorded_table_call(&call_name(table, "aggregate"), args, || async {
+                let rows = self.table_select(&selected, &sql, &params).await?;
+                Ok(J::Array(rows.iter().map(row_json).collect()))
+            })
+            .await?;
+        let malformed = || RuntimeError::Other(format!("the recorded outcome of `{}.aggregate` is malformed", table.name));
+        outcome
+            .as_array()
+            .ok_or_else(malformed)?
+            .iter()
+            .map(|row| json_row(row)?.into_iter().next().ok_or_else(malformed))
             .collect()
     }
 }

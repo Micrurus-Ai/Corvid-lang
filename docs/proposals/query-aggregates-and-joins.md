@@ -102,7 +102,7 @@ A `live` query whose `where` filters by another table depends on both tables. A 
 
 ## Slices
 
-- [ ] J1. `count`, `sum`, `min` and `max`: checker, lowering, SQL on both engines, the exact `Decimal` and `Duration` sums, a trap on `Int` overflow, and parity tests against the same computation in Corvid over the rows.
+- [x] J1. `count`, `sum`, `min` and `max`: checker, lowering, SQL on both engines, the exact `Decimal` and `Duration` sums, a trap on `Int` overflow, and parity tests against the same computation in Corvid over the rows. Built 2026-11-26. `min` and `max` run as the query ordered by the column, without missing values, limited to one row, so the database's own collations decide and the row reads back through the existing decoder. `count` and an `Int` `sum` return one column through the same recorded select. The tests run on SQLite here, and on Postgres where `CORVID_TEST_POSTGRES_URL` is set.
 - [ ] J2. `count_by` and `sum_by` to a `Map`.
 - [ ] J3. `keys().contains(row.col)` inside `where`, as `IN (SELECT ...)`, with the composite-key refusal and parity tests against filtering in memory.
 - [ ] J4. `by_key()`.

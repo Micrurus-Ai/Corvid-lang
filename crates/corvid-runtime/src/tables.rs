@@ -45,7 +45,7 @@ pub use indexes::{derive_indexes, managed_prefix, plan_index_changes, unique_pre
 pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations, zoned_time_column_text};
 pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
-pub use query::{query_sql, TableFilter, TableQuery};
+pub use query::{aggregate_sql, query_sql, TableAggregate, TableFilter, TableQuery};
 pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
 pub use postgres::VerifiedTls;
 use recorded::{call_name, json_row, row_json, value_json};
