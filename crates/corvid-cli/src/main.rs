@@ -55,6 +55,7 @@ mod eval_cmd;
 mod format;
 mod jobs_explain_cmd;
 mod lineage_cmd;
+mod lineage_input;
 mod migrate_cmd;
 mod migrate_plan_cmd;
 mod migrate_postgres;
