@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### F08 route stream integration
+
+The GET item loop and generated route call had competing implementations of `routeStream`, which prevented the SDK from compiling. Both call forms now read the existing server protocol through one decoder. The orders check exercises partial delivery followed by truncation, a failed frame or malformed JSON.
+
 ### Lineage from real runs L1d: a streamed call's usage counts
 
 A model call streamed by its provider recorded no usage at all: not in the

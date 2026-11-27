@@ -15,29 +15,38 @@ export interface SseEvent {
  * body ends and throws when the connection fails mid-read, so a caller
  * can tell an ended stream from a lost one.
  */
-export async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+export async function* readSseEvents(body: ReadableStream<Uint8Array>, strictJson = false): AsyncGenerator<SseEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let previousEndedWithCR = false;
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+      let text = decoder.decode(value, { stream: true });
+      if (!text) continue;
+      if (previousEndedWithCR && text.startsWith("\n")) text = text.slice(1);
+      previousEndedWithCR = text.endsWith("\r");
+      buffer += text.replace(/\r\n?/g, "\n");
       let sep: number;
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const raw = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        const event = parseSseEvent(raw);
+        const event = parseSseEvent(raw, strictJson);
         if (event) yield event;
       }
     }
   } finally {
-    reader.releaseLock();
+    try {
+      await reader.cancel();
+    } finally {
+      reader.releaseLock();
+    }
   }
 }
 
-function parseSseEvent(raw: string): SseEvent | null {
+function parseSseEvent(raw: string, strictJson: boolean): SseEvent | null {
   let event = "message";
   const dataLines: string[] = [];
   for (const line of raw.split("\n")) {
@@ -48,7 +57,8 @@ function parseSseEvent(raw: string): SseEvent | null {
   const text = dataLines.join("\n");
   try {
     return { event, data: JSON.parse(text) };
-  } catch {
+  } catch (error) {
+    if (strictJson) throw error;
     return { event, data: text };
   }
 }

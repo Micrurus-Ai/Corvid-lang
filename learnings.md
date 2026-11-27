@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
+
 `upload.bytes()` now returns `Bytes`, one shared buffer, instead of a `List<Int>` with one value per byte; use `bytes.length()`, `bytes.sha256()`, `bytes.to_hex()` or `bytes.to_utf8()`. An uploaded file no longer reaches the trace: a run's recorded arguments hold its name, type, size and SHA-256, never its content.
 
 `password.verify_password(hash)` now runs on a blocking worker, as `hash_password` does, so a login check no longer holds up the other requests a server is handling on the same thread. Nothing changes in your code. [Cryptography: passwords](docs/reference/cryptography.md#passwords)

@@ -701,6 +701,16 @@ The scene editor builds three example agents for its browser worker. The generat
 
 [Build and use the landscape editor](../book/19-browser-views.md#edit-landscape-tiles-with-a-webgl-canvas)
 
+### TypeScript browser route client
+
+- `CorvidClient.request<T>(method, path, body?, signal?): Promise<T>` fetches a JSON route and accepts an optional abort signal.
+- `CorvidClient.upload<T>(path, file, onProgress, signal?): Promise<T>` posts one multipart field named `file` with session credentials. The callback receives bytes sent and an optional total for the encoded request body. Success resolves to the JSON receipt. HTTP errors carry the status and parsed error body in `CorvidError`. Aborting rejects with the signal's reason.
+- `CorvidClient.routeStream<T>(path, signal?): AsyncGenerator<T>` reads JSON items from a Corvid GET route returning `Stream<T>`. Each `chunk` yields its JSON item and `completed` ends iteration. A `failed` event, malformed JSON or a truncated stream rejects the iteration. Cancellation rejects with the signal's reason. Breaking from the loop closes the reader.
+- Generated `api.route(route, ...args)` calls the `routeStream<T>(route, shape, args)` overload. Its iterator exposes `chunk`, `completed`, `failed` and `interrupted` events. Calling `result()` consumes the remaining stream and resolves to `null` on completion or rejects on failure or interruption.
+- `useCorvidPaginated(fetchPage)` supplies `(cursor?, signal?)` to the page loader. Reset aborts a pending request and starts the first page. Unmount aborts the active request. A failure retains earlier pages so `loadMore()` can retry the same cursor.
+
+See [Read order activity and upload a CSV](../book/19-browser-views.md#read-order-activity-and-upload-a-csv).
+
 ## Windowed inventory example
 
 These integer exports belong to the inventory example. Scroll offsets and viewport sizes are nonnegative CSS pixels and row height must be positive. The caller supplies a valid scroll offset for the current inventory size.

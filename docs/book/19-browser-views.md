@@ -1137,6 +1137,29 @@ For example, a browser may ship `Blob.bytes()` before your installed toolchain d
 
 From the repository root, build the example with `python scripts/verify_file_preview.py --cli target/debug/corvid.exe --build-only`. This requires Node, npm and a built Corvid CLI. Serve it with `python -m http.server --directory examples/file_preview/target/site --bind 127.0.0.1 8000` and open `http://127.0.0.1:8000`. To run the browser assertions, replace `--build-only` with `--channel msedge`.
 
+## Read order activity and upload a CSV
+
+The [orders server](../../examples/orders_api/src/main.cor) declares its request and receipt types in Corvid. Generate their TypeScript definitions with `corvid contract ts-client examples/orders_api/src/main.cor --out generated`. Start the example with `corvid serve examples/orders_api/src/main.cor --mode mock`. In a browser client using the same origin, pass the generated item type when reading a stream and the generated receipt type when sending a file.
+
+```ts
+import { CorvidClient } from "@corvid/client";
+import type { ImportReceipt, OrderEvent } from "./generated/types";
+
+const client = new CorvidClient({ baseUrl: location.origin });
+const controller = new AbortController();
+for await (const event of client.routeStream<OrderEvent>("/orders/activity", controller.signal)) {
+  console.log(event.id, event.status);
+}
+
+// file is a File selected by the user. A progress event counts multipart bytes.
+const receipt = await client.upload<ImportReceipt>("/orders/import", file, (loaded, total) => {
+  console.log(total ? Math.round(100 * loaded / total) + "%" : loaded + " bytes sent");
+}, controller.signal);
+console.log(receipt.filename, receipt.bytes);
+```
+
+The loop yields one order update per `chunk` and ends on `completed`. Catch a rejected iteration to show an error alongside any updates already received. To handle terminal events individually, iterate the generated `api.route("GET /orders/activity")` and switch on `event.kind`. Call `controller.abort()` when the user cancels. Create a fresh controller for a retry. The upload promise resolves when the server sends its receipt. A search can use the same cancellation mechanism through `client.request<OrderPage>("GET", path, undefined, controller.signal)`. With React, pass the signal from `useCorvidPaginated((cursor, signal) => ...)` to the page request. Its `reset()` discards accumulated items and starts a fresh first page. An older response arriving afterward cannot append items or replace the new error state.
+
 ## Display a live board in Corvid
 
 Use the subscription declared by the server as the source of a child loop.
