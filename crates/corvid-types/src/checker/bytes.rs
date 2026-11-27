@@ -32,13 +32,15 @@ impl<'a> Checker<'a> {
         let hint = match (op, lt, rt) {
             (_, Type::Unknown, _) | (_, _, Type::Unknown) => return Some(recovered),
             (Eq | NotEq, Type::Bytes, Type::Bytes) => return Some(Type::Bool),
+            // `a + b` joins two byte strings; bytes and text never mix.
+            (Add, Type::Bytes, Type::Bytes) => return Some(Type::Bytes),
             (Lt | LtEq | Gt | GtEq, Type::Bytes, Type::Bytes) => {
                 "byte strings have no order: an ordered comparison stops at the first differing byte, which leaks it; compare with `==`, which is constant-time"
             }
             (_, Type::String, _) | (_, _, Type::String) => {
                 "bytes and text do not mix: turn text into bytes with `utf8()`, or bytes into text with `to_hex()`, `to_base64()`, `to_base64_url()` or `to_utf8()`"
             }
-            _ => "`Bytes` supports only `==` and `!=`, which are constant-time",
+            _ => "`Bytes` supports `==` and `!=`, which are constant-time, and `+`, which joins two byte strings",
         };
         self.errors.push(TypeError::new(
             TypeErrorKind::BytesOperatorMismatch {

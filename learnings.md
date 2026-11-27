@@ -8457,3 +8457,7 @@ Using a record, list or other compound value as a map key stores a copy of it, s
 
 A call to a method a type lacks says so plainly and suggests the method you likely meant: `"corvid".lenght()` gives `[E0240] error: `String` has no method `lenght`` with `help: did you mean `length`?`. On an `Option` or `Result` the help says to take the value out first, for example `value.unwrap_or(default).to_string()`. Before, the message read "cannot call a value of type `method …`" and cited internal slice numbers.
 
+### Joining byte strings
+
+`a + b` on two `Bytes` values gives their bytes one after the other, on both tiers, so a signed message with a binary part can be built as bytes: `"DSSEv1 ".utf8() + payload`. Bytes and text still never mix: `"digest: " + bytes` is a compile error whose help names `utf8()` and the encodings.
+

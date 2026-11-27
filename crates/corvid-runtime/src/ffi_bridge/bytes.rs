@@ -173,6 +173,17 @@ pub unsafe extern "C" fn corvid_bytes_equal(left: CorvidString, right: CorvidStr
     i64::from(Bytes::canonical_texts_equal(left, right))
 }
 
+/// `a + b` between two byte strings: `a`'s bytes then `b`'s, by
+/// `corvid_crypto::Bytes::concat`, the interpreter's join.
+///
+/// # Safety
+/// Both operands must be live native Bytes strings.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_bytes_concat(left: CorvidString, right: CorvidString) -> CorvidString {
+    let (left, right) = unsafe { (bytes_of(&left), bytes_of(&right)) };
+    text_of(&left.concat(&right))
+}
+
 /// The text the interpreter prints for a `Bytes` result,
 /// `Bytes(<hex>)`, written by the same `Debug` form.
 ///

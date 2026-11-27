@@ -2,6 +2,18 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Joining byte strings
+
+B04 left `+` off `Bytes`: no slice needed it, and `+` must not quietly join
+bytes and text. A DSSE envelope over a binary payload needs it, so the first
+reason no longer holds. `a + b` between two `Bytes` now joins them through
+one `corvid_crypto::Bytes::concat`, which the interpreter calls and native
+code reaches through `corvid_bytes_concat`. The second reason is kept:
+mixing bytes with text stays a compile error, and so does any other
+arithmetic. Tests cover the checker, a DSSE-style join on the interpreter, and
+native parity under the leak detector. The reference's operator table
+says so.
+
 ### Query J5: live queries that filter by another table
 
 `live` refused every list filter, because a list may come from a table the

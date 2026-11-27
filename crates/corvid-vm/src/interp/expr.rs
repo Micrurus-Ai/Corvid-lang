@@ -129,6 +129,7 @@ fn eval_arithmetic(
             out.push_str(&b);
             Ok(Value::String(Arc::from(out)))
         }
+        (Value::Bytes(a), Value::Bytes(b)) if matches!(op, BinaryOp::Add) => Ok(Value::Bytes(a.concat(&b))),
         (Value::List(a), Value::List(b)) if matches!(op, BinaryOp::Add) => {
             let mut items = a.iter_cloned();
             items.extend(b.iter_cloned());

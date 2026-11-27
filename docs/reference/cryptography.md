@@ -172,12 +172,14 @@ Signing is not offered: a private key is a long-lived credential whose storage n
 
 `==` and `!=` on `Bytes` are constant-time: comparing two byte strings of the same length takes the same time whichever bytes differ, so comparing a computed signature with a received one cannot leak the signature byte by byte. Byte strings of different lengths are unequal at once, which reveals only their lengths. The comparison is the same wherever it happens: between two values, between records or lists that hold bytes, and in `list.contains(bytes)`.
 
+`a + b` joins two byte strings: `a`'s bytes, then `b`'s. Use it for a signed message with a binary part, such as `"DSSEv1 ".utf8() + payload`.
+
 Every other operator is a compile error that says why:
 
 | Expression | Error hint |
 | --- | --- |
 | `a < b`, `<=`, `>`, `>=` | byte strings have no order, because an ordered comparison stops at the first differing byte |
-| `a + b` | `Bytes` supports only `==` and `!=` |
+| `a - b`, other arithmetic | `Bytes` supports `==`, `!=` and `+` |
 | `a == "text"`, `"digest: " + a` | bytes and text do not mix; convert with `utf8()` or a named encoding |
 
 ## JSON
