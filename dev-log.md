@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Live L2: re-check only the written rows
+
+After L1 one evaluation served all watchers of a query, but each commit
+still re-ran the whole query, so a write to a 10,000-row list read 10,000
+rows. A commit already names the rows it wrote and their revisions. Now
+the query agent runs through `corvid_vm::run_agent_reading_written_rows`,
+which adds an `OR` of key equalities to the query's own condition on the
+entry agent's interpreter only, never on the agents it calls. So the
+database still decides which written rows match, as the proposal requires.
+`corvid_runtime::tables::merge_rechecked` drops every written row from the
+previous result and inserts each that still matches where the query's
+total order (`order_by`, then the key, as `query_sql` writes it) puts it.
+
+The order is compared in Rust only where that equals the database's order
+exactly: whole numbers, `Bool`s, and text on SQLite, which compares bytes.
+Text on Postgres sorts by the database's locale, missing values sort first
+on SQLite and last on Postgres, and decimals and times have their own
+collations, so those kinds re-run the full query. That is correct, only
+slower. Widening it is on the roadmap. So is a commit naming no rows or
+more than 64. A row the database returns that the commit did not write,
+or one that cannot be compared, also falls back.
+
+Tests: a commit adding one row to a 10,000-row board reads one row, and a
+move out of the board reads none; a parity test runs the re-check and the
+full query side by side over adds, an unrelated list, a tie broken by key,
+moves to the top, out, in and down, and a delete, and requires equal rows
+and frames at every step with fewer rows read. `live_order` holds unit tests
+for placement and for which orders are refused.
+
+Alternatives: evaluating the `where` lambda per written row in memory
+(rejected in the proposal: a second meaning beside SQL) and asking the
+database for each row's position (a count query per row, as costly as the
+read it replaces on an unindexed order). No grammar change.
+
 ### Live L1: one evaluation per distinct live query
 
 Every open subscription used to re-run its whole query on each relevant

@@ -9,9 +9,10 @@
 //! A subscription keeps the rows it last sent. On a commit that touches
 //! its table, the transport runs the `live` declaration's snapshot agent
 //! again, which runs its query in the database, and [`live_changes`]
-//! turns the two ordered results into the agreed wire changes. The
-//! database stays the one judge of which rows match and in what order;
-//! an incremental matcher can come later, with this as its reference.
+//! turns the two ordered results into the agreed wire changes. When the
+//! commit names its rows, the agent reads only those rows under its
+//! query's condition and `live_order` places them (live L2); the database
+//! stays the one judge of which rows match.
 
 use serde_json::Value as J;
 use std::collections::{BTreeMap, BTreeSet};

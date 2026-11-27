@@ -8,7 +8,9 @@
 
 use super::Interpreter;
 use crate::errors::{InterpError, InterpErrorKind};
-use crate::public_json::{decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields};
+use crate::public_json::{
+    decode_public_json, decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields,
+};
 use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
@@ -19,6 +21,17 @@ use corvid_runtime::tables::{
 };
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
+
+/// The rows a live subscription re-checks after a commit (live L2): the
+/// entry agent's query on `table` reads only the rows with these keys,
+/// under the query's own condition and order, so the database still
+/// decides which of them match. Each key is a
+/// [`corvid_runtime::tables::LiveRow::key`] text.
+#[derive(Debug, Clone)]
+pub struct WrittenKeys {
+    pub table: String,
+    pub keys: Vec<String>,
+}
 
 impl<'ir> Interpreter<'ir> {
     pub(super) async fn eval_table_op(
@@ -100,10 +113,17 @@ impl<'ir> Interpreter<'ir> {
             .get(&table.def_id)
             .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
         let mut operands = operands.into_iter();
-        let filter = match filter {
+        let mut filter = match filter {
             Some(filter) => Some(self.table_filter(record, filter, &mut operands).map_err(fail)?),
             None => None,
         };
+        if let Some(written) = self.written_keys.as_ref().filter(|w| w.table == table.name) {
+            let only = self.written_keys_filter(record, table, &written.keys).map_err(fail)?;
+            filter = Some(match filter {
+                Some(condition) => TableFilter::And(Box::new(condition), Box::new(only)),
+                None => only,
+            });
+        }
         let take = match operands.next() {
             Some(Value::Int(n)) => Some(n),
             Some(other) => return Err(fail(format!("`take` needs an Int, got {}", other.type_name()))),
@@ -119,6 +139,45 @@ impl<'ir> Interpreter<'ir> {
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         let items = rows.into_iter().map(|row| self.row_value(record, row)).collect::<Result<Vec<_>, _>>().map_err(fail)?;
         Ok(Value::List(crate::value::ListValue::new(items)))
+    }
+
+    /// The condition that keeps only the rows whose keys are in `keys`,
+    /// each a [`corvid_runtime::tables::LiveRow::key`] text: the JSON array
+    /// of the key fields' public JSON values, the form `live_key` writes.
+    fn written_keys_filter(&self, record: &IrType, table: &IrTable, keys: &[String]) -> Result<TableFilter, String> {
+        let mut any: Option<TableFilter> = None;
+        for key in keys {
+            let parts = match serde_json::from_str::<serde_json::Value>(key) {
+                Ok(serde_json::Value::Array(parts)) if parts.len() == table.keys.len() => parts,
+                _ => return Err(format!("`{key}` is not a key of table `{}`", table.name)),
+            };
+            let mut all: Option<TableFilter> = None;
+            for (name, part) in table.keys.iter().zip(parts) {
+                let ty = &record
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *name)
+                    .ok_or_else(|| format!("table `{}` has no key field `{name}`", table.name))?
+                    .ty;
+                let value = decode_public_json(&part, ty, &self.types_by_id, UnknownFields::Reject)
+                    .map_err(|e| e.message())?;
+                let test = TableFilter::Compare {
+                    column: name.clone(),
+                    op: corvid_types::table_ops::QueryCompare::Eq,
+                    value: self.to_column(&value, ty)?,
+                };
+                all = Some(match all {
+                    Some(left) => TableFilter::And(Box::new(left), Box::new(test)),
+                    None => test,
+                });
+            }
+            let all = all.unwrap_or(TableFilter::Const(true));
+            any = Some(match any {
+                Some(left) => TableFilter::Or(Box::new(left), Box::new(all)),
+                None => all,
+            });
+        }
+        Ok(any.unwrap_or(TableFilter::Const(false)))
     }
 
     /// A lowered condition with its values converted to column values.

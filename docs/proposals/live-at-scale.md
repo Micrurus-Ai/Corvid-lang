@@ -39,7 +39,7 @@ Cost after step 2: distinct queries × rows written.
 ## Slices
 
 - [x] L1. Shared evaluation per (declaration, path, actor when read), with a test that 50 subscribers to one board run the query once per commit and each receives the same frames, and that two actors whose query reads `actor` do not share. Done 2026-11-26 (`serve_cmd/live/shared.rs`). The path and caller are keyed by each field's public JSON form. A subscriber that falls more than 64 frames behind starts again from the shared query's current snapshot, and the last subscriber to leave stops the evaluation.
-- [ ] L2. The written-row re-check with the full-query fallback, with a test that a commit writing one row of a 10,000-row table reads only that row, and a parity test that the frames equal those of the full query across inserts, moves out of the query, deletes and reorders.
+- [x] L2. The written-row re-check with the full-query fallback, with a test that a commit writing one row of a 10,000-row table reads only that row, and a parity test that the frames equal those of the full query across inserts, moves out of the query, deletes and reorders. Done 2026-11-26. The query agent runs through `run_agent_reading_written_rows`, which adds `key = ... OR ...` to its own condition, and `corvid_runtime::tables::merge_rechecked` places the rows. A commit naming more than 64 rows, or none, re-runs the full query. Rows are placed by Rust comparison only where it equals the database's order exactly: `Int` and `Bool` columns, and text on SQLite. An `order_by` on any other kind (text on Postgres, which sorts by the database's locale, `Decimal`, times, optional columns) re-runs the full query for now; the roadmap holds widening it.
 
 ## Non-scope
 

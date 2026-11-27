@@ -3,19 +3,29 @@ use super::protocol::{Change, Delivery, Row};
 use super::shared::{QueryKey, SharedQueries, Step};
 use super::{Failure, Subscription};
 use crate::serve_cmd::ReplyEncoding;
-use corvid_driver::{run_ir_with_runtime, Runtime, Value};
+use corvid_driver::{run_agent_reading_written_rows, run_ir_with_runtime, Runtime, Value, WrittenKeys};
 use corvid_ir::{for_each_expr, IrAgent, IrExprKind, IrFile, IrRoute, IrStmt, IrTable, IrType};
+use corvid_runtime::tables::{
+    column_kind, live_changes, merge_rechecked, ColumnKind, LiveChange, LiveChangeKind,
+    LiveMessage, LiveRow, OrderColumn, RowOrder, TableCommit, TableEngine, WrittenRows,
+    MOST_ROWS_RECHECKED,
+};
 use corvid_types::Type;
 use futures::stream::BoxStream;
-use corvid_runtime::tables::{
-    live_changes, LiveChange, LiveChangeKind, LiveMessage, LiveRow, TableCommit, TableEngine,
-    WrittenRows,
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 use futures::StreamExt;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 
-fn query_table(route: &IrRoute) -> Option<&IrTable> {
+/// A live declaration's query: its table, and its `order_by` column and
+/// direction.
+struct LiveQuery<'a> {
+    table: &'a IrTable,
+    order: Option<&'a str>,
+    descending: bool,
+}
+
+fn live_query(route: &IrRoute) -> Option<LiveQuery<'_>> {
     let [IrStmt::Return {
         value: Some(expr), ..
     }] = route.body.stmts.as_slice()
@@ -23,9 +33,56 @@ fn query_table(route: &IrRoute) -> Option<&IrTable> {
         return None;
     };
     match &expr.kind {
-        IrExprKind::TableQuery { table, .. } => Some(table),
+        IrExprKind::TableQuery {
+            table,
+            order,
+            descending,
+            ..
+        } => Some(LiveQuery {
+            table,
+            order: order.as_deref(),
+            descending: *descending,
+        }),
         _ => None,
     }
+}
+
+fn query_table(route: &IrRoute) -> Option<&IrTable> {
+    live_query(route).map(|query| query.table)
+}
+
+/// The query's order when re-checked rows can be placed in it exactly,
+/// else `None`, and every commit re-runs the full query.
+fn row_order(query: &LiveQuery<'_>, types: &[IrType]) -> Option<RowOrder> {
+    let table = query.table;
+    let record = types.iter().find(|t| t.id == table.def_id)?;
+    let column = |name: &str| {
+        let field = record.fields.iter().find(|f| f.name == name)?;
+        let (kind, nullable) = column_kind(&field.ty);
+        Some((field.name.clone(), kind, nullable))
+    };
+    let order = match query.order {
+        Some(name) => Some(column(name)?),
+        None => None,
+    };
+    let keys = table.keys.iter().map(|k| column(k)).collect::<Option<Vec<_>>>()?;
+    let engine = TableEngine::from_declaration(
+        &table.database.engine,
+        table.database.tls.as_deref(),
+        table.database.connections,
+    )?;
+    fn as_column((name, kind, nullable): &(String, ColumnKind, bool)) -> OrderColumn<'_> {
+        OrderColumn {
+            name,
+            kind: *kind,
+            nullable: *nullable,
+        }
+    }
+    RowOrder::of_query(
+        engine,
+        order.as_ref().map(|c| (as_column(c), query.descending)),
+        &keys.iter().map(as_column).collect::<Vec<_>>(),
+    )
 }
 
 pub(in crate::serve_cmd) async fn share_commits(
@@ -185,7 +242,23 @@ pub(super) fn subscribe(
     path: Value,
     actor: Value,
 ) -> Result<Subscription, Failure> {
-    let table = query_table(route).ok_or(Failure::Unavailable)?.clone();
+    let (key, evaluation) = evaluation(queries, ir, runtime, types, route, path, actor)?;
+    Ok(queries.join(key, move || evaluation.run()))
+}
+
+/// The evaluation a subscription joins, and the key it shares under.
+fn evaluation(
+    queries: &Arc<SharedQueries>,
+    ir: Arc<IrFile>,
+    runtime: Runtime,
+    types: Arc<Vec<IrType>>,
+    route: &IrRoute,
+    path: Value,
+    actor: Value,
+) -> Result<(QueryKey, Evaluation), Failure> {
+    let query = live_query(route).ok_or(Failure::Unavailable)?;
+    let order = row_order(&query, &types);
+    let table = query.table.clone();
     let handler = route.handler_agent.clone();
     let agent = ir
         .agents
@@ -217,56 +290,113 @@ pub(super) fn subscribe(
         }
         args.push(value.clone());
     }
-    Ok(queries.join(key, move || evaluate(ir, runtime, encoding, handler, table, args)))
+    let evaluation = Evaluation {
+        ir,
+        runtime,
+        encoding,
+        handler,
+        table,
+        args,
+        order,
+        rows_read: queries.rows_read.clone(),
+    };
+    Ok((key, evaluation))
 }
 
-/// Run the query once, then once per relevant commit, yielding the rows and
-/// the frames that carry a subscriber to them: a snapshot first, then changes.
-fn evaluate(
+/// One live query and what it needs to run.
+struct Evaluation {
     ir: Arc<IrFile>,
     runtime: Runtime,
     encoding: ReplyEncoding,
     handler: String,
     table: IrTable,
     args: Vec<Value>,
-) -> BoxStream<'static, Step> {
-    let mut commits = runtime.subscribe_table_commits();
-    async_stream::try_stream! {
-        let mut previous = Vec::new();
-        let mut batch = None;
-        loop {
-            let value = run_ir_with_runtime(&ir, Some(&handler), args.clone(), &runtime)
-                .await.map_err(|_| Failure::Unavailable)?;
-            let json = encoding.encode(&value, &encoding.ty).map_err(|_| Failure::Unavailable)?;
-            let rows = match json {
-                serde_json::Value::Array(rows) => Ok(rows),
-                _ => Err(Failure::Unavailable),
-            }?;
-            let next = rows.into_iter()
-                .map(|row| LiveRow::from_json(row, &table.keys).ok_or(Failure::Unavailable))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut frames = Vec::new();
-            if let Some(written) = &batch {
-                // A newer commit may already be visible to this read. Its removal
-                // revision is unknown until we consume that notification.
-                let unknown = WrittenRows::default();
-                let revisions = if commits.is_empty() { written } else { &unknown };
-                match live_changes(&previous, &next, revisions) {
-                    LiveMessage::Unchanged => {}
-                    LiveMessage::Snapshot(rows) => frames.push(snapshot(&rows)?),
-                    LiveMessage::Changes(changes) => for change in changes {
-                        frames.push(change_frame(change)?);
-                    }
-                }
-            } else {
-                frames.push(snapshot(&next)?);
+    /// Set when written rows can be re-checked alone (live L2).
+    order: Option<RowOrder>,
+    rows_read: Arc<AtomicU64>,
+}
+
+impl Evaluation {
+    /// The query's rows: all of them, or only the `written` ones that
+    /// still match its condition.
+    async fn read(&self, written: Option<&WrittenRows>) -> Result<Vec<LiveRow>, Failure> {
+        let value = match written {
+            None => run_ir_with_runtime(&self.ir, Some(&self.handler), self.args.clone(), &self.runtime)
+                .await
+                .map_err(|_| Failure::Unavailable)?,
+            Some(written) => {
+                let only = WrittenKeys {
+                    table: self.table.name.clone(),
+                    keys: written.iter().map(|(key, _)| key.to_string()).collect(),
+                };
+                run_agent_reading_written_rows(&self.ir, &self.handler, self.args.clone(), &self.runtime, only)
+                    .await
+                    .map_err(|_| Failure::Unavailable)?
             }
-            yield (next.clone(), frames);
-            previous = next;
-            batch = wait_for_commit(&mut commits, &table.database.name, &table.name).await?;
-        }
+        };
+        let json = self
+            .encoding
+            .encode(&value, &self.encoding.ty)
+            .map_err(|_| Failure::Unavailable)?;
+        let serde_json::Value::Array(rows) = json else {
+            return Err(Failure::Unavailable);
+        };
+        self.rows_read.fetch_add(rows.len() as u64, Ordering::Relaxed);
+        rows.into_iter()
+            .map(|row| LiveRow::from_json(row, &self.table.keys).ok_or(Failure::Unavailable))
+            .collect()
     }
-    .boxed()
+
+    /// The result after a commit that wrote `written`: the written rows
+    /// re-checked and merged in when the commit names few enough rows and
+    /// the order allows it, else the full query.
+    async fn after_commit(&self, previous: &[LiveRow], written: &WrittenRows) -> Result<Vec<LiveRow>, Failure> {
+        let few = !written.is_empty() && written.iter().count() <= MOST_ROWS_RECHECKED;
+        if let (true, Some(order)) = (few, &self.order) {
+            let rechecked = self.read(Some(written)).await?;
+            if let Some(next) = merge_rechecked(previous, rechecked, written, order) {
+                return Ok(next);
+            }
+        }
+        self.read(None).await
+    }
+
+    /// Run the query once, then once per relevant commit, yielding the
+    /// rows and the frames that carry a subscriber to them: a snapshot
+    /// first, then changes.
+    fn run(self) -> BoxStream<'static, Step> {
+        let mut commits = self.runtime.subscribe_table_commits();
+        async_stream::try_stream! {
+            let mut previous = Vec::new();
+            let mut batch: Option<WrittenRows> = None;
+            loop {
+                let next = match &batch {
+                    Some(written) => self.after_commit(&previous, written).await?,
+                    None => self.read(None).await?,
+                };
+                let mut frames = Vec::new();
+                if let Some(written) = &batch {
+                    // A newer commit may already be visible to this read. Its removal
+                    // revision is unknown until we consume that notification.
+                    let unknown = WrittenRows::default();
+                    let revisions = if commits.is_empty() { written } else { &unknown };
+                    match live_changes(&previous, &next, revisions) {
+                        LiveMessage::Unchanged => {}
+                        LiveMessage::Snapshot(rows) => frames.push(snapshot(&rows)?),
+                        LiveMessage::Changes(changes) => for change in changes {
+                            frames.push(change_frame(change)?);
+                        }
+                    }
+                } else {
+                    frames.push(snapshot(&next)?);
+                }
+                yield (next.clone(), frames);
+                previous = next;
+                batch = wait_for_commit(&mut commits, &self.table.database.name, &self.table.name).await?;
+            }
+        }
+        .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -315,11 +445,13 @@ mod tests {
     }
 
     /// The live cards fixture over a fresh database, with agents that write
-    /// cards and a second live query that reads its caller.
+    /// cards and tasks, a live query that reads its caller, and a live task
+    /// list ordered by rank, highest first.
     fn board_program(dir: &tempfile::TempDir) -> Arc<IrFile> {
         let database = dir.path().join("boards.sqlite");
         rusqlite::Connection::open(&database).unwrap().execute_batch(
-            "CREATE TABLE Card (card INTEGER PRIMARY KEY NOT NULL, board TEXT NOT NULL, revision INTEGER NOT NULL)"
+            "CREATE TABLE Card (card INTEGER PRIMARY KEY NOT NULL, board TEXT NOT NULL, revision INTEGER NOT NULL);
+             CREATE TABLE Task (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, rank INTEGER NOT NULL, revision INTEGER NOT NULL)"
         ).unwrap();
         let source = include_str!("../../../tests/fixtures/live_cards.cor")
             .replace(
@@ -328,7 +460,7 @@ mod tests {
             )
             .replace(
                 "    route GET \"/archive\"",
-                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    route GET \"/archive\"",
+                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    live \"/lists/{list}/tasks\" -> Task requires permission(\"board.view\"):\n        return Task.where(fn (t) -> t.list == path.list).order_by(fn (t) -> t.rank).descending()\n    route GET \"/archive\"",
             );
         let program = source
             + r#"
@@ -345,6 +477,31 @@ agent move_card(card: Int, board: String) -> String:
 fn saved(result: Result<Card, Conflict<Card>>) -> String:
     return match result:
         Ok(row) -> "saved"
+        Err(_) -> "conflict"
+
+table Task:
+    key id: Int
+    list: String
+    rank: Int
+
+agent add_task(id: Int, list: String, rank: Int) -> String:
+    return match Task.insert(Task(id, list, rank)):
+        Ok(row) -> "added"
+        Err(_) -> "taken"
+
+agent change_task(id: Int, list: String, rank: Int) -> String:
+    return match Task.get(id):
+        Some(row) -> task_written(Task.save(Task { list: list, rank: rank, ..row }))
+        None -> "missing"
+
+agent remove_task(id: Int) -> String:
+    return match Task.get(id):
+        Some(row) -> task_written(Task.delete(row))
+        None -> "missing"
+
+fn task_written(result: Result<Task, Conflict<Task>>) -> String:
+    return match result:
+        Ok(row) -> "written"
         Err(_) -> "conflict"
 "#;
         Arc::new(corvid_driver::compile_to_ir(&program).unwrap())
@@ -410,6 +567,124 @@ fn saved(result: Result<Card, Conflict<Card>>) -> String:
         assert_eq!(queries.evaluations(), 2);
         drop(watchers);
         assert_eq!(queries.shared_count(), 0, "the last watcher to leave stops it");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_commit_writing_one_row_of_ten_thousand_reads_only_that_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let ir = board_program(&dir);
+        let mut connection = rusqlite::Connection::open(dir.path().join("boards.sqlite")).unwrap();
+        let fill = connection.transaction().unwrap();
+        for card in 0..10_000 {
+            fill.execute(
+                "INSERT INTO Card (card, board, revision) VALUES (?1, 'home', 1)",
+                [card],
+            )
+            .unwrap();
+        }
+        fill.commit().unwrap();
+        let runtime = Runtime::builder().build();
+        let routes = Routes::new(&ir).unwrap();
+        let (route, path) = routes.resolve(&ir, "/boards/home/cards").unwrap();
+        let queries = Arc::new(SharedQueries::default());
+        let mut watcher = subscribe(
+            &queries,
+            ir.clone(),
+            runtime.clone(),
+            Arc::new(ir.types.clone()),
+            route,
+            path,
+            Value::Nothing,
+        )
+        .unwrap();
+        let first = frame(&mut watcher).await;
+        assert_eq!(first["rows"].as_array().unwrap().len(), 10_000);
+        assert_eq!(queries.rows_read(), 10_000);
+        write(&ir, &runtime, "add", 5_000_000, "home").await;
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"change","kind":"added","index":10_000,"revision":"1","row":{"card":5_000_000,"board":"home","revision":1}})
+        );
+        write(&ir, &runtime, "move_card", 17, "away").await;
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"change","kind":"removed","revision":"2","row":{"card":17,"board":"home","revision":1}})
+        );
+        assert_eq!(queries.rows_read(), 10_001, "only the added row was read back");
+    }
+
+    /// The next step of an evaluation: its rows and its frames as JSON.
+    async fn step(steps: &mut BoxStream<'static, Step>) -> (Vec<LiveRow>, serde_json::Value) {
+        let (rows, frames) = tokio::time::timeout(Duration::from_secs(5), steps.next())
+            .await
+            .expect("evaluation timed out")
+            .expect("evaluation ended")
+            .expect("evaluation failed");
+        (rows, serde_json::to_value(frames).unwrap())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rechecking_written_rows_gives_the_frames_of_the_full_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let ir = board_program(&dir);
+        let runtime = Runtime::builder().build();
+        let routes = Routes::new(&ir).unwrap();
+        let (route, path) = routes.resolve(&ir, "/lists/home/tasks").unwrap();
+        let types = Arc::new(ir.types.clone());
+        let task = |agent: &'static str, args: Vec<Value>| {
+            let (ir, runtime) = (ir.clone(), runtime.clone());
+            async move { run_ir_with_runtime(&ir, Some(agent), args, &runtime).await.unwrap() }
+        };
+        let (int, text) = (Value::Int, |s: &str| Value::String(s.into()));
+        task("add_task", vec![int(9), text("home"), int(7)]).await;
+        let open = || {
+            let queries = Arc::new(SharedQueries::default());
+            let (_, evaluation) = evaluation(
+                &queries,
+                ir.clone(),
+                runtime.clone(),
+                types.clone(),
+                route,
+                path.clone(),
+                Value::Nothing,
+            )
+            .unwrap();
+            (queries, evaluation)
+        };
+        let (rechecked_reads, rechecked) = open();
+        let (full_reads, mut full) = open();
+        assert!(rechecked.order.is_some(), "an Int order is re-checked");
+        full.order = None;
+        let (mut rechecked, mut full) = (rechecked.run(), full.run());
+        assert_eq!(step(&mut rechecked).await, step(&mut full).await);
+        let writes: Vec<(&'static str, Vec<Value>)> = vec![
+            ("add_task", vec![int(1), text("home"), int(5)]),
+            ("add_task", vec![int(2), text("home"), int(3)]),
+            // Another list: nothing changes here.
+            ("add_task", vec![int(3), text("away"), int(9)]),
+            // The same rank as task 1: the key orders them.
+            ("add_task", vec![int(4), text("home"), int(5)]),
+            // Moves to the top.
+            ("change_task", vec![int(2), text("home"), int(10)]),
+            // Moves out of the list.
+            ("change_task", vec![int(1), text("away"), int(5)]),
+            // Moves into the list, at the bottom.
+            ("change_task", vec![int(3), text("home"), int(1)]),
+            ("remove_task", vec![int(4)]),
+            // Moves down past two rows.
+            ("change_task", vec![int(2), text("home"), int(2)]),
+        ];
+        for (agent, args) in writes {
+            task(agent, args.clone()).await;
+            let (rows, frames) = step(&mut rechecked).await;
+            assert_eq!((rows, frames), step(&mut full).await, "after {agent}{args:?}");
+        }
+        assert!(
+            rechecked_reads.rows_read() < full_reads.rows_read(),
+            "{} rows re-checked, {} read by the full query",
+            rechecked_reads.rows_read(),
+            full_reads.rows_read()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

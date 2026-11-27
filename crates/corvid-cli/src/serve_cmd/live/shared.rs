@@ -48,6 +48,8 @@ struct Shared {
 pub(in crate::serve_cmd) struct SharedQueries {
     running: Mutex<HashMap<QueryKey, Shared>>,
     reads_actor: Mutex<HashMap<String, bool>>,
+    /// Rows the evaluations have read from the database, all told.
+    pub(super) rows_read: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl SharedQueries {
@@ -149,6 +151,11 @@ impl SharedQueries {
     #[cfg(test)]
     pub(super) fn shared_count(&self) -> usize {
         self.running().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn rows_read(&self) -> u64 {
+        self.rows_read.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     #[cfg(test)]

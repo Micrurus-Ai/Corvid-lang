@@ -49,8 +49,10 @@ mod connector_json;
 mod test_trace;
 
 pub use run_validate::{
-    bind_and_run_agent, build_struct, run_agent, run_agent_stepping, run_agent_with_env,
+    bind_and_run_agent, build_struct, run_agent, run_agent_reading_written_rows, run_agent_stepping,
+    run_agent_with_env,
 };
+pub use tables::WrittenKeys;
 pub use test_runner::{
     run_all_tests, run_all_tests_with_options, run_test, SnapshotOptions, TestAssertionExecution,
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
@@ -170,6 +172,10 @@ struct Interpreter<'ir> {
     /// the agents it calls so their table operations join it. `None`
     /// outside an `atomic:` block.
     table_transaction: Option<Arc<corvid_runtime::tables::TableTransaction>>,
+    /// The written rows a live re-check reads instead of its whole query
+    /// (live L2). Set only on the entry agent's interpreter, never passed
+    /// to the agents it calls.
+    written_keys: Option<Arc<tables::WrittenKeys>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -211,6 +217,7 @@ impl<'ir> Interpreter<'ir> {
             dispatch_count: None,
             replay_cancel_after: None,
             table_transaction: None,
+            written_keys: None,
         }
     }
 

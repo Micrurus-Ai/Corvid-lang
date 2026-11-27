@@ -30,6 +30,31 @@ pub async fn run_agent_with_env(
     args: Vec<Value>,
     runtime: &Runtime,
 ) -> Result<(Value, Env), InterpError> {
+    run_configured(ir, agent_name, args, runtime, None).await
+}
+
+/// Run a `live` declaration's query agent reading only the rows `written`
+/// names (live L2): its query keeps its own condition and order, and the
+/// database decides which written rows still match.
+pub async fn run_agent_reading_written_rows(
+    ir: &IrFile,
+    agent_name: &str,
+    args: Vec<Value>,
+    runtime: &Runtime,
+    written: super::tables::WrittenKeys,
+) -> Result<Value, InterpError> {
+    run_configured(ir, agent_name, args, runtime, Some(Arc::new(written)))
+        .await
+        .map(|(value, _env)| value)
+}
+
+async fn run_configured(
+    ir: &IrFile,
+    agent_name: &str,
+    args: Vec<Value>,
+    runtime: &Runtime,
+    written_keys: Option<Arc<super::tables::WrittenKeys>>,
+) -> Result<(Value, Env), InterpError> {
     let agent = ir
         .agents
         .iter()
@@ -54,6 +79,7 @@ pub async fn run_agent_with_env(
     });
 
     let mut interp = Interpreter::new(ir, runtime);
+    interp.written_keys = written_keys;
     let bind_result = interp.bind_params(agent, args);
     let outcome = match bind_result {
         Ok(()) => interp
