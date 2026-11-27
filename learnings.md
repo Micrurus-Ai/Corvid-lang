@@ -8473,3 +8473,15 @@ A whole-number literal larger than `Int` holds (beyond 9223372036854775807) is r
 
 The server `corvid build --target server` generates answers a failure with the body `corvid serve` sends: `{"error": "handler_timeout", "detail": "..."}`, a code and a fixed sentence. The request id is in the `x-corvid-request-id` header. Before, the generated server sent `{"request_id", "route", "kind", "message", "duration_ms"}`, so a client had to read two shapes for the same failures.
 
+
+### See what a run did with `corvid observe`
+
+Every `corvid run` records its trace under the project's `target/trace/`, and `corvid observe list`, `corvid observe show <run-id>` and `corvid trace lineage <run-id>` read that trace directly. The run is the root. Each table operation is a `db` step (`- db Shelf.insert [ok] latency=2ms`), each other tool a `tool` step, each model call a `prompt` step, each approval an `approval` step, and each HTTP attempt sits under its tool. `corvid eval promote target/trace/<run-id>.jsonl` turns a run into an eval fixture.
+
+Not yet:
+- `corvid serve` records no trace.
+- Calls between agents are not nested.
+- Model calls show no token counts or cost.
+- Nothing is exported to OpenTelemetry while a program runs.
+
+[Observability](docs/guides/observability.md)

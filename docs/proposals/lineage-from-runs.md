@@ -40,7 +40,8 @@ The runtime trace stays the one record of a run. Lineage becomes a projection of
 - **Pairing.** A call is paired with the next result of the same name in the same run, in trace order.
 - **Timing.** A span's start and end are the two events' timestamps.
 - **Span ids.** They come from `lineage_span_id`, so deriving the same trace twice gives the same ids. Redaction, drift comparison and eval promotion depend on that.
-- **Incomplete traces.** A trace cut off mid-call gives a span with status `Failed` and the reason "the trace ends before this call's result". It is never dropped silently.
+- **Incomplete traces.** A trace cut off mid-call keeps the call as a span with status `Failed`, ending at the trace's last event, and the run's root fails too. It is never dropped silently.
+- **Which files are traces.** A reader judges a file by its first line, not its name. A run trace's first line is an event with `kind` and `run_id`, and a lineage trace's carries the lineage `schema`. A directory scan skips any other JSON lines file, and naming one directly is refused with an error saying it is neither.
 
 ### Time spent in the database (L2)
 
@@ -96,7 +97,9 @@ traces:
 
 ## Slices
 
-- [ ] L1. `lineage_from_trace`, with a test per row of the table. `corvid observe list | show`, `corvid trace lineage` and `corvid eval promote` accept a run trace, and a trace from a real `corvid run` renders as a tree. The tests run a program, not a fixture.
+- [x] L1. `lineage_from_trace`, with a test per row of the table. `corvid observe list | show`, `corvid trace lineage` and `corvid eval promote` accept a run trace, and a trace from a real `corvid run` renders as a tree. The tests run a program, not a fixture. Built 2026-11-27. Four copies of the lineage reader across `observe`, `trace lineage`, `eval promote` and the observe helpers became one, `corvid-cli`'s `lineage_input`. One copy had already drifted: it read every `.jsonl` in a directory as lineage.
+- [ ] L1b. A call from one agent to another is recorded in the trace, so lineage shows the agent nesting. Today a run's steps sit directly under it, because the trace holds only the run's own start and end.
+- [ ] L1c. Model calls record token counts and cost in the trace, so `Prompt` spans and `observe`'s cost totals are real. Today the trace records the model but not its usage, so derived lineage shows zero cost.
 - [ ] L2. `timing` on table results, filled on both engines. `corvid.db.wait_ms` and `corvid.db.statement_ms` on `Db` spans and in the OTLP export. Replay ignores the field.
 - [ ] L3. The `traces:` block (`location:`, `keep:`, `none`) parsed and checked, and required with a `server` block. `corvid serve` records one run per request, with the route as root, and deletes traces older than `keep:`. Served examples declare it. Needs the frontend review.
 - [ ] L4. `export: otlp(env(...))`, exporting each finished run's redacted lineage. Needs the frontend review.

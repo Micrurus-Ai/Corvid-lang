@@ -104,7 +104,7 @@ pub fn run_drift(baseline: &Path, candidate: &Path, json: bool) -> Result<u8> {
 }
 
 pub(super) use crate::lineage_input::{
-    is_lineage_jsonl, read_lineage_events, read_lineage_input, resolve_lineage_path,
+    is_trace_jsonl, read_lineage_events, read_lineage_input, resolve_lineage_path,
 };
 
 pub(super) fn kind_name(kind: LineageKind) -> String {

@@ -2,20 +2,24 @@
 
 > **What runs today, and what does not yet.** `corvid run` and a compiled
 > binary record every run as a trace, `target/trace/<run_id>.jsonl`. That
-> trace is the record replay, `corvid trace show` and `corvid trace dag`
-> read. `corvid serve` records no trace yet.
+> trace is the record replay reads, and the tools on this page read it
+> too: `corvid observe`, `corvid trace lineage` and `corvid eval promote`
+> derive a run's lineage from its trace. The run is the root. Each table
+> operation is a `db` step, each other tool a `tool` step, each model call
+> a `prompt` step, each approval an `approval` step, and each HTTP attempt
+> sits under its tool. A lineage file (`*.lineage.jsonl`) is still read as
+> written.
 >
-> The tools on this page read a different file, the lineage trace
-> (`<run_id>.lineage.jsonl`): `corvid observe`, `corvid trace lineage`,
-> `corvid eval promote` and the OpenTelemetry export. Corvid does not yet
-> write that file for a run, so today these tools work on lineage files you
-> supply, such as the reference apps' `traces/demo.lineage.jsonl`. Also not
-> built yet: the `CORVID_OTEL_*` variables and a `corvid run --trace-out`
-> flag.
+> Not built yet:
+> - `corvid serve` records no trace.
+> - A call from one agent to another is not in the trace, so the steps sit
+>   directly under the run.
+> - Model calls carry their model but no token counts or cost.
+> - A running program exports nothing to OpenTelemetry. The
+>   `CORVID_OTEL_*` variables and a `corvid run --trace-out` flag do not
+>   exist.
 >
-> The plan to derive lineage from the trace every run already writes, and
-> to let a served program declare where its traces go, is
-> [lineage from real runs](../proposals/lineage-from-runs.md).
+> The plan for each is [lineage from real runs](../proposals/lineage-from-runs.md).
 
 The observability surface is the OTel-conformant lineage model, the
 `corvid observe` CLI, and the `corvid eval`, `corvid eval-drift` and
@@ -29,8 +33,9 @@ Per the Phase 40 audit (`docs/phases/phase-40-audit-2026-05-17.md`):
 - **Lineage events.** A typed `LineageEvent` model for prompt, tool,
   agent, approval, database, retry and error steps, with stable
   `(trace_id, span_id, parent_span_id)` triples. Validated by
-  `corvid_runtime::lineage::validate_lineage`. A run does not produce
-  these events yet (see the note above).
+  `corvid_runtime::lineage::validate_lineage`. A run's lineage is derived
+  from its trace by `corvid_runtime::lineage_from_trace`, the one
+  projection every reader calls.
 - **OTel SDK export** —
   `crates/corvid-runtime/src/otel_sdk_export.rs` ships span
   emission through the standard `opentelemetry` +
@@ -75,26 +80,25 @@ machine-readable form the docs-site + downstream tooling consume.
 
 ## Trace + eval lifecycle
 
-Steps 2 to 4 read lineage traces, which a run does not write yet (see
-the note at the top). Until it does, run them on a lineage file you
-supply.
-
 ```sh
-# 1. Run an agent; its trace is recorded under target/trace/.
-corvid run examples/backend/personal_executive_agent/src/main.cor
+# 1. Run an agent; its trace is recorded under the project's target/trace/.
+cd examples/backend/personal_executive_agent
+corvid run src/main.cor
 
-# 2. Inspect a lineage trace.
-corvid observe show <run-id> --trace-dir /var/lib/corvid/traces/
+# 2. Inspect the run: its lineage is derived from the trace.
+corvid observe list
+corvid trace lineage <run-id>
+corvid observe show <run-id>
 
-# 3. Compare two traces (e.g. before/after a prompt change).
-corvid observe drift /var/lib/corvid/traces/pre/ /var/lib/corvid/traces/post/
+# 3. Compare two sets of runs (e.g. before/after a prompt change).
+corvid observe drift traces/before/ traces/after/
 
-# 4. Promote a failing trace into an eval fixture.
-corvid eval promote /var/lib/corvid/traces/<failed>.lineage.jsonl \
+# 4. Promote a failing run into an eval fixture.
+corvid eval promote target/trace/<failed-run-id>.jsonl \
     --promote-out tests/evals/regressions/
 
 # 5. Run the eval set during CI.
-corvid eval tests/evals/regressions/ --source examples/backend/personal_executive_agent/src/main.cor
+corvid eval tests/evals/regressions/ --source src/main.cor
 ```
 
 ## OTel export configuration

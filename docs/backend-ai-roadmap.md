@@ -119,7 +119,9 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [x] Variant payload refinements and the duration literal, built under the amended grammar law (2026-11-26, Mac session).
 - [ ] Proposals, then builds: a per-call credential on connector operations ([user credentials](proposals/user-credentials.md), C1 built), raw request bodies with a webhook verifier (B16), joins and aggregates in queries and `live`.
 - [ ] Lineage from real runs. [Proposal](proposals/lineage-from-runs.md), 2026-11-27. Brought forward ahead of the remaining order because it misled users. `corvid observe`, `corvid trace lineage`, `corvid eval promote` and the OpenTelemetry export read lineage files that no run writes, `corvid serve` records no trace, and the observability guide documented `CORVID_OTEL_*` variables and a `--trace-out` flag that do not exist. The guide now says what runs today.
-  - [ ] L1. One projection, `lineage_from_trace`, from the trace every run already writes, with every lineage reader accepting a run trace.
+  - [x] L1. One projection, `lineage_from_trace`, from the trace every run already writes, with every lineage reader accepting a run trace. Built 2026-11-27. A real `corvid run` renders through `corvid trace lineage` and `corvid observe list | show`, and the four copies of the lineage reader became one.
+  - [ ] L1b. Agent-to-agent calls recorded in the trace, so lineage shows the nesting. Found building L1: a real run's trace holds only its own start and end.
+  - [ ] L1c. Model calls record token counts and cost in the trace. Found building L1: derived lineage shows zero cost, so `observe`'s cost totals are empty for real runs.
   - [ ] L2. Wait for a connection and statement time on every table operation's span.
   - [ ] L3. A served program declares `traces:` (location and retention, or `none`), and `corvid serve` records one run per request. Shared grammar: item 9 of the review brief.
   - [ ] L4. `export: otlp(env(...))` sends each finished run's redacted lineage. Shared grammar: item 9 of the review brief.

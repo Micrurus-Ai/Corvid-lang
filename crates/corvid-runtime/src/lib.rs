@@ -75,6 +75,7 @@ pub mod lineage_eval;
 pub mod lineage_incidents;
 pub mod lineage_redact;
 pub mod lineage_render;
+pub mod lineage_trace;
 pub mod llm;
 pub mod models;
 pub mod native_layout;
@@ -263,6 +264,7 @@ pub use lineage_redact::{
     LineageRedactionPolicy,
 };
 pub use lineage_render::render_lineage_tree;
+pub use lineage_trace::lineage_from_trace;
 pub use llm::{
     anthropic::AnthropicAdapter,
     gemini::GeminiAdapter,

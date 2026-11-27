@@ -2,6 +2,52 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs L1: `observe` reads what a run records
+
+`corvid_runtime::lineage_from_trace` turns a run's trace into its
+lineage, one tree per run:
+- the run is the root;
+- `table:<Table>.<op>` calls become `Db` spans;
+- other tools become `Tool` spans, model calls `Prompt` spans, and
+  approvals `Approval` spans (`Denied` when refused);
+- an HTTP exchange sits under its tool, and a retried attempt is a
+  `Retry` span;
+- a failed run gets an `Error` child, and a call cut off mid-trace stays
+  as a `Failed` span.
+
+A call pairs with the next result of the same name. Span ids come from
+`lineage_span_id`, so the same trace always gives the same ids.
+
+`corvid-cli`'s `lineage_input` is now the one reader for `observe`,
+`trace lineage`, `eval promote` and the observe helpers. It judges a file
+by its first line:
+- a run trace (`kind` and `run_id`) is projected;
+- a lineage trace (the lineage `schema`) is read as written;
+- anything else is skipped in a directory and refused by name.
+
+A bare run id finds `<id>.lineage.jsonl`, or else `<id>.jsonl`.
+
+The tests run a program, not a fixture. `corvid run` records a table
+program's trace, `corvid trace lineage` prints the run with its three `db`
+steps in order, and `observe list | show` find it.
+
+Found and fixed:
+- **Four copies of the lineage reader.** Before this slice they lived in
+  three command files and the observe helpers. The identical three moved
+  in a refactor commit first. The helpers' copy had drifted: it read every
+  `.jsonl` in a directory as lineage, so a run trace beside lineage files
+  failed. It now calls the shared reader.
+
+Found and filed (the real trace showed both):
+- **L1b.** An agent's call to another agent is not in the trace, so
+  lineage is flat under the run.
+- **L1c.** Model calls record no token counts or cost, so derived lineage
+  shows zero cost.
+
+Told the Mac session that the cargo-audit CI job it planned already exists
+(`dependency-advisories` in `ci.yml`), so it can extend that job instead of
+adding a second one.
+
 ### Lineage from real runs: the gap, and the plan
 
 I started on the roadmap item to show pool wait in production, and found
