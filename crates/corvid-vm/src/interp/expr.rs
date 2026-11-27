@@ -747,6 +747,17 @@ pub(super) fn eval_builtin_method(
             let label = want_string(&args[1], span)?;
             super::form::render(&target, &args[0], &label, types, span)
         }
+        ActionForm => {
+            let path = want_string(&recv, span)?;
+            let label = want_string(&args[1], span)?;
+            super::form::render_action(&path, &args[0], &label, types, span)
+        }
+        ActionButton => {
+            let path = want_string(&recv, span)?;
+            let label = want_string(&args[1], span)?;
+            let field = want_string(&args[2], span)?;
+            super::form::render_action_button(&path, &args[0], &label, &field, types, span)
+        }
         RangeIntList => {
             let start = want_int(&recv, span)?;
             let end = want_int(&args[0], span)?;

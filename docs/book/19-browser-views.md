@@ -541,9 +541,20 @@ server notes:
 
 Set `CORVID_IO_ROOT` to the project directory for the saved search. Run `corvid serve src/main.cor --listen 127.0.0.1:8000` and open the root URL. Pressing Search navigates to the result page. The browser URL carries the submitted values, so reloading preserves them. An invalid integer returns HTTP 400. Save search submits the fields in the POST body and writes the term to `saved-search.txt`.
 
-`form_for(target, initial, submit_label)` returns HTML for a fixed-path route declared in the same module. Use a literal such as `"GET /search"` or `"POST /save"`. Corvid checks the route and the initial record at compile time. It derives field names, labels and controls from the record in declaration order. Supported field types are String, Int, Float and Bool. GET uses a `query` record. POST uses a `form` record and the browser's standard URL-encoded request body. The route reads the submitted record as `body`.
+`form_for(target, initial, submit_label)` returns HTML for a fixed-path route declared in the same module. Use a literal such as `"GET /search"` or `"POST /save"`. Corvid checks the route and the initial record at compile time. It derives field names, labels and controls from the record in declaration order. Supported field types are String, Int, Float, Bool and a type of plain variants, which is a choice of its variants. These are the types the server reads back from one form value. A field the server reads but a form cannot show yet, such as a `Decimal`, is a compile error naming it. GET uses a `query` record. POST uses a `form` record and the browser's standard URL-encoded request body. The route reads the submitted record as `body`.
 
 The save example uses a public route. Cookie-authenticated mutations also require the session CSRF token in the `x-csrf-token` header. A plain HTML form cannot set that header.
+
+A form can call an action in place of a route. The action is named, and the compiler checks the initial record against its input, so renaming a field of `MoveCard` is an error at the form:
+
+```corvid-fragment
+fn board_page(card: Card) -> String:
+    move = View(form_for(move_card, MoveCard(card.id, Done, 0), "Move"))
+    archive = View(button_for(archive_card, card.id, "Archive"))
+    return ui.page("Board", [move, archive])
+```
+
+`form_for(move_card, ...)` needs an action whose input is one record, and posts to `/actions/move_card`. `button_for(action, value, label)` is a single button that posts `value` as the action's whole input, in hidden fields: either the action's one input record, or its one input of a form type, such as `archive_card(card: Int)`. Both forms carry a hidden `corvid_csrf` field. The page script fills it from the `corvid_csrf` cookie on submit, and the server checks it like the header. Without the script, the field stays empty and a signed-in action refuses the post. `corvid_csrf` is reserved, so no action input may use that name. A form submitted without the page script gets a page back: `303` to the page it came from when the action succeeds, or a page naming the refused field or the error, with a link back.
 
 The separate preview route accepts the same record as JSON. Posting `{"term":"meeting","limit":2}` to `/preview` returns its rendered page.
 

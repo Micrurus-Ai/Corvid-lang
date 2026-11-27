@@ -198,6 +198,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0713` | `TypeErrorKind::ActionCallerWithoutSignIn` | An action reads its caller (a `Caller` parameter) but requires no sign-in, so no caller is ever verified. |
 | `E0714` | `TypeErrorKind::InvalidForm` | A browser form that does not match what it submits to; `message` names the mismatch. |
 | `E0715` | `TypeErrorKind::InvalidLiveBinding` | A browser binding to a `live` route that does not match its declaration; `message` names the mismatch. |
+| `E0716` | `TypeErrorKind::ActionInputReservedName` | An action input named `corvid_csrf`, the hidden field that carries a form's CSRF token (B10-2b-5): the two would collide in a form. |
 | `E0720` | `TypeErrorKind::DuplicateServerRoute` | A backend server declared the same method/path pair more than once. |
 | `E0721` | `TypeErrorKind::GetRouteBody` | A GET route declared a request body. |
 | `E0722` | `TypeErrorKind::RouteMethodAnsweredByServer` | A route declared with `HEAD` or `OPTIONS`, which the server answers itself (B05: the methods exist for connector operations). |

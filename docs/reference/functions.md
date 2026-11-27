@@ -206,7 +206,8 @@ No method returns a secret's text. `decode_base64_after` returns another secret,
 ## Built-in functions
 
 - `range(start: Int, end: Int) -> List<Int>`
-- `form_for(target: String, initial: Record, submit_label: String) -> String`
+- `form_for(target: String | action, initial: Record, submit_label: String) -> String`: a form for a declared route (`"POST /save"`) or an action, named (`move_card`)
+- `button_for(action, value: T, submit_label: String) -> String`: one button calling an action with `value` as its whole input
 - `Ok(value: T) -> Result<T, E>`
 - `Err(error: E) -> Result<T, E>`
 - `Some(value: T) -> Option<T>`

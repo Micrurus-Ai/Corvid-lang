@@ -40,6 +40,39 @@ impl<'a> Checker<'a> {
         });
     }
 
+    /// No action input may be named like the hidden CSRF field a form for
+    /// an action carries (B10-2b-5): neither a parameter nor, when the
+    /// input is one record, a field of that record.
+    pub(super) fn check_action_reserved_names(&mut self, file: &File) {
+        use crate::action_input::{whole_input_type, CSRF_FORM_FIELD};
+        for decl in &file.decls {
+            let Decl::Agent(agent) = decl else { continue };
+            if agent.action.is_none() {
+                continue;
+            }
+            let inputs: Vec<(String, crate::Type, corvid_ast::Span)> = agent
+                .params
+                .iter()
+                .filter_map(|p| Some((p.name.name.clone(), self.type_refs.get(&p.ty.span())?.clone(), p.name.span)))
+                .filter(|(_, ty, _)| !is_caller(ty))
+                .collect();
+            let mut names: Vec<(String, corvid_ast::Span)> = inputs.iter().map(|(n, _, s)| (n.clone(), *s)).collect();
+            if let Some(crate::Type::Struct(id)) = whole_input_type(inputs.iter().map(|(_, ty, _)| ty)) {
+                if let Some(record) = self.types_by_id.get(id) {
+                    names = record.fields.iter().map(|f| (f.name.name.clone(), f.name.span)).collect();
+                }
+            }
+            for (name, span) in names {
+                if name == CSRF_FORM_FIELD {
+                    self.errors.push(TypeError::new(
+                        TypeErrorKind::ActionInputReservedName { action: agent.name.name.clone(), name },
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+
     /// A `Caller` comes only from a verified session. An action's
     /// parameter of type `Caller` is its caller, which needs a signed-in
     /// policy; a `Caller` anywhere a request, a client or a model supplies

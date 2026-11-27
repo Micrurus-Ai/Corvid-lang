@@ -182,6 +182,35 @@ struct Lowerer<'a> {
 }
 
 impl<'a> Lowerer<'a> {
+    /// The action of this module an expression names, for `form_for` and
+    /// `button_for` (B10-2b-5).
+    fn action_named(&self, expr: &Expr) -> Option<&'a AgentDecl> {
+        let Expr::Ident { name, .. } = expr else { return None };
+        self.file.decls.iter().find_map(|decl| match decl {
+            Decl::Agent(agent) if agent.action.is_some() && agent.name.name == name.name => Some(agent),
+            _ => None,
+        })
+    }
+
+    /// The name of an action's one input parameter, when its input is a
+    /// single value rather than a whole input record; through the same
+    /// rule the contract and `corvid serve` use.
+    fn single_input_name(&self, agent: &AgentDecl) -> Option<String> {
+        let inputs: Vec<(&str, &Type)> = agent
+            .params
+            .iter()
+            .filter_map(|param| Some((param.name.name.as_str(), self.type_refs.get(&param.ty.span())?)))
+            .filter(|(_, ty)| !corvid_types::action_input::is_caller(ty))
+            .collect();
+        if corvid_types::action_input::whole_input_type(inputs.iter().map(|(_, ty)| *ty)).is_some() {
+            return None;
+        }
+        match inputs.as_slice() {
+            [(name, _)] => Some((*name).to_string()),
+            _ => None,
+        }
+    }
+
     fn new(
         file: &'a File,
         resolved: &'a Resolved,
@@ -2133,6 +2162,35 @@ impl<'a> Lowerer<'a> {
                         kind: corvid_types::BuiltinMethodKind::BrowserFields,
                         receiver: Box::new(self.lower_expr(&args[0])),
                         args: Vec::new(),
+                    };
+                }
+                // `form_for(move_card, ...)` and `button_for(archive_card,
+                // ...)` (B10-2b-5): the action, named, renders a form that
+                // posts to its path. The checker proved the name is an
+                // action of this module.
+                Some(Binding::BuiltIn(BuiltIn::FormFor | BuiltIn::ButtonFor))
+                    if args.len() == 3 && self.action_named(&args[0]).is_some() =>
+                {
+                    let agent = self.action_named(&args[0]).expect("checked by the guard");
+                    let path = format!("{}{}", corvid_types::action_input::ACTIONS_PATH, agent.name.name);
+                    let receiver = IrExpr { kind: IrExprKind::Literal(IrLiteral::String(path)), ty: Type::String, span: args[0].span() };
+                    let mut lowered: Vec<IrExpr> = args[1..].iter().map(|arg| self.lower_expr(arg)).collect();
+                    let is_button = matches!(self.bindings.get(&name.span), Some(Binding::BuiltIn(BuiltIn::ButtonFor)));
+                    if is_button {
+                        // A single-value input travels in a field named for
+                        // the action's one input parameter; a whole-input
+                        // record travels field by field ("").
+                        let field = self.single_input_name(agent).unwrap_or_default();
+                        lowered.push(IrExpr { kind: IrExprKind::Literal(IrLiteral::String(field)), ty: Type::String, span: name.span });
+                    }
+                    return IrExprKind::BuiltinMethod {
+                        kind: if is_button {
+                            corvid_types::BuiltinMethodKind::ActionButton
+                        } else {
+                            corvid_types::BuiltinMethodKind::ActionForm
+                        },
+                        receiver: Box::new(receiver),
+                        args: lowered,
                     };
                 }
                 Some(Binding::BuiltIn(BuiltIn::FormFor)) if args.len() == 3 => {

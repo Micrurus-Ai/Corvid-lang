@@ -2,6 +2,59 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### B10-2b-5: forms and buttons that call actions
+
+Frontend development approved the form binding on 2026-11-27 (review item
+1), with notes I followed: reserve the hidden field's name, fail closed
+without a token, and switch straight to `button_for`.
+
+**The checker.** `form_for(move_card, initial, label)` resolves the named
+action and checks `initial` against its input through
+`action_input::whole_input_type`, the rule the contract and `corvid
+serve` use. `button_for(action, value, label)` takes the action's one
+input record or its one input of a form type. Each says what to use
+instead when the action does not fit: an action with several parameters
+needs `form_for`, and `form_for` points one-value actions to `button_for`.
+
+**The forms.** Both render a form for `POST /actions/<name>` with
+`data-corvid-action`, for the page script, and the reserved `corvid_csrf`
+field (`action_input::CSRF_FORM_FIELD`). An action input with that name is
+`E0716`, whether a parameter or a field of the input record.
+
+**The server.**
+- **CSRF.** A form without the `X-CSRF-Token` header has its
+  `corvid_csrf` field copied into that header, so the one double-submit
+  check reads it, and the field is dropped from the input. An empty field
+  leaves the header absent and the post is refused.
+- **A page back.** A form asking for `text/html` gets `303` to its
+  `Referer`, as a path only, when that page has the server's own origin,
+  and to `/` otherwise. A refusal or failure gets a page naming it, with
+  its status and a link back. A queued approval gets a page with the id.
+
+**The origin rule.** The live endpoint's own-origin rule moves to
+`serve_cmd/own_origin.rs` in a refactor commit first, and the redirect uses
+it rather than a second parser.
+
+**`ui.button`.** `ui.button(label, action, value)` was only ever proposed,
+so there was nothing to migrate or refuse.
+
+Found and fixed:
+- **The form field rule had drifted from the server's.** `check_form_record`
+  accepted only String, Int, Float and Bool, while `corvid serve` decodes a
+  type of plain variants too. The proposal's own example, `MoveCard` with
+  `to: Column`, could not be a form. Forms now decide by
+  `text_parameters::query_field_shape` and draw plain variants as a choice.
+  I fixed it in the feature commit, not its own, because the feature's
+  example needs it and the two touch the same two functions.
+- **Form initial-value mismatches name records.** They read "expected
+  `MoveCard`, got `Moved`", not "expected `struct`, got `struct`".
+
+Filed:
+- **Form controls for the other types the server reads** (`Decimal` and
+  the time types, `Option`, `List`). They are refused by name until then.
+- **Record names in every checker diagnostic.** The "`struct`" wording is
+  checker-wide.
+
 ### Native `try` catches outages inside `match` arms
 
 The IR has no statement form inside a `match` arm, so a failing call
@@ -67,6 +120,7 @@ answers text for an `Int` prompt, called inside an agent and directly;
 both tiers give 20. The tier picker test now expects a `try` over a
 prompt to run natively, and a new one names the agent whose `match` arm
 blocks it.
+
 
 ### Dependency scanning reads GitHub's advisories too
 

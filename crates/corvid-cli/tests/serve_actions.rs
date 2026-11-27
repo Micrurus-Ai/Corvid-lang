@@ -399,3 +399,57 @@ fn openapi_publishes_each_action_with_its_input_and_caller() {
     let (_, contract) = request(app.port, "GET", "/.well-known/corvid", "application/json", "", &[]).unwrap();
     assert_eq!(contract["actions"][0]["name"], "archive");
 }
+
+/// The raw reply to a request: status line, headers and body.
+fn raw_request(port: u16, path: &str, body: &str, headers: &[(String, String)]) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let mut head = format!(
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    write!(stream, "{head}\r\n{body}").unwrap();
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).unwrap();
+    raw
+}
+
+/// B10-2b-5 — a plain browser form posted to an action. It carries the
+/// CSRF token in the reserved `corvid_csrf` field, checked by the same
+/// double-submit rule as the header, and gets a page back: `303` to the
+/// page it came from on success, or a page naming the refusal.
+#[test]
+fn a_browser_form_carries_its_token_in_a_field_and_returns_to_its_page() {
+    let mut editor = Vec::new();
+    let app = serve(GUARDED, |data| editor = seed_actor(data, "ana", Some("editor")));
+    let cookie: Vec<(String, String)> = editor.iter().filter(|(name, _)| name == "Cookie").cloned().collect();
+    let csrf = editor.iter().find(|(name, _)| name == "X-CSRF-Token").unwrap().1.clone();
+    let browser = |referer: &str| {
+        let mut headers = cookie.clone();
+        headers.push(("Accept".into(), "text/html,application/xhtml+xml".into()));
+        headers.push(("Referer".into(), referer.into()));
+        headers
+    };
+
+    let done = raw_request(app.port, "/actions/archive", &format!("card=3&corvid_csrf={csrf}"), &browser("http://localhost/board/7?tab=open"));
+    assert!(done.starts_with("HTTP/1.1 303"), "success returns to the page: {done}");
+    assert!(done.to_ascii_lowercase().contains("location: /board/7?tab=open"), "{done}");
+
+    let elsewhere = raw_request(app.port, "/actions/archive", &format!("card=3&corvid_csrf={csrf}"), &browser("https://evil.example/phish"));
+    assert!(elsewhere.to_ascii_lowercase().contains("location: /\r\n"), "another site is never a destination: {elsewhere}");
+
+    let no_token = raw_request(app.port, "/actions/archive", "card=3&corvid_csrf=", &browser("http://localhost/board"));
+    assert!(no_token.starts_with("HTTP/1.1 403"), "an empty field fails closed: {no_token}");
+    assert!(no_token.contains("archive did not run") && no_token.contains("href=\"/board\""), "a page with a way back: {no_token}");
+
+    let refused = raw_request(app.port, "/actions/archive", &format!("card=three&corvid_csrf={csrf}"), &browser("http://localhost/board"));
+    assert!(refused.starts_with("HTTP/1.1 400") && refused.contains("card"), "the page names the refused field: {refused}");
+
+    // A form that does not ask for a page gets the action's own answer.
+    let (status, body) = request(app.port, "POST", "/actions/archive", "application/x-www-form-urlencoded", &format!("card=3&corvid_csrf={csrf}"), &cookie)
+        .expect("request completes");
+    assert_eq!((status, body), (200, json!(3)));
+}

@@ -75,7 +75,12 @@ pub enum BuiltIn {
     WeakNew,
     /// `range(start, end) -> List<Int>` (slice 45f).
     Range,
+    /// `form_for(target, initial, label)`: a form for a declared route or an
+    /// action.
     FormFor,
+    /// `button_for(action, value, label)`: one button that calls an action
+    /// with a prepared input (B10-2b-5).
+    ButtonFor,
     BrowserFields,
     BrowserFieldKey,
     BrowserRowKey,
@@ -251,6 +256,7 @@ impl SymbolTable {
         self.builtins.insert("__browser_field_key".into(), BuiltIn::BrowserFieldKey);
         self.builtins.insert("__browser_fields".into(), BuiltIn::BrowserFields);
         self.builtins.insert("form_for".into(), BuiltIn::FormFor);
+        self.builtins.insert("button_for".into(), BuiltIn::ButtonFor);
         self.builtins
             .insert("Weak::upgrade".into(), BuiltIn::WeakUpgrade);
         self.builtins.insert("merge".into(), BuiltIn::StreamMerge);

@@ -70,6 +70,7 @@ use crate::request_text::{coerce_str_to_value, urlencoded_record};
 mod actions;
 mod assistant_endpoint;
 mod browser_asset;
+mod browser_form;
 mod live_assets;
 mod live;
 mod own_origin;

@@ -62,8 +62,27 @@ async fn run_action(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
+    let answer = answer_action(&state, &endpoint, &headers, &body).await;
+    // A form a person submitted from a page gets a page back (B10-2b-5):
+    // `303` to that page on success, or a page naming the refusal.
+    if super::browser_form::wants_page(&headers) {
+        let base = state.auth_context.as_ref().and_then(|ctx| ctx.public_base_url.as_deref());
+        return super::browser_form::page_answer(answer, &headers, base, &endpoint.name).await;
+    }
+    answer
+}
+
+async fn answer_action(
+    state: &Arc<ServeState>,
+    endpoint: &ActionEndpoint,
+    headers: &axum::http::HeaderMap,
+    body: &Bytes,
+) -> Response {
+    // A plain form carries its CSRF token in the reserved field; the one
+    // double-submit check reads it from the header either way.
+    let policy_headers = super::browser_form::with_form_csrf(headers, body);
     let enforced = if endpoint.policy.requires_auth() {
-        match enforce_route_policy(&state, &endpoint.policy, HttpMethod::Post, &endpoint.path, &headers) {
+        match enforce_route_policy(state, &endpoint.policy, HttpMethod::Post, &endpoint.path, &policy_headers) {
             Ok(enforced) => Some(enforced),
             Err(refused) => return refused,
         }
@@ -71,11 +90,11 @@ async fn run_action(
         None
     };
     let types_by_id: HashMap<DefId, &IrType> = state.ir.types.iter().map(|t| (t.id, t)).collect();
-    let inputs = match decode_input(&endpoint, &headers, &body, &types_by_id) {
+    let inputs = match decode_input(endpoint, headers, body, &types_by_id) {
         Ok(inputs) => inputs,
         Err(refused) => return refused,
     };
-    execute(&state, &endpoint, enforced.as_ref(), inputs, serde_json::json!({ "surface": "http" })).await
+    execute(state, endpoint, enforced.as_ref(), inputs, serde_json::json!({ "surface": "http" })).await
 }
 
 /// Run an action with its decoded inputs, the same way for every surface:
@@ -140,7 +159,10 @@ fn decode_input(
         }
         "application/x-www-form-urlencoded" => {
             let text = std::str::from_utf8(body).map_err(|_| bad_request("invalid_form", "form body must be UTF-8"))?;
-            let given = urlencoded_values(text).map_err(|err| bad_request("invalid_form", &err))?;
+            let mut given = urlencoded_values(text).map_err(|err| bad_request("invalid_form", &err))?;
+            // The CSRF field is the form's, not the action's input; no
+            // action input may take its name.
+            given.remove(corvid_types::action_input::CSRF_FORM_FIELD);
             decode_text_input(endpoint, &given, types_by_id, "form").map_err(|refusal| match refusal {
                 TextInputRefusal::Unsupported(detail) => unsupported(&detail),
                 TextInputRefusal::Refused(detail) => bad_request("invalid_form", &detail),

@@ -253,6 +253,14 @@ pub enum BuiltinMethodKind {
     RangeIntList,
     /// `form_for(target: String, initial: Record, submit_label: String) -> String`
     RouteForm,
+    /// `form_for(action, initial: Record, submit_label: String) -> String`
+    /// (B10-2b-5): the receiver is the action's path, `/actions/<name>`.
+    ActionForm,
+    /// `button_for(action, value, submit_label: String) -> String`
+    /// (B10-2b-5): the receiver is the action's path; the third argument
+    /// names the field a single-value input travels in (empty when the
+    /// value is the whole input record).
+    ActionButton,
     BrowserFields,
 
     // ----- HTTP-boundary uploads (slice 52c-2) --------------------

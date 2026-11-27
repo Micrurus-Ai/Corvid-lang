@@ -503,6 +503,7 @@ impl<'a> Checker<'a> {
             BuiltIn::BrowserRowKey => self.check_browser_field_key(name, args, true),
             BuiltIn::BrowserFields => self.check_browser_fields(name, args),
             BuiltIn::FormFor => self.check_form_for(name, args),
+            BuiltIn::ButtonFor => self.check_button_for(name, args),
             BuiltIn::Range => {
                 if args.len() != 2 {
                     self.errors.push(TypeError::new(

@@ -391,6 +391,7 @@ impl<'a> Checker<'a> {
                 | BuiltIn::BrowserFieldKey
                 | BuiltIn::BrowserFields
                 | BuiltIn::FormFor
+                | BuiltIn::ButtonFor
                 | BuiltIn::Range
                 | BuiltIn::Changed
                 | BuiltIn::Taken

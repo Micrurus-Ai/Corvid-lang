@@ -298,6 +298,9 @@ pub enum TypeErrorKind {
     /// An action reads its caller (a `Caller` parameter) but requires no
     /// sign-in, so no caller is ever verified.
     ActionCallerWithoutSignIn { action: String, param: String },
+    /// An action input named `corvid_csrf`, the hidden field that carries
+    /// a form's CSRF token (B10-2b-5): the two would collide in a form.
+    ActionInputReservedName { action: String, name: String },
     /// A `Caller` where a request, a client or a model supplies the value.
     ActorFromInput { place: String, at: String },
     /// A route's `query` record with a field the server cannot read
@@ -757,6 +760,7 @@ impl TypeErrorKind {
             Self::ActionPathTaken { .. } => "E0711",
             Self::AssistantsWithoutIdentity { .. } => "E0712",
             Self::ActionCallerWithoutSignIn { .. } => "E0713",
+            Self::ActionInputReservedName { .. } => "E0716",
             Self::ActorFromInput { .. } => "E0226",
             Self::RouteQueryFieldType { .. } => "E0725",
             Self::TryElseFallbackType { .. } => "E0227",
@@ -1071,6 +1075,9 @@ impl TypeErrorKind {
             }
             Self::AssistantsWithoutIdentity { action } => format!(
                 "action `{action}` is offered to assistants, but no one can sign in to confirm an assistant's call"
+            ),
+            Self::ActionInputReservedName { action, name } => format!(
+                "action `{action}` has an input named `{name}`, the field a form for an action carries its CSRF token in"
             ),
             Self::ActionCallerWithoutSignIn { action, param } => format!(
                 "action `{action}` reads its caller as `{param}`, but `requires anyone` verifies no caller"
@@ -1866,6 +1873,7 @@ impl TypeErrorKind {
             Self::ActionPolicyUndeclaredAuthority { kind, name, .. } => Some(format!(
                 "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
+            Self::ActionInputReservedName { .. } => Some("rename the input: `corvid_csrf` is reserved for every action's forms".into()),
             Self::ActionCallerWithoutSignIn { .. } => Some(
                 "require a signed-in caller, such as `requires authenticated`, or remove the `Caller` parameter".into(),
             ),

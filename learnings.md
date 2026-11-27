@@ -8514,3 +8514,19 @@ before. A `try` that carries a `timeout`, or reaches a failing call
 inside a `match` guard or a lambda, still runs on the interpreter, and
 `corvid build` says which; `match` arms are caught natively.
 
+
+### A form that calls an action
+
+`form_for` takes an action by name where it takes a route, and `button_for(action, value, label)` is one button that calls an action with a prepared input:
+
+```corvid
+move = View(form_for(move_card, MoveCard(card.id, Done, 0), "Move"))
+archive = View(button_for(archive_card, card.id, "Archive"))
+```
+
+- **Checked at the form.** The compiler checks the initial record, or the button's value, against the action's input, so renaming a field of `MoveCard` is an error at the form.
+- **Where it posts.** Both post to `/actions/<name>`. A field whose type has only plain variants, such as `to: Column`, is a choice of its variants.
+- **The CSRF field.** Both carry a hidden `corvid_csrf` field. The page script fills it from the cookie, and `corvid serve` checks it like the `X-CSRF-Token` header. Without the script a signed-in action refuses the post, and the name is reserved for every action's input (`E0716`).
+- **What the browser gets back.** A plain form gets `303` back to the page it came from when the action succeeds, and only ever to this server's own pages. A refusal gets a page naming the field or error, with a link back.
+
+[Browser views](docs/book/19-browser-views.md)

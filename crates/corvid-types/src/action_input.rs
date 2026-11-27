@@ -18,6 +18,14 @@ use crate::types::Type;
 /// Where actions are served: `POST /actions/<name>`.
 pub const ACTIONS_PATH: &str = "/actions/";
 
+/// The hidden form field that carries the CSRF token of a form posted to
+/// an action (B10-2b-5). A plain HTML form cannot set the `X-CSRF-Token`
+/// header, so `form_for` and `button_for` render this field, the page
+/// script fills it from the `corvid_csrf` cookie on submit, and `corvid
+/// serve` checks it with the same double-submit rule when the header is
+/// absent. It is reserved: no action input may use the name.
+pub const CSRF_FORM_FIELD: &str = "corvid_csrf";
+
 /// A parameter the server fills with the signed-in caller.
 pub fn is_caller(ty: &Type) -> bool {
     *ty == Type::actor()
