@@ -65,11 +65,8 @@ pub fn supports_match(ty: &Type, arms: &[IrMatchArm]) -> bool {
         })
 }
 
+/// Whether `p` binds `id`: the one rule, `IrPattern::binds`, which also
+/// sees `At` and `Record` patterns.
 pub(crate) fn pattern_binds(p: &IrPattern, id: corvid_resolve::LocalId) -> bool {
-    match p {
-        IrPattern::Variant { args, .. } => args.iter().any(|arg| pattern_binds(arg, id)),
-        IrPattern::Bind { local_id, .. } => id == *local_id,
-        IrPattern::Some_(p) | IrPattern::Ok_(p) | IrPattern::Err_(p) => pattern_binds(p, id),
-        _ => false,
-    }
+    p.binds(id)
 }
