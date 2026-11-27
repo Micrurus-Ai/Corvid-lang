@@ -15,7 +15,7 @@ jobs:
   dependency-advisories:
     # The audit is defined once, in dependency-advisories.yml, which also
     # runs it daily on its own.
-    name: cargo audit
+    name: Dependency advisories
     uses: ./.github/workflows/dependency-advisories.yml
 
   workspace-tests:

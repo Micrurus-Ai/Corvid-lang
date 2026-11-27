@@ -2,6 +2,10 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Npm dependency advisories
+
+The shared dependency workflow now checks every tracked npm lockfile and includes development dependencies. New lockfiles join the check automatically. Each package reports its own result, and the job fails on a high or critical finding or an audit error. All five current lockfiles reported zero advisories on 2026-11-27. The five open GitHub alerts on that date cover three Rust crates. The [backend dependency tracker](docs/backend-ai-roadmap.md) records the affected versions and upgrades.
+
 ### The parity suite runs the collector at every allocation
 
 The first run of the native parity suite with collection forced turned up
