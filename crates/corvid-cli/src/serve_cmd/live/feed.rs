@@ -449,9 +449,12 @@ mod tests {
     /// list ordered by rank, highest first.
     fn board_program(dir: &tempfile::TempDir) -> Arc<IrFile> {
         let database = dir.path().join("boards.sqlite");
-        rusqlite::Connection::open(&database).unwrap().execute_batch(
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        corvid_runtime::tables::register_sqlite_collations(&connection).unwrap();
+        connection.execute_batch(
             "CREATE TABLE Card (card INTEGER PRIMARY KEY NOT NULL, board TEXT NOT NULL, revision INTEGER NOT NULL);
-             CREATE TABLE Task (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, rank INTEGER NOT NULL, revision INTEGER NOT NULL)"
+             CREATE TABLE Task (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, rank INTEGER NOT NULL, revision INTEGER NOT NULL);
+             CREATE TABLE Bill (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, total DECIMAL TEXT COLLATE corvid_decimal NOT NULL, revision INTEGER NOT NULL)"
         ).unwrap();
         let source = include_str!("../../../tests/fixtures/live_cards.cor")
             .replace(
@@ -460,7 +463,7 @@ mod tests {
             )
             .replace(
                 "    route GET \"/archive\"",
-                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    live \"/lists/{list}/tasks\" -> Task requires permission(\"board.view\"):\n        return Task.where(fn (t) -> t.list == path.list).order_by(fn (t) -> t.rank).descending()\n    route GET \"/archive\"",
+                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    live \"/lists/{list}/tasks\" -> Task requires permission(\"board.view\"):\n        return Task.where(fn (t) -> t.list == path.list).order_by(fn (t) -> t.rank).descending()\n    live \"/lists/{list}/bills\" -> Bill requires permission(\"board.view\"):\n        return Bill.where(fn (b) -> b.list == path.list).order_by(fn (b) -> b.total)\n    route GET \"/archive\"",
             );
         let program = source
             + r#"
@@ -500,6 +503,26 @@ agent remove_task(id: Int) -> String:
         None -> "missing"
 
 fn task_written(result: Result<Task, Conflict<Task>>) -> String:
+    return match result:
+        Ok(row) -> "written"
+        Err(_) -> "conflict"
+
+table Bill:
+    key id: Int
+    list: String
+    total: Decimal
+
+agent add_bill(id: Int, list: String, total: Decimal) -> String:
+    return match Bill.insert(Bill(id, list, total)):
+        Ok(row) -> "added"
+        Err(_) -> "taken"
+
+agent change_bill(id: Int, list: String, total: Decimal) -> String:
+    return match Bill.get(id):
+        Some(row) -> bill_written(Bill.save(Bill { list: list, total: total, ..row }))
+        None -> "missing"
+
+fn bill_written(result: Result<Bill, Conflict<Bill>>) -> String:
     return match result:
         Ok(row) -> "written"
         Err(_) -> "conflict"
@@ -623,20 +646,21 @@ fn task_written(result: Result<Task, Conflict<Task>>) -> String:
         (rows, serde_json::to_value(frames).unwrap())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn rechecking_written_rows_gives_the_frames_of_the_full_query() {
+    /// Run `writes` against the live query at `path` twice side by side,
+    /// re-checking written rows and re-running the full query, and require
+    /// equal rows and frames after each write, with fewer rows read.
+    async fn assert_rechecked_like_full_query(path: &str, first: (&'static str, Vec<Value>), writes: Vec<(&'static str, Vec<Value>)>) {
         let dir = tempfile::tempdir().unwrap();
         let ir = board_program(&dir);
         let runtime = Runtime::builder().build();
         let routes = Routes::new(&ir).unwrap();
-        let (route, path) = routes.resolve(&ir, "/lists/home/tasks").unwrap();
+        let (route, path) = routes.resolve(&ir, path).unwrap();
         let types = Arc::new(ir.types.clone());
         let task = |agent: &'static str, args: Vec<Value>| {
             let (ir, runtime) = (ir.clone(), runtime.clone());
             async move { run_ir_with_runtime(&ir, Some(agent), args, &runtime).await.unwrap() }
         };
-        let (int, text) = (Value::Int, |s: &str| Value::String(s.into()));
-        task("add_task", vec![int(9), text("home"), int(7)]).await;
+        task(first.0, first.1).await;
         let open = || {
             let queries = Arc::new(SharedQueries::default());
             let (_, evaluation) = evaluation(
@@ -653,10 +677,27 @@ fn task_written(result: Result<Task, Conflict<Task>>) -> String:
         };
         let (rechecked_reads, rechecked) = open();
         let (full_reads, mut full) = open();
-        assert!(rechecked.order.is_some(), "an Int order is re-checked");
+        assert!(rechecked.order.is_some(), "the order is re-checked");
         full.order = None;
         let (mut rechecked, mut full) = (rechecked.run(), full.run());
         assert_eq!(step(&mut rechecked).await, step(&mut full).await);
+        for (agent, args) in writes {
+            task(agent, args.clone()).await;
+            let (rows, frames) = step(&mut rechecked).await;
+            assert_eq!((rows, frames), step(&mut full).await, "after {agent}{args:?}");
+        }
+        assert!(
+            rechecked_reads.rows_read() < full_reads.rows_read(),
+            "{} rows re-checked, {} read by the full query",
+            rechecked_reads.rows_read(),
+            full_reads.rows_read()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rechecking_written_rows_gives_the_frames_of_the_full_query() {
+        let (int, text) = (Value::Int, |s: &str| Value::String(s.into()));
+        let first = ("add_task", vec![int(9), text("home"), int(7)]);
         let writes: Vec<(&'static str, Vec<Value>)> = vec![
             ("add_task", vec![int(1), text("home"), int(5)]),
             ("add_task", vec![int(2), text("home"), int(3)]),
@@ -674,17 +715,33 @@ fn task_written(result: Result<Task, Conflict<Task>>) -> String:
             // Moves down past two rows.
             ("change_task", vec![int(2), text("home"), int(2)]),
         ];
-        for (agent, args) in writes {
-            task(agent, args.clone()).await;
-            let (rows, frames) = step(&mut rechecked).await;
-            assert_eq!((rows, frames), step(&mut full).await, "after {agent}{args:?}");
-        }
-        assert!(
-            rechecked_reads.rows_read() < full_reads.rows_read(),
-            "{} rows re-checked, {} read by the full query",
-            rechecked_reads.rows_read(),
-            full_reads.rows_read()
-        );
+        assert_rechecked_like_full_query("/lists/home/tasks", first, writes).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rechecked_decimal_order_follows_value_not_text() {
+        let (int, text) = (Value::Int, |s: &str| Value::String(s.into()));
+        let total = |s: &str| {
+            corvid_vm::decode_public_json(
+                &json!(s),
+                &Type::Decimal,
+                &Default::default(),
+                corvid_vm::UnknownFields::Reject,
+            )
+            .unwrap()
+        };
+        let first = ("add_bill", vec![int(1), text("home"), total("10.0")]);
+        let writes: Vec<(&'static str, Vec<Value>)> = vec![
+            // Before `10.0` by value, after it as text.
+            ("add_bill", vec![int(2), text("home"), total("9.50")]),
+            ("add_bill", vec![int(3), text("home"), total("-2")]),
+            // Equal to `10.0`: the key orders them.
+            ("add_bill", vec![int(4), text("home"), total("10.000")]),
+            ("change_bill", vec![int(3), text("home"), total("100")]),
+            ("change_bill", vec![int(1), text("away"), total("10.0")]),
+            ("change_bill", vec![int(2), text("home"), total("0.001")]),
+        ];
+        assert_rechecked_like_full_query("/lists/home/bills", first, writes).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

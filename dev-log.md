@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Live re-checks for decimal, duration and instant orders
+
+L2 placed re-checked rows only under an `Int`, `Bool` or SQLite text
+order. Decimals, durations and instants re-ran the full query, though both
+engines compare them by value: SQLite through the `corvid_decimal` and
+`corvid_duration` collations and the time-ordered text of an instant,
+Postgres as `numeric` and `COLLATE "C"` text. `RowOrder` now compares those
+three by parsing the row's public JSON text with the same parsers the
+decoder uses, so `9.50` sorts before `10.0` and `1.00` ties `1.0`, with the
+key breaking the tie as `query_sql` does. A parity test runs a `Decimal`
+order against the full query through adds, a tie, and moves up, out and
+down. Zoned times, time zones, currencies, locales, optional columns and
+Postgres text still re-run the full query; the roadmap item names how each
+widens.
+
 ### Live L2: re-check only the written rows
 
 After L1 one evaluation served all watchers of a query, but each commit

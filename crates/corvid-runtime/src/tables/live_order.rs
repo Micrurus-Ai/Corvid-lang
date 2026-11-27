@@ -7,15 +7,18 @@
 //! orders every query totally: by the `order_by` column, then by the
 //! key's columns. [`RowOrder`] compares two rows the same way, and only for
 //! column kinds whose order it can reproduce exactly on that engine: whole
-//! numbers, `Bool`s, and text on SQLite, which compares text bytewise as
-//! Rust does. Any other kind (text under a Postgres locale, decimals,
-//! times, optional columns) gives no `RowOrder`, and the caller re-runs the
-//! full query, which is always correct.
+//! numbers, `Bool`s, `Decimal`s and `Duration`s by value, `Instant`s in time
+//! order, and text on SQLite, which compares text bytewise as Rust does.
+//! Any other kind (text under a Postgres locale, zoned times, time zones,
+//! currencies, locales, optional columns) gives no `RowOrder`, and the
+//! caller re-runs the full query, which is always correct.
 //!
 //! [`query_sql`]: super::query_sql
 
 use super::live::{LiveRow, WrittenRows};
 use super::{ColumnKind, TableEngine};
+use corvid_decimal::Decimal;
+use corvid_time::{Duration, Instant};
 use serde_json::Value as J;
 use std::cmp::Ordering;
 
@@ -28,6 +31,15 @@ enum OrderedAs {
     WholeNumber,
     Boolean,
     Bytes,
+    /// By value, as the `corvid_decimal` collation and Postgres `numeric`
+    /// compare: `1.0` equals `1.00`, and the key breaks the tie.
+    Decimal,
+    /// By nanoseconds, as the `corvid_duration` collation and Postgres
+    /// `numeric(39, 0)` compare.
+    Duration,
+    /// In time order, which is the byte order of the stored text on both
+    /// engines (`COLLATE "C"` on Postgres).
+    Instant,
 }
 
 /// How a query orders its rows: each field, how it compares, and whether
@@ -67,6 +79,9 @@ impl RowOrder {
                 {
                     Some(OrderedAs::Bytes)
                 }
+                ColumnKind::Decimal => Some(OrderedAs::Decimal),
+                ColumnKind::Duration => Some(OrderedAs::Duration),
+                ColumnKind::Instant => Some(OrderedAs::Instant),
                 _ => None,
             }
         };
@@ -92,6 +107,9 @@ impl RowOrder {
                 OrderedAs::WholeNumber => a.as_i64()?.cmp(&b.as_i64()?),
                 OrderedAs::Boolean => a.as_bool()?.cmp(&b.as_bool()?),
                 OrderedAs::Bytes => a.as_str()?.as_bytes().cmp(b.as_str()?.as_bytes()),
+                OrderedAs::Decimal => by_value(a, b, |text| Decimal::parse(text).ok())?,
+                OrderedAs::Duration => by_value(a, b, |text| Duration::parse(text).ok())?,
+                OrderedAs::Instant => by_value(a, b, |text| Instant::parse(text).ok())?,
             };
             let ordering = if *descending { ordering.reverse() } else { ordering };
             if ordering != Ordering::Equal {
@@ -100,6 +118,12 @@ impl RowOrder {
         }
         Some(Ordering::Equal)
     }
+}
+
+/// Compare two public JSON texts by the values they name. `None` when
+/// either is not text of that type.
+fn by_value<T: Ord>(a: &J, b: &J, parse: impl Fn(&str) -> Option<T>) -> Option<Ordering> {
+    Some(parse(a.as_str()?)?.cmp(&parse(b.as_str()?)?))
 }
 
 /// The query's result after a commit, from its previous result and the
@@ -195,8 +219,33 @@ mod tests {
         assert!(RowOrder::of_query(postgres, Some((title, false)), &key).is_none());
         let optional = OrderColumn { nullable: true, ..column("rank", ColumnKind::Integer) };
         assert!(RowOrder::of_query(TableEngine::Sqlite, Some((optional, false)), &key).is_none());
-        let decimal = column("total", ColumnKind::Decimal);
-        assert!(RowOrder::of_query(TableEngine::Sqlite, Some((decimal, false)), &key).is_none());
+        let zoned = column("signed", ColumnKind::ZonedTime);
+        assert!(RowOrder::of_query(TableEngine::Sqlite, Some((zoned, false)), &key).is_none());
+        for kind in [ColumnKind::Decimal, ColumnKind::Duration, ColumnKind::Instant] {
+            assert!(RowOrder::of_query(postgres, Some((column("at", kind), false)), &key).is_some());
+        }
+    }
+
+    #[test]
+    fn decimals_durations_and_instants_are_placed_by_value() {
+        let key = [column("id", ColumnKind::Integer)];
+        let place = |kind, values: &[&str], arriving: &str| {
+            let order = RowOrder::of_query(TableEngine::Sqlite, Some((column("v", kind), false)), &key).unwrap();
+            let row = |id: i64, v: &str| LiveRow::from_json(json!({"id": id, "v": v, "revision": 1}), &["id".to_string()]).unwrap();
+            let previous: Vec<LiveRow> = values.iter().enumerate().map(|(n, v)| row(n as i64, v)).collect();
+            let new = row(99, arriving);
+            let next = merge_rechecked(&previous, vec![new.clone()], &written(&[&new]), &order).unwrap();
+            next.iter().position(|r| r.key == new.key).unwrap()
+        };
+        // `9.50` sorts before `10.0` by value, not text; `1.00` ties `1.0`
+        // and follows it by key.
+        assert_eq!(place(ColumnKind::Decimal, &["-2", "1.0", "10.0"], "9.50"), 2);
+        assert_eq!(place(ColumnKind::Decimal, &["-2", "1.0", "10.0"], "1.00"), 2);
+        assert_eq!(place(ColumnKind::Duration, &["PT1S", "PT1M", "PT1H"], "PT2M"), 2);
+        assert_eq!(
+            place(ColumnKind::Instant, &["2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z"], "2026-03-01T12:00:00Z"),
+            1
+        );
     }
 
     #[test]
