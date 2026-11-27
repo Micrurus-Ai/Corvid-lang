@@ -2,6 +2,27 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Maps index their keys by a hash that agrees with `==`
+
+The Windows session filed it and handed it over: `MapValue` was a vector
+searched by `==`, so building a map of n keys took n² comparisons. A
+`count_by` over many groups, a large map literal or repeated `m[k] = v` all
+paid it. It is now an insertion-ordered `IndexMap` keyed by `MapKey`, whose
+hash agrees with `==`. An `Int` hashes as the `Decimal` of its value, and a
+whole-number `Float` as that number, because `==` equates them. `Decimal`
+hashes its normalized form. Text and the B06 scalars use their own `Hash`. A
+removal keeps the other entries in order (`shift_remove`).
+
+Some keys keep a fixed hash and are found by `==` alone, as before: records,
+lists, options, results, variants, maps and grounded values, whose contents
+can change in place after insertion. So do `Bytes` and `Secret`, whose `==`
+is constant-time, and identity-compared values. Measured with
+`tests/map_scaling.rs`: 20,000 and 80,000 text keys took 1.23 s and 24.1 s
+before, a 19.6× ratio for 4× the keys, and take 4.5 ms and 19.1 ms now, a 4.3×
+ratio. The test refuses a ratio above 8. A unit test holds every pair of
+values `==` equates to one hash. The Windows session's grouped-aggregates
+test still passes. Filed: freezing compound keys so they can be hashed too.
+
 ### Query J3a: `values.contains(row.column)` inside `where`
 
 `query_condition` now reads `list.contains(row.col)` as

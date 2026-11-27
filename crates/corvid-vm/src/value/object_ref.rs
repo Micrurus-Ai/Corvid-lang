@@ -142,7 +142,7 @@ impl ObjectRef {
                 .map(|entries| {
                     entries
                         .iter()
-                        .flat_map(|(k, v)| [k, v])
+                        .flat_map(|(k, v)| [&k.0, v])
                         .filter_map(Value::as_object_ref)
                         .collect()
                 })

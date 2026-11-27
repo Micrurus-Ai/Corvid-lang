@@ -6,6 +6,8 @@ license.workspace = true
 description = "Tree-walking interpreter for the Corvid IR. Dev tier + correctness oracle for the native compiler."
 
 [dependencies]
+# A map's entries in insertion order with constant-time lookup (MapValue).
+indexmap = "2"
 corvid-ast = { workspace = true }
 corvid-ir = { workspace = true }
 corvid-resolve = { workspace = true }
