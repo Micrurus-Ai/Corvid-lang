@@ -26,6 +26,8 @@ use std::pin::Pin;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
+#[path = "parity/route_parameters.rs"]
+mod route_parameters;
 #[path = "parity/int.rs"]
 mod int;
 #[path = "parity/bool.rs"]
