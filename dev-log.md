@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### B10-4b: actions as background jobs, and a forged-caller path closed
+
+`jobs enqueue --task <action>` now takes `--source`. With it, the payload
+is checked against the action's input before the job is stored: one
+public JSON value, through `action_calls::decode_json_input`, the decoder
+the HTTP endpoint, MCP and `corvid act` use. An action that requires a
+signed-in caller is refused by name.
+
+`jobs run` uses a new `ActionJobExecutor`. A job whose task names an action
+is checked and decoded again on the worker, traced as `surface: "worker"`
+with its job id, and run through `DefaultJobRuntimeExecutor::run_job_agent`.
+That is the default executor's run half, split out so per-job traces,
+durable-job binding and outcome fingerprints stay in one place. Any other
+task goes to the default executor.
+
+The weakness found on the way: the default executor ran any agent named by
+a job's task, decoding a positional payload with the interpreter's
+internal JSON form. An action's body is an agent, so a job naming it could
+pass a `Caller` record with any permissions, and the action's `requires`
+would pass against that forged caller. The default executor now refuses
+an action's body (`ActionNotRunAsAgent`), so actions run only through the
+action path, where a `Caller` is never input.
+
+Tests:
+- VM: a forged admin `Caller` in a payload is refused;
+- CLI unit: a worker runs an action from public JSON and the trace holds
+  `"surface":"worker"` and the job id; a signed-in action and a bad input
+  fail with named kinds; the enqueue check leaves other tasks alone;
+- end to end through the binary: enqueue accepts a good payload and refuses
+  a bad one and a signed-in action, and a worker pool run succeeds once
+  and refuses the unchecked signed-in job.
+
+Narrowed, and scheduled as B11-5: signed-in actions on workers.
+
 ### One failure envelope for both servers
 
 `corvid serve` answered a failure as `{"error", "detail"}`, through the one
@@ -12,6 +46,7 @@ answered the same kinds of stop as `{"request_id", "route", "kind",
 header, and the route and duration are in its traces. No client read `kind`:
 the TypeScript `CorvidError` keeps the body as sent. So the change touched
 only the `build_server` assertions, which now check the exact body.
+
 
 ### A program's own type wins over a built-in of its name
 

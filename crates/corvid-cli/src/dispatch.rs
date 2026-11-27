@@ -617,6 +617,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 replay_key,
                 idempotency_key,
                 delay_ms,
+                source,
             } => cmd_jobs_enqueue(
                 &state,
                 &task,
@@ -628,6 +629,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 replay_key,
                 idempotency_key,
                 delay_ms,
+                source.as_deref(),
             ),
             JobsCommand::RunOne {
                 state,

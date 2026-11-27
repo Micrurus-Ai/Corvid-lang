@@ -76,6 +76,7 @@ mod run_cmd;
 mod serve_approval;
 mod act_cmd;
 mod action_calls;
+mod jobs_actions;
 mod request_text;
 mod serve_auth;
 mod serve_cmd;
