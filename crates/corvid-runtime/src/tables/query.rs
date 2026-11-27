@@ -32,6 +32,23 @@ pub enum TableFilter {
     /// The column holds one of `values` (J3), each matched as `==`
     /// matches it, a missing value included.
     In { column: String, values: Vec<DbValue> },
+    /// The column holds one of another table's keys (J3b), read by an
+    /// inner query in the same statement, so both tables are read in one
+    /// snapshot and the keys never leave the database.
+    InQuery { column: String, inner: Box<InnerQuery> },
+}
+
+/// The inner query of a [`TableFilter::InQuery`]: a table in the same
+/// database, keyed by one column, and its condition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InnerQuery {
+    pub table: String,
+    pub key: String,
+    /// Its columns and how each is stored, so its condition binds values
+    /// as its own queries do.
+    pub columns: Vec<String>,
+    pub kinds: Vec<ColumnKind>,
+    pub filter: Option<TableFilter>,
 }
 
 /// The most values one `contains` list sends to the database. Each is a
@@ -69,6 +86,8 @@ pub enum TableAggregate {
     /// `sum_by` of a `Decimal` or `Duration` column: each row's key and
     /// value, for the interpreter to add exactly per key.
     ValuesBy { key: String, column: String },
+    /// `keys()` (J3b): the key column alone, in key order.
+    Keys(String),
 }
 
 impl TableAggregate {
@@ -89,7 +108,7 @@ impl TableAggregate {
             kinds.push(column_kind_of(table, key));
         }
         match self {
-            Self::Values(column) | Self::ValuesBy { column, .. } => {
+            Self::Values(column) | Self::ValuesBy { column, .. } | Self::Keys(column) => {
                 columns.push(column.clone());
                 kinds.push(column_kind_of(table, column));
             }
@@ -125,7 +144,7 @@ pub fn aggregate_sql(
     let selected = match aggregate {
         TableAggregate::Count => count,
         TableAggregate::SumInteger(column) => integer_sum(column),
-        TableAggregate::Values(column) => read(column),
+        TableAggregate::Values(column) | TableAggregate::Keys(column) => read(column),
         TableAggregate::CountBy(key) => format!("{}, {count}", read(key)),
         TableAggregate::SumIntegerBy { key, column } => format!("{}, {}", read(key), integer_sum(column)),
         TableAggregate::ValuesBy { key, column } => format!("{}, {}", read(key), read(column)),
@@ -140,7 +159,7 @@ pub fn aggregate_sql(
         TableAggregate::CountBy(key) | TableAggregate::SumIntegerBy { key, .. } => {
             sql.push_str(&format!(" GROUP BY {table_name}.{key} ORDER BY {table_name}.{key} ASC", key = quote(key)));
         }
-        TableAggregate::ValuesBy { key, .. } => {
+        TableAggregate::ValuesBy { key, .. } | TableAggregate::Keys(key) => {
             sql.push_str(&format!(" ORDER BY {table_name}.{} ASC", quote(key)));
         }
         _ => {}
@@ -255,6 +274,29 @@ fn filter_sql(table: &TableRef<'_>, filter: &TableFilter, params: &mut Vec<DbVal
                 1 => tests.remove(0),
                 _ => format!("({})", tests.join(" OR ")),
             }
+        }
+        TableFilter::InQuery { column, inner } => {
+            // A key is never missing, so `IN` agrees with `==` here.
+            let inner_table = TableRef {
+                name: &inner.table,
+                keys: std::slice::from_ref(&inner.key),
+                columns: &inner.columns,
+                kinds: &inner.kinds,
+                ..*table
+            };
+            let inner_name = quote(&inner.table);
+            let mut sql = format!(
+                "{}.{} IN (SELECT {inner_name}.{} FROM {inner_name}",
+                quote(table.name),
+                quote(column),
+                quote(&inner.key)
+            );
+            if let Some(condition) = &inner.filter {
+                sql.push_str(" WHERE ");
+                sql.push_str(&filter_sql(&inner_table, condition, params));
+            }
+            sql.push(')');
+            sql
         }
     }
 }

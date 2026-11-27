@@ -553,6 +553,24 @@ impl<'a> Checker<'a> {
         let Some(columns) = columns.into_iter().collect::<Option<Vec<_>>>() else { return Type::Unknown };
         match (aggregate, columns.as_slice()) {
             (QueryAggregate::Count, []) => Type::Int,
+            (QueryAggregate::Keys, []) => match query.table.keys.as_slice() {
+                [key] => {
+                    let field = query.table.record.fields.iter().find(|f| f.name.name == key.name);
+                    let ty = field.map(|f| self.type_ref_to_type(&f.ty)).unwrap_or(Type::Unknown);
+                    Type::List(Box::new(ty))
+                }
+                _ => {
+                    self.query_error(
+                        span,
+                        &format!(
+                            "`keys` lists one value per row, so it needs a table keyed by one column; `{}` is keyed by {} columns",
+                            query.table.name().name,
+                            query.table.keys.len()
+                        ),
+                    );
+                    Type::Unknown
+                }
+            },
             (QueryAggregate::Sum, [(column, ty, at)]) => self.summed(name, column, ty, *at),
             (QueryAggregate::Min | QueryAggregate::Max, [(column, ty, at)]) => {
                 self.check_column_is_orderable(query.table, column, *at);
@@ -852,6 +870,11 @@ fn mentions_ident(expr: &Expr, name: &str) -> bool {
         Expr::UnOp { operand, .. } => mentions_ident(operand, name),
         Expr::Index { target, index, .. } => mentions_ident(target, name) || mentions_ident(index, name),
         Expr::List { items, .. } => items.iter().any(|i| mentions_ident(i, name)),
+        // An inner query's function (J3b) reads its own row; it reads the
+        // outer one only by naming it, unless its parameter shadows it.
+        Expr::Lambda { params, body, .. } => {
+            !params.iter().any(|param| param.name.name == name) && mentions_ident(body, name)
+        }
         // Anything richer is not a plain agent value; treat it as reading the row.
         _ => true,
     }

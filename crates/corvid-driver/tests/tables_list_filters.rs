@@ -92,6 +92,51 @@ async fn a_list_filter_keeps_exactly_the_rows_the_same_test_keeps_in_corvid() {
     }
 }
 
+/// J3b: another table's `keys()` inside a `where` runs as one statement,
+/// and keeps what the same test keeps in Corvid over every row.
+fn by_owner_program(settings: &str) -> String {
+    program(settings)
+        + r#"
+agent by_owner(owner: String) -> String:
+    stocked = stock()
+    mine = Board.where(fn (b) -> b.owner == owner).keys()
+    every = Card.all()
+    return numbers(Card.where(fn (c) -> Board.where(fn (b) -> b.owner == owner).keys().contains(c.board))) + " | " + kept(every, fn (c) -> mine.contains(c.board)) + " | " + keys_text(mine)
+
+fn keys_text(keys: List<Int>) -> String:
+    out = ""
+    for key in keys:
+        out = out + key.to_string() + ","
+    return out
+"#
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn another_tables_keys_filter_in_one_statement() {
+    for database in TestDatabase::every_engine().await {
+        let source = by_owner_program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let trace_dir = tempfile::tempdir().expect("trace dir");
+        let runtime = Runtime::builder().trace_to(trace_dir.path()).build();
+        let out = run_ir_with_runtime(&ir, Some("by_owner"), vec![Value::String("ada".into())], &runtime)
+            .await
+            .expect("program runs");
+        let label = database.label();
+        let Value::String(text) = out else { panic!("expected text, got {out:?}") };
+        let parts: Vec<&str> = text.split(" | ").collect();
+        assert_eq!(parts[2], "1,3,", "`keys()` lists ada's boards in key order on {label}");
+        assert_eq!(parts[0], parts[1], "the inner query keeps what Corvid keeps on {label}");
+        assert_eq!(parts[0], "10,12,", "on {label}");
+        let trace_path = runtime.tracer().path().to_path_buf();
+        drop(runtime);
+        let trace = std::fs::read_to_string(&trace_path).expect("trace");
+        let card_queries: Vec<&str> = trace.lines().filter(|line| line.contains("table:Card.query") && line.contains("IN (SELECT")).collect();
+        assert_eq!(card_queries.len(), 1, "one statement reads both tables on {label}:\n{trace}");
+        database.finish().await;
+    }
+}
+
 fn refusal(body: &str) -> String {
     let source = program("    engine: sqlite\n    location: \"shop.sqlite\"")
         + &format!("\nagent probe(word: String) -> List<Board>:\n    {body}\n");
@@ -105,4 +150,15 @@ fn refusal(body: &str) -> String {
 fn testing_whether_text_contains_a_column_is_refused() {
     let refused = refusal("return Board.where(fn (b) -> word.contains(b.owner))");
     assert!(refused.contains("only `values.contains(row.column)` on a `List` can run in the database"), "{refused}");
+}
+
+#[test]
+fn an_inner_query_cannot_read_the_outer_row() {
+    let source = program("    engine: sqlite\n    location: \"shop.sqlite\"")
+        + "\nagent probe() -> List<Card>:\n    return Card.where(fn (c) -> Board.where(fn (b) -> b.board == c.card).keys().contains(c.board))\n";
+    let refused = match compile_to_ir(&source) {
+        Ok(_) => panic!("a correlated inner query must be refused"),
+        Err(errors) => format!("{errors:#?}"),
+    };
+    assert!(refused.contains("cannot read the row"), "{refused}");
 }

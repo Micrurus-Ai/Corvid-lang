@@ -145,6 +145,9 @@ pub enum QueryAggregate {
     CountBy,
     /// `sum_by(fn (r) -> r.key, fn (r) -> r.col) -> Map<K, T>` (J2).
     SumBy,
+    /// `keys() -> List<K>` (J3b): the matching rows' keys alone, in key
+    /// order, for a table keyed by one column.
+    Keys,
 }
 
 impl QueryAggregate {
@@ -156,6 +159,7 @@ impl QueryAggregate {
             "max" => Self::Max,
             "count_by" => Self::CountBy,
             "sum_by" => Self::SumBy,
+            "keys" => Self::Keys,
             _ => return None,
         })
     }
@@ -168,13 +172,14 @@ impl QueryAggregate {
             Self::Max => "max",
             Self::CountBy => "count_by",
             Self::SumBy => "sum_by",
+            Self::Keys => "keys",
         }
     }
 
     /// How many functions the stage takes.
     pub fn arity(self) -> usize {
         match self {
-            Self::Count => 0,
+            Self::Count | Self::Keys => 0,
             Self::Sum | Self::Min | Self::Max | Self::CountBy => 1,
             Self::SumBy => 2,
         }

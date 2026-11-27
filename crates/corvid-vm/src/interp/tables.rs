@@ -213,6 +213,22 @@ impl<'ir> Interpreter<'ir> {
                 }
                 Ok(total)
             }
+            // The key column alone, in key order: the order a query's rows
+            // come in without `order_by`.
+            QueryAggregate::Keys => {
+                let rows = self
+                    .runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::Keys(column()?))
+                    .await
+                    .map_err(runtime_error)?;
+                let keys = rows
+                    .into_iter()
+                    .flatten()
+                    .map(|stored| self.from_column(stored, &column_ty))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(fail)?;
+                Ok(Value::List(crate::value::ListValue::new(keys)))
+            }
             QueryAggregate::CountBy | QueryAggregate::SumBy => {
                 let (key, key_ty) = aggregate.key.clone().ok_or_else(|| fail(format!("`{name}` names no key column")))?;
                 let request = match aggregate.op {
@@ -370,6 +386,29 @@ impl<'ir> Interpreter<'ir> {
                 let ty = column_type(column)?;
                 let values = items.iter().map(|item| self.query_value(item, ty)).collect::<Result<Vec<_>, _>>()?;
                 TableFilter::In { column: column.clone(), values }
+            }
+            IrTableFilter::InQuery { column, inner } => {
+                let inner_record = *self
+                    .types_by_id
+                    .get(&inner.table.def_id)
+                    .ok_or_else(|| format!("table `{}` has no record type", inner.table.name))?;
+                let [key] = inner.table.keys.as_slice() else {
+                    return Err(format!("`keys` needs table `{}` keyed by one column", inner.table.name));
+                };
+                let filter = match &inner.filter {
+                    Some(condition) => Some(self.table_filter(inner_record, condition, operands)?),
+                    None => None,
+                };
+                TableFilter::InQuery {
+                    column: column.clone(),
+                    inner: Box::new(corvid_runtime::tables::InnerQuery {
+                        table: inner.table.name.clone(),
+                        key: key.clone(),
+                        columns: inner.table.columns.clone(),
+                        kinds: column_kinds(inner_record),
+                        filter,
+                    }),
+                }
             }
         })
     }

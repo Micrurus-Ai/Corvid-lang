@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Query J3b: another table's keys in one statement
+
+`keys()` is a new zero-argument stage: `List<K>` of the key column alone,
+in key order, refused by name for a table keyed by several columns.
+
+Inside a `where`, `Other.where(...).keys().contains(row.col)` first reads
+as J3a's `InList`. When the list expression is such a query on a table in
+the same database, lowering turns it into `IrTableFilter::InQuery`. Its
+inner condition's values join the outer query's operands in order. The
+runtime writes the inner query into the same statement,
+`"Card"."board" IN (SELECT "Board"."board" FROM "Board" WHERE ...)`,
+binding the inner values in the one parameter sequence through a
+`TableRef` for the inner table. So both tables are read in one snapshot,
+and the keys never cross to the program. A table in another database
+stays a J3a list.
+
+Fixed in the checker: `mentions_ident` treated every lambda as reading
+the row, so any inner query was refused as reading the outer one. A lambda
+now reads a name only through its body, unless its parameter shadows it.
+A correlated inner query that names the outer row is still refused.
+
+Tests:
+- `keys()` lists ada's boards in order;
+- the inner-query filter keeps exactly what the same test keeps in Corvid;
+- the recorded trace holds one `Card` query with `IN (SELECT`;
+- the correlated form is refused.
+
+No new diagnostic kind.
+
 ### Maps index their keys by a hash that agrees with `==`
 
 The Windows session filed it and handed it over: `MapValue` was a vector

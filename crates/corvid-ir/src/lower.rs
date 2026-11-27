@@ -2423,7 +2423,7 @@ impl<'a> Lowerer<'a> {
             Some(Expr::Lambda { params, body, .. }) => {
                 let row = &params.first()?.name.name;
                 let condition = corvid_types::table_ops::query_condition(query.table, row, body).ok()?;
-                Some(self.lower_table_filter(&condition))
+                Some(self.lower_table_filter(&condition, query.table))
             }
             Some(_) => return None,
             None => None,
@@ -2451,7 +2451,14 @@ impl<'a> Lowerer<'a> {
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>()?;
+                // `keys()` reads the table's one key column.
+                let table_key = || {
+                    let [key] = query.table.keys.as_slice() else { return None };
+                    let field = query.table.record.fields.iter().find(|f| f.name.name == key.name)?;
+                    Some((key.name.clone(), self.type_ref_to_type(&field.ty)))
+                };
                 let (key, value) = match (op, columns.as_slice()) {
+                    (QueryAggregate::Keys, []) => (None, Some(table_key()?)),
                     (QueryAggregate::CountBy, [key]) => (Some(key.clone()), None),
                     (QueryAggregate::SumBy, [key, value]) => (Some(key.clone()), Some(value.clone())),
                     (_, [value]) => (None, Some(value.clone())),
@@ -2475,16 +2482,44 @@ impl<'a> Lowerer<'a> {
         })
     }
 
-    fn lower_table_filter(&self, condition: &corvid_types::table_ops::QueryCondition<'_>) -> crate::types::IrTableFilter {
+    /// `Other.where(...).keys()` as an inner query of `outer`'s query
+    /// (J3b), when `list` is one on a table in the same database. A table
+    /// in another database is read first as a list instead (J3a), with
+    /// the same result.
+    fn keys_subquery(&self, list: &Expr, outer: &corvid_ast::TableDecl) -> Option<crate::types::IrSubquery> {
+        let Expr::Call { callee, args, .. } = list else { return None };
+        let query = corvid_types::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings)?;
+        if !matches!(query.aggregate, Some((corvid_types::table_ops::QueryAggregate::Keys, _))) || query.take.is_some() {
+            return None;
+        }
+        if self.ir_table(query.table)?.database.name != self.ir_table(outer)?.database.name {
+            return None;
+        }
+        let filter = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => {
+                let row = &params.first()?.name.name;
+                let condition = corvid_types::table_ops::query_condition(query.table, row, body).ok()?;
+                Some(self.lower_table_filter(&condition, query.table))
+            }
+            Some(_) => return None,
+            None => None,
+        };
+        Some(crate::types::IrSubquery { table: self.ir_table(query.table)?, filter })
+    }
+
+    fn lower_table_filter(&self, condition: &corvid_types::table_ops::QueryCondition<'_>, table: &corvid_ast::TableDecl) -> crate::types::IrTableFilter {
         use corvid_types::table_ops::QueryCondition as C;
         use crate::types::IrTableFilter as F;
         match condition {
             C::Const(b) => F::Const(*b),
             C::Column(column) => F::Column(column.clone()),
-            C::And(left, right) => F::And(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
-            C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
-            C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner))),
-            C::InList { column, values } => F::InList { column: column.clone(), values: Box::new(self.lower_expr(values)) },
+            C::And(left, right) => F::And(Box::new(self.lower_table_filter(left, table)), Box::new(self.lower_table_filter(right, table))),
+            C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left, table)), Box::new(self.lower_table_filter(right, table))),
+            C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner, table))),
+            C::InList { column, values } => match self.keys_subquery(values, table) {
+                Some(inner) => F::InQuery { column: column.clone(), inner: Box::new(inner) },
+                None => F::InList { column: column.clone(), values: Box::new(self.lower_expr(values)) },
+            },
             C::Compare { column, op, value } => {
                 F::Compare { column: column.clone(), op: *op, value: Box::new(self.lower_expr(value)) }
             }

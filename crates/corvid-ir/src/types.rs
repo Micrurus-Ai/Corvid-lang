@@ -1256,6 +1256,18 @@ pub enum IrTableFilter {
     Text { column: String, test: corvid_types::table_ops::QueryTextTest, value: Box<IrExpr> },
     /// `values.contains(row.column)` (J3): the column holds one of a list.
     InList { column: String, values: Box<IrExpr> },
+    /// `Other.where(...).keys().contains(row.column)` (J3b) on a table in
+    /// the same database: the column holds one of the inner query's keys,
+    /// read in the same statement.
+    InQuery { column: String, inner: Box<IrSubquery> },
+}
+
+/// The inner query of an [`IrTableFilter::InQuery`].
+#[derive(Debug, Clone)]
+pub struct IrSubquery {
+    pub table: IrTable,
+    /// `None` for `all()`.
+    pub filter: Option<IrTableFilter>,
 }
 
 impl IrTableFilter {
@@ -1275,6 +1287,11 @@ impl IrTableFilter {
             }
             Self::Not(inner) => inner.collect_values(out),
             Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => out.push(value),
+            Self::InQuery { inner, .. } => {
+                if let Some(filter) = &inner.filter {
+                    filter.collect_values(out);
+                }
+            }
         }
     }
 
@@ -1288,6 +1305,11 @@ impl IrTableFilter {
             }
             Self::Not(inner) => inner.for_each_value_mut(visit),
             Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => visit(value),
+            Self::InQuery { inner, .. } => {
+                if let Some(filter) = &mut inner.filter {
+                    filter.for_each_value_mut(visit);
+                }
+            }
         }
     }
 }

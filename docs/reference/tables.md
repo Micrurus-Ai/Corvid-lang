@@ -320,11 +320,26 @@ A `where` condition may use:
 bound, and keeps exactly the rows the same test keeps in Corvid: a `None`
 in the list matches a missing value, an empty list keeps nothing, and a
 `Decimal` matches by value. The list is computed by the agent before the
-query runs, so it may come from another query. A list holds at most 10,000
-values for now; a larger one stops the run with its reason until the
-inner query runs inside the same statement ([J3b](../proposals/query-aggregates-and-joins.md)).
-A `live` query cannot filter by a list yet, because the list may come from
-a table it does not watch.
+query runs. A list holds at most 10,000 values; a larger one stops the run
+with its reason.
+
+To filter by another table, use its query's keys directly:
+
+```corvid
+agent my_cards(owner: String) -> List<Card>:
+    return Card.where(fn (c) -> Board.where(fn (b) -> b.owner == owner).keys().contains(c.board))
+```
+
+`keys()` ends a query with its rows' keys, in key order, for a table keyed
+by one column. Inside a `where` on a table in the same database, it runs
+as an inner query in the same statement, `board IN (SELECT board FROM
+Board WHERE ...)`, so both tables are read at one moment, the keys never
+leave the database, and there is no limit on how many there are. A table
+in another database is read first, as a list. The inner query cannot read
+the outer row.
+
+A `live` query cannot filter by a list or another table's keys yet,
+because it does not watch that table's writes ([J5](../proposals/query-aggregates-and-joins.md)).
 
 The value on the other side of a comparison is computed by the agent
 before the query runs, so it may use the agent's variables and calls but
