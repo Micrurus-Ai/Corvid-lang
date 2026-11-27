@@ -45,6 +45,7 @@ pub use lowering::{native_public_json_type, native_runtime_call_types};
 pub use lowering::{is_native_option_type_for, is_native_value_type_for, is_refcounted_type_for, NativeTypeQuestion};
 mod json_error_record;
 mod response_record;
+mod route_parameter_record;
 mod regex_match_record;
 mod scalar_compound;
 pub use scalar_compound::native_scalar_compound;
@@ -100,6 +101,7 @@ pub fn compile_to_object(
     // so a body holding one already names its record (native dispatch N4).
     response_record::represent_responses_as_records(&mut ir);
     regex_match_record::represent_regex_match_as_record(&mut ir);
+    route_parameter_record::represent_route_parameters_as_records(&mut ir);
     // `total += price` on a `Decimal` or time local becomes the rebinding
     // `total = total + price`, which ownership and lowering already handle.
     scalar_compound::rewrite_scalar_compound_assignments(&mut ir);

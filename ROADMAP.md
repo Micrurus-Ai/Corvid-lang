@@ -1,5 +1,7 @@
 # Corvid — Build Roadmap
 
+- Native library builds lower checked route parameter and caller records before ownership analysis. Verify all five reference app descriptors against their sources.
+
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
 - [x] RT-4 / F08 live subscriptions. The generated TypeScript observer and

@@ -169,3 +169,13 @@ The checker's refusals are unchanged, so a native program can do with a secret e
   - *Wrong question for a `Result`.* The JSON-form check asked whether a `Result` is native with the lowering question, before the rewrite; it now asks the program question.
   - *`Nothing` had no JSON form.* The decoder already read it as `null`; now the check agrees.
   - *`to_string()` and floats.* `Int`, `Float` and `Bool` `to_string()` had no native form, and native code wrote floats with `%.17g`; see the dev-log entry "Numbers read the same on both tiers".
+
+### Native layouts for route arguments
+
+A program may contain ordinary HTTP handlers and export a native C library from
+the same source. Compile its checked path and caller fields as ordinary records
+before ownership analysis. Derive their names, order and types from the IR,
+including the empty path of a fixed route. A pointer-only lowering would miss
+field offsets and drops. This changes no route grammar, UI contract, assistant
+permissions or HTTP execution mode. The five reference libraries must still pass
+their source-to-library descriptor check.
