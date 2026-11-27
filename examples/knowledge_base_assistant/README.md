@@ -10,7 +10,7 @@ From this directory:
 set CORVID_TEST_MOCK_TOOLS={"retrieve_context":["Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves.","Refunds over one hundred dollars require approval before money moves."]}
 set CORVID_TEST_MOCK_LLM=1
 set CORVID_TEST_MOCK_LLM_RESPONSE=Refunds over one hundred dollars require approval before money moves.
-cargo run -q -p corvid-cli -- build
+cargo run -q -p corvid-cli -- check
 cargo run -q -p corvid-cli -- run
 ```
 

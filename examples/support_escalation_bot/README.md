@@ -9,7 +9,7 @@ From this directory:
 
 ```sh
 set CORVID_TEST_MOCK_TOOLS={"lookup_order":[{"id":"ord_1001","customer_id":"cust_42","status":"delivered","total":149.99},{"id":"ord_1003","customer_id":"cust_42","status":"delivered","total":19.95}],"escalate_to_human":{"ticket_id":"esc_9001","status":"queued","channel":"slack"},"issue_refund":{"receipt_id":"rf_7001","status":"approved","audit_id":"audit_refund_7001"}}
-cargo run -q -p corvid-cli -- build
+cargo run -q -p corvid-cli -- check
 cargo run -q -p corvid-cli -- run
 ```
 
