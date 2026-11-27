@@ -185,7 +185,7 @@ fn lower_stmt(
                 Ok(BlockOutcome::Normal)
             }
         IrStmt::Assign { span, .. } => Err(CodegenError::not_supported(
-            "place assignment (x.field = v / xs[i] = v / compound ops) is interpreter-only in 45b",
+            "place assignment (x.field = v / xs[i] = v / compound ops) runs on the interpreter only",
             *span,
         )),
         IrStmt::Return { value, span } => {
@@ -367,7 +367,7 @@ fn lower_stmt(
             runtime,
         ),
         IrStmt::Destructure { span, .. } => Err(CodegenError::not_supported(
-            "destructuring is interpreter-only in 45n",
+            "destructuring runs on the interpreter only",
             *span,
         )),
         IrStmt::Parallel { span, .. } => Err(CodegenError::not_supported(

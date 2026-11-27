@@ -464,7 +464,7 @@ fn check_entry_boundary_type(ty: &Type, span: Span, role: &str, types: &[corvid_
             }
         }
         Type::Map(_, _) => Err(CodegenError::not_supported(
-            format!("entry agent {role} of type `Map<K, V>` - interpreter-only in 45g"),
+            format!("entry agent {role} of type `Map<K, V>` - runs on the interpreter only"),
             Span::new(0, 0),
         )),
         Type::Int | Type::Bool | Type::Float | Type::String => Ok(()),

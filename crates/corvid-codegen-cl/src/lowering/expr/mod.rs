@@ -127,11 +127,11 @@ pub(super) fn lower_expr(
         IrExprKind::Lambda { .. } | IrExprKind::Decl { .. } if crate::native_callback_type(&expr.ty) =>
             callback::create(builder, expr, env, func_ids_by_def, module, runtime),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
-            "lambdas are interpreter-only in 45j",
+            "lambdas run on the interpreter only",
             expr.span,
         )),
         IrExprKind::StructLiteral { .. } => Err(CodegenError::not_supported(
-            "named struct literals are interpreter-only in 45n (positional construction compiles natively)",
+            "named struct literals run on the interpreter only (positional construction compiles natively)",
             expr.span,
         )),
         IrExprKind::PageNew { .. } => Err(CodegenError::not_supported(
@@ -586,8 +586,12 @@ pub(super) fn lower_expr(
                 lower_json_encode(builder, module, runtime, &receiver.ty, value, expr.span)
             }
         }
-        IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
-            "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
+        IrExprKind::BuiltinMethod { kind, receiver, .. } => Err(CodegenError::not_supported(
+            format!(
+                "`{}` on `{}` in native code",
+                corvid_types::builtin_methods::builtin_method_name(&receiver.ty, *kind).unwrap_or("this builtin method"),
+                receiver.ty.display_name()
+            ),
             expr.span,
         )),
         IrExprKind::Literal(IrLiteral::Int(n)) => Ok(builder.ins().iconst(I64, *n)),
@@ -864,7 +868,7 @@ pub(super) fn lower_expr(
             }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(CodegenError::not_supported(
-                    "closure calls are interpreter-only in 45j",
+                    "closure calls run on the interpreter only",
                     expr.span,
                 ));
             }

@@ -1008,6 +1008,15 @@ pub fn closest_builtin_method(receiver: &Type, name: &str) -> Option<&'static st
         .map(|(_, candidate)| candidate)
 }
 
+/// The source name of the builtin method `kind` on `receiver`, such as
+/// `unwrap_or`, for a message about the call. IR keeps only the kind.
+pub fn builtin_method_name(receiver: &Type, kind: BuiltinMethodKind) -> Option<&'static str> {
+    BUILTIN_METHOD_NAMES
+        .iter()
+        .copied()
+        .find(|name| builtin_method(receiver, name).is_some_and(|sig| sig.kind == kind))
+}
+
 fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();

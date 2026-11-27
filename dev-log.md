@@ -2,6 +2,18 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native refusals name the method and drop slice numbers
+
+A native refusal of a builtin method read "builtin methods (String.length()
+and the 45d/45e/45f batches) are interpreter-only in 45c", whatever the
+method. It now names it: "program calls `unwrap_or` on `Result<Bytes,
+String>`, which native code does not run yet". The new
+`builtin_method_name` finds the source name of a `BuiltinMethodKind` on its
+receiver through the builtin method list. Fifteen other native and wasm
+refusals cited internal slice numbers ("lambdas are interpreter-only in
+45j", "match is interpreter-only in 45i"). They now say the construct runs
+on the interpreter only. No test pinned the old wording.
+
 ### Joining byte strings
 
 B04 left `+` off `Bytes`: no slice needed it, and `+` must not quietly join
