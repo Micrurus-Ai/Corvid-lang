@@ -2,6 +2,33 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Aggregates J2: `count_by` and `sum_by`
+
+The aggregate stage now holds its argument list, so `sum_by` can take
+its key function and its column function. The checker reads each with one
+shared `aggregate_column` and types the result `Map<K, Int>` or `Map<K, T>`.
+The key column must be one the database compares as Corvid does: not JSON,
+and not `Float`, whose equality is inexact.
+
+The runtime's `TableAggregate` gains `CountBy`, `SumIntegerBy` and
+`ValuesBy`. `table_aggregate` now returns rows, the key first, through the
+same recorded select:
+- the first two are `GROUP BY` the key, ordered by it, so the map's order
+  is the same on every run and engine;
+- `ValuesBy` reads each row's key and value in key order, and the
+  interpreter adds per key with `eval_binop(Add)`.
+
+`Decimal` keys group by value on both engines, and `MapValue`'s `==` agrees.
+
+Test: on each engine, every group of `count_by` and `sum_by` (an `Int`,
+`Decimal` and `Duration` total, and one over a filtered query) equals the
+same J1 aggregate over that key's rows alone, and the keys come in order.
+
+Filed: `MapValue` is a vector searched by `==`. Building a map of n keys
+is n² comparisons and each lookup is linear, which a `count_by` over many
+groups exposes. The roadmap item asks for hashing that agrees with `==`,
+with insertion order kept. It touches the core value both sessions use.
+
 ### Aggregates J1: `count`, `sum`, `min`, `max`
 
 A query chain may now end in an aggregate stage, read by the same

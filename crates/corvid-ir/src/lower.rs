@@ -2437,17 +2437,33 @@ impl<'a> Lowerer<'a> {
         };
         let aggregate = match query.aggregate {
             None => None,
-            Some((op, None)) => Some(crate::types::IrQueryAggregate { op, column: None, column_ty: None }),
-            Some((op, Some(Expr::Lambda { params, body, .. }))) => {
-                let column = corvid_types::table_ops::query_column(query.table, &params.first()?.name.name, body)?;
-                let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
+            Some((op, args)) => {
+                use corvid_types::table_ops::QueryAggregate;
+                // Each function reads one column, as the checker requires.
+                let columns = args
+                    .iter()
+                    .map(|of| match of {
+                        Expr::Lambda { params, body, .. } => {
+                            let column = corvid_types::table_ops::query_column(query.table, &params.first()?.name.name, body)?;
+                            let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
+                            Some((column, self.type_ref_to_type(&field.ty)))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let (key, value) = match (op, columns.as_slice()) {
+                    (QueryAggregate::CountBy, [key]) => (Some(key.clone()), None),
+                    (QueryAggregate::SumBy, [key, value]) => (Some(key.clone()), Some(value.clone())),
+                    (_, [value]) => (None, Some(value.clone())),
+                    _ => (None, None),
+                };
                 Some(crate::types::IrQueryAggregate {
                     op,
-                    column_ty: Some(self.type_ref_to_type(&field.ty)),
-                    column: Some(column),
+                    column: value.as_ref().map(|(column, _)| column.clone()),
+                    column_ty: value.map(|(_, ty)| ty),
+                    key,
                 })
             }
-            Some(_) => return None,
         };
         Some(IrExprKind::TableQuery {
             table: self.ir_table(query.table)?,

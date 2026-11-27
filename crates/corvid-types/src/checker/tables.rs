@@ -523,20 +523,21 @@ impl<'a> Checker<'a> {
         let _ = span;
         match query.aggregate {
             None => Some(Type::List(Box::new(row))),
-            Some((aggregate, of)) => Some(self.check_query_aggregate(&query, &row, aggregate, of, method.span)),
+            Some((aggregate, args)) => Some(self.check_query_aggregate(&query, &row, aggregate, args, method.span)),
         }
     }
 
-    /// An aggregate stage (J1): `count() -> Int`, `sum` of an `Int`,
-    /// `Decimal` or `Duration` column to that type, and `min` or `max` of
-    /// an orderable column to an `Option`. `order_by` and `take` cannot
-    /// change an aggregate, so the chain may not hold them.
+    /// An aggregate stage (J1, J2): `count() -> Int`; `sum` of an `Int`,
+    /// `Decimal` or `Duration` column to that type; `min` or `max` of an
+    /// orderable column to an `Option`; `count_by` and `sum_by` to a `Map`
+    /// from a grouping column. `order_by` and `take` cannot change an
+    /// aggregate, so the chain may not hold them.
     fn check_query_aggregate(
         &mut self,
         query: &crate::table_ops::TableQuery<'_, '_>,
         row: &Type,
         aggregate: crate::table_ops::QueryAggregate,
-        of: Option<&Expr>,
+        args: &[Expr],
         span: Span,
     ) -> Type {
         use crate::table_ops::QueryAggregate;
@@ -547,7 +548,42 @@ impl<'a> Checker<'a> {
                 &format!("`{name}` reads every matching row, so `order_by`, `descending` and `take` cannot change it; remove them"),
             );
         }
-        let Some(of) = of else { return Type::Int };
+        let columns: Vec<Option<(String, Type, Span)>> =
+            args.iter().map(|of| self.aggregate_column(query, row, name, of)).collect();
+        let Some(columns) = columns.into_iter().collect::<Option<Vec<_>>>() else { return Type::Unknown };
+        match (aggregate, columns.as_slice()) {
+            (QueryAggregate::Count, []) => Type::Int,
+            (QueryAggregate::Sum, [(column, ty, at)]) => self.summed(name, column, ty, *at),
+            (QueryAggregate::Min | QueryAggregate::Max, [(column, ty, at)]) => {
+                self.check_column_is_orderable(query.table, column, *at);
+                match ty {
+                    // A missing value is never the least or greatest.
+                    Type::Option(_) => ty.clone(),
+                    other => Type::Option(Box::new(other.clone())),
+                }
+            }
+            (QueryAggregate::CountBy, [(key, key_ty, at)]) => {
+                self.check_grouping_column(name, key, key_ty, *at);
+                Type::Map(Box::new(key_ty.clone()), Box::new(Type::Int))
+            }
+            (QueryAggregate::SumBy, [(key, key_ty, key_at), (column, ty, at)]) => {
+                self.check_grouping_column(name, key, key_ty, *key_at);
+                let total = self.summed(name, column, ty, *at);
+                Type::Map(Box::new(key_ty.clone()), Box::new(total))
+            }
+            _ => Type::Unknown,
+        }
+    }
+
+    /// The column an aggregate's function reads, with its declared type,
+    /// or `None` (reported) when the function does not read one column.
+    fn aggregate_column(
+        &mut self,
+        query: &crate::table_ops::TableQuery<'_, '_>,
+        row: &Type,
+        name: &str,
+        of: &Expr,
+    ) -> Option<(String, Type, Span)> {
         let ty = self.check_expr_as(
             of,
             Some(&Type::Function { params: vec![row.clone()], ret: Box::new(Type::Unknown), effect: corvid_ast::Effect::Safe }),
@@ -559,34 +595,41 @@ impl<'a> Checker<'a> {
         };
         let Some(column) = column else {
             self.query_error(of.span(), &format!("`{name}` takes a function that reads one column, such as `fn (s) -> s.points`"));
-            return Type::Unknown;
+            return None;
         };
-        let Some(field) = query.table.record.fields.iter().find(|f| f.name.name == column) else { return Type::Unknown };
+        let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
         let column_ty = self.type_ref_to_type(&field.ty);
-        match aggregate {
-            QueryAggregate::Count => Type::Int,
-            QueryAggregate::Sum => match crate::table_columns::untainted(&column_ty) {
-                Type::Int | Type::Decimal | Type::Duration => column_ty,
-                Type::Float => {
-                    self.query_error(of.span(), &format!("`sum` of the `Float` column `{column}` would depend on the order rows are added; store it as a `Decimal` for an exact total"));
-                    Type::Unknown
-                }
-                other => {
-                    self.query_error(
-                        of.span(),
-                        &format!("`sum` adds an `Int`, `Decimal` or `Duration` column; `{column}` is a `{}`", other.display_name()),
-                    );
-                    Type::Unknown
-                }
-            },
-            QueryAggregate::Min | QueryAggregate::Max => {
-                self.check_column_is_orderable(query.table, &column, of.span());
-                match column_ty {
-                    // A missing value is never the least or greatest.
-                    Type::Option(_) => column_ty,
-                    other => Type::Option(Box::new(other)),
-                }
+        Some((column, column_ty, of.span()))
+    }
+
+    /// The type a `sum` of `column` has: its own, when it is an `Int`,
+    /// `Decimal` or `Duration`.
+    fn summed(&mut self, name: &str, column: &str, ty: &Type, at: Span) -> Type {
+        match crate::table_columns::untainted(ty) {
+            Type::Int | Type::Decimal | Type::Duration => ty.clone(),
+            Type::Float => {
+                self.query_error(at, &format!("`{name}` of the `Float` column `{column}` would depend on the order rows are added; store it as a `Decimal` for an exact total"));
+                Type::Unknown
             }
+            other => {
+                self.query_error(
+                    at,
+                    &format!("`{name}` adds an `Int`, `Decimal` or `Duration` column; `{column}` is a `{}`", other.display_name()),
+                );
+                Type::Unknown
+            }
+        }
+    }
+
+    /// A column rows are grouped by: one the database compares as Corvid
+    /// compares it, so each group is one key of the `Map`. Not JSON, and
+    /// not a `Float`, whose equality is not exact (`0.1 + 0.2`).
+    fn check_grouping_column(&mut self, name: &str, column: &str, ty: &Type, at: Span) {
+        use crate::table_columns::{column_kind, ColumnKind};
+        match column_kind(ty).0 {
+            ColumnKind::Json => self.query_error(at, &format!("`{name}` groups by a column the database compares; `{column}` is stored as JSON")),
+            ColumnKind::Real => self.query_error(at, &format!("`{name}` cannot group by the `Float` column `{column}`, whose values do not compare exactly")),
+            _ => {}
         }
     }
 

@@ -54,33 +54,89 @@ pub enum TableAggregate {
     /// exactly with its own `+` (`Decimal` and `Duration`: SQLite stores
     /// both as text, so its `sum` would add floats).
     Values(String),
+    /// `count_by` (J2): each value of the key column with its row count.
+    CountBy(String),
+    /// `sum_by` of an `Int` column: each key with its total, added by the
+    /// database as [`Self::SumInteger`] adds one.
+    SumIntegerBy { key: String, column: String },
+    /// `sum_by` of a `Decimal` or `Duration` column: each row's key and
+    /// value, for the interpreter to add exactly per key.
+    ValuesBy { key: String, column: String },
 }
 
-/// The statement for an aggregate over the rows `filter` keeps, the
-/// column it returns, and its parameters.
+impl TableAggregate {
+    /// The grouping column, for the stages that group.
+    fn key(&self) -> Option<&String> {
+        match self {
+            Self::CountBy(key) | Self::SumIntegerBy { key, .. } | Self::ValuesBy { key, .. } => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The columns each result row holds, as the statement names them.
+    fn result_columns(&self, table: &TableRef<'_>) -> (Vec<String>, Vec<ColumnKind>) {
+        let mut columns = Vec::new();
+        let mut kinds = Vec::new();
+        if let Some(key) = self.key() {
+            columns.push(key.clone());
+            kinds.push(column_kind_of(table, key));
+        }
+        match self {
+            Self::Values(column) | Self::ValuesBy { column, .. } => {
+                columns.push(column.clone());
+                kinds.push(column_kind_of(table, column));
+            }
+            _ => {
+                columns.push(AGGREGATE_COLUMN.to_string());
+                kinds.push(ColumnKind::Integer);
+            }
+        }
+        (columns, kinds)
+    }
+}
+
+/// The statement for an aggregate over the rows `filter` keeps and its
+/// parameters. Grouped results come in the key's order, so the `Map`
+/// they build is the same on every run and every engine.
 pub fn aggregate_sql(
     table: &TableRef<'_>,
     filter: Option<&TableFilter>,
     aggregate: &TableAggregate,
 ) -> (String, Vec<DbValue>) {
     let mut params = Vec::new();
+    let read = |column: &String| {
+        let kind = column_kind_of(table, column);
+        table.engine.select_list(&TableRef { columns: std::slice::from_ref(column), kinds: std::slice::from_ref(&kind), ..*table })
+    };
+    // `sum` of no rows is `NULL`; an empty total is 0. Postgres sums a
+    // `bigint` as `numeric`, and the cast back refuses one past 64 bits.
+    let integer_sum = |column: &String| match table.engine.is_postgres() {
+        true => format!("coalesce(sum({}), 0)::bigint AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+        false => format!("coalesce(sum({}), 0) AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+    };
+    let count = format!("count(*) AS {}", quote(AGGREGATE_COLUMN));
     let selected = match aggregate {
-        TableAggregate::Count => format!("count(*) AS {}", quote(AGGREGATE_COLUMN)),
-        // `sum` of no rows is `NULL`; an empty total is 0. Postgres sums a
-        // `bigint` as `numeric`, and the cast back refuses one past 64 bits.
-        TableAggregate::SumInteger(column) => match table.engine.is_postgres() {
-            true => format!("coalesce(sum({}), 0)::bigint AS {}", quote(column), quote(AGGREGATE_COLUMN)),
-            false => format!("coalesce(sum({}), 0) AS {}", quote(column), quote(AGGREGATE_COLUMN)),
-        },
-        TableAggregate::Values(column) => {
-            let kind = column_kind_of(table, column);
-            table.engine.select_list(&TableRef { columns: std::slice::from_ref(column), kinds: std::slice::from_ref(&kind), ..*table })
-        }
+        TableAggregate::Count => count,
+        TableAggregate::SumInteger(column) => integer_sum(column),
+        TableAggregate::Values(column) => read(column),
+        TableAggregate::CountBy(key) => format!("{}, {count}", read(key)),
+        TableAggregate::SumIntegerBy { key, column } => format!("{}, {}", read(key), integer_sum(column)),
+        TableAggregate::ValuesBy { key, column } => format!("{}, {}", read(key), read(column)),
     };
     let mut sql = format!("SELECT {selected} FROM {}", quote(table.name));
     if let Some(filter) = filter {
         sql.push_str(" WHERE ");
         sql.push_str(&filter_sql(table, filter, &mut params));
+    }
+    let table_name = quote(table.name);
+    match aggregate {
+        TableAggregate::CountBy(key) | TableAggregate::SumIntegerBy { key, .. } => {
+            sql.push_str(&format!(" GROUP BY {table_name}.{key} ORDER BY {table_name}.{key} ASC", key = quote(key)));
+        }
+        TableAggregate::ValuesBy { key, .. } => {
+            sql.push_str(&format!(" ORDER BY {table_name}.{} ASC", quote(key)));
+        }
+        _ => {}
     }
     (sql, params)
 }
@@ -195,24 +251,20 @@ impl Runtime {
             .collect()
     }
 
-    /// Run an aggregate (aggregates J1), recorded as
+    /// Run an aggregate (aggregates J1, J2), recorded as
     /// `table:<Table>.aggregate` with its SQL and parameters; a replay
-    /// serves the recorded values. `Count` and `SumInteger` give one
-    /// value; `Values` gives the column's value in each row.
+    /// serves the recorded rows. Each row holds the grouping key first,
+    /// for the grouped stages, then the count, the total or the column's
+    /// value.
     pub async fn table_aggregate(
         &self,
         table: &TableRef<'_>,
         filter: Option<&TableFilter>,
         aggregate: &TableAggregate,
-    ) -> Result<Vec<DbValue>, RuntimeError> {
+    ) -> Result<Vec<Row>, RuntimeError> {
         let (sql, params) = aggregate_sql(table, filter, aggregate);
-        // The statement returns one column, read back by its name.
-        let (name, kind) = match aggregate {
-            TableAggregate::Count | TableAggregate::SumInteger(_) => (AGGREGATE_COLUMN.to_string(), ColumnKind::Integer),
-            TableAggregate::Values(column) => (column.clone(), column_kind_of(table, column)),
-        };
-        let columns = [name];
-        let kinds = [kind];
+        // The statement's columns, read back by their names.
+        let (columns, kinds) = aggregate.result_columns(table);
         let selected = TableRef { columns: &columns, kinds: &kinds, ..*table };
         let args = vec![J::String(sql.clone()), J::Array(params.iter().map(value_json).collect())];
         let outcome = self
@@ -222,12 +274,11 @@ impl Runtime {
             })
             .await?;
         let malformed = || RuntimeError::Other(format!("the recorded outcome of `{}.aggregate` is malformed", table.name));
-        outcome
-            .as_array()
-            .ok_or_else(malformed)?
-            .iter()
-            .map(|row| json_row(row)?.into_iter().next().ok_or_else(malformed))
-            .collect()
+        let rows = outcome.as_array().ok_or_else(malformed)?.iter().map(json_row).collect::<Result<Vec<_>, _>>()?;
+        if rows.iter().any(|row| row.len() != columns.len()) {
+            return Err(malformed());
+        }
+        Ok(rows)
     }
 }
 

@@ -169,40 +169,83 @@ impl<'ir> Interpreter<'ir> {
         };
         let kinds = column_kinds(record);
         let target = table_target(table, &kinds, self.table_transaction.as_deref()).map_err(fail)?;
-        let column = || aggregate.column.clone().ok_or_else(|| fail(format!("`{}` names no column", aggregate.op.name())));
+        let name = aggregate.op.name();
+        let column = || aggregate.column.clone().ok_or_else(|| fail(format!("`{name}` names no column")));
         let column_ty = aggregate.column_ty.clone().unwrap_or(Type::Unknown);
-        let whole = |values: Vec<DbValue>| match values.as_slice() {
-            [DbValue::Integer(n)] => Ok(Value::Int(*n)),
-            other => Err(fail(format!("`{}` on table `{}` read {other:?}, not one whole number", aggregate.op.name(), table.name))),
+        let whole = |value: &DbValue| match value {
+            DbValue::Integer(n) => Ok(Value::Int(*n)),
+            other => Err(fail(format!("`{name}` on table `{}` read {other:?}, not a whole number", table.name))),
         };
+        let one = |rows: Vec<Row>| match rows.as_slice() {
+            [row] => match row.as_slice() {
+                [value] => whole(value),
+                _ => Err(fail(format!("`{name}` on table `{}` read more than one value", table.name))),
+            },
+            _ => Err(fail(format!("`{name}` on table `{}` read {} rows, not one", table.name, rows.len()))),
+        };
+        // An exact total adds with Corvid's own checked `+`.
+        let zero = || match untainted(&column_ty) {
+            Type::Decimal => Ok(Value::Decimal(corvid_decimal::Decimal::parse("0").map_err(|e| fail(e.to_string()))?)),
+            Type::Duration => Ok(Value::Duration(corvid_time::Duration::from_nanoseconds(0).map_err(|e| fail(e.to_string()))?)),
+            other => Err(fail(format!("`{name}` cannot add a `{}` column", other.display_name()))),
+        };
+        let integer_total = matches!(untainted(&column_ty), Type::Int);
         match aggregate.op {
             QueryAggregate::Count => {
-                whole(self.runtime.table_aggregate(&target, filter.as_ref(), &TableAggregate::Count).await.map_err(runtime_error)?)
+                one(self.runtime.table_aggregate(&target, filter.as_ref(), &TableAggregate::Count).await.map_err(runtime_error)?)
             }
-            QueryAggregate::Sum if matches!(untainted(&column_ty), Type::Int) => whole(
+            QueryAggregate::Sum if integer_total => one(
                 self.runtime
                     .table_aggregate(&target, filter.as_ref(), &TableAggregate::SumInteger(column()?))
                     .await
                     .map_err(runtime_error)?,
             ),
             QueryAggregate::Sum => {
-                let values = self
+                let rows = self
                     .runtime
                     .table_aggregate(&target, filter.as_ref(), &TableAggregate::Values(column()?))
                     .await
                     .map_err(runtime_error)?;
-                let mut total = match untainted(&column_ty) {
-                    Type::Decimal => Value::Decimal(corvid_decimal::Decimal::parse("0").map_err(|e| fail(e.to_string()))?),
-                    Type::Duration => {
-                        Value::Duration(corvid_time::Duration::from_nanoseconds(0).map_err(|e| fail(e.to_string()))?)
-                    }
-                    other => return Err(fail(format!("`sum` cannot add a `{}` column", other.display_name()))),
-                };
-                for stored in values {
+                let mut total = zero()?;
+                for stored in rows.into_iter().flatten() {
                     let value = self.from_column(stored, &column_ty).map_err(fail)?;
                     total = super::eval_binop(corvid_ast::BinaryOp::Add, total, value, span, false)?;
                 }
                 Ok(total)
+            }
+            QueryAggregate::CountBy | QueryAggregate::SumBy => {
+                let (key, key_ty) = aggregate.key.clone().ok_or_else(|| fail(format!("`{name}` names no key column")))?;
+                let request = match aggregate.op {
+                    QueryAggregate::CountBy => TableAggregate::CountBy(key),
+                    _ if integer_total => TableAggregate::SumIntegerBy { key, column: column()? },
+                    _ => TableAggregate::ValuesBy { key, column: column()? },
+                };
+                let rows = self.runtime.table_aggregate(&target, filter.as_ref(), &request).await.map_err(runtime_error)?;
+                // Rows come in key order, so the map's order is the same on
+                // every run; a key read twice (only `ValuesBy` repeats keys)
+                // adds to its total.
+                let mut entries: Vec<(Value, Value)> = Vec::new();
+                for row in rows {
+                    let [stored_key, stored] = <[DbValue; 2]>::try_from(row)
+                        .map_err(|_| fail(format!("`{name}` on table `{}` read a malformed row", table.name)))?;
+                    let key = self.from_column(stored_key, &key_ty).map_err(fail)?;
+                    let value = match request {
+                        TableAggregate::ValuesBy { .. } => self.from_column(stored, &column_ty).map_err(fail)?,
+                        _ => whole(&stored)?,
+                    };
+                    match entries.iter_mut().find(|(held, _)| *held == key) {
+                        Some((_, total)) => {
+                            let added = super::eval_binop(corvid_ast::BinaryOp::Add, total.clone(), value, span, false)?;
+                            *total = added;
+                        }
+                        None if matches!(request, TableAggregate::ValuesBy { .. }) => {
+                            let first = super::eval_binop(corvid_ast::BinaryOp::Add, zero()?, value, span, false)?;
+                            entries.push((key, first));
+                        }
+                        None => entries.push((key, value)),
+                    }
+                }
+                Ok(Value::Map(crate::value::MapValue::new(entries)))
             }
             QueryAggregate::Min | QueryAggregate::Max => {
                 let column = column()?;

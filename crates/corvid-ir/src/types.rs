@@ -1223,10 +1223,14 @@ pub enum IrExprKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IrQueryAggregate {
     pub op: corvid_types::table_ops::QueryAggregate,
-    /// The column `sum`, `min` or `max` reads; `None` for `count`.
+    /// The column `sum`, `min`, `max` or `sum_by` reads; `None` for
+    /// `count` and `count_by`.
     pub column: Option<String>,
     /// The column's declared type, which decides how a `sum` is added.
     pub column_ty: Option<Type>,
+    /// The column `count_by` and `sum_by` group by, with its declared
+    /// type, which each `Map` key has.
+    pub key: Option<(String, Type)>,
 }
 
 /// The expressions a query chain evaluates before it runs, in

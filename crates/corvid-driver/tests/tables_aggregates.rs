@@ -131,6 +131,38 @@ agent main() -> String:
     stocked = stock()
     return stocked.to_string() + " | " + in_database("home") + " | " + in_memory("home") + " | " + in_database("none") + " | " + in_memory("none")
 
+fn int_text(value: Option<Int>) -> String:
+    return match value:
+        Some(n) -> n.to_string()
+        None -> "none"
+
+fn total_text(value: Option<Decimal>) -> String:
+    return match value:
+        Some(d) -> d.to_string()
+        None -> "none"
+
+fn spent_text(value: Option<Duration>) -> String:
+    return match value:
+        Some(d) -> d.to_string()
+        None -> "none"
+
+agent grouped_in_database() -> String:
+    counts = Item.all().count_by(fn (i) -> i.list)
+    points = Item.all().sum_by(fn (i) -> i.list, fn (i) -> i.points)
+    prices = Item.all().sum_by(fn (i) -> i.list, fn (i) -> i.price)
+    spent = Item.where(fn (i) -> i.points > 0).sum_by(fn (i) -> i.list, fn (i) -> i.spent)
+    order = ""
+    for list in counts.keys():
+        order = order + list + ","
+    return order + " " + int_text(counts["home"]) + " " + int_text(counts["away"]) + " " + int_text(counts["none"]) + " " + int_text(points["home"]) + " " + int_text(points["away"]) + " " + total_text(prices["home"]) + " " + total_text(prices["away"]) + " " + spent_text(spent["home"]) + " " + spent_text(spent["away"])
+
+agent grouped_one_at_a_time() -> String:
+    return "away,home, " + Item.where(fn (i) -> i.list == "home").count().to_string() + " " + Item.where(fn (i) -> i.list == "away").count().to_string() + " none " + Item.where(fn (i) -> i.list == "home").sum(fn (i) -> i.points).to_string() + " " + Item.where(fn (i) -> i.list == "away").sum(fn (i) -> i.points).to_string() + " " + Item.where(fn (i) -> i.list == "home").sum(fn (i) -> i.price).to_string() + " " + Item.where(fn (i) -> i.list == "away").sum(fn (i) -> i.price).to_string() + " " + Item.where(fn (i) -> i.list == "home" and i.points > 0).sum(fn (i) -> i.spent).to_string() + " " + Item.where(fn (i) -> i.list == "away" and i.points > 0).sum(fn (i) -> i.spent).to_string()
+
+agent grouped() -> String:
+    stocked = stock()
+    return grouped_in_database() + " | " + grouped_one_at_a_time()
+
 agent overflow() -> Int:
     a = add(10, "big", 9223372036854775807, 1, "PT1S", "")
     b = add(11, "big", 1, 1, "PT1S", "")
@@ -161,6 +193,22 @@ async fn aggregates_in_the_database_equal_the_same_computation_over_the_rows() {
         assert_eq!(home[4], "-3", "the least price by value on {label}");
         assert_eq!(home[5], "10.0", "the greatest price by value, not text (9.50 < 10.0) on {label}");
         assert_eq!(&out[3].split(' ').collect::<Vec<_>>()[4..], ["none"; 4], "no rows, no extremes, on {label}");
+        database.finish().await;
+    }
+}
+
+/// J2: each group of `count_by` and `sum_by` equals the same aggregate
+/// over that key's rows alone, and the keys come in order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grouped_aggregates_equal_the_aggregate_of_each_group() {
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        let out = parts(run_ir_with_runtime(&ir, Some("grouped"), vec![], &runtime).await.expect("program runs"));
+        assert_eq!(out[0], out[1], "grouped equals one key at a time on {}", database.label());
+        assert!(out[0].starts_with("away,home, 4 1 none 10 1 "), "{} on {}", out[0], database.label());
         database.finish().await;
     }
 }
@@ -213,4 +261,5 @@ fn aggregates_refuse_what_cannot_be_exact() {
     );
     assert!(refusal("n = Item.all().sum(fn (i) -> i.list)").contains("`sum` adds an `Int`, `Decimal` or `Duration` column"));
     assert!(refusal("n = Item.all().sum(fn (i) -> i.points + 1)").contains("reads one column"));
+    assert!(refusal("n = Item.all().sum_by(fn (i) -> i.list, fn (i) -> i.list)").contains("`sum_by` adds an `Int`, `Decimal` or `Duration` column"));
 }

@@ -123,10 +123,11 @@ pub struct TableQuery<'a, 'e> {
     pub order: Option<&'e Expr>,
     pub descending: bool,
     pub take: Option<&'e Expr>,
-    /// A last stage that reduces the rows to one value (aggregates J1):
-    /// `count()`, or `sum`, `min` or `max` with the function that reads
-    /// the column.
-    pub aggregate: Option<(QueryAggregate, Option<&'e Expr>)>,
+    /// A last stage that reduces the rows to one value (aggregates J1,
+    /// J2), with its arguments: none for `count()`, the function that
+    /// reads the column for `sum`, `min`, `max` and `count_by`, and the
+    /// key's function then the column's for `sum_by`.
+    pub aggregate: Option<(QueryAggregate, &'e [Expr])>,
 }
 
 /// A stage that turns a query's rows into one value, run by the database.
@@ -140,6 +141,10 @@ pub enum QueryAggregate {
     Min,
     /// `max(fn (r) -> r.col) -> Option<T>`.
     Max,
+    /// `count_by(fn (r) -> r.key) -> Map<K, Int>` (J2).
+    CountBy,
+    /// `sum_by(fn (r) -> r.key, fn (r) -> r.col) -> Map<K, T>` (J2).
+    SumBy,
 }
 
 impl QueryAggregate {
@@ -149,6 +154,8 @@ impl QueryAggregate {
             "sum" => Self::Sum,
             "min" => Self::Min,
             "max" => Self::Max,
+            "count_by" => Self::CountBy,
+            "sum_by" => Self::SumBy,
             _ => return None,
         })
     }
@@ -159,6 +166,17 @@ impl QueryAggregate {
             Self::Sum => "sum",
             Self::Min => "min",
             Self::Max => "max",
+            Self::CountBy => "count_by",
+            Self::SumBy => "sum_by",
+        }
+    }
+
+    /// How many functions the stage takes.
+    pub fn arity(self) -> usize {
+        match self {
+            Self::Count => 0,
+            Self::Sum | Self::Min | Self::Max | Self::CountBy => 1,
+            Self::SumBy => 2,
         }
     }
 }
@@ -206,16 +224,10 @@ pub fn table_query_target<'a, 'e>(
         // An aggregate ends the chain. The checker refuses one after
         // `order_by` or `take`, which cannot change it, by name.
         if let Some(aggregate) = QueryAggregate::from_name(stage) {
-            let of = match (aggregate, *stage_args) {
-                (QueryAggregate::Count, []) => None,
-                (QueryAggregate::Count, _) => return None,
-                (_, [column]) => Some(column),
-                _ => return None,
-            };
-            if rank >= 4 {
+            if rank >= 4 || stage_args.len() != aggregate.arity() {
                 return None;
             }
-            query.aggregate = Some((aggregate, of));
+            query.aggregate = Some((aggregate, *stage_args));
             rank = 4;
             continue;
         }

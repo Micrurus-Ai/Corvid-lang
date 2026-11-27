@@ -342,6 +342,15 @@ the database instead of reading every row:
 | `.count()` | `Int` | `0` |
 | `.sum(fn (s) -> s.column)` | the column's type: `Int`, `Decimal` or `Duration` | `0` |
 | `.min(fn (s) -> s.column)`, `.max(...)` | `Option` of the column's type | `None` |
+| `.count_by(fn (s) -> s.key)` | `Map<K, Int>` | an empty map |
+| `.sum_by(fn (s) -> s.key, fn (s) -> s.column)` | `Map<K, T>`, `T` as for `sum` | an empty map |
+
+`count_by` and `sum_by` group the rows by a column and give one entry per
+value that has rows, in the column's order, so `m[k]` is `None` for a key
+with none. A group's total follows the rules of `sum`. The key column
+must be one the database compares as Corvid does: not one stored as JSON,
+and not a `Float`, whose values do not compare exactly. `Decimal` keys
+group by value, so `1.0` and `1.00` are one key.
 
 ```corvid
 agent shelf_summary(owner: String) -> String:
