@@ -26,43 +26,56 @@ export interface PaginatedHandle<Item> {
  * The first page loads on mount.
  */
 export function useCorvidPaginated<Item>(
-  fetchPage: (cursor?: string) => Promise<Page<Item>>,
+  fetchPage: (cursor?: string, signal?: AbortSignal) => Promise<Page<Item>>,
 ): PaginatedHandle<Item> {
   const [items, setItems] = useState<Item[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<CorvidError | null>(null);
   const cursor = useRef<string | undefined>(undefined);
-  const inFlight = useRef(false);
+  const inFlight = useRef<AbortController | null>(null);
+  const exhausted = useRef(false);
 
   const loadMore = useCallback(async (): Promise<void> => {
-    if (inFlight.current || !hasMore) return;
-    inFlight.current = true;
+    if (inFlight.current || exhausted.current) return;
+    const request = new AbortController();
+    inFlight.current = request;
     setLoading(true);
     setError(null);
     try {
-      const page = await fetchPage(cursor.current);
+      const page = await fetchPage(cursor.current, request.signal);
+      if (request.signal.aborted) return;
       setItems((prev) => [...prev, ...page.items]);
       cursor.current = page.next_cursor ?? undefined;
-      setHasMore(page.has_more && page.next_cursor != null);
+      exhausted.current = !page.has_more || page.next_cursor == null;
+      setHasMore(!exhausted.current);
     } catch (err) {
-      setError(err instanceof CorvidError ? err : new CorvidError(0, err, String(err)));
+      if (!request.signal.aborted) {
+        setError(err instanceof CorvidError ? err : new CorvidError(0, err, String(err)));
+      }
     } finally {
-      inFlight.current = false;
-      setLoading(false);
+      if (inFlight.current === request) {
+        inFlight.current = null;
+        setLoading(false);
+      }
     }
-  }, [fetchPage, hasMore]);
+  }, [fetchPage]);
 
   const reset = useCallback(() => {
+    inFlight.current?.abort();
+    inFlight.current = null;
+    exhausted.current = false;
     cursor.current = undefined;
     setItems([]);
     setHasMore(true);
     setError(null);
-  }, []);
+    void loadMore();
+  }, [loadMore]);
 
   // Load the first page on mount.
   useEffect(() => {
-    void loadMore();
+    reset();
+    return () => inFlight.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
+
 A native library can include HTTP handlers with checked path and caller fields. The native compiler uses the same field names, order and types as the interpreter. [Native route parameter layouts](docs/proposals/native-dispatch.md#native-layouts-for-route-arguments)
 
 `upload.bytes()` now returns `Bytes`, one shared buffer, instead of a `List<Int>` with one value per byte; use `bytes.length()`, `bytes.sha256()`, `bytes.to_hex()` or `bytes.to_utf8()`. An uploaded file no longer reaches the trace: a run's recorded arguments hold its name, type, size and SHA-256, never its content.

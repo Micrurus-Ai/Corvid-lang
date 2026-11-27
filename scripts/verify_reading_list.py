@@ -27,13 +27,14 @@ from urllib.request import Request, urlopen
 
 
 @contextmanager
-def serve(cli, directory, env, port=None, source="src/main.cor"):
+def serve(cli, directory, env, port=None, source="src/main.cor", mode=None):
     if port is None:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
     address = f"127.0.0.1:{port}"
-    process = subprocess.Popen([cli, "serve", source, "--listen", address],
+    options = ["--mode", mode] if mode else []
+    process = subprocess.Popen([cli, "serve", source, "--listen", address, *options],
                                cwd=directory, env=env)
     url = "http://" + address
     try:

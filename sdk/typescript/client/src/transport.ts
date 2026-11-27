@@ -91,11 +91,12 @@ export class CorvidClient {
   }
 
   /** A typed low-level request against a declared route. */
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method,
       credentials: "include",
       headers: withCsrf(method, body === undefined ? { ...this.headers } : { "content-type": "application/json", ...this.headers }),
+      signal,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return this.parse<T>(res);
@@ -108,7 +109,21 @@ export class CorvidClient {
    * `args` follow `shape`. Generated `Api.route` calls this. A path value
    * that cannot be sent exactly throws here, before any request.
    */
-  routeStream<Item>(route: string, shape: RouteShape, args: readonly unknown[]): RouteStream<Item> {
+  routeStream<Item>(path: string, signal?: AbortSignal): AsyncGenerator<Item>;
+  /**
+   * Call a declared route that returns `Stream<Item>`. `route` is the
+   * method and contract path, as in `"GET /boards/{board}/feed"`, and
+   * `args` follow `shape`. Generated `Api.route` calls this. A path value
+   * that cannot be sent exactly throws here, before any request.
+   */
+  routeStream<Item>(route: string, shape: RouteShape, args: readonly unknown[]): RouteStream<Item>;
+  routeStream<Item>(
+    route: string, ...call: [signal?: AbortSignal] | [shape: RouteShape, args: readonly unknown[]]
+  ): AsyncGenerator<Item> | RouteStream<Item> {
+    if (call.length !== 2) {
+      return routeItems(this.readRouteEvents<Item>(route, { method: "GET", signal: call[0] }));
+    }
+    const [shape, args] = call;
     const space = route.indexOf(" ");
     const method = route.slice(0, space);
     const values: Record<string, unknown> = {};
@@ -119,7 +134,7 @@ export class CorvidClient {
       const query = urlEncodedRecord(args[next++]);
       if (query) path += "?" + query;
     }
-    const headers: Record<string, string> = { accept: "text/event-stream", ...this.headers };
+    const headers: Record<string, string> = {};
     let body: string | undefined;
     if (shape.body === "json") {
       body = JSON.stringify(args[next++]);
@@ -128,72 +143,91 @@ export class CorvidClient {
       body = urlEncodedRecord(args[next++]);
       headers["content-type"] = "application/x-www-form-urlencoded";
     }
-    return this.eventStream<Item>(`${this.baseUrl}${path}`, method, headers, body);
+    return this.eventStream<Item>(path, method, headers, body);
   }
 
-  /**
-   * Call a declared `action` that returns `Stream<Item>`: the input is
-   * posted as `action` posts it, and the reply is the stream protocol a
-   * streaming route sends (`chunk`, `completed`, `failed`).
-   */
-  actionStream<Item>(name: string, input: unknown): RouteStream<Item> {
-    const headers = { accept: "text/event-stream", "content-type": "application/json", ...this.headers };
-    const url = `${this.baseUrl}/actions/${encodeURIComponent(name)}`;
-    return this.eventStream<Item>(url, "POST", headers, JSON.stringify(input ?? {}));
-  }
-
-  /** Read one request's server-sent events as the route stream protocol. */
-  private eventStream<Item>(
-    url: string, method: string, headers: Record<string, string>, body: string | undefined,
-  ): RouteStream<Item> {
-    const doFetch = this.doFetch;
-
-    async function* iterate(): AsyncGenerator<RouteEvent<Item>> {
-      let res: Response;
-      try {
-        res = await doFetch(url, { method, credentials: "include", headers: withCsrf(method, headers), body });
-      } catch {
-        yield { kind: "interrupted" };
-        return;
-      }
-      if (!res.ok || !res.body) {
-        throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
-      }
-      try {
-        for await (const { event, data } of readSseEvents(res.body)) {
-          if (event === "chunk") {
-            yield { kind: "chunk", value: data as Item };
-          } else if (event === "completed") {
-            yield { kind: "completed", value: null };
-            return;
-          } else if (event === "failed") {
-            yield { kind: "failed", error: routeFailure(data) };
-            return;
-          }
-        }
-      } catch {
-        // The connection failed mid-read; reported as interrupted below.
-      }
-      yield { kind: "interrupted" };
-    }
-
-    const gen = iterate();
+  private eventStream<Item>(path: string, method: string, headers: Record<string, string>, body?: string): RouteStream<Item> {
+    const gen = this.readRouteEvents<Item>(path, {method, headers, body});
     return {
       [Symbol.asyncIterator]: () => gen,
       async result(): Promise<null> {
         for await (const event of gen) {
           if (event.kind === "completed") return null;
-          if (event.kind === "failed") throw new CorvidError(200, event.error, event.error.detail);
-          if (event.kind === "interrupted") {
-            throw new CorvidError(0, null, "the connection was lost before the stream completed");
-          }
+          throwRouteFailure(event);
         }
         throw new CorvidError(0, null, "the stream ended without a terminal event");
       },
     };
   }
 
+  actionStream<Item>(name: string, input: unknown): RouteStream<Item> {
+    const headers = { accept: "text/event-stream", "content-type": "application/json", ...this.headers };
+    const url = `/actions/${encodeURIComponent(name)}`;
+    return this.eventStream<Item>(url, "POST", headers, JSON.stringify(input ?? {}));
+  }
+
+  private async *readRouteEvents<Item>(path: string, init: RequestInit): AsyncGenerator<RouteEvent<Item>> {
+    let res: Response;
+    try {
+      res = await this.doFetch(this.baseUrl + path, {
+        ...init, credentials: "include", headers: withCsrf(init.method ?? "GET", { accept: "text/event-stream", ...this.headers, ...init.headers } as Record<string,string>),
+      });
+    } catch {
+      init.signal?.throwIfAborted();
+      yield { kind: "interrupted" };
+      return;
+    }
+    if (!res.ok || !res.body) {
+      throw new CorvidError(res.status, await safeJson(res), "stream failed to open");
+    }
+    try {
+      for await (const { event, data } of readSseEvents(res.body, true)) {
+        init.signal?.throwIfAborted();
+        if (event === "chunk") {
+          yield { kind: "chunk", value: data as Item };
+        } else if (event === "completed") {
+          yield { kind: "completed", value: null };
+          return;
+        } else if (event === "failed") {
+          yield { kind: "failed", error: routeFailure(data) };
+          return;
+        }
+      }
+    } catch {
+      // A malformed frame or a broken reader interrupts the stream.
+    }
+    init.signal?.throwIfAborted();
+    yield { kind: "interrupted" };
+  }
+
   /** Walk a cursor-paginated route to exhaustion. */
+  /** Send a file to a multipart POST route. Progress counts multipart body bytes. */
+  upload<T>(path: string, file: File, onProgress: (loaded: number, total?: number) => void,
+            signal?: AbortSignal): Promise<T> {
+    return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", this.baseUrl + path);
+      xhr.withCredentials = true;
+      for (const [name, value] of Object.entries(withCsrf("POST", this.headers))) {
+        if (name.toLowerCase() !== "content-type") xhr.setRequestHeader(name, value);
+      }
+      const abort = () => xhr.abort();
+      xhr.upload.onprogress = event => onProgress(event.loaded, event.lengthComputable ? event.total : undefined);
+      xhr.onerror = () => reject(new CorvidError(0, null, "Upload connection failed"));
+      xhr.onabort = () => reject(signal?.reason ?? new DOMException("Upload cancelled", "AbortError"));
+      xhr.onload = () => {
+        const response = new Response(xhr.responseText || null, { status: xhr.status });
+        resolve(this.parse<T>(response));
+      };
+      xhr.onloadend = () => signal?.removeEventListener("abort", abort);
+      const form = new FormData();
+      form.append("file", file);
+      xhr.send(form);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+
   paginate<Item>(path: string): AsyncGenerator<Item> {
     return paginate<Item>((cursor) => {
       const q = cursor ? `${path}${path.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}` : path;
@@ -223,6 +257,20 @@ export class CorvidClient {
       throw new CorvidError(res.status, await safeJson(res));
     }
     return (await res.json()) as T;
+  }
+}
+
+async function* routeItems<Item>(events: AsyncIterable<RouteEvent<Item>>): AsyncGenerator<Item> {
+  for await (const event of events) {
+    if (event.kind === "chunk") yield event.value;
+    else throwRouteFailure(event);
+  }
+}
+
+function throwRouteFailure(event: RouteEvent<unknown>): void {
+  if (event.kind === "failed") throw new CorvidError(200, event.error, event.error.detail);
+  if (event.kind === "interrupted") {
+    throw new CorvidError(0, null, "the connection was lost before the stream completed");
   }
 }
 
