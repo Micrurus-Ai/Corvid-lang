@@ -107,9 +107,11 @@ typedef struct corvid_tracking_node {
     /* The collector's scratch count: the references to this block from
      * outside the heap (collector.c, trial deletion). */
     long long gc_external;
-    /* Keeps the node a multiple of 16 bytes, so payload alignment is
-     * unchanged. */
-    long long gc_reserved;
+    /* Stamped by each collection on every block it finds in the live
+     * list, so a reference to anything else is caught before the
+     * collector writes through it (collector.c). It also keeps the node
+     * a multiple of 16 bytes, so payload alignment is unchanged. */
+    unsigned long long gc_live_stamp;
 } corvid_tracking_node;
 
 #define CORVID_TRACKING_BYTES (sizeof(corvid_tracking_node))
@@ -324,6 +326,17 @@ void* corvid_alloc_typed(long long payload_bytes, const corvid_typeinfo* typeinf
     corvid_header* h = (corvid_header*)(raw + CORVID_TRACKING_BYTES);
     h->refcount_word = 1;
     h->typeinfo = typeinfo;
+
+    /* A block's slots start empty. The collector traces every live
+     * block, and a collection can run before the caller writes the
+     * slots: inside this allocation, or while the program allocates the
+     * values those slots will hold. A slot not yet written must read as
+     * no value (NULL, an empty list, tag 0), never as whatever the
+     * memory held before. A string's bytes are never traced, so text
+     * skips this. */
+    if (typeinfo->trace_fn != corvid_trace_String_fn && payload_bytes > 0) {
+        memset((char*)h + CORVID_HEADER_BYTES, 0, (size_t)payload_bytes);
+    }
 
     node->last_retain_pc = CORVID_CALLER_PC();
     node->last_release_pc = NULL;
