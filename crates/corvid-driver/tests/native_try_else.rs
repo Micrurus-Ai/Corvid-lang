@@ -37,20 +37,20 @@ agent main() -> String:
 }
 
 #[test]
-fn a_try_that_reaches_a_failing_call_in_a_match_arm_names_the_agent() {
+fn a_try_that_reaches_a_failing_call_in_a_match_guard_names_the_agent() {
     let src = r#"
 prompt summarize(text: String) -> String:
     "Summarize {text}"
 
 agent pick(text: Option<String>) -> String:
     return match text:
-        Some(t) -> summarize(t)
-        None -> ""
+        Some(t) if summarize(t) == "" -> "empty"
+        _ -> ""
 
 agent main() -> String:
     return try pick(Some("notes")) else "no summary"
 "#;
-    let reason = ability(src).expect_err("an arm cannot unwind yet");
+    let reason = ability(src).expect_err("a guard cannot unwind yet");
     assert!(reason.contains("runs on the interpreter") && reason.contains("`pick`"), "{reason}");
 }
 

@@ -968,6 +968,30 @@ pub enum IrPattern {
     },
 }
 
+impl IrPattern {
+    /// Every local this pattern binds, nested patterns included.
+    pub fn bound_locals(&self, out: &mut Vec<LocalId>) {
+        match self {
+            IrPattern::Wildcard | IrPattern::Literal(_) | IrPattern::None_ => {}
+            IrPattern::Bind { local_id, .. } => out.push(*local_id),
+            IrPattern::At { local_id, inner, .. } => {
+                out.push(*local_id);
+                inner.bound_locals(out);
+            }
+            IrPattern::Variant { args, .. } => args.iter().for_each(|arg| arg.bound_locals(out)),
+            IrPattern::Some_(inner) | IrPattern::Ok_(inner) | IrPattern::Err_(inner) => inner.bound_locals(out),
+            IrPattern::Record { fields } => fields.iter().for_each(|(_, field)| field.bound_locals(out)),
+        }
+    }
+
+    /// Whether this pattern binds `local_id`.
+    pub fn binds(&self, local_id: LocalId) -> bool {
+        let mut bound = Vec::new();
+        self.bound_locals(&mut bound);
+        bound.contains(&local_id)
+    }
+}
+
 /// One segment of a place-assignment path (slice 45b).
 #[derive(Debug, Clone)]
 pub enum IrPathSeg {

@@ -49,6 +49,8 @@ fn operand_supported(expr: &IrExpr) -> bool {
             args,
             ..
         } => args.iter().all(operand_supported),
+        // A call the expansion marked checked means exactly that call.
+        IrExprKind::Outage(corvid_ir::IrOutage::Checked(call)) => operand_supported(call),
         _ => false,
     }
 }

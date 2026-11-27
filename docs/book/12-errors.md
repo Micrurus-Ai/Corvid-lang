@@ -86,9 +86,9 @@ can never hide one. The failure may happen any number of calls inside
 the body; with `retry`, the body runs again before the fallback is used.
 
 Compiled programs catch outages from tool, connector and prompt calls
-the same way. A `try` with a `timeout`, or one that can reach a failing
-call inside a `match` arm, a guard or a lambda, runs on the interpreter
-for now, and `corvid build` names which one.
+the same way, `match` arms included. A `try` with a `timeout`, or one
+that can reach a failing call inside a `match` guard or a lambda, runs
+on the interpreter for now, and `corvid build` names which one.
 
 ## Timeouts
 

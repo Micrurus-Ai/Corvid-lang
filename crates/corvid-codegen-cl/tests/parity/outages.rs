@@ -133,14 +133,41 @@ agent main() -> Int:
 }
 
 #[test]
-fn a_try_that_reaches_a_failing_call_in_a_match_arm_is_refused_by_name() {
+fn an_outage_inside_a_match_arm_unwinds_from_the_arm_and_releases_what_it_held() {
+    // The first arm is a lone call, checked after the `match`; the second
+    // does more around its call, so it is lifted into an agent of its own.
+    let out = assert_parity(
+        r#"
+agent plain(name: Option<String>, prefix: String) -> Int:
+    return match name:
+        Some(n) -> echo_string(prefix)
+        None -> 0
+
+agent around(name: Option<String>, prefix: String) -> Int:
+    return match name:
+        Some(n) -> echo_string(prefix + n) + n.length()
+        None -> 0
+
+agent main() -> String:
+    held = "held"
+    a = try plain(Some("x"), held) else 1
+    b = try around(Some("other"), held) else 2
+    c = try around(None, held) else 3
+    return held + " " + a.to_string() + " " + b.to_string() + " " + c.to_string()
+"#,
+    );
+    assert_eq!(out, "held 1 2 0");
+}
+
+#[test]
+fn a_try_that_reaches_a_failing_call_in_a_match_guard_is_refused_by_name() {
     let src = format!(
         "{TOOLS}{}",
         r#"
 agent pick(name: Option<String>) -> Int:
     return match name:
-        Some(n) -> echo_string(n)
-        None -> 0
+        Some(n) if echo_string(n) > 0 -> 1
+        _ -> 0
 
 agent main() -> Int:
     return try pick(Some("x")) else 3
@@ -152,7 +179,7 @@ agent main() -> Int:
         .expect_err("native code refuses this try");
     let message = error.to_string();
     assert!(
-        message.contains("runs on the interpreter") && message.contains("`pick`") && message.contains("match"),
+        message.contains("runs on the interpreter") && message.contains("`pick`") && message.contains("guard"),
         "{message}"
     );
 }

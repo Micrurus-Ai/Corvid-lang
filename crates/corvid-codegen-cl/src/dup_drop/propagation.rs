@@ -89,15 +89,18 @@ pub(super) fn expand_expr(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &m
             expand_expr(inner, cx, next, output);
             expand_binding(expr, cx.return_ty, next, output);
         }
+        Match { scrutinee, arms } => {
+            expand_expr(scrutinee, cx, next, output);
+            if super::outage::check_failing_arms(arms, cx) {
+                super::outage::hoist_checked_match(expr, cx, next, output);
+            }
+        }
         OptionSome { inner }
         | ResultOk { inner }
         | ResultErr { inner }
         | UnOp { operand: inner, .. }
         | WrappingUnOp { operand: inner, .. }
         | FieldAccess { target: inner, .. }
-        | Match {
-            scrutinee: inner, ..
-        }
         | TrustBoundary { inner } => expand_expr(inner, cx, next, output),
         BinOp {
             op: op @ (corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or),

@@ -8,9 +8,11 @@
 //! that can fail into its own statement, followed by a test that unwinds
 //! by an ordinary `return`, so the ownership pass releases what is live.
 //!
-//! Some calls cannot be hoisted: one in a `match` arm, a guard, a lambda
-//! body or a `parallel` or `approve` statement runs only on some paths
-//! or inside a construct the IR has no statement form for. Such a call is
+//! A failing call inside a `match` arm is lifted with the arm into an
+//! agent of its own (`outage_lift.rs`), and the arm's call is checked
+//! after the `match`. Some calls still cannot be hoisted: one in a guard,
+//! a lambda body or a `parallel` or `approve` statement runs only on some
+//! paths or inside a construct the IR has no statement form for. Such a call is
 //! followed by a test that stops the program on an outage, which is what
 //! native code always did. A `try` that can reach one would then stop
 //! where the interpreter catches, so native lowering refuses that `try`
@@ -188,7 +190,7 @@ impl OutagePlan {
                 Some(format!("it calls agent `{name}`, and {}", self.blocked[def_id]))
             }
             _ if !hoisted && self.call_can_fail(kind) => Some(format!(
-                "it calls `{callee_name}` inside a `match` arm, a guard, a lambda or a `parallel` or `approve` statement, where native code cannot yet unwind an outage"
+                "it calls `{callee_name}` inside a `match` guard, a lambda or a `parallel` or `approve` statement, where native code cannot yet unwind an outage"
             )),
             _ => None,
         }
@@ -211,12 +213,16 @@ pub(crate) fn hoisted_children(expr: &IrExpr) -> Option<Vec<(&IrExpr, bool)>> {
         | FieldAccess { target: inner, .. }
         | TrustBoundary { inner } => vec![(inner.as_ref(), true)],
         Match { scrutinee, arms } => {
+            // An arm whose whole body is a call is checked after the
+            // `match` (failing arms are lifted into such calls by
+            // `outage_lift`); anything else in an arm, and every guard,
+            // is not hoisted from.
             let mut out = vec![(scrutinee.as_ref(), true)];
             for arm in arms {
                 if let Some(guard) = &arm.guard {
                     out.push((guard, false));
                 }
-                out.push((&arm.body, false));
+                out.push((&arm.body, matches!(arm.body.kind, Call { .. })));
             }
             out
         }

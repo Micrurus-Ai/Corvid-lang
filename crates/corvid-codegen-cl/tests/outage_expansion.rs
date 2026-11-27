@@ -57,6 +57,11 @@ agent in_arm(name: Option<String>) -> Int:
     return match name:
         Some(n) -> fails(n)
         None -> 0
+
+agent in_guard(name: Option<String>) -> Int:
+    return match name:
+        Some(n) if fails(n) > 0 -> 1
+        _ -> 0
 "#;
 
 #[test]
@@ -70,29 +75,43 @@ fn every_failing_call_in_a_hoisted_position_is_checked() {
 }
 
 #[test]
+fn a_match_arm_that_is_a_failing_call_is_checked_after_the_match() {
+    let ir = ir_of(SRC);
+    let plan = OutagePlan::for_file(&ir);
+    assert_eq!(checked_and_unchecked(&ir, &plan, "in_arm"), (1, 0));
+}
+
+#[test]
 fn a_failing_call_the_pass_leaves_in_place_is_one_the_plan_refuses_a_try_over() {
     let ir = ir_of(SRC);
     let plan = OutagePlan::for_file(&ir);
-    assert_eq!(checked_and_unchecked(&ir, &plan, "in_arm"), (0, 1));
-    let reason = ir
-        .agents
-        .iter()
-        .find(|a| a.name == "in_arm")
-        .map(|agent| {
-            let mut found = None;
-            corvid_ir::for_each_expr(
-                &IrFile { agents: vec![agent.clone()], ..ir.clone() },
-                &mut |_, e| {
-                    if found.is_none() {
-                        if let IrExprKind::Match { .. } = &e.kind {
-                            found = plan.try_refusal(e);
-                        }
-                    }
-                },
-            );
-            found
-        })
-        .flatten();
-    assert!(reason.as_deref().is_some_and(|r| r.contains("`fails`") && r.contains("match")), "{reason:?}");
-    assert!(plan.fallible.len() == 3, "fails, hoisted and in_arm can fail: {:?}", plan.fallible);
+    assert_eq!(checked_and_unchecked(&ir, &plan, "in_guard"), (0, 1));
+    let guard = ir.agents.iter().find(|a| a.name == "in_guard").expect("agent");
+    let mut reason = None;
+    corvid_ir::for_each_expr(&IrFile { agents: vec![guard.clone()], ..ir.clone() }, &mut |_, e| {
+        if reason.is_none() && matches!(e.kind, IrExprKind::Match { .. }) {
+            reason = plan.try_refusal(e);
+        }
+    });
+    assert!(reason.as_deref().is_some_and(|r| r.contains("`fails`") && r.contains("guard")), "{reason:?}");
+    assert_eq!(plan.fallible.len(), 4, "fails, hoisted, in_arm and in_guard can fail: {:?}", plan.fallible);
+}
+
+#[test]
+fn an_arm_that_does_more_than_call_is_lifted_into_an_agent_that_unwinds() {
+    let src = r#"
+tool lookup(s: String) -> Int
+
+agent pick(name: Option<String>) -> Int:
+    return match name:
+        Some(n) -> lookup(n) + n.length()
+        None -> 0
+"#;
+    let ir = ir_of(src);
+    let lifted = corvid_codegen_cl::outage_lift::lift_failing_arms(&ir).expect("the arm is lifted");
+    let plan = OutagePlan::for_file(&lifted);
+    let arm_agent = lifted.agents.iter().find(|a| a.name.starts_with("__corvid_pick_arm_")).expect("lifted agent");
+    assert_eq!(arm_agent.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["n"]);
+    assert_eq!(checked_and_unchecked(&lifted, &plan, &arm_agent.name), (1, 0));
+    assert_eq!(checked_and_unchecked(&lifted, &plan, "pick"), (1, 0));
 }

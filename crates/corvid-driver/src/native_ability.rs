@@ -275,6 +275,10 @@ fn runtime_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'
 }
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
+    // The program native lowering compiles: failing `match` arms lifted
+    // into agents of their own, so the outage plan judges the same IR.
+    let lifted = corvid_codegen_cl::outage_lift::lift_failing_arms(ir);
+    let ir = lifted.as_ref().unwrap_or(ir);
     let outages = corvid_codegen_cl::outage_plan::OutagePlan::for_file(ir);
     let context = ScanContext { outages: &outages, types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {

@@ -2,6 +2,50 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native `try` catches outages inside `match` arms
+
+The IR has no statement form inside a `match` arm, so a failing call
+there could not be followed by its test, and a `try` that could reach
+one ran on the interpreter. Now:
+- **An arm whose whole body is a failing call** (with arguments that
+  cannot fail) is marked checked, and the expansion hoists the whole
+  `match` with a test after it. Nothing in the arm reads the zero bits
+  an outage leaves, because the call is all the arm does.
+- **An arm that does more around a failing call** is lifted first
+  (`outage_lift.rs`). Its body becomes a synthesized agent whose
+  parameters are the locals the body reads, pattern bindings and
+  captured locals alike. The arm becomes one call to it. The lifted
+  agent unwinds by its own returns, so the ownership pass releases what
+  it holds exactly as in any agent.
+
+Native lowering and the tier picker both lift before asking the outage
+plan, so they judge the same program.
+
+Guards are not lifted. An outage in a guard would read as `false`, and
+the `match` would try later arms before the test, so a `try` that can
+reach one stays on the interpreter, refused by name. Lambdas, `parallel`
+and `approve` stay refused for the same lack of a statement form.
+
+Simpler alternatives considered:
+- Branching to an unwind block from inside the arm's machine code skips
+  the drops the ownership pass placed later in the function.
+- Rewriting the arm to statements needs a statement-level `match`,
+  which the IR does not have.
+
+Lifting reuses the one path that already unwinds exactly.
+
+Found and strengthened: the binding rule for patterns had a weaker copy
+in `result_match::pattern_binds` that missed `At` and `Record` patterns.
+`IrPattern::bound_locals` is now the one rule; the copy is replaced in
+the next commit.
+
+Proof:
+- a parity test under the leak detector: a lone-call arm, a lifted arm
+  and the arm that does not fail;
+- `outage_expansion.rs` checks the lifting (one parameter, the binding),
+  the checked arm and the guard refusal;
+- the tier picker test names the agent whose guard blocks a `try`.
+
 ### Native prompts report outages (TE-3c)
 
 `corvid_prompt_call_typed` now holds an outage instead of exiting, when

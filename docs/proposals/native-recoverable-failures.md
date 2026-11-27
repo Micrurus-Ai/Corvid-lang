@@ -1,6 +1,6 @@
 # `try ... else` in native code (recoverable failures TE-3)
 
-**Status:** TE-3a to TE-3d built 2026-11-27. What remains is the widening on the roadmap (failing calls in `match` arms, guards and lambdas) and `timeout`. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
+**Status:** TE-3a to TE-3d built 2026-11-27. `match` arms widened the same day (`outage_lift.rs`). What remains is the widening on the roadmap (guards, lambdas, `parallel` and `approve`) and `timeout`. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
 **Owner:** backend (Claude Code, Mac session).
 **Roadmap:** `try ... else` TE-3 in [backend-ai-roadmap](../backend-ai-roadmap.md); parent proposal [recoverable failures](recoverable-failures.md).
 

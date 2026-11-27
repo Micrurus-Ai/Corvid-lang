@@ -61,6 +61,11 @@ pub fn lower_file(
     tools_via_registry: bool,
     connector_specs: Option<&str>,
 ) -> Result<HashMap<String, FuncId>, CodegenError> {
+    // A `match` arm that can raise an outage becomes a call to an agent
+    // of its own, so the outage unwinds by ordinary returns
+    // (recoverable failures TE-3).
+    let lifted = crate::outage_lift::lift_failing_arms(ir);
+    let ir = lifted.as_ref().unwrap_or(ir);
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut func_ids_by_def: HashMap<DefId, FuncId> = HashMap::new();
 
