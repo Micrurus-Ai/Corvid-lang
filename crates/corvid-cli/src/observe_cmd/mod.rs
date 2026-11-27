@@ -1,8 +1,5 @@
 use anyhow::{Context, Result};
-use corvid_runtime::{
-    compute_lineage_drift_report, LineageEvent, LineageIncidentGroup, LineageKind, LineageStatus,
-};
-use std::fs;
+use corvid_runtime::{compute_lineage_drift_report, LineageIncidentGroup, LineageKind, LineageStatus};
 use std::path::{Path, PathBuf};
 
 mod drift;
@@ -141,6 +138,8 @@ pub(super) fn display_optional(value: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use corvid_runtime::LineageEvent;
+    use std::fs;
 
     fn write_lineage(path: &Path, events: &[LineageEvent]) {
         let body = events
