@@ -106,7 +106,7 @@ A `live` query whose `where` filters by another table depends on both tables. A 
 - [x] J2. `count_by` and `sum_by` to a `Map`. Built 2026-11-26: `GROUP BY` the key, ordered by it, for counts and `Int` totals; an exact total reads each row's key and value and adds per key with Corvid's `+`. A test requires each group to equal the same aggregate over that key's rows alone.
 - [x] J3a. `contains(row.col)` on a list the agent holds, as `col IN (values)`, with `None` matched as `==` matches it, parity tests against filtering in memory, a refusal of `text.contains(row.col)`, and a refusal in `live` until J5. Built 2026-11-26. Narrowed: at most 10,000 values per list, a parameter bound both engines can take.
 - [x] J3b. `Other.where(...).keys().contains(row.col)` as `IN (SELECT ...)` in one statement, with the composite-key refusal. This also widens J3a: a list of any size, and one snapshot for both tables. Built 2026-11-26. `keys()` is also a stage on its own (`List<K>` in key order, the key column alone). The inner query is used when both tables share a database; otherwise it is read first as a J3a list. The 10,000 cap now applies only to a list the agent builds itself.
-- [ ] J4. `by_key()`.
+- [x] J4. `by_key()`. Built 2026-11-27: the ordinary query, whose rows come in key order, each put under its key's value, so it adds no SQL. A test requires it to answer what one `Board.get` per card answers.
 - [ ] J5. `live` over a query that filters by another table: re-run on commits to either table, with a test that a write to the inner table that changes membership reaches the subscriber.
 - [ ] J6. Native code, with native table queries.
 

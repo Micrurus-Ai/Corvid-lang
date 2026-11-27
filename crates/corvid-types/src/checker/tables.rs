@@ -553,23 +553,13 @@ impl<'a> Checker<'a> {
         let Some(columns) = columns.into_iter().collect::<Option<Vec<_>>>() else { return Type::Unknown };
         match (aggregate, columns.as_slice()) {
             (QueryAggregate::Count, []) => Type::Int,
-            (QueryAggregate::Keys, []) => match query.table.keys.as_slice() {
-                [key] => {
-                    let field = query.table.record.fields.iter().find(|f| f.name.name == key.name);
-                    let ty = field.map(|f| self.type_ref_to_type(&f.ty)).unwrap_or(Type::Unknown);
-                    Type::List(Box::new(ty))
-                }
-                _ => {
-                    self.query_error(
-                        span,
-                        &format!(
-                            "`keys` lists one value per row, so it needs a table keyed by one column; `{}` is keyed by {} columns",
-                            query.table.name().name,
-                            query.table.keys.len()
-                        ),
-                    );
-                    Type::Unknown
-                }
+            (QueryAggregate::Keys, []) => match self.single_key_type(query, name, span) {
+                Some(key) => Type::List(Box::new(key)),
+                None => Type::Unknown,
+            },
+            (QueryAggregate::ByKey, []) => match self.single_key_type(query, name, span) {
+                Some(key) => Type::Map(Box::new(key), Box::new(row.clone())),
+                None => Type::Unknown,
             },
             (QueryAggregate::Sum, [(column, ty, at)]) => self.summed(name, column, ty, *at),
             (QueryAggregate::Min | QueryAggregate::Max, [(column, ty, at)]) => {
@@ -591,6 +581,25 @@ impl<'a> Checker<'a> {
             }
             _ => Type::Unknown,
         }
+    }
+
+    /// The type of the query's table's key, for `keys` and `by_key`, which
+    /// give one value per row and so need a key of one column; reported
+    /// and `None` otherwise.
+    fn single_key_type(&mut self, query: &crate::table_ops::TableQuery<'_, '_>, name: &str, span: Span) -> Option<Type> {
+        let [key] = query.table.keys.as_slice() else {
+            self.query_error(
+                span,
+                &format!(
+                    "`{name}` gives one value per row, so it needs a table keyed by one column; `{}` is keyed by {} columns",
+                    query.table.name().name,
+                    query.table.keys.len()
+                ),
+            );
+            return None;
+        };
+        let field = query.table.record.fields.iter().find(|f| f.name.name == key.name)?;
+        Some(self.type_ref_to_type(&field.ty))
     }
 
     /// The column an aggregate's function reads, with its declared type,

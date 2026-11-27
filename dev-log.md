@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Query J4: `by_key()`
+
+`by_key()` is a zero-argument stage typed `Map<K, Row>` for a table keyed
+by one column. The single-column check is shared with `keys()` through
+`single_key_type`. It adds no SQL: the interpreter runs the ordinary
+query, whose rows come in key order, and puts each decoded row under its
+key's value. With the Mac session's hashed `MapValue` (1066e5b5),
+building and reading the map is linear.
+
+Test, on every engine the harness runs: each card shown with its board's
+owner from `Board.all().by_key()` and a `contains` over its keys answers
+exactly what one `Board.get` per card answers. That includes a card whose
+board does not exist, which the filter leaves out. A filtered `by_key`
+holds only its rows.
+
 ### One reader for an event's run and time
 
 Six trace readers each matched all thirty event kinds by hand to read

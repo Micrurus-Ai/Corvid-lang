@@ -2458,7 +2458,7 @@ impl<'a> Lowerer<'a> {
                     Some((key.name.clone(), self.type_ref_to_type(&field.ty)))
                 };
                 let (key, value) = match (op, columns.as_slice()) {
-                    (QueryAggregate::Keys, []) => (None, Some(table_key()?)),
+                    (QueryAggregate::Keys | QueryAggregate::ByKey, []) => (None, Some(table_key()?)),
                     (QueryAggregate::CountBy, [key]) => (Some(key.clone()), None),
                     (QueryAggregate::SumBy, [key, value]) => (Some(key.clone()), Some(value.clone())),
                     (_, [value]) => (None, Some(value.clone())),

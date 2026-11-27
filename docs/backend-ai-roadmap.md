@@ -125,7 +125,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [ ] Map keys that are records, lists, options or results are still found by a scan, because their contents can change in place after insertion and would leave a stale hash. Stronger: freeze a compound key when it is inserted (copy on write, or refuse to mutate a value that is a key), then hash it structurally.
   - [x] J3b. `Other.where(...).keys().contains(row.col)` as `IN (SELECT ...)` in one statement, and `keys()` as a stage. Built 2026-11-26.
   - [x] J3a. `contains` on a held list inside `where` (`IN (values)`), `None` matched as `==` matches it. Built 2026-11-26; at most 10,000 values for now.
-  - [ ] J4. `by_key()`.
+  - [x] J4. `by_key()`. Built 2026-11-27.
   - [ ] J5. `live` over a query that filters by another table.
   - [ ] J6. Native code.
 

@@ -148,6 +148,9 @@ pub enum QueryAggregate {
     /// `keys() -> List<K>` (J3b): the matching rows' keys alone, in key
     /// order, for a table keyed by one column.
     Keys,
+    /// `by_key() -> Map<K, Row>` (J4): each matching row under its key, in
+    /// key order, for a table keyed by one column.
+    ByKey,
 }
 
 impl QueryAggregate {
@@ -160,6 +163,7 @@ impl QueryAggregate {
             "count_by" => Self::CountBy,
             "sum_by" => Self::SumBy,
             "keys" => Self::Keys,
+            "by_key" => Self::ByKey,
             _ => return None,
         })
     }
@@ -173,13 +177,14 @@ impl QueryAggregate {
             Self::CountBy => "count_by",
             Self::SumBy => "sum_by",
             Self::Keys => "keys",
+            Self::ByKey => "by_key",
         }
     }
 
     /// How many functions the stage takes.
     pub fn arity(self) -> usize {
         match self {
-            Self::Count | Self::Keys => 0,
+            Self::Count | Self::Keys | Self::ByKey => 0,
             Self::Sum | Self::Min | Self::Max | Self::CountBy => 1,
             Self::SumBy => 2,
         }

@@ -338,6 +338,21 @@ leave the database, and there is no limit on how many there are. A table
 in another database is read first, as a list. The inner query cannot read
 the outer row.
 
+`by_key()` ends a query with a `Map` from each matching row's key to the
+row, in key order, for a table keyed by one column. A program that shows
+each card with its board reads two queries instead of one per card:
+
+```corvid
+agent card_titles() -> String:
+    boards = Board.all().by_key()
+    out = ""
+    for card in Card.where(fn (c) -> boards.keys().contains(c.board)):
+        out = out + card.title + " on " + match boards[card.board]:
+            Some(board) -> board.title
+            None -> "no board"
+    return out
+```
+
 A `live` query cannot filter by a list or another table's keys yet,
 because it does not watch that table's writes ([J5](../proposals/query-aggregates-and-joins.md)).
 

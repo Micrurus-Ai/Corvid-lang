@@ -137,6 +137,51 @@ async fn another_tables_keys_filter_in_one_statement() {
     }
 }
 
+/// J4: `by_key()` puts each row under its key, so a program shows each
+/// card with its board's owner from two queries, the same answer as one
+/// `Board.get` per card.
+fn owners_program(settings: &str) -> String {
+    by_owner_program(settings)
+        + r#"
+fn owner_of(board: Option<Board>) -> String:
+    return match board:
+        Some(b) -> b.owner
+        None -> "none"
+
+agent card_owners() -> String:
+    stocked = stock()
+    boards = Board.all().by_key()
+    order = ""
+    for key in boards.keys():
+        order = order + key.to_string() + ","
+    two_queries = ""
+    one_per_card = ""
+    for card in Card.where(fn (c) -> boards.keys().contains(c.board)):
+        two_queries = two_queries + card.card.to_string() + ":" + owner_of(boards[card.board]) + ","
+        one_per_card = one_per_card + card.card.to_string() + ":" + owner_of(Board.get(card.board)) + ","
+    return order + " | " + two_queries + " | " + one_per_card + " | " + keys_text(Board.where(fn (b) -> b.owner == "ada").by_key().keys())
+"#
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rows_by_key_answer_what_a_lookup_per_row_answers() {
+    for database in TestDatabase::every_engine().await {
+        let source = owners_program(&database.settings());
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        let out = run_ir_with_runtime(&ir, Some("card_owners"), vec![], &runtime).await.expect("program runs");
+        let label = database.label();
+        let Value::String(text) = out else { panic!("expected text, got {out:?}") };
+        let parts: Vec<&str> = text.split(" | ").collect();
+        assert_eq!(parts[0], "1,2,3,", "every board, in key order, on {label}");
+        assert_eq!(parts[1], parts[2], "the map answers what a lookup per card answers on {label}");
+        assert_eq!(parts[1], "10:ada,11:grace,12:ada,13:grace,", "card 14's board 9 does not exist on {label}");
+        assert_eq!(parts[3], "1,3,", "a filtered `by_key` holds only its rows on {label}");
+        database.finish().await;
+    }
+}
+
 fn refusal(body: &str) -> String {
     let source = program("    engine: sqlite\n    location: \"shop.sqlite\"")
         + &format!("\nagent probe(word: String) -> List<Board>:\n    {body}\n");

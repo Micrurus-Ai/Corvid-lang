@@ -229,6 +229,23 @@ impl<'ir> Interpreter<'ir> {
                     .map_err(fail)?;
                 Ok(Value::List(crate::value::ListValue::new(keys)))
             }
+            // The query's rows, in key order as any query without
+            // `order_by` returns them, each under its key's value.
+            QueryAggregate::ByKey => {
+                let key = column()?;
+                let query = TableQuery { filter, order: None, descending: false, take: None };
+                let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
+                let mut entries = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let value = self.row_value(record, row).map_err(fail)?;
+                    let Value::Struct(fields) = &value else {
+                        return Err(fail(format!("a `{}` row is not a record", table.name)));
+                    };
+                    let held = fields.get_field(&key).ok_or_else(|| fail(format!("a `{}` row has no `{key}`", table.name)))?;
+                    entries.push((held, value));
+                }
+                Ok(Value::Map(crate::value::MapValue::new(entries)))
+            }
             QueryAggregate::CountBy | QueryAggregate::SumBy => {
                 let (key, key_ty) = aggregate.key.clone().ok_or_else(|| fail(format!("`{name}` names no key column")))?;
                 let request = match aggregate.op {
