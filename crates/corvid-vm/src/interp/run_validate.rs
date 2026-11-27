@@ -1,5 +1,4 @@
 use super::Interpreter;
-use crate::conv::value_to_json;
 use crate::env::Env;
 use crate::errors::{InterpError, InterpErrorKind};
 use crate::step::{StepController, StepEvent, StepMode};
@@ -31,6 +30,31 @@ pub async fn run_agent_with_env(
     args: Vec<Value>,
     runtime: &Runtime,
 ) -> Result<(Value, Env), InterpError> {
+    run_configured(ir, agent_name, args, runtime, None).await
+}
+
+/// Run a `live` declaration's query agent reading only the rows `written`
+/// names (live L2): its query keeps its own condition and order, and the
+/// database decides which written rows still match.
+pub async fn run_agent_reading_written_rows(
+    ir: &IrFile,
+    agent_name: &str,
+    args: Vec<Value>,
+    runtime: &Runtime,
+    written: super::tables::WrittenKeys,
+) -> Result<Value, InterpError> {
+    run_configured(ir, agent_name, args, runtime, Some(Arc::new(written)))
+        .await
+        .map(|(value, _env)| value)
+}
+
+async fn run_configured(
+    ir: &IrFile,
+    agent_name: &str,
+    args: Vec<Value>,
+    runtime: &Runtime,
+    written_keys: Option<Arc<super::tables::WrittenKeys>>,
+) -> Result<(Value, Env), InterpError> {
     let agent = ir
         .agents
         .iter()
@@ -42,7 +66,7 @@ pub async fn run_agent_with_env(
             )
         })?;
 
-    let json_args: Vec<serde_json::Value> = args.iter().map(value_to_json).collect();
+    let json_args = recorded_run_args(ir, agent, &args)?;
     runtime
         .prepare_run(agent_name, &json_args)
         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), Span::new(0, 0)))?;
@@ -55,6 +79,7 @@ pub async fn run_agent_with_env(
     });
 
     let mut interp = Interpreter::new(ir, runtime);
+    interp.written_keys = written_keys;
     let bind_result = interp.bind_params(agent, args);
     let outcome = match bind_result {
         Ok(()) => interp
@@ -64,10 +89,10 @@ pub async fn run_agent_with_env(
         Err(e) => Err(e),
     };
 
-    let result_json = outcome
-        .as_ref()
-        .ok()
-        .map(|(value, _env)| value_to_json(value));
+    let result_json = match &outcome {
+        Ok((value, _env)) => Some(recorded_run_result(ir, agent, value)?),
+        Err(_) => None,
+    };
     let error_text = outcome.as_ref().err().map(|error| error.to_string());
     if should_validate_run_completion(&outcome) {
         runtime
@@ -106,7 +131,7 @@ pub async fn run_agent_stepping(
             )
         })?;
 
-    let json_args: Vec<serde_json::Value> = args.iter().map(value_to_json).collect();
+    let json_args = recorded_run_args(ir, agent, &args)?;
     runtime
         .prepare_run(agent_name, &json_args)
         .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), Span::new(0, 0)))?;
@@ -139,7 +164,10 @@ pub async fn run_agent_stepping(
         })
         .await;
 
-    let result_json = outcome.as_ref().ok().map(|(value, _)| value_to_json(value));
+    let result_json = match &outcome {
+        Ok((value, _)) => Some(recorded_run_result(ir, agent, value)?),
+        Err(_) => None,
+    };
     let error_text = outcome.as_ref().err().map(|error| error.to_string());
     if should_validate_run_completion(&outcome) {
         runtime
@@ -209,4 +237,23 @@ fn should_validate_run_completion(outcome: &Result<(Value, Env), InterpError>) -
             ..
         })
     )
+}
+
+/// A run's arguments as its trace records them (see
+/// `tool_json::recorded_value_json`), what native code records.
+fn recorded_run_args(ir: &IrFile, agent: &corvid_ir::IrAgent, args: &[Value]) -> Result<Vec<serde_json::Value>, InterpError> {
+    let types: std::collections::HashMap<_, _> = ir.types.iter().map(|ty| (ty.id, ty)).collect();
+    Ok(agent
+        .params
+        .iter()
+        .zip(args)
+        .map(|(param, value)| super::tool_json::recorded_value_json(value, &param.ty, &types))
+        .collect())
+}
+
+/// A run's result as its trace records it, by the agent's declared
+/// return type.
+fn recorded_run_result(ir: &IrFile, agent: &corvid_ir::IrAgent, value: &Value) -> Result<serde_json::Value, InterpError> {
+    let types: std::collections::HashMap<_, _> = ir.types.iter().map(|ty| (ty.id, ty)).collect();
+    Ok(super::tool_json::recorded_value_json(value, &agent.return_ty, &types))
 }

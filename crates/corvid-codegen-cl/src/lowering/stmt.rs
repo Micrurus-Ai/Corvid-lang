@@ -185,7 +185,7 @@ fn lower_stmt(
                 Ok(BlockOutcome::Normal)
             }
         IrStmt::Assign { span, .. } => Err(CodegenError::not_supported(
-            "place assignment (x.field = v / xs[i] = v / compound ops) is interpreter-only in 45b",
+            "place assignment (x.field = v / xs[i] = v / compound ops) runs on the interpreter only",
             *span,
         )),
         IrStmt::Return { value, span } => {
@@ -367,7 +367,7 @@ fn lower_stmt(
             runtime,
         ),
         IrStmt::Destructure { span, .. } => Err(CodegenError::not_supported(
-            "destructuring is interpreter-only in 45n",
+            "destructuring runs on the interpreter only",
             *span,
         )),
         IrStmt::Parallel { span, .. } => Err(CodegenError::not_supported(
@@ -411,7 +411,8 @@ fn lower_stmt(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let approve_arg_tys = args.iter().map(|a| a.ty.clone()).collect::<Vec<_>>();
-            let trace_payload = emit_trace_payload(
+            let label_val = emit_string_const(builder, module, runtime, label, *span)?;
+            let trace_payload = recorded_values_payload(
                 builder,
                 module,
                 runtime,
@@ -419,8 +420,6 @@ fn lower_stmt(
                 &approve_arg_tys,
                 *span,
             )?;
-
-            let label_val = emit_string_const(builder, module, runtime, label, *span)?;
             let approve_fref = module.declare_func_in_func(runtime.approve_sync, builder.func);
             let call = builder.ins().call(
                 approve_fref,

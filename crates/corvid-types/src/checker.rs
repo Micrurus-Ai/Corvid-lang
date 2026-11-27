@@ -363,6 +363,8 @@ fn typecheck_with_everything(
 
     c.record_signature_types(file);
     c.check_secret_boundaries(file);
+    c.check_action_paths(file);
+    c.check_actor_sources(file);
     c.check_response_boundaries(file);
 
     Checked {
@@ -828,7 +830,42 @@ impl<'a> Checker<'a> {
     // File-level traversal.
     // ------------------------------------------------------------
 
+    /// A type the file declares or imports under a built-in's name: a core
+    /// scalar's name is refused, and any other built-in it hides is named
+    /// in a warning (see [`Type::builtin_named`]).
+    fn check_builtin_type_names(&mut self, file: &File) {
+        let mut names: Vec<(&corvid_ast::Ident, bool)> = Vec::new();
+        for decl in &file.decls {
+            match decl {
+                Decl::Type(ty) => names.push((&ty.name, true)),
+                Decl::Table(table) => names.push((table.name(), true)),
+                Decl::Import(import) => {
+                    for item in &import.use_items {
+                        names.push((item.alias.as_ref().unwrap_or(&item.name), false));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (ident, declared_here) in names {
+            let name = ident.name.as_str();
+            if Type::compiler_known(name).is_none() {
+                continue;
+            }
+            if Type::is_reserved_name(name) {
+                self.errors.push(TypeError::new(TypeErrorKind::ReservedTypeName { name: name.to_string() }, ident.span));
+                continue;
+            }
+            // An imported `use` hides the built-in only when it is a type.
+            let hides = declared_here || self.named_type_to_type(name, ident.span) != Type::compiler_known(name).unwrap_or(Type::Unknown);
+            if hides {
+                self.warnings.push(TypeWarning::new(TypeWarningKind::BuiltinTypeHidden { name: name.to_string() }, ident.span));
+            }
+        }
+    }
+
     fn check_file(&mut self, file: &File) {
+        self.check_builtin_type_names(file);
         for decl in &file.decls {
             match decl {
                 Decl::Agent(a) => self.check_agent(a),
@@ -943,6 +980,7 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------
 }
 
+mod actions;
 mod call;
 mod case;
 mod decl;

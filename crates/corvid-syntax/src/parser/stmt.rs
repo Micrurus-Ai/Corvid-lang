@@ -12,7 +12,7 @@
 use super::Parser;
 use crate::errors::{ParseError, ParseErrorKind};
 use crate::token::TokKind;
-use corvid_ast::{BinaryOp, Block, Expr, Ident, Stmt};
+use corvid_ast::{BinaryOp, Block, Expr, Ident, Span, Stmt};
 
 impl<'a> Parser<'a> {
     // ------------------------------------------------------------
@@ -29,7 +29,13 @@ impl<'a> Parser<'a> {
             });
         }
         self.bump(); // consume Indent
+        self.parse_block_after_indent(start_span)
+    }
 
+    /// The statements of a block whose `Indent` is already consumed, up to
+    /// and including its `Dedent`. A declaration that reads a line of its
+    /// own first (an action's `assistants:` line) continues here.
+    pub(super) fn parse_block_after_indent(&mut self, start_span: Span) -> Result<Block, ParseError> {
         let mut stmts = Vec::new();
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             match self.parse_stmt() {

@@ -339,35 +339,11 @@ fn decode_hex_64(input: &str) -> Result<[u8; 64]> {
 }
 
 fn decode_hex(input: &str) -> Result<Vec<u8>> {
-    if input.len() % 2 != 0 {
-        return Err(anyhow!("hex string has odd length"));
-    }
-    let mut out = Vec::with_capacity(input.len() / 2);
-    for pair in input.as_bytes().chunks(2) {
-        let hi = hex_value(pair[0])?;
-        let lo = hex_value(pair[1])?;
-        out.push((hi << 4) | lo);
-    }
-    Ok(out)
-}
-
-fn hex_value(byte: u8) -> Result<u8> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(anyhow!("non-hex byte `{}`", byte as char)),
-    }
+    corvid_hex::decode(input).map_err(|problem| anyhow!(problem))
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode(bytes)
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 extern "C" {
     fn corvid_string_eq(a: u64, b: u64) -> i64;
     fn corvid_ordered_map_entries(map: u64) -> *const u64;
+    fn corvid_ordered_map_key_kind(map: u64) -> i64;
     fn corvid_list_slots(payload: u64) -> *const u64;
 }
 
@@ -21,6 +22,19 @@ unsafe fn read_slot(layout: *const u32, slot: *const u64) -> u64 {
 /// when `kind` is not one: `1.0` equals `1.00` (B06), an instant equals
 /// itself however its text writes the fraction, and two byte strings
 /// compare in constant time (B04).
+/// Whether two keys of a native map compare equal by value, for a map
+/// whose keys are a text-held scalar (`kind` is the key's layout). The
+/// C map calls this; a `String` key never reaches it.
+///
+/// # Safety
+/// `a` and `b` must be live native values of the key kind.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_map_keys_equal(kind: i64, a: u64, b: u64) -> i64 {
+    let slots_equal = text_scalar_equality(kind as u32)
+        .unwrap_or_else(|| panic!("internal compiler error: a native map key of layout {kind} has no by-value comparison"));
+    i64::from(a == b || unsafe { slots_equal(a, b) })
+}
+
 fn text_scalar_equality(kind: u32) -> Option<unsafe fn(u64, u64) -> bool> {
     Some(match kind {
         k if k == Layout::Decimal as u32 => super::decimal::slots_equal,
@@ -129,6 +143,18 @@ pub unsafe extern "C" fn corvid_structural_eq(layout: *const u32, left: u64, rig
                     let xs = x.add(1);
                     let ys = y.add(1);
                     if a == b {
+                        continue;
+                    }
+                    // Keys held as a text scalar compare by value, so the
+                    // entries are matched with the type's own comparison.
+                    let key_kind = corvid_ordered_map_key_kind(a);
+                    if key_kind != Layout::String as i64 {
+                        for i in (0..len).step_by(2) {
+                            let key = *xs.add(i);
+                            let found = (0..len).step_by(2).find(|&j| corvid_map_keys_equal(key_kind, key, *ys.add(j)) != 0);
+                            let Some(j) = found else { return 0 };
+                            enqueue(child(1), xs.add(i + 1), ys.add(j + 1));
+                        }
                         continue;
                     }
                     let mut by_key = HashMap::with_capacity(len / 2);

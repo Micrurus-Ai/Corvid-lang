@@ -29,7 +29,7 @@ impl Request {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(in crate::serve_cmd) struct Row {
     #[serde(serialize_with = "decimal_revision")]
     pub revision: u64,
@@ -41,7 +41,7 @@ fn decimal_revision<S: serde::Serializer>(value: &u64, serializer: S) -> Result<
     serializer.collect_str(value)
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub(in crate::serve_cmd) enum Change {
     Added {
@@ -60,7 +60,7 @@ pub(in crate::serve_cmd) enum Change {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(in crate::serve_cmd) enum Delivery {
     Snapshot {

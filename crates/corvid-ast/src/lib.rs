@@ -186,6 +186,7 @@ mod tests {
             constraints: Vec::new(),
             attributes: Vec::new(),
             visibility: Visibility::Private,
+            action: None,
             span: sp(),
         };
 

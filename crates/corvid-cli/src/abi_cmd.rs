@@ -34,28 +34,10 @@ fn decode_hex(hex: &str) -> Result<[u8; 32]> {
     if hex.len() != 64 {
         return Err(anyhow!("expected 64 hex chars, got {}", hex.len()));
     }
-    let mut out = [0u8; 32];
-    for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
-        out[index] = (decode_nibble(chunk[0])? << 4) | decode_nibble(chunk[1])?;
-    }
-    Ok(out)
-}
-
-fn decode_nibble(byte: u8) -> Result<u8> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(anyhow!("invalid hex character `{}`", byte as char)),
-    }
+    let bytes = corvid_hex::decode(hex).map_err(|problem| anyhow!(problem))?;
+    Ok(bytes.try_into().expect("64 hex digits are 32 bytes"))
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode(bytes)
 }

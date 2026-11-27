@@ -266,7 +266,7 @@ fn hmac_sha256_hex(secret: &[u8], body: &[u8]) -> Option<String> {
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret).ok()?;
     mac.update(body);
     let bytes = mac.finalize().into_bytes();
-    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    Some(corvid_hex::encode(&bytes))
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

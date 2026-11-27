@@ -65,6 +65,10 @@ use corvid_vm::{
 };
 use libloading::{Library, Symbol};
 
+use crate::request_text::{coerce_str_to_value, urlencoded_record};
+
+mod actions;
+mod assistant_endpoint;
 mod browser_asset;
 mod live_assets;
 mod live;
@@ -107,6 +111,8 @@ struct PendingInvocation {
 /// going through the runtime.
 struct ServeState {
     live_routes: live::Routes,
+    /// One evaluation per distinct live query, shared by its subscribers.
+    live_queries: Arc<live::SharedQueries>,
     live_shutdown: tokio::sync::watch::Sender<bool>,
     page_scripts: browser_asset::PageScripts,
     io_policy: corvid_runtime::io::IoToolPolicy,
@@ -124,6 +130,8 @@ struct ServeState {
     /// handlers on the queued path; drained on either `/approve`
     /// (re-executed) or `/deny` (discarded).
     pending_invocations: Arc<Mutex<HashMap<String, PendingInvocation>>>,
+    /// Assistant calls waiting for their person's confirmation (B10-3b).
+    confirmations: assistant_endpoint::Confirmations,
     /// Tool handlers registered at startup — typically populated by
     /// the `--with-tools-cdylib <path>` loader, but could also carry
     /// handlers from future loader paths (e.g. 33Q1b's tools.py
@@ -164,8 +172,8 @@ pub(crate) fn cmd_serve(
             return Ok(1);
         }
     };
-    if ir.servers.is_empty() {
-        eprintln!("error: no `server` block found in {}", file.display());
+    if ir.servers.is_empty() && ir.actions.is_empty() {
+        eprintln!("error: no `server` block or `action` found in {}", file.display());
         return Ok(1);
     }
 
@@ -399,6 +407,7 @@ pub(crate) fn cmd_serve(
     }
     let state = Arc::new(ServeState {
         live_routes: live::Routes::new(&ir)?,
+        live_queries: Arc::default(),
         live_shutdown: tokio::sync::watch::channel(false).0,
         page_scripts,
         io_policy,
@@ -409,6 +418,7 @@ pub(crate) fn cmd_serve(
         runtime,
         approval_queue,
         pending_invocations: Arc::new(Mutex::new(HashMap::new())),
+        confirmations: Arc::new(Mutex::new(HashMap::new())),
         host_tools,
         contract_json,
         openapi_json,
@@ -578,6 +588,17 @@ pub(crate) fn cmd_serve(
     for (path, mr) in by_path {
         app = app.route(&path, mr);
     }
+    // B10-2: one `POST /actions/<name>` per action. The checker refuses a
+    // route declared at an action's path, so the two never collide.
+    let action_catalog = actions::catalog(&state.ir)?;
+    for (path, mr) in actions::endpoints(&action_catalog) {
+        app = app.route(&path, mr);
+    }
+    // B10-3b: the assistant endpoint and the person's confirmations, for
+    // actions with an `assistants:` line.
+    for (path, mr) in assistant_endpoint::routes(&action_catalog, &contract) {
+        app = app.route(&path, mr);
+    }
 
     // Slice 52e: mount the login surface (`/auth/{provider}/login`,
     // `/callback`, `/logout`, `/session`) when an identity block is
@@ -635,6 +656,13 @@ pub(crate) fn cmd_serve(
                 };
                 println!("  {:<6} {}{tag}", route.method.as_str(), route.path);
             }
+        }
+        for action in &state_for_banner.ir.actions {
+            println!("  POST   {}{}", corvid_types::action_input::ACTIONS_PATH, action.name);
+        }
+        if state_for_banner.ir.actions.iter().any(|action| action.assistants.is_some()) {
+            println!("  POST   {:<28} -> assistant tools (MCP); each call waits for its person", assistant_endpoint::MCP_PATH);
+            println!("  POST   /__confirmations/<id>/confirm|decline -> the person decides their assistant's call");
         }
         println!("  GET    /__approvals                -> list pending approvals");
         println!("  GET    /__approvals/<id>           -> fetch one pending approval");
@@ -833,11 +861,6 @@ fn bind_path<'a>(
 /// time or plain variant reads exactly as in a JSON body. A type that
 /// cannot be request text is refused here as the checker refuses it,
 /// never passed on as text where another type was declared.
-fn coerce_str_to_value(raw: &str, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<Value, String> {
-    corvid_vm::public_json::decode_request_text(raw, ty, types_by_id)
-        .unwrap_or_else(|| Err(format!("`{}` cannot be read from request text", ty.display_name())))
-}
-
 /// The unauthenticated `actor` placeholder bound in a route body when
 /// the route carries a policy (slice 52a). Real session-derived actors
 /// land in slices 52e/52f; until then the fields are empty so a body
@@ -1341,27 +1364,12 @@ async fn run_route(
         }
     }
 
-    let request_runtime = match (&enforced_actor, &meta.approval_policy) {
-        (Some(enforced), Some(policy)) => {
-            state.runtime.with_approver(Arc::new(QueueApprover::new(
-                state.approval_queue.clone(),
-                ApprovalRequester {
-                    actor_id: enforced.actor.id.clone(),
-                    tenant_id: enforced.actor.tenant_id.clone(),
-                },
-                ApprovalQueuePolicy {
-                    route: format!("{} {}", meta.method.as_str(), meta.route_path),
-                    required_role: policy.role.clone(),
-                    risk_level: policy.risk.clone(),
-                    data_class: policy.data.clone(),
-                    expires_in_ms: policy.expires_ms,
-                    max_cost_usd: policy.max_cost_usd,
-                    irreversible: policy.irreversible,
-                },
-            )))
-        }
-        _ => state.runtime.clone(),
-    };
+    let request_runtime = approval_runtime(
+        &state,
+        enforced_actor.as_ref(),
+        meta.approval_policy.as_ref(),
+        format!("{} {}", meta.method.as_str(), meta.route_path),
+    );
     let outcome = run_ir_with_runtime(
         &state.ir,
         Some(&meta.handler_agent),
@@ -1372,6 +1380,37 @@ async fn run_route(
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     let route = format!("{} {}", meta.method.as_str(), meta.route_path);
     finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
+}
+
+/// The runtime one request runs on. A signed-in request to a route or an
+/// action with an `@approval(...)` policy queues each `approve` it
+/// reaches under that policy, with the verified caller as requester; any
+/// other request keeps the process runtime, whose approver says no.
+fn approval_runtime(
+    state: &ServeState,
+    enforced: Option<&EnforcedRouteActor>,
+    policy: Option<&corvid_ast::ApprovalSpec>,
+    label: String,
+) -> Runtime {
+    match (enforced, policy) {
+        (Some(enforced), Some(policy)) => state.runtime.with_approver(Arc::new(QueueApprover::new(
+            state.approval_queue.clone(),
+            ApprovalRequester {
+                actor_id: enforced.actor.id.clone(),
+                tenant_id: enforced.actor.tenant_id.clone(),
+            },
+            ApprovalQueuePolicy {
+                route: label,
+                required_role: policy.role.clone(),
+                risk_level: policy.risk.clone(),
+                data_class: policy.data.clone(),
+                expires_in_ms: policy.expires_ms,
+                max_cost_usd: policy.max_cost_usd,
+                irreversible: policy.irreversible,
+            },
+        ))),
+        _ => state.runtime.clone(),
+    }
 }
 
 enum RouteRequestBody {
@@ -1470,9 +1509,10 @@ async fn parse_multipart_upload(
             data.extend_from_slice(&chunk);
         }
 
-        let bytes_list = Value::List(corvid_driver::ListValue::new(
-            data.iter().map(|b| Value::Int(*b as i64)),
-        ));
+        // One shared buffer, not one value per byte: a 10 MB file is
+        // 10 MB in memory, as the declared `max_bytes` assumes.
+        let size = data.len() as i64;
+        let bytes = Value::Bytes(corvid_crypto::Bytes::from(data));
         let upload = corvid_driver::StructValue::new(
             DefId(0),
             "Upload",
@@ -1482,96 +1522,12 @@ async fn parse_multipart_upload(
                     "content_type".to_string(),
                     Value::String(content_type.into()),
                 ),
-                ("size".to_string(), Value::Int(data.len() as i64)),
-                ("bytes".to_string(), bytes_list),
+                ("size".to_string(), Value::Int(size)),
+                ("bytes".to_string(), bytes),
             ],
         );
         return Ok(Value::Struct(upload));
     }
-}
-
-/// Parse a URL query string (`a=1&b=x`) into the declared query struct
-/// value, coercing each field from its string form (slice 52a).
-fn urlencoded_record(
-    encoded: &str,
-    ty: &Type,
-    types_by_id: &HashMap<DefId, &IrType>,
-    source: &str,
-) -> Result<Value, String> {
-    let def_id = match ty {
-        Type::Struct(id) => id,
-        Type::ImportedStruct(record) => &record.def_id,
-        _ => return Err(format!("{source} type must be a struct")),
-    };
-    let ir_type = types_by_id
-        .get(def_id)
-        .copied()
-        .ok_or_else(|| format!("unknown {source} struct type"))?;
-    // Every value under each name, in order: a `List` field reads them
-    // all, and a field of one value refuses a name given twice.
-    let mut given: HashMap<String, Vec<String>> = HashMap::new();
-    for pair in encoded.split('&').filter(|s| !s.is_empty()) {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        given.entry(urldecode(key)?).or_default().push(urldecode(value)?);
-    }
-    let plain = |ty: &Type| corvid_vm::public_json::has_plain_variants(ty, types_by_id);
-    let read = |raw: &str, ty: &Type, name: &str| {
-        coerce_str_to_value(raw, ty, types_by_id).map_err(|e| format!("{source} param `{name}`: {e}"))
-    };
-    let mut fields: Vec<(String, Value)> = Vec::new();
-    for field in &ir_type.fields {
-        let values = given.get(&field.name).map(Vec::as_slice).unwrap_or(&[]);
-        let shape = corvid_types::text_parameters::query_field_shape(&field.ty, &plain)
-            .ok_or_else(|| format!("{source} param `{}` has a type a query string cannot carry", field.name))?;
-        let once = |values: &[String]| -> Result<Option<String>, String> {
-            match values {
-                [] => Ok(None),
-                [one] => Ok(Some(one.clone())),
-                _ => Err(format!("{source} param `{}` is given {} times, but holds one value", field.name, values.len())),
-            }
-        };
-        let value = match (shape, &field.ty) {
-            (corvid_types::text_parameters::QueryFieldShape::One(_), ty) => {
-                let raw = once(values)?.ok_or_else(|| format!("missing {source} param `{}`", field.name))?;
-                read(&raw, ty, &field.name)?
-            }
-            (corvid_types::text_parameters::QueryFieldShape::Optional(_), Type::Option(inner)) => match once(values)? {
-                Some(raw) => Value::OptionSome(corvid_vm::value::BoxedValue::new(read(&raw, inner, &field.name)?)),
-                None => Value::OptionNone,
-            },
-            (corvid_types::text_parameters::QueryFieldShape::Repeated(_), Type::List(inner)) => {
-                let items = values.iter().map(|raw| read(raw, inner, &field.name)).collect::<Result<Vec<_>, _>>()?;
-                Value::List(corvid_driver::ListValue::new(items))
-            }
-            _ => return Err(format!("{source} param `{}` has a type a query string cannot carry", field.name)),
-        };
-        corvid_vm::conv::check_field_refinement(&ir_type.name, field, &value)
-            .map_err(|err| err.to_string())?;
-        fields.push((field.name.clone(), value));
-    }
-    Ok(Value::Struct(corvid_driver::StructValue::new(
-        ir_type.id,
-        ir_type.name.clone(),
-        fields,
-    )))
-}
-
-/// Decode form-encoded query text as UTF-8 after expanding percent escapes.
-fn urldecode(s: &str) -> Result<String, String> {
-    let mut decoded = Vec::with_capacity(s.len());
-    let mut bytes = s.bytes();
-    while let Some(byte) = bytes.next() {
-        match byte {
-            b'+' => decoded.push(b' '),
-            b'%' => {
-                let mut digit = || bytes.next().and_then(|b| char::from(b).to_digit(16))
-                    .ok_or_else(|| "invalid percent escape in query".to_string());
-                decoded.push((digit()? * 16 + digit()?) as u8);
-            }
-            other => decoded.push(other),
-        }
-    }
-    String::from_utf8(decoded).map_err(|_| "query parameter must be UTF-8".into())
 }
 
 /// If the dispatch outcome surfaced an `ApprovalQueued` from the
@@ -2462,6 +2418,7 @@ fn expr_reaches_approve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::request_text::urldecode;
     use corvid_ast::Span;
     use corvid_ir::IrField;
 

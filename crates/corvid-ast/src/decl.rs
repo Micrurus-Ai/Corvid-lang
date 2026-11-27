@@ -620,6 +620,23 @@ pub enum ConnectorAuth {
     Basic { username: SecretRef, password: SecretRef },
 }
 
+/// An operation's own credential, taken from one of its parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationAuth {
+    /// `auth: bearer(token)` — `Authorization: Bearer <token>`, where
+    /// `token` is a `Secret` parameter of the operation.
+    Bearer(Ident),
+}
+
+impl OperationAuth {
+    /// The parameter the credential comes from.
+    pub fn param(&self) -> &Ident {
+        match self {
+            OperationAuth::Bearer(param) => param,
+        }
+    }
+}
+
 /// A `secret("NAME")` reference (slice 52g) — the name of a secret the
 /// runtime resolves from its configured secret store. The value is never
 /// a literal in source and never enters a trace.
@@ -694,6 +711,11 @@ pub struct OperationDecl {
     /// carrying the reason when the variant has one `String` field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<Ident>,
+    /// `auth: bearer(token)` on the operation — this call's own
+    /// credential, from one of its `Secret` parameters, in place of the
+    /// connector's `auth:`: a call made as the signed-in person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OperationAuth>,
     /// `timeout: <n>s` on the operation — overrides the connector's
     /// timeout for this operation only (a slow upload, a long report).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -961,7 +983,7 @@ impl ProviderProtocolDecl {
     /// may have been produced by an earlier build.
     pub fn fingerprint_of(canonical_encoding: &str) -> String {
         let digest = <sha2::Sha256 as sha2::Digest>::digest(canonical_encoding.as_bytes());
-        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let hex = corvid_hex::encode(&digest);
         format!("{PROTOCOL_FINGERPRINT_ALGORITHM}:{hex}")
     }
 }
@@ -1906,7 +1928,55 @@ pub struct AgentDecl {
     /// visibility by definition.
     #[serde(default)]
     pub visibility: Visibility,
+    /// `action name(...) -> T requires ...:` (B10): the operation a
+    /// person, an assistant and the program share. An action is an agent
+    /// in every other respect; this says who may call it from outside the
+    /// program.
+    #[serde(default)]
+    pub action: Option<ActionSpec>,
     pub span: Span,
+}
+
+/// What makes an agent an action (B10).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionSpec {
+    /// Who may call it from outside the program. Always written:
+    /// `requires anyone` is an empty policy, and leaving `requires` out is
+    /// a parse error, so an action is never open by accident.
+    pub policy: RoutePolicy,
+    /// `@approval(...)` before the action: who decides an `approve` its
+    /// body reaches, and how long the request waits. Required when the
+    /// body can reach one, as on a route.
+    pub approval: Option<crate::ApprovalSpec>,
+    /// The `assistants:` line: whether an authorized assistant is offered
+    /// the action. Absent, it is not offered to any assistant.
+    pub assistants: Option<AssistantExposure>,
+    pub span: Span,
+}
+
+/// An action's `assistants:` line (B10).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantExposure {
+    pub mode: AssistantMode,
+    /// What an assistant reads to decide whether to call the action.
+    pub description: String,
+    pub span: Span,
+}
+
+/// How an assistant may call an action. `Allow` (no confirmation) arrives
+/// with on-behalf-of authority (B11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssistantMode {
+    /// Each call waits for the person the assistant acts for to confirm.
+    Confirm,
+}
+
+impl AssistantMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AssistantMode::Confirm => "confirm",
+        }
+    }
 }
 
 /// ABI marker on an exported agent declaration.

@@ -103,3 +103,57 @@ agent approve_site(site: ApprovalSite, args: ApprovalArgs, ctx: ApprovalContext)
     assert!(!decision.accepted);
     assert_eq!(decision.rationale, "manual review");
 }
+
+/// An approver the approval evaluator cannot run is refused when it is
+/// loaded, by registration and by simulation alike, naming the construct.
+/// Before, it loaded and then failed its first real approval.
+#[test]
+fn an_approver_the_evaluator_cannot_run_is_refused_at_load() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let duration = write_source(
+        dir.path(),
+        "duration.cor",
+        r#"
+agent approve_site(site: ApprovalSite, args: ApprovalArgs, ctx: ApprovalContext) -> ApprovalDecision:
+    limit = 5 minutes
+    if limit == 5 minutes:
+        return ApprovalDecision(true, "approved")
+    return ApprovalDecision(false, "rejected")
+"#,
+    );
+    let err = register_approver_from_source(&duration, 1.0).expect_err("a duration is refused at load");
+    assert_eq!(err.status, CorvidApproverLoadStatus::CompileError);
+    assert!(err.message.contains("the duration `5 minutes`"), "{}", err.message);
+    let err = simulate_approver_source(&duration, "IssueRefund", "[]", 1.0).expect_err("and when simulated");
+    assert!(err.message.contains("the duration `5 minutes`"), "{}", err.message);
+
+    let call = write_source(
+        dir.path(),
+        "call.cor",
+        r#"
+agent approve_site(site: ApprovalSite, args: ApprovalArgs, ctx: ApprovalContext) -> ApprovalDecision:
+    return ApprovalDecision(site.label.contains("Refund"), "checked")
+"#,
+    );
+    let err = register_approver_from_source(&call, 1.0).expect_err("a method call is refused at load");
+    assert!(err.message.contains("a method call"), "{}", err.message);
+}
+
+/// Approver arithmetic is checked, as everywhere in Corvid: an overflow is
+/// an error the host sees, never a wrapped value or a panic.
+#[test]
+fn approver_arithmetic_overflow_is_an_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_source(
+        dir.path(),
+        "overflow.cor",
+        r#"
+agent approve_site(site: ApprovalSite, args: ApprovalArgs, ctx: ApprovalContext) -> ApprovalDecision:
+    most = 9223372036854775807
+    big = most + most
+    return ApprovalDecision(big > 0, "checked")
+"#,
+    );
+    let err = simulate_approver_source(&path, "IssueRefund", "[]", 1.0).expect_err("overflow is an error");
+    assert!(err.message.contains("integer overflow"), "{}", err.message);
+}

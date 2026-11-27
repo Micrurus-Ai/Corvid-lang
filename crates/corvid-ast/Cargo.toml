@@ -6,6 +6,7 @@ license.workspace = true
 description = "AST types for the Corvid language."
 
 [dependencies]
+corvid-hex = { workspace = true }
 serde = { workspace = true }
 sha2 = "0.10"
 

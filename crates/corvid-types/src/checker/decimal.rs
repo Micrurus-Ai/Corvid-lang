@@ -35,6 +35,15 @@ pub(crate) fn is_number_literal_expr(e: &Expr) -> bool {
     }
 }
 
+/// Whether `e` is an integer literal, perhaps signed: `3`, `-3`.
+fn is_signed_int_literal(e: &Expr) -> bool {
+    match e {
+        Expr::Literal { value: Literal::Int(_), .. } => true,
+        Expr::UnOp { op: UnaryOp::Neg | UnaryOp::Pos, operand, .. } => is_signed_int_literal(operand),
+        _ => false,
+    }
+}
+
 /// The literal integer an expression spells, sign included: the
 /// `places` argument of `round_half_even(2)` or `round_floor(-1)`.
 fn literal_int(e: &Expr) -> Option<i64> {
@@ -102,6 +111,8 @@ impl<'a> Checker<'a> {
             Some(Type::Decimal) if is_number_literal_expr(operand) => {
                 self.check_expr_as(operand, Some(&Type::Decimal))
             }
+            // A signed integer literal where a `Float` is meant (`-3`).
+            Some(Type::Float) if is_signed_int_literal(operand) => self.check_expr_as(operand, Some(&Type::Float)),
             _ => self.check_expr(operand),
         }
     }

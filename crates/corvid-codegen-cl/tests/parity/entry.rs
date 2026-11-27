@@ -133,6 +133,35 @@ fn float_return_nan_round_trips() {
     );
 }
 
+/// A printed `Float` reads as one on both tiers: `2.0`, never `2`, the
+/// form `to_string()` writes, and a large one in full, never cut short.
+#[test]
+fn a_printed_float_keeps_its_point_and_every_digit_on_both_tiers() {
+    // Corvid has no exponent literal: 1e300 is written out.
+    let large = format!("1{}.0", "0".repeat(300));
+    for (value, printed) in [
+        ("2.0", "2.0".to_string()),
+        ("0.1", "0.1".to_string()),
+        (large.as_str(), corvid_runtime::number_text::float_to_string(1e300)),
+    ] {
+        let src = format!("agent n() -> Float:\n    return {value}\n");
+        let ir = ir_of(&src);
+        let runtime = Runtime::builder()
+            .approver(Arc::new(ProgrammaticApprover::always_yes()))
+            .build();
+        let got = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async { corvid_vm::run_agent(&ir, "n", vec![], &runtime).await })
+            .expect("interpreter run");
+        assert_eq!(got.to_string(), printed, "the interpreter prints `{value}`");
+        let (out, _) = compile_and_run(&src, &[]);
+        assert_eq!(out.trim(), printed, "native code prints `{value}`");
+    }
+    assert!(corvid_runtime::number_text::float_to_string(1e300).len() > 300);
+}
+
 #[test]
 fn string_param_echoes() {
     let src = "agent echo(s: String) -> String:\n    return s\n";

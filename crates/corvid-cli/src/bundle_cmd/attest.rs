@@ -79,7 +79,7 @@ pub fn load_verifying_key(path: &Path) -> Result<VerifyingKey> {
         .collect::<Vec<u8>>();
     let bytes: [u8; 32] = if trimmed.iter().all(|byte| byte.is_ascii_hexdigit()) && trimmed.len() == 64 {
         let mut out = [0u8; 32];
-        hex::decode_to_slice(&trimmed, &mut out).context("hex decode verifying key")?;
+        out.copy_from_slice(&corvid_hex::decode(std::str::from_utf8(&trimmed).unwrap_or_default()).map_err(anyhow::Error::msg).context("hex decode verifying key")?);
         out
     } else if raw.len() == 32 {
         let mut out = [0u8; 32];

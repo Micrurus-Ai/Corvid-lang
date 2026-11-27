@@ -182,17 +182,19 @@ fn refusal(program: &str) -> String {
     native_ability(&project.ir).expect_err("the program stays on the interpreter").to_string()
 }
 
-/// A tool of the program's own records its arguments in native code
-/// without redaction, so one that takes a secret, alone or in a record
-/// field, keeps the program on the interpreter.
+/// A tool of the program's own that takes a secret, alone or in a record
+/// field, no longer keeps the program on the interpreter: native code
+/// calls it through the runtime, which records `<redacted>` and reveals
+/// the text only to the tool (native scalar boundaries B2b). What it
+/// needs is the tool's implementation, the tools library.
 #[test]
-fn a_tool_of_the_programs_own_that_takes_a_secret_stays_on_the_interpreter() {
+fn a_tool_of_the_programs_own_that_takes_a_secret_needs_only_its_tools_library() {
     for program in [
         "import \"./std/crypto\" use random_token\n\ntool sign(key: Secret, body: String) -> String\n\nagent main() -> String:\n    return sign(random_token(16), \"body\")\n",
         "import \"./std/crypto\" use random_token\n\ntype Signer:\n    key: Secret\n\ntool sign(signer: Signer, body: String) -> String\n\nagent main() -> String:\n    return sign(Signer(random_token(16)), \"body\")\n",
     ] {
         let reason = refusal(program);
-        assert!(reason.contains("tool of the program's own"), "{reason}");
+        assert!(reason.contains("--with-tools-lib") && !reason.contains("Secret"), "{reason}");
     }
 }
 

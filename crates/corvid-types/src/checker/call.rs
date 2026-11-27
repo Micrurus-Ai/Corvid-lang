@@ -1133,14 +1133,13 @@ impl<'a> Checker<'a> {
             Type::Struct(id) => id,
             other => {
                 self.errors.push(TypeError::new(
-                    TypeErrorKind::NotCallable {
-                        got: format!(
-                            "method `{}` on receiver of type `{}` — no builtin method with this name (String.length() shipped in 45c; method batches land in 45d/45e/45f/45l), and user methods work on user-declared struct types via `extend`",
-                            method_name.name,
-                            other.display_name()
-                        ),
+                    TypeErrorKind::UnknownMethod {
+                        receiver: other.display_name(),
+                        method: method_name.name.clone(),
+                        suggestion: crate::builtin_methods::closest_builtin_method(&other, &method_name.name)
+                            .map(str::to_string),
                     },
-                    target.span(),
+                    method_name.span,
                 ));
                 // Still typecheck remaining args for diagnostics.
                 for a in args {

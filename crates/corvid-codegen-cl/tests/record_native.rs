@@ -50,27 +50,7 @@ fn entry_name(ir: &corvid_ir::IrFile) -> &str {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // `corvid_test_tools.lib` already bundles `corvid-runtime` as a
-    // transitive Rust dep (along with the C runtime objects) because
-    // `corvid-test-tools` lists `corvid-runtime` as a workspace dep.
-    // Routing the linker through this single Rust staticlib avoids
-    // the duplicate-`std` LNK2005 that linking it alongside the
-    // standalone `corvid_runtime.lib` produces on MSVC.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn interpreter_runtime(trace_dir: &Path) -> Runtime {
@@ -226,12 +206,22 @@ fn normalize_event(event: &TraceEvent) -> TraceEvent {
             issued_at_ms: 0,
             expires_at_ms: 0,
         },
-        TraceEvent::HostEvent { name, payload, .. } => TraceEvent::HostEvent {
-            ts_ms: 0,
-            run_id: "normalized-run".into(),
-            name: name.clone(),
-            payload: payload.clone(),
-        },
+        TraceEvent::HostEvent { name, payload, .. } => {
+            // The fixture gives each tier its own mock: a `MockAdapter`
+            // named `mock-1` in the interpreter, the environment mock in
+            // the native binary. Everything else in the usage record is
+            // compared.
+            let mut payload = payload.clone();
+            if name == "llm.usage" {
+                payload["adapter"] = json!("normalized-adapter");
+            }
+            TraceEvent::HostEvent {
+                ts_ms: 0,
+                run_id: "normalized-run".into(),
+                name: name.clone(),
+                payload,
+            }
+        }
         TraceEvent::SeedRead { purpose, value, .. } => TraceEvent::SeedRead {
             ts_ms: 0,
             run_id: "normalized-run".into(),
@@ -307,22 +297,15 @@ async fn refund_bot_native_trace_matches_interpreter_shape() {
         "native trace should include rollout_default_seed"
     );
 
-    // Filter out the `llm.usage` HostEvent before comparing: the
-    // interpreter records it in this fixture and the native run does not,
-    // a telemetry gap on the roadmap. Replay skips host events, so it does
-    // not affect replay. Drop on both sides for symmetry.
-    fn drop_host_llm_usage(event: &TraceEvent) -> bool {
-        !matches!(event, TraceEvent::HostEvent { name, .. } if name == "llm.usage")
-    }
+    // The whole trace is compared, host events included: both tiers
+    // record the `llm.usage` record from the runtime's one LLM call path.
     let normalized_interp = interp_events
         .iter()
-        .filter(|e| drop_host_llm_usage(e))
         .map(normalize_event)
         .map(|event| serialize_event_line(&event).expect("serialize interp event"))
         .collect::<Vec<_>>();
     let normalized_native = native_events
         .iter()
-        .filter(|e| drop_host_llm_usage(e))
         .map(normalize_event)
         .map(|event| serialize_event_line(&event).expect("serialize native event"))
         .collect::<Vec<_>>();
@@ -418,3 +401,79 @@ async fn refund_bot_replays_on_the_other_tier() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
 }
+
+const RECORD_RESULT_SRC: &str = r#"
+type Refund:
+    @json(key: "order-id")
+    order_id: String
+    amount: Int
+    approved: Bool
+
+agent refund_bot() -> Refund:
+    refund = Refund("ord-7", 42, true)
+    approve IssueRefund(refund)
+    return refund
+"#;
+
+fn approval_and_result(events: &[TraceEvent]) -> (Vec<serde_json::Value>, Option<serde_json::Value>, Option<serde_json::Value>) {
+    let approval = events
+        .iter()
+        .find_map(|event| match event {
+            TraceEvent::ApprovalRequest { args, .. } => Some(args.clone()),
+            _ => None,
+        })
+        .expect("an approval request");
+    let started = events.iter().find_map(|event| match event {
+        TraceEvent::RunStarted { args, .. } => Some(serde_json::Value::Array(args.clone())),
+        _ => None,
+    });
+    let result = events.iter().find_map(|event| match event {
+        TraceEvent::RunCompleted { result, .. } => result.clone(),
+        _ => None,
+    });
+    (approval, started, result)
+}
+
+/// A record argument to `approve` and a record result are recorded in the
+/// public JSON form on both tiers: under the renamed key, the same values
+/// the interpreter records.
+#[tokio::test]
+async fn a_record_result_and_approval_record_the_same_public_form_on_both_tiers() {
+    let ir = ir_of(RECORD_RESULT_SRC);
+
+    let interp_trace_dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .trace_to(interp_trace_dir.path())
+        .build();
+    run_agent(&ir, entry_name(&ir), vec![], &runtime).await.expect("interpreter run");
+    let interp_events = read_events_from_path(runtime.tracer().path()).expect("read interpreter trace");
+
+    let native_tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(
+        &ir,
+        "corvid_record_result_native",
+        &native_tmp.path().join("record_result_native"),
+        &[test_tools_lib_path().as_path()],
+    )
+    .expect("compile native binary");
+    let native_trace_path = native_tmp.path().join("native-trace.jsonl");
+    let output = Command::new(&produced)
+        .env("CORVID_TRACE_PATH", &native_trace_path)
+        .env("CORVID_APPROVE_AUTO", "1")
+        .output()
+        .expect("run native binary");
+    assert!(
+        output.status.success(),
+        "native run failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let native_events = read_events_from_path(&native_trace_path).expect("read native trace");
+
+    let expected = json!({"order-id": "ord-7", "amount": 42, "approved": true});
+    let (interp_approval, interp_started, interp_result) = approval_and_result(&interp_events);
+    assert_eq!(interp_approval, vec![expected.clone()]);
+    assert_eq!(interp_result, Some(expected));
+    assert_eq!(approval_and_result(&native_events), (interp_approval, interp_started, interp_result));
+}
+

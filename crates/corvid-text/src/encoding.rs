@@ -91,7 +91,6 @@ fn decode_base64_with(engine: &GeneralPurpose, name: &str, text: &str) -> Result
     })
 }
 
-const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 /// `text.encode_hex()`: two lowercase digits per UTF-8 byte.
 pub fn encode_hex(text: &str) -> String {
@@ -103,37 +102,15 @@ pub fn decode_hex(text: &str) -> Result<String, String> {
     utf8_text(decode_hex_bytes(text)?)
 }
 
-/// `bytes.to_hex()`: two lowercase digits per byte.
+/// `bytes.to_hex()`: two lowercase digits per byte (`corvid_hex`).
 pub fn encode_hex_bytes(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        out.push(HEX_DIGITS[usize::from(byte >> 4)] as char);
-        out.push(HEX_DIGITS[usize::from(byte & 0x0f)] as char);
-    }
-    out
+    corvid_hex::encode(bytes)
 }
 
-/// `Bytes.from_hex(text)`: either case; an even number of digits.
+/// `Bytes.from_hex(text)`: either case; an even number of digits
+/// (`corvid_hex`).
 pub fn decode_hex_bytes(text: &str) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::with_capacity(text.len() / 2);
-    let mut high: Option<u8> = None;
-    for (position, ch) in text.chars().enumerate() {
-        let Some(digit) = ch.to_digit(16) else {
-            return Err(format!("not hex: unexpected character `{ch}` at position {position}"));
-        };
-        let digit = digit as u8;
-        match high.take() {
-            None => high = Some(digit),
-            Some(h) => bytes.push(h << 4 | digit),
-        }
-    }
-    if high.is_some() {
-        return Err(format!(
-            "not hex: {} digits cannot encode whole bytes; hex needs two digits per byte",
-            text.chars().count()
-        ));
-    }
-    Ok(bytes)
+    corvid_hex::decode(text)
 }
 
 /// The RFC 3986 unreserved characters, which never need encoding in
@@ -162,9 +139,24 @@ pub fn encode_url_component(text: &str) -> String {
 /// `text.decode_url_component()`: `%XX` becomes byte `XX`; every other
 /// character, including `+`, stands for itself.
 pub fn decode_url_component(text: &str) -> Result<String, String> {
+    decode_percent(text, false)
+}
+
+/// A query-string or form-body value (`application/x-www-form-urlencoded`):
+/// as `decode_url_component`, and `+` is a space. A literal `+` arrives as
+/// `%2B`.
+pub fn decode_form_component(text: &str) -> Result<String, String> {
+    decode_percent(text, true)
+}
+
+fn decode_percent(text: &str, plus_is_space: bool) -> Result<String, String> {
     let mut bytes = Vec::with_capacity(text.len());
     let mut chars = text.char_indices().enumerate().peekable();
     while let Some((position, (_, ch))) = chars.next() {
+        if plus_is_space && ch == '+' {
+            bytes.push(b' ');
+            continue;
+        }
         if ch != '%' {
             let mut buffer = [0u8; 4];
             bytes.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
@@ -347,5 +339,19 @@ mod tests {
             "not URL-encoded: `%` at position 1 must be followed by two hex digits"
         );
         assert!(decode_url_component("%ff").unwrap_err().starts_with("the decoded bytes are not UTF-8"));
+    }
+}
+
+#[cfg(test)]
+mod form_component_tests {
+    use super::{decode_form_component, decode_url_component};
+
+    /// A form value reads `+` as a space and `%2B` as a plus; a URL
+    /// component reads `+` as itself.
+    #[test]
+    fn plus_is_a_space_only_in_form_encoding() {
+        assert_eq!(decode_form_component("a%20b+c%2Bd").unwrap(), "a b c+d");
+        assert_eq!(decode_url_component("a+b").unwrap(), "a+b");
+        assert!(decode_form_component("50%").unwrap_err().contains("position 2"));
     }
 }

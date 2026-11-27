@@ -7,6 +7,8 @@
 //! backend, which will also be async-native. Behavioural parity is what
 //! makes this interpreter useful as a correctness oracle.
 
+#[path = "interp/action_caller.rs"]
+mod action_caller;
 #[path = "interp/effect_compose.rs"]
 mod effect_compose;
 #[path = "interp/expr.rs"]
@@ -40,14 +42,17 @@ mod currency;
 mod crypto;
 #[path = "interp/secret_tools.rs"]
 mod secret_tools;
+pub(crate) mod tool_json;
 #[path = "interp/connector_json.rs"]
 mod connector_json;
 #[path = "interp/test_trace.rs"]
 mod test_trace;
 
 pub use run_validate::{
-    bind_and_run_agent, build_struct, run_agent, run_agent_stepping, run_agent_with_env,
+    bind_and_run_agent, build_struct, run_agent, run_agent_reading_written_rows, run_agent_stepping,
+    run_agent_with_env,
 };
+pub use tables::WrittenKeys;
 pub use test_runner::{
     run_all_tests, run_all_tests_with_options, run_test, SnapshotOptions, TestAssertionExecution,
     TestAssertionStatus, TestExecution, TestRunOptions, TraceFixtureOptions,
@@ -167,6 +172,10 @@ struct Interpreter<'ir> {
     /// the agents it calls so their table operations join it. `None`
     /// outside an `atomic:` block.
     table_transaction: Option<Arc<corvid_runtime::tables::TableTransaction>>,
+    /// The written rows a live re-check reads instead of its whole query
+    /// (live L2). Set only on the entry agent's interpreter, never passed
+    /// to the agents it calls.
+    written_keys: Option<Arc<tables::WrittenKeys>>,
 }
 
 impl<'ir> Interpreter<'ir> {
@@ -208,6 +217,7 @@ impl<'ir> Interpreter<'ir> {
             dispatch_count: None,
             replay_cancel_after: None,
             table_transaction: None,
+            written_keys: None,
         }
     }
 
@@ -723,6 +733,24 @@ impl<'ir> Interpreter<'ir> {
                     if matches!(kind, Bmk::JsonEncode) {
                         return eval_json_encode(&recv, &receiver.ty, &self.types_by_id, expr.span)
                             .map(ExprFlow::Value);
+                    }
+                    // Argon2id spends tens of milliseconds of CPU at the
+                    // hash's own cost. It runs on the blocking pool, so the
+                    // thread this program shares with other requests keeps
+                    // serving them while one password is checked.
+                    if let (Bmk::SecretVerifyPassword, Value::Secret(secret), Some(Value::String(hash))) =
+                        (kind, &recv, arg_vals.first())
+                    {
+                        let (secret, hash) = (secret.clone(), hash.clone());
+                        let verified = tokio::task::spawn_blocking(move || secret.verify_password(&hash))
+                            .await
+                            .map_err(|err| {
+                                InterpError::new(
+                                    InterpErrorKind::Other(format!("internal: the password check stopped: {err}")),
+                                    expr.span,
+                                )
+                            })?;
+                        return Ok(ExprFlow::Value(Value::Bool(verified)));
                     }
                 }
                 // B06 — a replay warns when this operation's zone rules
@@ -1340,7 +1368,7 @@ impl<'ir> Interpreter<'ir> {
                 self.eval_table_op(*op, table, values, expr.span).await.map(ExprFlow::Value)
             },
 
-            IrExprKind::TableQuery { table, filter, order, descending, take } => {
+            IrExprKind::TableQuery { table, filter, order, descending, take, aggregate } => {
                 let mut operands = Vec::new();
                 for operand in corvid_ir::table_query_operands(filter, take) {
                     match self.eval_expr(operand).await?.into_value() {
@@ -1348,9 +1376,11 @@ impl<'ir> Interpreter<'ir> {
                         Err(v) => return Ok(ExprFlow::Propagate(v)),
                     }
                 }
-                self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span)
-                    .await
-                    .map(ExprFlow::Value)
+                match aggregate {
+                    Some(aggregate) => self.eval_table_aggregate(table, filter.as_ref(), aggregate, operands, expr.span).await,
+                    None => self.eval_table_query(table, filter.as_ref(), order.as_deref(), *descending, operands, expr.span).await,
+                }
+                .map(ExprFlow::Value)
             },
 
             IrExprKind::TryPropagate { inner } => {
@@ -1822,8 +1852,13 @@ impl<'ir> Interpreter<'ir> {
                     }
                 }
 
-                let json_args: Vec<serde_json::Value> =
-                    arg_values.iter().map(value_to_json).collect();
+                // The arguments in the public form, by declared type, a
+                // `Secret` as `<redacted>`: what the trace records, an
+                // approver is shown, and a tool without secrets receives.
+                let json_args = tool_json::tool_arguments(
+                    &tool, &arg_values, &self.types_by_id, crate::public_json::SecretArgument::Recorded,
+                )
+                .map_err(|problem| InterpError::new(InterpErrorKind::Marshal(problem), span))?;
 
                 if tool.python_approval_required && !self.env.consume_python_approval(callee_name, &json_args) {
                     return Err(InterpError::new(
@@ -1924,7 +1959,7 @@ impl<'ir> Interpreter<'ir> {
                         })
                         .await?;
                     if let StepAction::Override(val) = action {
-                        let value = json_to_value(val, result_decode_ty, &self.types_by_id)
+                        let value = tool_json::tool_result(val, result_decode_ty, &self.types_by_id)
                             .map_err(|e| {
                                 InterpError::new(
                                     InterpErrorKind::Marshal(format!(
@@ -2060,7 +2095,7 @@ impl<'ir> Interpreter<'ir> {
                         }
                     }
                     let result = outcome?;
-                    json_to_value(result, result_decode_ty, &self.types_by_id).map_err(|e| {
+                    tool_json::tool_result(result, result_decode_ty, &self.types_by_id).map_err(|e| {
                         InterpError::new(
                             InterpErrorKind::UnusableReply(format!("tool `{callee_name}`: {e}")),
                             span,
@@ -2068,13 +2103,13 @@ impl<'ir> Interpreter<'ir> {
                     })?
                 };
                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                let result = value_to_json(&result_value);
-                let result = match &echo_scrub {
-                    Some(revealed) => revealed.scrub_json(result),
-                    None => result,
-                };
-
                 if self.should_yield_boundary() {
+                    // The debugger sees the answer as the tool sent it.
+                    let result = tool_json::debugger_view(&result_value, result_decode_ty, &self.types_by_id);
+                    let result = match &echo_scrub {
+                        Some(revealed) => revealed.scrub_json(result),
+                        None => result,
+                    };
                     let action = self
                         .maybe_yield(StepEvent::AfterToolCall {
                             tool_name: callee_name.to_string(),
@@ -2135,6 +2170,7 @@ impl<'ir> Interpreter<'ir> {
                     })
                     .await?;
                 }
+                self.check_action_caller(agent, &arg_values, span)?;
 
                 let mut sub = Interpreter::new(self.ir, self.runtime);
                 sub.mock_tools = self.mock_tools.clone();

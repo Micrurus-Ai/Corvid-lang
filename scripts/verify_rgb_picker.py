@@ -67,16 +67,20 @@ def check(page, url):
     expect(output).to_have_text("RGB 0, 127, 44")
 
 
+def package_picker(cli, root):
+    project = root / "project"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "examples/rgb_picker", project,
+                    ignore=shutil.ignore_patterns("target"))
+    main = project / "src/main.cor"
+    main.write_text(main.read_text().replace('"Choose an RGB color.")]', '"Choose an RGB color."), picker]'))
+    package(cli, project, root / "bundle")
+    return root / "bundle"
+
+
 def verify(cli, channel):
     with TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        project = root / "project"
-        shutil.copytree(Path(__file__).resolve().parents[1] / "examples/rgb_picker", project,
-                        ignore=shutil.ignore_patterns("target"))
-        main = project / "src/main.cor"
-        main.write_text(main.read_text().replace('"Choose an RGB color.")]', '"Choose an RGB color."), picker]'))
-        package(cli, project, root / "bundle")
-        with serve(cli, root / "bundle", os.environ.copy()) as url, sync_playwright() as engines:
+        bundle = package_picker(cli, Path(tmp))
+        with serve(cli, bundle, os.environ.copy()) as url, sync_playwright() as engines:
             for name in ("chromium", "firefox", "webkit"):
                 browser = getattr(engines, name).launch(channel=channel if name == "chromium" else None)
                 try:

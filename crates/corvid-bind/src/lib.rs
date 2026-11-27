@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -465,11 +464,7 @@ pub(crate) fn python_string_literal(value: &str) -> String {
 }
 
 pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(&mut out, "{byte:02x}");
-    }
-    out
+    corvid_hex::encode(bytes)
 }
 
 fn source_stem(abi: &CorvidAbi, descriptor_path: Option<&Path>) -> String {

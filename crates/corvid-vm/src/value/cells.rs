@@ -19,6 +19,7 @@ use corvid_resolve::{DefId, LocalId};
 use crate::cycle_collector;
 
 use super::heap::HeapMeta;
+use super::map_key::{is_compound_key, snapshot_key, MapKey};
 use super::{ObjectRef, Value};
 
 // Recursive Corvid types pass through a named record or variant. A back
@@ -154,10 +155,16 @@ impl ClosureValue {
 #[derive(Debug)]
 pub struct MapValue(pub(super) Arc<MapInner>);
 
+/// A map's entries: insertion-ordered, keyed by a hash that agrees with
+/// `==`.
+pub(super) type MapEntries = indexmap::IndexMap<MapKey, Value>;
+
 #[derive(Debug)]
 pub(crate) struct MapInner {
     pub(super) meta: HeapMeta,
-    pub(super) entries: Mutex<Option<Vec<(Value, Value)>>>,
+    /// In insertion order, found by a hash that agrees with `==`
+    /// (`map_key`), so lookup and insertion take constant time.
+    pub(super) entries: Mutex<Option<MapEntries>>,
 }
 
 impl StructValue {
@@ -471,15 +478,11 @@ impl PartialEq for EnumValue {
 
 impl MapValue {
     /// Build from entries; a later duplicate key WINS (Python dict
-    /// literal semantics).
+    /// literal semantics), keeping the first one's position.
     pub fn new(entries: impl IntoIterator<Item = (Value, Value)>) -> Self {
-        let mut out: Vec<(Value, Value)> = Vec::new();
+        let mut out = MapEntries::default();
         for (k, v) in entries {
-            if let Some(slot) = out.iter_mut().find(|(ek, _)| *ek == k) {
-                slot.1 = v;
-            } else {
-                out.push((k, v));
-            }
+            out.insert(stored_key(k), v);
         }
         Self(Arc::new(MapInner {
             meta: HeapMeta::new(),
@@ -509,26 +512,21 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .and_then(|e| e.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()))
+            .and_then(|e| e.get(&MapKey(key.clone())).cloned())
     }
 
     pub fn insert_or_update(&self, key: Value, value: Value) {
         let _access = cycle_collector::heap_access();
         if let Some(entries) = self.0.entries.lock().expect("map lock").as_mut() {
-            if let Some(slot) = entries.iter_mut().find(|(k, _)| *k == key) {
-                slot.1 = value;
-            } else {
-                entries.push((key, value));
-            }
+            entries.insert(stored_key(key), value);
         }
     }
 
+    /// Remove `key`, keeping the other entries in insertion order.
     pub fn remove(&self, key: &Value) -> Option<Value> {
         let _access = cycle_collector::heap_access();
         let mut guard = self.0.entries.lock().expect("map lock");
-        let entries = guard.as_mut()?;
-        let idx = entries.iter().position(|(k, _)| k == key)?;
-        Some(entries.remove(idx).1)
+        guard.as_mut()?.shift_remove(&MapKey(key.clone()))
     }
 
     pub fn keys_cloned(&self) -> Vec<Value> {
@@ -538,7 +536,7 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .map(|e| e.iter().map(|(k, _)| k.clone()).collect())
+            .map(|e| e.keys().map(|k| handed_out(&k.0)).collect())
             .unwrap_or_default()
     }
 
@@ -549,7 +547,7 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .map(|e| e.iter().map(|(_, v)| v.clone()).collect())
+            .map(|e| e.values().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -560,13 +558,25 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .cloned()
+            .map(|e| e.iter().map(|(k, v)| (handed_out(&k.0), v.clone())).collect())
             .unwrap_or_default()
     }
 
     pub fn ptr_key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }
+}
+
+/// A key as the map stores it: a snapshot of a compound key, so a later
+/// change to the program's value cannot reach inside the map.
+fn stored_key(key: Value) -> MapKey {
+    MapKey(if is_compound_key(&key) { snapshot_key(&key) } else { key })
+}
+
+/// A key as the map hands it out: another snapshot, so the program never
+/// holds the map's own copy.
+fn handed_out(key: &Value) -> Value {
+    if is_compound_key(key) { snapshot_key(key) } else { key.clone() }
 }
 
 impl Clone for ClosureValue {

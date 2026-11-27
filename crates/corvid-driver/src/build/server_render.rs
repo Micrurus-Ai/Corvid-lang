@@ -555,13 +555,13 @@ fn error_response(
     request_id: String,
     started: Instant,
 ) -> Response {{
+    // The public failure answer both Corvid servers give:
+    // `{{"error": code, "detail": sentence}}` (`corvid_driver::public_failure`).
+    // The request id travels in the `x-corvid-request-id` header.
     let body = format!(
-        "{{{{\"request_id\":{{}},\"route\":{{}},\"kind\":{{}},\"message\":{{}},\"duration_ms\":{{}}}}}}",
-        json_string(&request_id),
-        json_string(route),
+        "{{{{\"error\":{{}},\"detail\":{{}}}}}}",
         json_string(kind),
         json_string(message),
-        started.elapsed().as_millis()
     );
     complete(state, method, route, status, "application/json", body, request_id, started)
 }}

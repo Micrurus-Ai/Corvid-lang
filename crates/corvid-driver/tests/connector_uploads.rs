@@ -57,10 +57,7 @@ fn upload() -> Value {
             ("filename".to_string(), Value::String("statement.pdf".into())),
             ("content_type".to_string(), Value::String("application/pdf".into())),
             ("size".to_string(), Value::Int(PDF.len() as i64)),
-            (
-                "bytes".to_string(),
-                Value::List(corvid_driver::ListValue::new(PDF.iter().map(|b| Value::Int(*b as i64)))),
-            ),
+            ("bytes".to_string(), Value::Bytes(corvid_crypto::Bytes::new(PDF))),
         ],
     ))
 }
@@ -116,7 +113,11 @@ async fn an_upload_is_sent_as_its_bytes_and_recorded_by_digest() {
     let raw = std::fs::read_to_string(&trace_path).unwrap();
     assert!(!raw.contains("private document"), "the content must not reach the trace");
     let encoded = corvid_crypto::Bytes::new(PDF).to_base64_url();
-    assert!(!raw.contains(&encoded), "not even encoded");
+    assert!(
+        !raw.contains(&encoded),
+        "not even encoded: {}",
+        raw.lines().filter(|line| line.contains(&encoded)).map(|line| &line[..line.len().min(160)]).collect::<Vec<_>>().join("\n")
+    );
     let args = read_events_from_path(&trace_path).unwrap().into_iter().find_map(|e| match e {
         TraceEvent::ToolCall { tool, args, .. } if tool == "attach" => Some(args),
         _ => None,

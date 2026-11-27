@@ -349,7 +349,7 @@ impl<'a> Parser<'a> {
     /// A complete approval policy. Every key is mandatory because
     /// reviewer authority and expiry are consequential deployment
     /// policy and must never come from runtime defaults.
-    fn parse_approval_spec(&mut self) -> Result<corvid_ast::ApprovalSpec, ParseError> {
+    pub(super) fn parse_approval_spec(&mut self) -> Result<corvid_ast::ApprovalSpec, ParseError> {
         let start = self.peek_span();
         self.bump(); // @
         self.bump(); // approval
@@ -473,13 +473,29 @@ impl<'a> Parser<'a> {
     /// `requires <item> [and <item>]*` where each item is
     /// `authenticated`, `role("name")`, or `permission("name")`
     /// (slice 51h). Returns `None` when there is no `requires` clause.
-    fn parse_route_policy(&mut self) -> Result<Option<corvid_ast::RoutePolicy>, ParseError> {
+    pub(super) fn parse_route_policy(&mut self) -> Result<Option<corvid_ast::RoutePolicy>, ParseError> {
         if !matches!(self.peek(), TokKind::KwRequires) {
             return Ok(None);
         }
         let start = self.peek_span();
         self.bump(); // requires
         let mut policy = corvid_ast::RoutePolicy::default();
+        // `requires anyone`: written, and alone, so an open caller policy
+        // is a decision in the source, never an omission.
+        if matches!(self.peek(), TokKind::Ident(word) if word == "anyone") {
+            self.bump();
+            if matches!(self.peek(), TokKind::KwAnd) {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: "`requires anyone and ...`".into(),
+                        expected: "`requires anyone` on its own, or the requirements without `anyone`".into(),
+                    },
+                    span: self.peek_span(),
+                });
+            }
+            policy.span = start.merge(self.prev_span());
+            return Ok(Some(policy));
+        }
         loop {
             let (item, item_span) = self.expect_ident()?;
             match item.as_str() {
@@ -496,7 +512,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("route requirement `{item}`"),
-                            expected: "`authenticated`, `role(\"...\")`, or `permission(\"...\")`"
+                            expected: "`anyone`, `authenticated`, `role(\"...\")`, or `permission(\"...\")`"
                                 .into(),
                         },
                         span: item_span,

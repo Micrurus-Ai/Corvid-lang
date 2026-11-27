@@ -157,6 +157,8 @@ borrows a connection for its one statement and returns it, and an
 operation or block waits its turn rather than opening another, so a
 burst of agents queues in the program instead of failing at the
 database. A connection the server closed is replaced on the next borrow.
+[Choosing a Postgres pool size](../guides/performance.md#choosing-a-postgres-pool-size)
+shows what each size buys under concurrent agents.
 
 A SQLite database is a file, so a SQLite block refuses `tls:` and
 `connections:`; Corvid opens the file as needed and queues its writers.
@@ -314,6 +316,54 @@ A `where` condition may use:
 | A string test on a column | `s.title.contains(word)`, `s.title.starts_with("A")`, `s.title.ends_with(suffix)` |
 | A `Bool` column | `s.archived` |
 | `and`, `or`, `not`, `true`, `false` | `not s.archived or s.shelf == 1` |
+| A column holding one of a list | `owners.contains(s.owner)`, `[1, 3].contains(s.shelf)` |
+
+`values.contains(s.column)` runs as `column IN (...)` with each value
+bound, and keeps exactly the rows the same test keeps in Corvid: a `None`
+in the list matches a missing value, an empty list keeps nothing, and a
+`Decimal` matches by value. The list is computed by the agent before the
+query runs. A list holds at most 10,000 values; a larger one stops the run
+with its reason.
+
+To filter by another table, use its query's keys directly:
+
+```corvid
+agent my_cards(owner: String) -> List<Card>:
+    return Card.where(fn (c) -> Board.where(fn (b) -> b.owner == owner).keys().contains(c.board))
+```
+
+`keys()` ends a query with its rows' keys, in key order, for a table keyed
+by one column. Inside a `where` on a table in the same database, it runs
+as an inner query in the same statement, `board IN (SELECT board FROM
+Board WHERE ...)`, so both tables are read at one moment, the keys never
+leave the database, and there is no limit on how many there are. A table
+in another database is read first, as a list. The inner query cannot read
+the outer row.
+
+`by_key()` ends a query with a `Map` from each matching row's key to the
+row, in key order, for a table keyed by one column. A program that shows
+each card with its board reads two queries instead of one per card:
+
+```corvid
+agent card_titles() -> String:
+    boards = Board.all().by_key()
+    out = ""
+    for card in Card.where(fn (c) -> boards.keys().contains(c.board)):
+        out = out + card.title + " on " + match boards[card.board]:
+            Some(board) -> board.title
+            None -> "no board"
+    return out
+```
+
+A `live` query may filter by another table's keys, or by a list built from
+literals, `path`, `actor` and table queries. It then follows every table
+its query reads: giving a board to a person brings that board's cards into
+their live list, though no card was written. A write to the delivered
+table is re-checked row by row, as always. A write to another table it
+reads re-runs the query and sends a snapshot when rows leave, because those
+rows were not written and have no removal revision of their own. A list
+that calls an agent, tool, prompt or function by name is refused in `live`,
+because the server cannot see what the call reads.
 
 The value on the other side of a comparison is computed by the agent
 before the query runs, so it may use the agent's variables and calls but
@@ -331,6 +381,55 @@ note.
 
 A query uses `db_egress_read`, like `Shelf.get`, so pure `fn`s and
 `@deterministic` agents cannot run one.
+
+### Counts, totals and extremes
+
+A query may end in one stage that reduces its rows to one value, run by
+the database instead of reading every row:
+
+| Stage | Type | For no rows |
+| --- | --- | --- |
+| `.count()` | `Int` | `0` |
+| `.sum(fn (s) -> s.column)` | the column's type: `Int`, `Decimal` or `Duration` | `0` |
+| `.min(fn (s) -> s.column)`, `.max(...)` | `Option` of the column's type | `None` |
+| `.count_by(fn (s) -> s.key)` | `Map<K, Int>` | an empty map |
+| `.sum_by(fn (s) -> s.key, fn (s) -> s.column)` | `Map<K, T>`, `T` as for `sum` | an empty map |
+
+`count_by` and `sum_by` group the rows by a column and give one entry per
+value that has rows, in the column's order, so `m[k]` is `None` for a key
+with none. A group's total follows the rules of `sum`. The key column
+must be one the database compares as Corvid does: not one stored as JSON,
+and not a `Float`, whose values do not compare exactly. `Decimal` keys
+group by value, so `1.0` and `1.00` are one key.
+
+```corvid
+agent shelf_summary(owner: String) -> String:
+    count = Shelf.where(fn (s) -> s.owner == owner).count()
+    return match Shelf.where(fn (s) -> s.owner == owner).max(fn (s) -> s.shelf):
+        Some(top) -> count.to_string() + " shelves, up to " + top.to_string()
+        None -> "no shelves"
+```
+
+- An `Int` total that does not fit in 64 bits stops the run with its
+  reason, as `+` does, never a wrapped or rounded number.
+- A `Decimal` or `Duration` total is exact: the column's values are read
+  and added with Corvid's own `+`, because SQLite stores both as text.
+- `sum` of a `Float` column is a compile error, because a float total
+  depends on the order the rows are added. Store an exact total as a
+  `Decimal`.
+- `min` and `max` compare values as `order_by` does, so `9.50` is less
+  than `10.0`, and they skip missing values. A column `order_by` refuses
+  is refused here too.
+- `order_by`, `descending` and `take` cannot change an aggregate, so a
+  chain with one is a compile error that says to remove them.
+- There is no `average`, because dividing needs a rounding decision.
+  Divide `sum` by `count` with the rounding you choose.
+- A `live` declaration delivers rows, so its query cannot end in one. A
+  live count is planned in [aggregates and joins](../proposals/query-aggregates-and-joins.md).
+
+A recorded run replays each aggregate from the trace, as it replays a
+query.
+
 ## Unique values
 
 A `unique` line names columns no two rows may share: `unique email` for

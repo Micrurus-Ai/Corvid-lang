@@ -1,0 +1,9 @@
+[package]
+name = "corvid-hex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The one lowercase hex encoder and either-case decoder every Corvid crate uses, so two digests of the same bytes always read the same."
+
+[dependencies]

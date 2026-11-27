@@ -8,7 +8,9 @@
 
 use super::Interpreter;
 use crate::errors::{InterpError, InterpErrorKind};
-use crate::public_json::{decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields};
+use crate::public_json::{
+    decode_public_json, decode_public_json_text, encode_public_json, encode_public_json_text, UnknownFields,
+};
 use crate::value::{BoxedValue, StructValue, Value};
 use corvid_ast::Span;
 use corvid_ir::{IrTable, IrTableFilter, IrType};
@@ -19,6 +21,17 @@ use corvid_runtime::tables::{
 };
 use corvid_types::{TableOp, Type};
 use std::sync::Arc;
+
+/// The rows a live subscription re-checks after a commit (live L2): the
+/// entry agent's query on `table` reads only the rows with these keys,
+/// under the query's own condition and order, so the database still
+/// decides which of them match. Each key is a
+/// [`corvid_runtime::tables::LiveRow::key`] text.
+#[derive(Debug, Clone)]
+pub struct WrittenKeys {
+    pub table: String,
+    pub keys: Vec<String>,
+}
 
 impl<'ir> Interpreter<'ir> {
     pub(super) async fn eval_table_op(
@@ -100,10 +113,17 @@ impl<'ir> Interpreter<'ir> {
             .get(&table.def_id)
             .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
         let mut operands = operands.into_iter();
-        let filter = match filter {
+        let mut filter = match filter {
             Some(filter) => Some(self.table_filter(record, filter, &mut operands).map_err(fail)?),
             None => None,
         };
+        if let Some(written) = self.written_keys.as_ref().filter(|w| w.table == table.name) {
+            let only = self.written_keys_filter(record, table, &written.keys).map_err(fail)?;
+            filter = Some(match filter {
+                Some(condition) => TableFilter::And(Box::new(condition), Box::new(only)),
+                None => only,
+            });
+        }
         let take = match operands.next() {
             Some(Value::Int(n)) => Some(n),
             Some(other) => return Err(fail(format!("`take` needs an Int, got {}", other.type_name()))),
@@ -119,6 +139,218 @@ impl<'ir> Interpreter<'ir> {
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
         let items = rows.into_iter().map(|row| self.row_value(record, row)).collect::<Result<Vec<_>, _>>().map_err(fail)?;
         Ok(Value::List(crate::value::ListValue::new(items)))
+    }
+
+    /// A query that ends in an aggregate (J1). `count` and an `Int` `sum`
+    /// run in the database; a `Decimal` or `Duration` `sum` reads the
+    /// column alone and adds it with Corvid's own checked `+`, so the total
+    /// is exact; `min` and `max` are the first row in the column's order
+    /// among those with a value, so the database's own order decides.
+    pub(super) async fn eval_table_aggregate(
+        &mut self,
+        table: &IrTable,
+        filter: Option<&IrTableFilter>,
+        aggregate: &corvid_ir::IrQueryAggregate,
+        operands: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, InterpError> {
+        use corvid_runtime::tables::TableAggregate;
+        use corvid_types::table_ops::QueryAggregate;
+        let fail = |message: String| InterpError::new(InterpErrorKind::Other(message), span);
+        let runtime_error = |e| InterpError::new(InterpErrorKind::Runtime(e), span);
+        let record = *self
+            .types_by_id
+            .get(&table.def_id)
+            .ok_or_else(|| fail(format!("table `{}` has no record type", table.name)))?;
+        let mut operands = operands.into_iter();
+        let filter = match filter {
+            Some(filter) => Some(self.table_filter(record, filter, &mut operands).map_err(fail)?),
+            None => None,
+        };
+        let kinds = column_kinds(record);
+        let target = table_target(table, &kinds, self.table_transaction.as_deref()).map_err(fail)?;
+        let name = aggregate.op.name();
+        let column = || aggregate.column.clone().ok_or_else(|| fail(format!("`{name}` names no column")));
+        let column_ty = aggregate.column_ty.clone().unwrap_or(Type::Unknown);
+        let whole = |value: &DbValue| match value {
+            DbValue::Integer(n) => Ok(Value::Int(*n)),
+            other => Err(fail(format!("`{name}` on table `{}` read {other:?}, not a whole number", table.name))),
+        };
+        let one = |rows: Vec<Row>| match rows.as_slice() {
+            [row] => match row.as_slice() {
+                [value] => whole(value),
+                _ => Err(fail(format!("`{name}` on table `{}` read more than one value", table.name))),
+            },
+            _ => Err(fail(format!("`{name}` on table `{}` read {} rows, not one", table.name, rows.len()))),
+        };
+        // An exact total adds with Corvid's own checked `+`.
+        let zero = || match untainted(&column_ty) {
+            Type::Decimal => Ok(Value::Decimal(corvid_decimal::Decimal::parse("0").map_err(|e| fail(e.to_string()))?)),
+            Type::Duration => Ok(Value::Duration(corvid_time::Duration::from_nanoseconds(0).map_err(|e| fail(e.to_string()))?)),
+            other => Err(fail(format!("`{name}` cannot add a `{}` column", other.display_name()))),
+        };
+        let integer_total = matches!(untainted(&column_ty), Type::Int);
+        match aggregate.op {
+            QueryAggregate::Count => {
+                one(self.runtime.table_aggregate(&target, filter.as_ref(), &TableAggregate::Count).await.map_err(runtime_error)?)
+            }
+            QueryAggregate::Sum if integer_total => one(
+                self.runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::SumInteger(column()?))
+                    .await
+                    .map_err(runtime_error)?,
+            ),
+            QueryAggregate::Sum => {
+                let rows = self
+                    .runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::Values(column()?))
+                    .await
+                    .map_err(runtime_error)?;
+                let mut total = zero()?;
+                for stored in rows.into_iter().flatten() {
+                    let value = self.from_column(stored, &column_ty).map_err(fail)?;
+                    total = super::eval_binop(corvid_ast::BinaryOp::Add, total, value, span, false)?;
+                }
+                Ok(total)
+            }
+            // The key column alone, in key order: the order a query's rows
+            // come in without `order_by`.
+            QueryAggregate::Keys => {
+                let rows = self
+                    .runtime
+                    .table_aggregate(&target, filter.as_ref(), &TableAggregate::Keys(column()?))
+                    .await
+                    .map_err(runtime_error)?;
+                let keys = rows
+                    .into_iter()
+                    .flatten()
+                    .map(|stored| self.from_column(stored, &column_ty))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(fail)?;
+                Ok(Value::List(crate::value::ListValue::new(keys)))
+            }
+            // The query's rows, in key order as any query without
+            // `order_by` returns them, each under its key's value.
+            QueryAggregate::ByKey => {
+                let key = column()?;
+                let query = TableQuery { filter, order: None, descending: false, take: None };
+                let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
+                let mut entries = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let value = self.row_value(record, row).map_err(fail)?;
+                    let Value::Struct(fields) = &value else {
+                        return Err(fail(format!("a `{}` row is not a record", table.name)));
+                    };
+                    let held = fields.get_field(&key).ok_or_else(|| fail(format!("a `{}` row has no `{key}`", table.name)))?;
+                    entries.push((held, value));
+                }
+                Ok(Value::Map(crate::value::MapValue::new(entries)))
+            }
+            QueryAggregate::CountBy | QueryAggregate::SumBy => {
+                let (key, key_ty) = aggregate.key.clone().ok_or_else(|| fail(format!("`{name}` names no key column")))?;
+                let request = match aggregate.op {
+                    QueryAggregate::CountBy => TableAggregate::CountBy(key),
+                    _ if integer_total => TableAggregate::SumIntegerBy { key, column: column()? },
+                    _ => TableAggregate::ValuesBy { key, column: column()? },
+                };
+                let rows = self.runtime.table_aggregate(&target, filter.as_ref(), &request).await.map_err(runtime_error)?;
+                // Rows come in key order, so the map's order is the same on
+                // every run; a key read twice (only `ValuesBy` repeats keys)
+                // adds to its total.
+                let mut entries: Vec<(Value, Value)> = Vec::new();
+                for row in rows {
+                    let [stored_key, stored] = <[DbValue; 2]>::try_from(row)
+                        .map_err(|_| fail(format!("`{name}` on table `{}` read a malformed row", table.name)))?;
+                    let key = self.from_column(stored_key, &key_ty).map_err(fail)?;
+                    let value = match request {
+                        TableAggregate::ValuesBy { .. } => self.from_column(stored, &column_ty).map_err(fail)?,
+                        _ => whole(&stored)?,
+                    };
+                    match entries.iter_mut().find(|(held, _)| *held == key) {
+                        Some((_, total)) => {
+                            let added = super::eval_binop(corvid_ast::BinaryOp::Add, total.clone(), value, span, false)?;
+                            *total = added;
+                        }
+                        None if matches!(request, TableAggregate::ValuesBy { .. }) => {
+                            let first = super::eval_binop(corvid_ast::BinaryOp::Add, zero()?, value, span, false)?;
+                            entries.push((key, first));
+                        }
+                        None => entries.push((key, value)),
+                    }
+                }
+                Ok(Value::Map(crate::value::MapValue::new(entries)))
+            }
+            QueryAggregate::Min | QueryAggregate::Max => {
+                let column = column()?;
+                // The first row in the column's order whose column holds a
+                // value: the same `order_by`, and the same `== None` test,
+                // a query writes.
+                let present = TableFilter::Not(Box::new(TableFilter::Compare {
+                    column: column.clone(),
+                    op: corvid_types::table_ops::QueryCompare::Eq,
+                    value: DbValue::Null,
+                }));
+                let query = TableQuery {
+                    filter: Some(match filter {
+                        Some(condition) => TableFilter::And(Box::new(condition), Box::new(present)),
+                        None => present,
+                    }),
+                    order: Some(column.clone()),
+                    descending: aggregate.op == QueryAggregate::Max,
+                    take: Some(1),
+                };
+                let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
+                let Some(row) = rows.into_iter().next() else { return Ok(Value::OptionNone) };
+                let Value::Struct(row) = self.row_value(record, row).map_err(fail)? else {
+                    return Err(fail(format!("a `{}` row is not a record", table.name)));
+                };
+                let value = row.get_field(&column).ok_or_else(|| fail(format!("a `{}` row has no `{column}`", table.name)))?;
+                Ok(match value {
+                    // An `Option` column already holds its `Some`.
+                    some @ Value::OptionSome(_) => some,
+                    other => Value::OptionSome(BoxedValue::new(other)),
+                })
+            }
+        }
+    }
+
+    /// The condition that keeps only the rows whose keys are in `keys`,
+    /// each a [`corvid_runtime::tables::LiveRow::key`] text: the JSON array
+    /// of the key fields' public JSON values, the form `live_key` writes.
+    fn written_keys_filter(&self, record: &IrType, table: &IrTable, keys: &[String]) -> Result<TableFilter, String> {
+        let mut any: Option<TableFilter> = None;
+        for key in keys {
+            let parts = match serde_json::from_str::<serde_json::Value>(key) {
+                Ok(serde_json::Value::Array(parts)) if parts.len() == table.keys.len() => parts,
+                _ => return Err(format!("`{key}` is not a key of table `{}`", table.name)),
+            };
+            let mut all: Option<TableFilter> = None;
+            for (name, part) in table.keys.iter().zip(parts) {
+                let ty = &record
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *name)
+                    .ok_or_else(|| format!("table `{}` has no key field `{name}`", table.name))?
+                    .ty;
+                let value = decode_public_json(&part, ty, &self.types_by_id, UnknownFields::Reject)
+                    .map_err(|e| e.message())?;
+                let test = TableFilter::Compare {
+                    column: name.clone(),
+                    op: corvid_types::table_ops::QueryCompare::Eq,
+                    value: self.to_column(&value, ty)?,
+                };
+                all = Some(match all {
+                    Some(left) => TableFilter::And(Box::new(left), Box::new(test)),
+                    None => test,
+                });
+            }
+            let all = all.unwrap_or(TableFilter::Const(true));
+            any = Some(match any {
+                Some(left) => TableFilter::Or(Box::new(left), Box::new(all)),
+                None => all,
+            });
+        }
+        Ok(any.unwrap_or(TableFilter::Const(false)))
     }
 
     /// A lowered condition with its values converted to column values.
@@ -155,6 +387,45 @@ impl<'ir> Interpreter<'ir> {
             IrTableFilter::Text { column, test, .. } => {
                 let value = self.query_value(&next_operand(operands)?, column_type(column)?)?;
                 TableFilter::Text { column: column.clone(), test: *test, value }
+            }
+            IrTableFilter::InList { column, .. } => {
+                let Value::List(items) = next_operand(operands)? else {
+                    return Err(format!("`contains` on column `{column}` needs a list"));
+                };
+                let items = items.iter_cloned();
+                if items.len() > corvid_runtime::tables::MOST_LIST_VALUES {
+                    return Err(format!(
+                        "`contains` on column `{column}` was given {} values; a query sends at most {} to the database",
+                        items.len(),
+                        corvid_runtime::tables::MOST_LIST_VALUES
+                    ));
+                }
+                let ty = column_type(column)?;
+                let values = items.iter().map(|item| self.query_value(item, ty)).collect::<Result<Vec<_>, _>>()?;
+                TableFilter::In { column: column.clone(), values }
+            }
+            IrTableFilter::InQuery { column, inner } => {
+                let inner_record = *self
+                    .types_by_id
+                    .get(&inner.table.def_id)
+                    .ok_or_else(|| format!("table `{}` has no record type", inner.table.name))?;
+                let [key] = inner.table.keys.as_slice() else {
+                    return Err(format!("`keys` needs table `{}` keyed by one column", inner.table.name));
+                };
+                let filter = match &inner.filter {
+                    Some(condition) => Some(self.table_filter(inner_record, condition, operands)?),
+                    None => None,
+                };
+                TableFilter::InQuery {
+                    column: column.clone(),
+                    inner: Box::new(corvid_runtime::tables::InnerQuery {
+                        table: inner.table.name.clone(),
+                        key: key.clone(),
+                        columns: inner.table.columns.clone(),
+                        kinds: column_kinds(inner_record),
+                        filter,
+                    }),
+                }
             }
         })
     }

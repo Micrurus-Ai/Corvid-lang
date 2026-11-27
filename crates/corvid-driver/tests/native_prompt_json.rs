@@ -154,5 +154,83 @@ async fn a_reply_missing_a_field_is_refused_on_both_tiers() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "the native run must stop");
-    assert!(stderr.contains("does not decode") && stderr.contains("score"), "{stderr}");
+    assert!(stderr.contains("unusable reply") && stderr.contains("score"), "{stderr}");
+}
+
+/// A reply that does not decode is retried exactly as `with repair N`
+/// says, on both tiers: the same number of calls, the same retry text
+/// (the previous reply and why it failed), the same answer. A scalar
+/// reply goes through the same request as any other, with its schema.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repairs_follow_with_repair_on_both_tiers() {
+    let program = "prompt score(text: String) -> Int:\n    with repair 1\n    \"\"\"Score {text}\"\"\"\n\nagent main() -> Int:\n    return score(\"great\")\n";
+    // The model first answers text that is not an Int, then 7.
+    let replies = r#"{"score": ["very good", 7]}"#;
+    std::env::set_var("CORVID_TEST_MOCK_LLM_REPLIES", replies);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let source = src.join("main.cor");
+    std::fs::write(&source, program).unwrap();
+    let ir = compile_to_ir_with_config_at_path(program, &source, None).expect("program compiles");
+
+    let traces = tempfile::tempdir().unwrap();
+    let runtime = Runtime::builder()
+        .llm(Arc::new(corvid_runtime::llm::mock::EnvVarMockAdapter::from_env()))
+        .default_model("mock-1")
+        .trace_to(traces.path())
+        .build();
+    let interpreted = run_ir_with_runtime(&ir, None, vec![], &runtime).await.expect("the repair succeeds");
+    assert_eq!(interpreted, corvid_driver::Value::Int(7));
+    let interpreted_calls = all_rendered(runtime.tracer().path());
+    assert_eq!(interpreted_calls.len(), 2, "one call and one repair");
+    assert!(interpreted_calls[1].starts_with("Score \"great\"\n\nYour previous response was:\n\"very good\""), "{interpreted_calls:?}");
+
+    let status = Command::new(env!("CARGO"))
+        .args(["build", "-p", "corvid-test-tools", "--release"])
+        .current_dir(corvid_test_paths::workspace_root())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", corvid_test_paths::test_tools_staticlib());
+    let binary = build_or_get_cached_native(&source, program, &ir, None).expect("native build").path;
+    let native_trace = traces.path().join("native.jsonl");
+    let output = Command::new(&binary)
+        .env("CORVID_TRACE_PATH", &native_trace)
+        .env("CORVID_MODEL", "mock-1")
+        .env("CORVID_TEST_MOCK_LLM", "1")
+        .env("CORVID_TEST_MOCK_LLM_REPLIES", replies)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "7");
+    assert_eq!(all_rendered(&native_trace), interpreted_calls, "both tiers make the same calls");
+
+    // Without `with repair`, one call is all a prompt makes, on either tier.
+    let no_repair = program.replace("    with repair 1\n", "");
+    let ir = compile_to_ir_with_config_at_path(&no_repair, &source, None).expect("program compiles");
+    std::fs::write(&source, &no_repair).unwrap();
+    let binary = build_or_get_cached_native(&source, &no_repair, &ir, None).expect("native build").path;
+    let once_trace = traces.path().join("once.jsonl");
+    let output = Command::new(&binary)
+        .env("CORVID_TRACE_PATH", &once_trace)
+        .env("CORVID_MODEL", "mock-1")
+        .env("CORVID_TEST_MOCK_LLM", "1")
+        .env("CORVID_TEST_MOCK_LLM_REPLIES", replies)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "an unusable reply with no repair stops the program");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unusable reply"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(all_rendered(&once_trace).len(), 1);
+}
+
+fn all_rendered(trace: &std::path::Path) -> Vec<String> {
+    read_events_from_path(trace)
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event {
+            TraceEvent::LlmCall { rendered, .. } => rendered,
+            _ => None,
+        })
+        .collect()
 }

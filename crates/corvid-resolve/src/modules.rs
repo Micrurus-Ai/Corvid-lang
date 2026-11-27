@@ -313,13 +313,7 @@ pub fn resolve_import_path(importing_file: &Path, module: &str) -> PathBuf {
 /// `PathBuf` as the module identity key. Hex-encoding the URL bytes keeps
 /// exact URLs collision-free without adding hashing dependencies here.
 pub fn remote_import_path(url: &str) -> PathBuf {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(url.len() * 2);
-    for byte in url.as_bytes() {
-        encoded.push(HEX[(byte >> 4) as usize] as char);
-        encoded.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    PathBuf::from(format!("<remote:{encoded}>"))
+    PathBuf::from(format!("<remote:{}>", corvid_hex::encode(url.as_bytes())))
 }
 
 #[cfg(test)]

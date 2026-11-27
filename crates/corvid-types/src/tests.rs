@@ -3,6 +3,7 @@ use corvid_resolve::{resolve, ResolveErrorKind};
 use corvid_syntax::{lex, parse_file};
 
 mod regex_methods;
+mod builtin_type_names;
 mod decimal;
 mod time;
 mod time_zones;
@@ -271,7 +272,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+            TypeErrorKind::ApprovalRequiresAuthentication { .. }
         )),
         "expected requester-authentication error, got {:?}",
         checked.errors
@@ -332,7 +333,7 @@ server api:
             error.guarantee_id == Some("approval.policy_clause_static_check")
                 && matches!(
                     error.kind,
-                    TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+                    TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                         if message.contains("role `reviewer` is not declared")
                 )
         }),
@@ -366,7 +367,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+            TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                 if message.contains("approvals.decide")
         )),
         "expected missing decision-permission error, got {:?}",
@@ -395,7 +396,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalPolicyInvalid { ref message, .. }
+            TypeErrorKind::ApprovalPolicyInvalid { ref message, .. }
                 if message.contains("reach an `approve` boundary")
         )),
         "expected dead-policy error, got {:?}",
@@ -438,7 +439,7 @@ server api:
     assert!(
         checked.errors.iter().any(|error| matches!(
             error.kind,
-            TypeErrorKind::RouteApprovalRequiresAuthentication { .. }
+            TypeErrorKind::ApprovalRequiresAuthentication { .. }
         )),
         "expected requester-authentication error through agent method, got {:?}",
         checked.errors
@@ -5527,12 +5528,10 @@ agent finalize() -> Receipt:
     );
 }
 
-// Adversarial: a struct whose field is itself a nested struct
-// (or list / option) still trips the rejection — the 20n-C
-// codegen does not yet support these field shapes, so the
-// typechecker stays in lock-step with codegen depth.
+/// A `pub extern "c"` signature takes and returns any type with a JSON
+/// form: nested records, lists, options. They cross as JSON strings.
 #[test]
-fn extern_c_agent_with_struct_param_containing_nested_struct_field_still_errors() {
+fn extern_c_agent_takes_nested_records_and_returns_lists() {
     let checked = check(
         r#"
 type Inner:
@@ -5540,31 +5539,25 @@ type Inner:
 
 type Outer:
     inner: Inner
+    tags: List<String>
+    note: Option<String>
 
 pub extern "c"
-agent refund_bot(outer: Outer @borrowed) -> Bool:
-    return true
+agent labels(outer: Outer @borrowed) -> List<String>:
+    return [outer.inner.label]
 "#,
     );
-    let err = checked
-        .errors
-        .iter()
-        .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
-        .expect("expected NonScalarInExternC error for nested-struct field");
-    let hint = err.hint().unwrap_or_default();
-    assert!(
-        hint.contains("scalars") && hint.contains("Nested structs"),
-        "expected scalar-only hint, got {hint:?}"
-    );
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
 }
 
+/// A type with no JSON form still cannot cross, and the hint says what can.
 #[test]
-fn extern_c_agent_with_list_return_errors_with_hint_at_22b() {
+fn extern_c_agent_refuses_a_type_with_no_json_form() {
     let checked = check(
         r#"
 pub extern "c"
-agent ids() -> List<String>:
-    return ["a"]
+agent refund_bot(token: Secret) -> Bool:
+    return true
 "#,
     );
     let err = checked
@@ -5573,10 +5566,7 @@ agent ids() -> List<String>:
         .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
         .expect("expected NonScalarInExternC error");
     let hint = err.hint().unwrap_or_default();
-    assert!(
-        hint.contains("Lists") || hint.contains("rich types") || hint.contains("scalars"),
-        "expected scalar-only hint covering lists, got {hint:?}"
-    );
+    assert!(hint.contains("JSON form"), "expected the JSON-form hint, got {hint:?}");
 }
 
 // -------------------- Phase 21 slice inv-A: @replayable --------------------
@@ -5947,8 +5937,8 @@ agent main() -> Int:
     assert!(
         c.errors
             .iter()
-            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
-        "expected NotCallable for Int.length(), got {:?}",
+            .any(|e| matches!(&e.kind, TypeErrorKind::UnknownMethod { .. })),
+        "expected UnknownMethod for Int.length(), got {:?}",
         c.errors
     );
 }
@@ -6823,8 +6813,8 @@ agent main() -> Int:
     assert!(
         c.errors
             .iter()
-            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
-        "expected NotCallable for List<struct>.sort(), got {:?}",
+            .any(|e| matches!(&e.kind, TypeErrorKind::UnknownMethod { .. })),
+        "expected UnknownMethod for List<struct>.sort(), got {:?}",
         c.errors
     );
 }
@@ -8742,4 +8732,122 @@ fn duration_literals_check_and_explain_calendar_units() {
     assert!(fraction.iter().any(|m| m.contains("not a whole number of nanoseconds")), "{fraction:?}");
     let mismatch = errors("agent wait() -> Int:\n    return 30 seconds\n");
     assert!(!mismatch.is_empty(), "a duration is not an Int");
+}
+
+/// A map literal's keys take the expected key type, as its values take
+/// the expected value type: number keys where a `Map<Decimal, _>` is
+/// meant are `Decimal`s, and text keys where a `Map<Currency, _>` is
+/// meant are currencies, checked as such.
+#[test]
+fn map_literal_keys_take_the_expected_key_type() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent main() -> Int:\n    prices: Map<Decimal, String> = {1.0: \"one\", 2.50: \"two\"}\n    return prices.length()\n").is_empty());
+    assert!(errors("agent main() -> Int:\n    rates: Map<Currency, Int> = {\"EUR\": 1}\n    return rates.length()\n").is_empty());
+    let bad = errors("agent main() -> Int:\n    rates: Map<Currency, Int> = {\"EURO\": 1}\n    return rates.length()\n");
+    assert!(!bad.is_empty(), "an unknown currency code is refused at the key");
+}
+
+/// An integer literal where a `Float` is meant is a `Float`, when a
+/// `Float` holds it exactly; an `Int` value never widens silently, alone
+/// or inside a list, and the mismatch says how to convert it.
+#[test]
+fn integer_literals_become_floats_by_slot_and_int_values_never_widen() {
+    let errors = |src: &str| -> Vec<(String, Option<String>)> {
+        check(src).errors.iter().map(|e| (e.kind.message(), e.kind.hint())).collect()
+    };
+    for ok in [
+        "agent main() -> Float:\n    x: Float = 3\n    return x\n",
+        "agent main() -> Float:\n    return -3\n",
+        "agent half(x: Float) -> Float:\n    return x / 2.0\n\nagent main() -> Float:\n    return half(3)\n",
+        "type P:\n    x: Float\n\nagent main() -> Float:\n    return P(1).x\n",
+        "agent main() -> Float:\n    xs: List<Float> = [1, 2.5]\n    return xs[0]\n",
+        "agent main() -> Float:\n    return 9007199254740992\n",
+    ] {
+        assert!(errors(ok).is_empty(), "{ok}: {:?}", errors(ok));
+    }
+    let value = errors("agent main() -> Float:\n    n = 3\n    x: Float = n\n    return x\n");
+    assert_eq!(value.len(), 1, "{value:?}");
+    assert!(value[0].0.contains("expected `Float`, got `Int`"), "{value:?}");
+    assert!(value[0].1.as_deref().unwrap_or_default().contains(".to_float()"), "{value:?}");
+    let list = errors("agent main() -> Int:\n    ns = [1, 2]\n    xs: List<Float> = ns\n    return 0\n");
+    assert!(!list.is_empty(), "a `List<Int>` is not a `List<Float>`");
+    let inexact = errors("agent main() -> Float:\n    return 9007199254740993\n");
+    assert!(inexact[0].0.contains("no exact `Float` value"), "{inexact:?}");
+}
+
+/// Every error kind declares its own code, in the `E` + four digits form,
+/// and no two kinds share one, so a code names exactly one error and
+/// rewording a message never changes it. Read from the `code()` match,
+/// which is exhaustive, so a new kind cannot compile without a code.
+#[test]
+fn no_two_error_kinds_share_a_code() {
+    // A checkout with Windows line endings holds `\r\n`; read lines alike.
+    let source = include_str!("errors/error_kind.rs").replace("\r\n", "\n");
+    let start = source.find("pub fn code(&self)").expect("TypeErrorKind::code");
+    let body = &source[start..source[start..].find("\n    }\n").map(|end| start + end).expect("end of code()")];
+    let mut seen = std::collections::BTreeMap::new();
+    for line in body.lines().filter(|line| line.contains("=> \"")) {
+        let kind = line.trim().split_whitespace().next().unwrap().trim_start_matches("Self::").to_string();
+        let code = line.split('"').nth(1).unwrap().to_string();
+        assert!(code.len() == 5 && code.starts_with('E') && code[1..].chars().all(|c| c.is_ascii_digit()), "{kind}: `{code}`");
+        if let Some(other) = seen.insert(code.clone(), kind.clone()) {
+            panic!("`{other}` and `{kind}` share {code}");
+        }
+    }
+    assert!(seen.len() > 100, "read the codes: {}", seen.len());
+    // The codes every message mapped to before they were declared stay.
+    for (code, kind) in [("E0101", "UnapprovedDangerousCall"), ("E0201", "ArityMismatch"), ("E0208", "TypeMismatch"), ("E0209", "UngroundedReturn"), ("E0250", "EffectConstraintViolation")] {
+        assert_eq!(seen.get(code).map(String::as_str), Some(kind), "{code}");
+    }
+}
+
+
+/// A call to a method a type lacks names the type and the method, suggests
+/// the builtin it most likely meant, and says how to reach the value inside
+/// an `Option` or `Result`.
+#[test]
+fn an_unknown_method_names_the_type_and_suggests_the_method_meant() {
+    let first = |src: &str| {
+        let checked = check(src);
+        let error = checked.errors.into_iter().next().expect("an error");
+        (error.kind.code(), error.kind.message(), error.kind.hint().unwrap_or_default())
+    };
+    let (code, message, hint) = first("agent main() -> Int:\n    return \"corvid\".lenght()\n");
+    assert_eq!(code, "E0240");
+    assert_eq!(message, "`String` has no method `lenght`");
+    assert_eq!(hint, "did you mean `length`?");
+    let (_, message, hint) = first("agent main() -> String:\n    x: Option<Int> = Some(1)\n    return x.to_string()\n");
+    assert_eq!(message, "`Option<Int>` has no method `to_string`");
+    assert!(hint.contains("unwrap_or(default).to_string()"), "{hint}");
+}
+
+/// The method-name list `closest_builtin_method` searches is exactly the
+/// names `builtin_method` matches on.
+#[test]
+fn builtin_method_names_match_the_table() {
+    let source = include_str!("builtin_methods.rs").replace("\r\n", "\n");
+    let body = &source[source.find("pub fn builtin_method(receiver: &Type, name: &str)").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut in_table = std::collections::BTreeSet::new();
+    for piece in body.split(", \"").skip(1) {
+        let name: String = piece.chars().take_while(|c| *c != '"').collect();
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') && piece[name.len()..].trim_start_matches('"').trim_start().starts_with(')') {
+            in_table.insert(name);
+        }
+    }
+    let listed: std::collections::BTreeSet<String> = crate::builtin_methods::BUILTIN_METHOD_NAMES.iter().map(|n| n.to_string()).collect();
+    assert_eq!(listed, in_table);
+}
+
+/// A whole number beyond `Int`'s range keeps its digits: a `Decimal` slot
+/// reads it exactly, a `Float` slot takes it only when a `Float` holds it
+/// exactly, and anywhere else it is refused with the range, never rounded.
+#[test]
+fn integer_literals_beyond_int_are_decimals_or_refused() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent main() -> Decimal:\n    price: Decimal = 99999999999999999999\n    return price\n").is_empty());
+    assert!(errors("agent main() -> Float:\n    return 100000000000000000000\n").is_empty(), "1e20 is an exact Float");
+    let refused = errors("agent main() -> Int:\n    return 99999999999999999999\n");
+    assert_eq!(refused, vec!["`99999999999999999999` is beyond `Int`'s range, -9223372036854775808 to 9223372036854775807"]);
+    assert!(!errors("agent main() -> Float:\n    return 99999999999999999999\n").is_empty(), "no exact Float, so refused");
 }

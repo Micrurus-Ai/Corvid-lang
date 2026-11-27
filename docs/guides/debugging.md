@@ -2,7 +2,9 @@
 
 ## When a Corvid program won't compile
 
-The diagnostic carries a stable error code and a fix hint:
+The diagnostic carries a stable error code and a fix hint. The
+[error reference](../reference/errors.md) lists every code and what it
+means:
 
 ```text
 [E0101] error: dangerous tool `refund` called without a prior `approve`

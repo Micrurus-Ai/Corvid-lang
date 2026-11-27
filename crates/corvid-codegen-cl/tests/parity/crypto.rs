@@ -312,3 +312,12 @@ fn a_native_build_compares_secrets_and_keys_cryptography_with_them() {
             .unwrap_or_else(|error| panic!("{error}; src=\n{src}"));
     }
 }
+
+/// `a + b` joins two byte strings natively as on the interpreter, by the
+/// one `Bytes::concat`, and releases what it allocates.
+#[test]
+fn byte_strings_join_alike() {
+    let src = "agent f() -> String:\n    header = \"DSSEv1 \".utf8()\n    joined = header + \"ab\".utf8()\n    return (joined + \"\".utf8()).to_hex() + \" \" + joined.sha256().to_hex()\n";
+    let printed = assert_parity_text(src);
+    assert!(printed.starts_with("445353457631206162 "), "{printed}");
+}

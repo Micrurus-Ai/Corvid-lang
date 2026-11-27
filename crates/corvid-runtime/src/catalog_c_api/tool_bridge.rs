@@ -13,8 +13,6 @@
 //! dispatch convention: a tool callback receives the call arguments as
 //! a JSON array string and returns the result as a JSON string.
 
-use crate::abi::{CorvidString, IntoCorvidAbi};
-use crate::ffi_bridge::{borrow_corvid_string, read_corvid_string};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CString};
 use std::ptr;
@@ -170,6 +168,12 @@ pub unsafe extern "C" fn corvid_invoke_tool(
 /// serializes args to JSON, calls this function, and parses the result
 /// back to a `Value`. Concrete site:
 /// `crates/corvid-cli/src/serve_cmd.rs::register_cdylib_tool_handlers`.
+/// Whether a tool is registered under `name`: a linked `#[tool]` or one
+/// an embedding host registered.
+pub fn host_tool_registered(name: &str) -> bool {
+    registry().lock().unwrap().contains_key(name)
+}
+
 pub fn dispatch_host_tool(name: &str, args_json: &str) -> Option<String> {
     dispatch_registered_tool(name, args_json)
 }
@@ -199,120 +203,6 @@ fn dispatch_registered_tool(name: &str, args_json: &str) -> Option<String> {
     }
     let result = unsafe { CString::from_raw(result_ptr) };
     result.into_string().ok()
-}
-
-/// Decode the codegen-supplied trace-buffer args, dispatch to the
-/// registered host tool, and return `(tool_name, result_json)`. Panics
-/// with a clear message when the tool is not registered — a live native
-/// call to an unregistered tool is a host wiring error, mirroring how
-/// the replay family panics on a missing recorded result.
-///
-/// # Safety
-///
-/// `tool` / `arg_types` must be valid `CorvidString`s and
-/// `argc` / `args_ptr` a valid trace-value buffer (as produced by the
-/// tool-call codegen, identical to the replay path).
-unsafe fn invoke_decoded_json(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> (String, String) {
-    let tool_name = read_corvid_string(tool);
-    let arg_tags = borrow_corvid_string(&arg_types);
-    let args = crate::native_trace::decode_trace_values(arg_tags, argc, args_ptr);
-    let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
-    let result_json = dispatch_registered_tool(&tool_name, &args_json).unwrap_or_else(|| {
-        panic!(
-            "corvid tool `{tool_name}` is not registered (or its callback returned null); a host must register it via corvid_register_tool before the agent invokes it"
-        )
-    });
-    (tool_name, result_json)
-}
-
-fn parse_tool_result(tool_name: &str, result_json: &str) -> serde_json::Value {
-    serde_json::from_str(result_json).unwrap_or_else(|err| {
-        panic!("corvid tool `{tool_name}` returned invalid JSON (`{result_json}`): {err}")
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_int(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> i64 {
-    let (name, json) = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-    parse_tool_result(&name, &json)
-        .as_i64()
-        .unwrap_or_else(|| panic!("corvid tool `{name}` returned non-int result `{json}`"))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_bool(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> bool {
-    let (name, json) = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-    parse_tool_result(&name, &json)
-        .as_bool()
-        .unwrap_or_else(|| panic!("corvid tool `{name}` returned non-bool result `{json}`"))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_float(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> f64 {
-    let (name, json) = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-    parse_tool_result(&name, &json)
-        .as_f64()
-        .unwrap_or_else(|| panic!("corvid tool `{name}` returned non-float result `{json}`"))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_string(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> CorvidString {
-    let (name, json) = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-    parse_tool_result(&name, &json)
-        .as_str()
-        .unwrap_or_else(|| panic!("corvid tool `{name}` returned non-string result `{json}`"))
-        .to_owned()
-        .into_corvid_abi()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_nothing(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) {
-    let _ = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-}
-
-/// Struct-returning tools hand the result JSON object straight back to
-/// the caller (the native tool-call codegen decodes it into a struct
-/// handle via the per-struct decoder, the same way prompt struct
-/// returns are decoded).
-#[no_mangle]
-pub unsafe extern "C" fn corvid_invoke_tool_struct(
-    tool: CorvidString,
-    arg_types: CorvidString,
-    argc: i64,
-    args_ptr: i64,
-) -> CorvidString {
-    let (_, json) = invoke_decoded_json(tool, arg_types, argc, args_ptr);
-    json.into_corvid_abi()
 }
 
 #[cfg(test)]

@@ -38,6 +38,26 @@ pub struct IrFile {
     /// needs to build a `ConnectorRequest` when one of those tools is
     /// called.
     pub connectors: Vec<IrConnector>,
+    /// `action` declarations (B10): which agents are actions, and who
+    /// may call each from outside the program. Each also lowers to an
+    /// `IrAgent` in `agents` of the same name, so Corvid code calls it
+    /// as any agent.
+    pub actions: Vec<IrAction>,
+}
+
+/// An `action` (B10): the agent `name`, callable from outside the program
+/// only by a caller its `policy` admits. An empty policy is `requires
+/// anyone`, which the source spelled out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IrAction {
+    pub name: String,
+    pub agent: DefId,
+    pub policy: IrRoutePolicy,
+    /// Who decides an `approve` the action's body reaches.
+    pub approval: Option<corvid_ast::ApprovalSpec>,
+    /// The `assistants:` line, when an assistant is offered the action.
+    pub assistants: Option<corvid_ast::AssistantExposure>,
+    pub span: Span,
 }
 
 /// A `connector` block lowered to IR (slice 52g-3). Its operations
@@ -123,6 +143,9 @@ pub struct IrOperation {
     pub stream_until: Option<String>,
     /// `on failure -> Variant`: the error variant every failure becomes.
     pub on_failure: Option<String>,
+    /// `auth: bearer(token)`: the `Secret` parameter this call sends as
+    /// its bearer credential, in place of the connector's `auth:`.
+    pub bearer_param: Option<String>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,
@@ -235,6 +258,16 @@ pub struct IrRoutePolicy {
 }
 
 impl IrRoutePolicy {
+    /// The policy a `requires` clause declares; routes and actions both
+    /// lower through this.
+    pub fn from_ast(policy: &corvid_ast::RoutePolicy) -> Self {
+        Self {
+            authenticated: policy.authenticated,
+            roles: policy.roles.clone(),
+            permissions: policy.permissions.clone(),
+        }
+    }
+
     /// Whether the route requires authentication at all — an explicit
     /// `authenticated`, or any role/permission requirement (which implies
     /// it).
@@ -1171,7 +1204,8 @@ pub enum IrExprKind {
 
     /// A query chain (B09 P2): `Shelf.where(fn (s) -> cond)` or
     /// `Shelf.all()`, then optional `order_by`, `descending` and `take`.
-    /// It runs as one database query and has type `List<Shelf>`.
+    /// It runs as one database query and has type `List<Shelf>`, or the
+    /// aggregate's type when it ends in one.
     TableQuery {
         table: IrTable,
         /// `None` for `all()`.
@@ -1180,7 +1214,23 @@ pub enum IrExprKind {
         order: Option<String>,
         descending: bool,
         take: Option<Box<IrExpr>>,
+        /// `count()`, or `sum`, `min` or `max` of a column (aggregates J1).
+        aggregate: Option<IrQueryAggregate>,
     },
+}
+
+/// A query's last stage when it reduces the rows to one value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrQueryAggregate {
+    pub op: corvid_types::table_ops::QueryAggregate,
+    /// The column `sum`, `min`, `max` or `sum_by` reads; `None` for
+    /// `count` and `count_by`.
+    pub column: Option<String>,
+    /// The column's declared type, which decides how a `sum` is added.
+    pub column_ty: Option<Type>,
+    /// The column `count_by` and `sum_by` group by, with its declared
+    /// type, which each `Map` key has.
+    pub key: Option<(String, Type)>,
 }
 
 /// The expressions a query chain evaluates before it runs, in
@@ -1204,6 +1254,20 @@ pub enum IrTableFilter {
     Not(Box<IrTableFilter>),
     Compare { column: String, op: corvid_types::table_ops::QueryCompare, value: Box<IrExpr> },
     Text { column: String, test: corvid_types::table_ops::QueryTextTest, value: Box<IrExpr> },
+    /// `values.contains(row.column)` (J3): the column holds one of a list.
+    InList { column: String, values: Box<IrExpr> },
+    /// `Other.where(...).keys().contains(row.column)` (J3b) on a table in
+    /// the same database: the column holds one of the inner query's keys,
+    /// read in the same statement.
+    InQuery { column: String, inner: Box<IrSubquery> },
+}
+
+/// The inner query of an [`IrTableFilter::InQuery`].
+#[derive(Debug, Clone)]
+pub struct IrSubquery {
+    pub table: IrTable,
+    /// `None` for `all()`.
+    pub filter: Option<IrTableFilter>,
 }
 
 impl IrTableFilter {
@@ -1222,7 +1286,12 @@ impl IrTableFilter {
                 right.collect_values(out);
             }
             Self::Not(inner) => inner.collect_values(out),
-            Self::Compare { value, .. } | Self::Text { value, .. } => out.push(value),
+            Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => out.push(value),
+            Self::InQuery { inner, .. } => {
+                if let Some(filter) = &inner.filter {
+                    filter.collect_values(out);
+                }
+            }
         }
     }
 
@@ -1235,7 +1304,12 @@ impl IrTableFilter {
                 right.for_each_value_mut(visit);
             }
             Self::Not(inner) => inner.for_each_value_mut(visit),
-            Self::Compare { value, .. } | Self::Text { value, .. } => visit(value),
+            Self::Compare { value, .. } | Self::Text { value, .. } | Self::InList { values: value, .. } => visit(value),
+            Self::InQuery { inner, .. } => {
+                if let Some(filter) = &mut inner.filter {
+                    filter.for_each_value_mut(visit);
+                }
+            }
         }
     }
 }

@@ -171,6 +171,13 @@ pub fn run_with_target(
     };
 
     let mut scan = crate::native_ability::native_ability_with_tools(&ir, tools_lib.is_some());
+    // The command-line boundary's own rule: an entry agent that takes or
+    // returns what native code cannot carry runs on the interpreter.
+    if scan.is_ok() {
+        if let Some(reason) = corvid_codegen_cl::native_entry_refusal(&ir) {
+            scan = Err(crate::native_ability::NotNativeReason::EntryBoundary { reason });
+        }
+    }
     // A connector's mock is a Corvid expression the interpreter evaluates.
     if scan.is_ok() && !ir.connectors.is_empty() && connector_mode == Some(corvid_ast::ConnectorMode::Mock) {
         scan = Err(crate::native_ability::NotNativeReason::ConnectorMockMode);
@@ -284,43 +291,28 @@ fn parse_args_for_entry_agent(
             args.len()
         );
     }
+    // Each argument is read by the request-text rule a path segment, a
+    // query field, a form field and a `corvid act` flag use, so every
+    // text type (`Decimal`, `Duration`, `Instant`, a plain choice, ...)
+    // is accepted here too.
+    let types_by_id: std::collections::HashMap<_, _> = ir.types.iter().map(|t| (t.id, t)).collect();
     let mut parsed = Vec::with_capacity(args.len());
     for (param, raw) in chosen.params.iter().zip(args.iter()) {
-        let value = match &param.ty {
-            corvid_types::Type::Int => Value::Int(raw.parse::<i64>().map_err(|_| {
-                anyhow::anyhow!(
-                    "cannot parse `{raw}` as Int for parameter `{}` of agent `{}`",
-                    param.name,
-                    chosen.name
-                )
-            })?),
-            corvid_types::Type::Float => Value::Float(raw.parse::<f64>().map_err(|_| {
-                anyhow::anyhow!(
-                    "cannot parse `{raw}` as Float for parameter `{}` of agent `{}`",
-                    param.name,
-                    chosen.name
-                )
-            })?),
-            corvid_types::Type::Bool => match raw.as_str() {
-                "true" => Value::Bool(true),
-                "false" => Value::Bool(false),
-                _ => anyhow::bail!(
-                    "cannot parse `{raw}` as Bool for parameter `{}` of agent `{}` \
-                     (expected `true` or `false`)",
-                    param.name,
-                    chosen.name
-                ),
-            },
-            corvid_types::Type::String => {
-                Value::String(std::sync::Arc::<str>::from(raw.as_str()))
-            }
-            other => anyhow::bail!(
-                "parameter `{}` of agent `{}` has type `{}` which is not \
-                 supported as a CLI argument; only `Int` / `Float` / `Bool` / \
-                 `String` parameters can receive `corvid run` positional args",
+        let value = match corvid_vm::public_json::decode_request_text(raw, &param.ty, &types_by_id) {
+            Some(Ok(value)) => value,
+            Some(Err(reason)) => anyhow::bail!(
+                "cannot parse `{raw}` as {} for parameter `{}` of agent `{}`: {reason}",
+                param.ty.display_name(),
+                param.name,
+                chosen.name
+            ),
+            None => anyhow::bail!(
+                "parameter `{}` of agent `{}` has type `{}`, which a command-line argument cannot carry; \
+                 an argument is one of {}",
                 param.name,
                 chosen.name,
-                other.display_name()
+                param.ty.display_name(),
+                corvid_types::text_parameters::TEXT_TYPES
             ),
         };
         parsed.push(value);
@@ -334,6 +326,22 @@ fn run_via_interpreter_tier(
     args: &[String],
     connector_mode: Option<corvid_ast::ConnectorMode>,
 ) -> Result<u8, anyhow::Error> {
+    let Some(rt) = interpreter_runtime(path, ir, connector_mode)? else {
+        return Ok(1);
+    };
+    run_entry_with_runtime(path, ir, args, rt)
+}
+
+/// The runtime a program runs on in the interpreter tier from the
+/// command line: the stdin approver, the trace, the project's io, http,
+/// rag and MCP policy, the connector mode and env-driven models. `None`
+/// when the connector startup check refused, with the refusals printed.
+/// `corvid run` and `corvid act` both build it here.
+pub fn interpreter_runtime(
+    path: &Path,
+    ir: &IrFile,
+    connector_mode: Option<corvid_ast::ConnectorMode>,
+) -> Result<Option<Runtime>, anyhow::Error> {
     let trace_dir = trace_dir_for(path);
     let tracer = Tracer::open(&trace_dir, corvid_runtime::fresh_run_id())
         .with_redaction(RedactionSet::from_env());
@@ -413,7 +421,7 @@ fn run_via_interpreter_tier(
             for refusal in &refusals {
                 eprintln!("{}", refusal.message());
             }
-            return Ok(1);
+            return Ok(None);
         }
     }
 
@@ -431,7 +439,10 @@ fn run_via_interpreter_tier(
             );
         }
     }
+    Ok(Some(rt))
+}
 
+fn run_entry_with_runtime(path: &Path, ir: &IrFile, args: &[String], rt: Runtime) -> Result<u8, anyhow::Error> {
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -480,7 +491,17 @@ fn run_via_interpreter_tier(
     match result {
         Ok(corvid_vm::Value::Nothing) => Ok(0),
         Ok(value) => {
-            println!("{value}");
+            // The entry agent `run_ir_with_runtime` ran: the only agent,
+            // or `main`.
+            let entry = if ir.agents.len() == 1 {
+                ir.agents.first()
+            } else {
+                ir.agents.iter().find(|agent| agent.name == "main")
+            };
+            match entry {
+                Some(agent) => println!("{}", corvid_vm::printed_result(ir, agent, &value)),
+                None => println!("{value}"),
+            }
             Ok(0)
         }
         Err(RunError::Compile(diags)) => {
@@ -585,7 +606,7 @@ pub fn build_or_get_cached_native(
         .unwrap_or_default();
     let base = native_cache::cache_key_with_tools(source, &tools_lib_str);
     let key = match ir.import_fingerprint {
-        Some(digest) => format!("{base}-{}", hex::encode(digest)),
+        Some(digest) => format!("{base}-{}", corvid_hex::encode(&digest)),
         None => base,
     };
     let cached = native_cache::cached_binary_path(&cache_dir, &key);

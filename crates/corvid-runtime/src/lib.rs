@@ -75,6 +75,7 @@ pub mod lineage_eval;
 pub mod lineage_incidents;
 pub mod lineage_redact;
 pub mod lineage_render;
+pub mod lineage_trace;
 pub mod llm;
 pub mod models;
 pub mod native_layout;
@@ -159,6 +160,18 @@ pub use serde_json;
 /// The not-covered axes (host toolchain version, libc version)
 /// match the cache's existing documented escape hatch (`cargo
 /// clean` or `rm -rf target/cache/native/`).
+/// The stamp of the sources this runtime was built from (see
+/// `corvid-source-stamp`). An archive holding this runtime exports
+/// `RUNTIME_STAMP_SYMBOL`; a native build checks the archive it links
+/// for it, so it never links a runtime other than the one its code was
+/// generated for.
+// Exporting the stamp needs `no_mangle`, which counts as unsafe code: the
+// name is unique to these sources, so no other library defines it.
+#[allow(unsafe_code)]
+pub mod runtime_stamp {
+    include!(concat!(env!("OUT_DIR"), "/runtime_stamp.rs"));
+}
+
 pub mod c_runtime {
     /// Source and header contents in build-input order, without host paths.
     pub const SOURCE_FILE_BYTES: &[&[u8]] =
@@ -190,7 +203,8 @@ pub use auth::{
     validate_jwt_verification_contract, verify_api_key_secret, ApiKeyCreate, ApiKeyRecord,
     ApiKeyResolution, AuthActor, AuthAuditEvent, AuthTraceContext, AuthorizationDecision,
     authorize_route, effective_permissions_for, mint_csrf_token, verify_csrf_double_submit,
-    CsrfError, CsrfRequestMethod,
+    CsrfError, CsrfRequestMethod, hash_delegation_secret, DelegatedAction, DelegationCreate,
+    DelegationMode, DelegationRecord,
     ExternalIdentityLink, FirstLoginPolicy, Invitation, InvitationCreate, JwtContractDiagnostic,
     JwtVerificationContract, OAuthCallbackResolution, OAuthStateCreate, OAuthStatePurpose,
     OAuthStateRecord, PermissionRequirement, ProvisioningOutcome, ProvisioningRequest,
@@ -250,6 +264,7 @@ pub use lineage_redact::{
     LineageRedactionPolicy,
 };
 pub use lineage_render::render_lineage_tree;
+pub use lineage_trace::lineage_from_trace;
 pub use llm::{
     anthropic::AnthropicAdapter,
     gemini::GeminiAdapter,
@@ -312,3 +327,13 @@ pub use test_from_traces::{
 pub use tools::{ToolHandler, ToolRegistry};
 pub use tracing::{fresh_run_id, now_ms, Tracer};
 pub use usage::{LlmUsageLedger, LlmUsageRecord, LlmUsageTotals};
+
+/// The prompt a `with repair N` retry sends: the rendered prompt, the
+/// reply that failed and why. Both tiers build retries with this, so a
+/// recording of a repaired call replays on either.
+pub fn prompt_repair_rendered(rendered: &str, failed_reply: &serde_json::Value, feedback: &str) -> String {
+    format!(
+        "{rendered}\n\nYour previous response was:\n{failed_reply}\n\nIt failed schema validation: {feedback}\nRespond again, matching the required schema exactly."
+    )
+}
+

@@ -550,6 +550,12 @@ fn ensure_native_runtime_staticlib() -> Result<()> {
     } else {
         "libcorvid_runtime.a"
     };
+    // Only a missing staticlib is built here. A stale one is caught where
+    // it is linked: the shared lookup checks the archive's source stamp
+    // and rebuilds a stale development archive. Rebuilding here on every
+    // run instead rewrote the archive while other native builds linked it,
+    // because `cargo build -p corvid-runtime` and a test build produce
+    // different archives and kept replacing each other.
     if corvid_codegen_cl::staticlib_discovery::discover_staticlib(filename)
         .is_some_and(|location| location.path.is_file())
     {

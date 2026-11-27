@@ -258,17 +258,6 @@ void corvid_print_bool(long long v) {
     fflush(stdout);
 }
 
-/* The interpreter's printed form, from the runtime's `number_text`, so a
- * native result prints exactly as `corvid run` prints it there. */
-extern size_t corvid_float_display_text(double value, char* buffer, size_t capacity);
-
-void corvid_print_f64(double v) {
-    char buf[64];
-    size_t len = corvid_float_display_text(v, buf, sizeof(buf));
-    printf("%.*s\n", (int)len, buf);
-    fflush(stdout);
-}
-
 /* Print a Corvid String — descriptor at offset 0 = bytes_ptr,
  * offset 8 = length. */
 void corvid_print_string(void* descriptor) {
@@ -285,6 +274,18 @@ void corvid_print_string(void* descriptor) {
     }
     fputc('\n', stdout);
     fflush(stdout);
+}
+
+/* A `Float` as text for people, `float.to_string()`'s form from the
+ * runtime's `number_text`, so a native result prints exactly as the
+ * interpreter prints it, at any length (`1e300` is 301 digits). */
+extern void* corvid_float_to_string(double value);
+extern void corvid_release(void* payload);
+
+void corvid_print_f64(double v) {
+    void* text = corvid_float_to_string(v);
+    corvid_print_string(text);
+    corvid_release(text);
 }
 
 long long corvid_bench_server_enabled(void) {

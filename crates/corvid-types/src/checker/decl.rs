@@ -29,6 +29,24 @@ impl<'a> Checker<'a> {
         if a.extern_abi.is_some() {
             self.check_extern_c_signature(a);
         }
+        if let Some(spec) = &a.action {
+            self.check_action_policy(a, spec);
+            let reaches_approval = block_reaches_approval(
+                &a.body,
+                self.bindings,
+                &self.agents_by_id,
+                self.methods,
+                &self.types,
+                &mut HashSet::new(),
+            );
+            self.check_approval_clause(
+                &format!("action `{}`", a.name.name),
+                reaches_approval,
+                spec.policy.requires_auth(),
+                spec.approval.as_ref(),
+                spec.span,
+            );
+        }
 
         let declared_ret = self.type_ref_to_type(&a.return_ty);
         let prev_ret = std::mem::replace(&mut self.current_return, Some(declared_ret.clone()));
@@ -212,6 +230,15 @@ impl<'a> Checker<'a> {
             }
             Some(_) => {}
         }
+        // Who may watch a live query is a consequential choice, so it is
+        // written, never left to a default (RT-1 follow-up). A public list
+        // says `requires anyone`.
+        if route.policy.is_none() {
+            invalid(
+                self,
+                "declares no `requires`; say who may watch it: `requires anyone` for a public list, or `requires authenticated`, `role(\"...\")` or `permission(\"...\")`".into(),
+            );
+        }
         let row_name = match route.response.live_row() {
             Some(corvid_ast::TypeRef::Named { name, .. }) => name.name.clone(),
             _ => {
@@ -246,6 +273,44 @@ impl<'a> Checker<'a> {
         }
         if query.take.is_some() {
             invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
+        }
+        // A list may read other tables, which the live query then also
+        // watches (J5). A call by name (an agent, tool, prompt or function)
+        // could read anything, so the feed could not know when to refresh.
+        let lists = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => params
+                .first()
+                .and_then(|row| crate::table_ops::query_condition(query.table, &row.name.name, body).ok())
+                .map(|condition| condition.lists())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for list in lists {
+            let mut named_call = None;
+            corvid_ast::visit::walk_expr(list, &mut |expr| {
+                if let Expr::Call { callee, .. } = expr {
+                    if let Expr::Ident { name, .. } = callee.as_ref() {
+                        named_call.get_or_insert_with(|| name.name.clone());
+                    }
+                }
+            });
+            if let Some(callee) = named_call {
+                invalid(
+                    self,
+                    format!(
+                        "filters by a list that calls `{callee}`; a live query keeps its rows current by watching the tables its query reads, and cannot see what a call reads. Build the list from table queries, such as `Board.where(...).keys()`, or from `path` and `actor`"
+                    ),
+                );
+            }
+        }
+        if let Some((aggregate, _)) = query.aggregate {
+            invalid(
+                self,
+                format!(
+                    "ends in `{}`; a live query delivers rows, and a live count or total, which needs its own message to the browser, is not supported yet",
+                    aggregate.name()
+                ),
+            );
         }
     }
 
@@ -666,6 +731,7 @@ impl<'a> Checker<'a> {
             self.check_operation_query_and_headers(decl, op, &param_names);
             self.check_operation_response_shape(decl, op);
             self.check_operation_on_failure(decl, op);
+            self.check_operation_auth(decl, op);
             self.check_operation_stream(decl, op);
             self.check_operation_body(decl, op);
 
@@ -870,37 +936,12 @@ impl<'a> Checker<'a> {
                         policy.span,
                     ));
                 }
-                // A `requires role/permission` clause must reference a name
-                // declared in the identity block's `roles:` — otherwise the
-                // requirement can never be satisfied and is almost certainly
-                // a typo (slice 52f). Only checked when an identity block
-                // exists (the missing-identity error above already fires).
-                if self.has_identity {
-                    for role in &policy.roles {
-                        if !self.identity_roles.contains(role) {
-                            self.errors.push(TypeError::new(
-                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
-                                    kind: "role",
-                                    name: role.clone(),
-                                    path: route.path.clone(),
-                                },
-                                policy.span,
-                            ));
-                        }
-                    }
-                    for permission in &policy.permissions {
-                        if !self.identity_permissions.contains(permission) {
-                            self.errors.push(TypeError::new(
-                                TypeErrorKind::RoutePolicyUndeclaredAuthority {
-                                    kind: "permission",
-                                    name: permission.clone(),
-                                    path: route.path.clone(),
-                                },
-                                policy.span,
-                            ));
-                        }
-                    }
-                }
+                let path = route.path.clone();
+                self.check_policy_authorities(policy, &|kind, name| TypeErrorKind::RoutePolicyUndeclaredAuthority {
+                    kind,
+                    name: name.to_string(),
+                    path: path.clone(),
+                });
                 self.bind_route_local_by_name(&route.body, "actor", actor_type());
             }
         }
@@ -923,56 +964,59 @@ impl<'a> Checker<'a> {
         self.in_agent_body = prev_in_agent;
         self.saw_stream_output = prev_saw_stream_output;
 
-        if reaches_approval
-            && !route
-                .policy
-                .as_ref()
-                .is_some_and(corvid_ast::RoutePolicy::requires_auth)
-        {
+        self.check_approval_clause(
+            &format!("route `{}`", route.path),
+            reaches_approval,
+            route.policy.as_ref().is_some_and(corvid_ast::RoutePolicy::requires_auth),
+            route.approval.as_ref(),
+            route.span,
+        );
+
+        let _ = server;
+    }
+
+    /// The approval rule routes and actions share: one that can reach an
+    /// `approve` requires a signed-in caller and declares a complete
+    /// `@approval(...)` whose reviewer role exists and can decide; one
+    /// that cannot reach an `approve` declares none. `subject` names the
+    /// declaration in errors, as "route `/x`" or "action `x`".
+    pub(super) fn check_approval_clause(
+        &mut self,
+        subject: &str,
+        reaches_approval: bool,
+        signed_in: bool,
+        approval: Option<&corvid_ast::ApprovalSpec>,
+        span: Span,
+    ) {
+        let invalid = |message: String| TypeErrorKind::ApprovalPolicyInvalid { subject: subject.to_string(), message };
+        if reaches_approval && !signed_in {
             self.errors.push(TypeError::new(
-                TypeErrorKind::RouteApprovalRequiresAuthentication {
-                    path: route.path.clone(),
-                },
-                route.span,
+                TypeErrorKind::ApprovalRequiresAuthentication { subject: subject.to_string() },
+                span,
             ));
         }
-        match (reaches_approval, route.approval.as_ref()) {
+        match (reaches_approval, approval) {
             (true, None) => self.errors.push(TypeError::with_guarantee(
-                TypeErrorKind::RouteApprovalPolicyInvalid {
-                    path: route.path.clone(),
-                    message: "an approval-capable route must declare a complete `@approval(...)` policy; serve never invents reviewer authority or expiry".into(),
-                },
-                route.span,
+                invalid(format!("{subject} can reach an `approve`, so it must declare a complete `@approval(...)` policy; serve never invents reviewer authority or expiry")),
+                span,
                 "approval.policy_clause_static_check",
             )),
             (false, Some(spec)) => self.errors.push(TypeError::with_guarantee(
-                TypeErrorKind::RouteApprovalPolicyInvalid {
-                    path: route.path.clone(),
-                    message: "`@approval(...)` is only valid when the route can reach an `approve` boundary".into(),
-                },
+                invalid("`@approval(...)` is only valid when it can reach an `approve` boundary".into()),
                 spec.span,
                 "approval.policy_clause_static_check",
             )),
             (true, Some(spec)) => {
                 if !self.identity_roles.contains(&spec.role) {
                     self.errors.push(TypeError::with_guarantee(
-                        TypeErrorKind::RouteApprovalPolicyInvalid {
-                            path: route.path.clone(),
-                            message: format!(
-                                "reviewer role `{}` is not declared in the identity block",
-                                spec.role
-                            ),
-                        },
+                        invalid(format!("reviewer role `{}` is not declared in the identity block", spec.role)),
                         spec.span,
                         "approval.policy_clause_static_check",
                     ));
                 }
                 if !self.identity_permissions.contains("approvals.decide") {
                     self.errors.push(TypeError::with_guarantee(
-                        TypeErrorKind::RouteApprovalPolicyInvalid {
-                            path: route.path.clone(),
-                            message: "the identity roles grant no `approvals.decide` permission, so this approval could never be decided".into(),
-                        },
+                        invalid("the identity roles grant no `approvals.decide` permission, so this approval could never be decided".into()),
                         spec.span,
                         "approval.policy_clause_static_check",
                     ));
@@ -980,8 +1024,6 @@ impl<'a> Checker<'a> {
             }
             (false, None) => {}
         }
-
-        let _ = server;
     }
 
     fn bind_route_local_by_name(&mut self, block: &Block, name: &str, ty: Type) {
@@ -1326,13 +1368,7 @@ fn is_direct_upload_type(ty: &corvid_ast::TypeRef) -> bool {
 /// sets. Provider tokens are deliberately ABSENT — the login actor
 /// never carries connector workspace credentials (slice 51j).
 fn actor_type() -> Type {
-    Type::RouteParams(vec![
-        ("id".to_string(), Type::String),
-        ("tenant".to_string(), Type::String),
-        ("display_name".to_string(), Type::String),
-        ("roles".to_string(), Type::List(Box::new(Type::String))),
-        ("permissions".to_string(), Type::List(Box::new(Type::String))),
-    ])
+    Type::actor()
 }
 
 /// A conservative "looks like a bare registrable domain" check for
@@ -1959,6 +1995,65 @@ impl<'a> Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// `auth: bearer(token)` on an operation: `token` is one of its
+    /// parameters, exactly a `Secret`, and sent only as the credential.
+    /// Refused on an `async:` operation, whose arguments are kept so it
+    /// can be polled later: a person's token is never stored.
+    fn check_operation_auth(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let Some(auth) = &op.auth else { return };
+        let credential = auth.param();
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                credential.span,
+            )
+        };
+        let operation = &op.name.name;
+        let name = &credential.name;
+        let Some(param) = op.params.iter().find(|p| p.name.name == *name) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `auth: bearer({name})`, but it declares no parameter named `{name}`; add `{name}: Secret` to its parameters"
+            )));
+            return;
+        };
+        let ty = self.type_ref_to_type(&param.ty);
+        if ty != Type::Secret {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `{name}` as its credential, so `{name}` must be a `Secret`, which never reaches a trace or a log; it is a `{}`",
+                ty.display_name()
+            )));
+        }
+        if op.protocol.is_some() {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` has an `async:` protocol, whose arguments are kept so it can be polled later; a person's token is never stored, so it cannot take `auth: bearer({name})`"
+            )));
+        }
+        let mut uses = Vec::new();
+        if op.body.as_ref().is_some_and(|body| body.param.name == *name) {
+            uses.push("the body".to_string());
+        }
+        if op.query.as_ref().is_some_and(|query| query.name == *name) {
+            uses.push("the query".to_string());
+        }
+        if op.url_param.as_ref().is_some_and(|url| url.name == *name) {
+            uses.push("the URL".to_string());
+        }
+        if path_placeholders(&op.path).iter().any(|placeholder| placeholder == name) {
+            uses.push("a path segment".to_string());
+        }
+        for header in &op.headers {
+            if matches!(&header.value, corvid_ast::OperationHeaderValue::Param(p) if p.name == *name) {
+                uses.push(format!("header `{}`", header.name));
+            }
+        }
+        if !uses.is_empty() {
+            self.errors.push(invalid(format!(
+                "`{name}` is operation `{operation}`'s credential, so only `auth:` may send it; it is also sent as {}",
+                uses.join(" and ")
+            )));
+        }
+    }
+
     /// `on failure -> Variant` turns every failure into a typed error, so
     /// the operation returns a `Result` whose error type declares the
     /// variant, with no fields or one `String` field for the reason.

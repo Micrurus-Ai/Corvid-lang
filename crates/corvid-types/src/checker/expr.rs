@@ -30,6 +30,28 @@ impl<'a> Checker<'a> {
             {
                 self.check_decimal_literal(value, *span)
             }
+            // An integer literal where a `Float` is meant is one, when a
+            // `Float` holds it exactly (`ratio: Float = 1`).
+            Expr::Literal { value: Literal::Int(n), span } if matches!(expected, Some(Type::Float)) => {
+                if !int_is_exact_float(*n) {
+                    self.errors.push(TypeError::new(TypeErrorKind::FloatLiteralInexact { literal: *n }, *span));
+                }
+                Type::Float
+            }
+            // A whole number beyond `Int`'s range, which the lexer keeps as
+            // its digits. A `Decimal` slot reads it exactly (the arm
+            // above); a `Float` slot takes it when a `Float` holds it
+            // exactly; anywhere else it is refused, never rounded.
+            Expr::Literal { value: Literal::Float { value, text }, span }
+                if !text.contains('.') && !matches!(expected, Some(Type::Decimal)) =>
+            {
+                if matches!(expected, Some(Type::Float)) && format!("{value:.0}") == *text {
+                    Type::Float
+                } else {
+                    self.errors.push(TypeError::new(TypeErrorKind::IntLiteralOutOfRange { literal: text.clone() }, *span));
+                    Type::Int
+                }
+            }
             // B06 — likewise for a `Currency` and a `Locale`.
             Expr::Literal { value: Literal::String(code), span } if matches!(expected, Some(Type::Currency)) => {
                 self.check_currency_literal(code, *span)
@@ -157,7 +179,16 @@ impl<'a> Checker<'a> {
                     _ => (Type::Unknown, Type::Unknown),
                 };
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    let kt = self.check_expr(k);
+                    // A key takes the expected key type, as a value takes
+                    // the expected value type: `{1.0: "one"}` where a
+                    // `Map<Decimal, String>` is meant has `Decimal` keys,
+                    // and `{"EUR": 30 seconds}` a `Currency` key.
+                    let expected_key = match expected {
+                        Some(Type::Map(key, _)) => Some(key.as_ref()),
+                        _ if i > 0 => Some(&key_ty),
+                        _ => None,
+                    };
+                    let kt = self.check_expr_as(k, expected_key);
                     let expected_value = match expected {
                         Some(Type::Map(_, value)) => Some(value.as_ref()),
                         _ if i > 0 => Some(&val_ty),
@@ -334,7 +365,9 @@ impl<'a> Checker<'a> {
                 // B03 — a `RegexMatch` comes only from the regex methods.
                 | BuiltIn::RegexMatch
                 // B01 — a `JsonError` comes only from `from_json`.
-                | BuiltIn::JsonError => {
+                | BuiltIn::JsonError
+                // B10 — a `Caller` comes only from a verified session.
+                | BuiltIn::Caller => {
                     self.errors.push(TypeError::new(
                         TypeErrorKind::TypeAsValue {
                             name: id.name.clone(),
@@ -814,13 +847,14 @@ impl<'a> Checker<'a> {
 fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) -> Type {
     use corvid_ast::TypeRef;
     match tr {
-        TypeRef::Named { name, .. } => Type::compiler_known(&name.name).unwrap_or_else(|| {
-            checker
+        TypeRef::Named { name, .. } => {
+            let declared = checker
                 .symbols
                 .lookup_def(&name.name)
-                .map(Type::Struct)
-                .unwrap_or(Type::Unknown)
-        }),
+                .filter(|id| checker.symbols.get(*id).kind == corvid_resolve::DeclKind::Type);
+            Type::builtin_named(&name.name, declared.is_some())
+                .unwrap_or_else(|| declared.map(Type::Struct).unwrap_or(Type::Unknown))
+        }
         TypeRef::Generic { name, args, .. } if args.len() == 1 => {
             let inner = type_ref_to_type_readonly(&args[0], checker);
             match name.name.as_str() {
@@ -932,3 +966,11 @@ fn unify_replay_arm_type_for_else(
         }
     }
 }
+
+/// Whether a `Float` holds `n` exactly: every whole number within 2^53,
+/// and beyond it only those the conversion does not round.
+pub(crate) fn int_is_exact_float(n: i64) -> bool {
+    let float = n as f64;
+    float >= -(2f64.powi(63)) && float < 2f64.powi(63) && float as i64 == n
+}
+

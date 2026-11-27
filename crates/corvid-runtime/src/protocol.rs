@@ -170,6 +170,10 @@ pub fn provider_canonical_encoding(spec: &crate::connectors::ConnectorHttpSpec) 
             username_secret,
             password_secret,
         }) => format!("basic:{username_secret}:{password_secret}"),
+        // The checker refuses an operation credential on an `async:`
+        // operation; named by its parameter, never its value, if one is
+        // ever encoded.
+        Some(ConnectorAuthSpec::BearerArgument { param }) => format!("bearer_argument:{param}"),
     };
     format!(
         "encoding={}\nconnector={}\nbase_url={}\nmethod={}\npath={}\nauth={}",

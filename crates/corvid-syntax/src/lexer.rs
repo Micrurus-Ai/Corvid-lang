@@ -210,10 +210,13 @@ impl<'a> Lexer<'a> {
             let text = &self.src[start..self.pos];
             match text.parse::<i64>() {
                 Ok(v) => self.emit(TokKind::Int(v), Span::new(start, self.pos)),
-                Err(_) => self.errors.push(LexError {
-                    kind: LexErrorKind::InvalidNumber(text.to_string()),
-                    span: Span::new(start, self.pos),
-                }),
+                // Digits beyond `Int`'s range keep their exact text, as a
+                // float literal does: a `Decimal` slot reads them exactly,
+                // and the checker refuses them where an `Int` is meant.
+                Err(_) => self.emit(
+                    TokKind::Float { value: text.parse::<f64>().unwrap_or(f64::INFINITY), text: text.to_string() },
+                    Span::new(start, self.pos),
+                ),
             }
         }
     }

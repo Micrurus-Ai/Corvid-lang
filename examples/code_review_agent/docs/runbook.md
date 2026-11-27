@@ -28,7 +28,7 @@
 
 ## Observe
 
-- Confirm each run emits one `ReviewSession` with `posted: false` unless the
+- Confirm each run emits one `ReviewSession` with `"posted":false` unless the
   operator explicitly chose the approved write path.
 - Track GitHub read status, LLM structured-output parse status, and approval
   prompts separately.

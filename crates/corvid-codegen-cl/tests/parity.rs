@@ -66,6 +66,8 @@ mod currency;
 mod crypto;
 #[path = "parity/loop_ownership.rs"]
 mod loop_ownership;
+#[path = "parity/text_scalar_maps.rs"]
+mod text_scalar_maps;
 #[path = "parity/refinements.rs"]
 mod refinements;
 #[path = "parity/comparison_literals.rs"]
@@ -77,18 +79,7 @@ mod comparison_literals;
 /// onwards). Pure-computation fixtures don't call into it — the dead
 /// symbols are stripped by the linker.
 fn test_tools_lib_path() -> PathBuf {
-    // The staticlib is in the release directory of Cargo's target
-    // directory, wherever CARGO_TARGET_DIR or build.target-dir puts it.
-    let path = corvid_test_paths::test_tools_staticlib();
-    // `corvid_test_tools.lib` already bundles `corvid-runtime` as a
-    // transitive Rust dep (along with the C runtime objects); routing
-    // the linker through this single Rust staticlib avoids the
-    // duplicate-`std` LNK2005 that linking it alongside the
-    // standalone `corvid_runtime.lib` produces on MSVC.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 /// Run a compiled binary with the leak detector enabled. Returns

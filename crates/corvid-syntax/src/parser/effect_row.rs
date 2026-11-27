@@ -205,7 +205,11 @@ impl<'a> Parser<'a> {
     ) -> Result<(Vec<AgentAttribute>, Vec<EffectConstraint>), ParseError> {
         let mut attributes = Vec::new();
         let mut constraints = Vec::new();
-        while matches!(self.peek(), TokKind::At) {
+        // `@approval(...)` is an action's approval policy, read by the
+        // declaration parser, not an agent annotation.
+        while matches!(self.peek(), TokKind::At)
+            && !matches!(self.peek_ahead(1), TokKind::Ident(name) if name == "approval")
+        {
             let start = self.peek_span();
             self.bump(); // @
             // Annotation names may collide with reserved keywords

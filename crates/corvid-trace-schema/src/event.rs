@@ -244,6 +244,24 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
+    /// Where one recorded table operation spent its time in the
+    /// database. It is written just before the operation's `ToolResult`,
+    /// and `tool` names the operation (`table:<Table>.<op>`). Waiting
+    /// covers a turn at the Postgres pool or at SQLite's writer queue; a
+    /// growing wait with steady statement time means `connections:` is
+    /// too small. Evidence only: replay never substitutes it, because
+    /// timing is not part of a result.
+    DbTiming {
+        ts_ms: u64,
+        run_id: String,
+        tool: String,
+        /// Microseconds spent waiting for a connection or a turn to write.
+        wait_us: u64,
+        /// Microseconds spent running the operation's statements.
+        statement_us: u64,
+        /// How many statements the operation ran.
+        statements: u32,
+    },
     /// A pseudo-random number read. Recorded per draw so replay
     /// can reproduce the exact sequence even when the seeded PRNG
     /// runs through different call paths.
@@ -389,4 +407,95 @@ pub enum TraceEvent {
         #[serde(default)]
         label: Option<String>,
     },
+}
+
+impl TraceEvent {
+    /// The run this event belongs to. Every event carries one; readers ask
+    /// here rather than matching each variant, so a new event kind is
+    /// read everywhere once it is added to these two matches.
+    pub fn run_id(&self) -> &str {
+        match self {
+            Self::SchemaHeader { run_id, .. }
+            | Self::RunStarted { run_id, .. }
+            | Self::RunCompleted { run_id, .. }
+            | Self::ToolCall { run_id, .. }
+            | Self::ToolResult { run_id, .. }
+            | Self::LlmCall { run_id, .. }
+            | Self::LlmResult { run_id, .. }
+            | Self::PromptCache { run_id, .. }
+            | Self::ApprovalRequest { run_id, .. }
+            | Self::ApprovalDecision { run_id, .. }
+            | Self::ApprovalResponse { run_id, .. }
+            | Self::ApprovalTokenIssued { run_id, .. }
+            | Self::ApprovalScopeViolation { run_id, .. }
+            | Self::HumanInputRequest { run_id, .. }
+            | Self::HumanInputResponse { run_id, .. }
+            | Self::HumanChoiceRequest { run_id, .. }
+            | Self::HumanChoiceResponse { run_id, .. }
+            | Self::HostEvent { run_id, .. }
+            | Self::HttpExchange { run_id, .. }
+            | Self::DbTiming { run_id, .. }
+            | Self::SeedRead { run_id, .. }
+            | Self::ClockRead { run_id, .. }
+            | Self::ModelSelected { run_id, .. }
+            | Self::ProgressiveEscalation { run_id, .. }
+            | Self::ProgressiveExhausted { run_id, .. }
+            | Self::StreamUpgrade { run_id, .. }
+            | Self::AbVariantChosen { run_id, .. }
+            | Self::EnsembleVote { run_id, .. }
+            | Self::AdversarialPipelineCompleted { run_id, .. }
+            | Self::AdversarialContradiction { run_id, .. }
+            | Self::ProvenanceEdge { run_id, .. } => run_id,
+        }
+    }
+
+    /// When this event happened, in milliseconds since the Unix epoch.
+    pub fn ts_ms(&self) -> u64 {
+        match self {
+            Self::SchemaHeader { ts_ms, .. }
+            | Self::RunStarted { ts_ms, .. }
+            | Self::RunCompleted { ts_ms, .. }
+            | Self::ToolCall { ts_ms, .. }
+            | Self::ToolResult { ts_ms, .. }
+            | Self::LlmCall { ts_ms, .. }
+            | Self::LlmResult { ts_ms, .. }
+            | Self::PromptCache { ts_ms, .. }
+            | Self::ApprovalRequest { ts_ms, .. }
+            | Self::ApprovalDecision { ts_ms, .. }
+            | Self::ApprovalResponse { ts_ms, .. }
+            | Self::ApprovalTokenIssued { ts_ms, .. }
+            | Self::ApprovalScopeViolation { ts_ms, .. }
+            | Self::HumanInputRequest { ts_ms, .. }
+            | Self::HumanInputResponse { ts_ms, .. }
+            | Self::HumanChoiceRequest { ts_ms, .. }
+            | Self::HumanChoiceResponse { ts_ms, .. }
+            | Self::HostEvent { ts_ms, .. }
+            | Self::HttpExchange { ts_ms, .. }
+            | Self::DbTiming { ts_ms, .. }
+            | Self::SeedRead { ts_ms, .. }
+            | Self::ClockRead { ts_ms, .. }
+            | Self::ModelSelected { ts_ms, .. }
+            | Self::ProgressiveEscalation { ts_ms, .. }
+            | Self::ProgressiveExhausted { ts_ms, .. }
+            | Self::StreamUpgrade { ts_ms, .. }
+            | Self::AbVariantChosen { ts_ms, .. }
+            | Self::EnsembleVote { ts_ms, .. }
+            | Self::AdversarialPipelineCompleted { ts_ms, .. }
+            | Self::AdversarialContradiction { ts_ms, .. }
+            | Self::ProvenanceEdge { ts_ms, .. } => *ts_ms,
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod accessor_tests {
+    use super::TraceEvent;
+
+    /// The two fields every event carries, read without matching its kind.
+    #[test]
+    fn every_event_reads_its_run_and_time() {
+        let event = TraceEvent::SeedRead { ts_ms: 42, run_id: "run-7".into(), purpose: "p".into(), value: 1 };
+        assert_eq!((event.run_id(), event.ts_ms()), ("run-7", 42));
+    }
 }

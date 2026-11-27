@@ -111,25 +111,7 @@ fn build_record_library() -> BuiltLibrary {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = std::process::Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::cdylib::runtime_staticlib_path`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn build_approval_library() -> BuiltLibrary {
@@ -343,15 +325,34 @@ fn prompt_call_agent_replays_recorded_trace_on_windows() {
         assert_ne!(observation, 0);
         free_result(result);
 
-        // Switch from record to replay. EnvScope tracks the prior
-        // values from this test's first phase, so its Drop will
-        // restore both phases' mutations together.
+        // Switch from record to replay. A loaded library starts its
+        // runtime once, from the environment of its first call, so the
+        // replay runs in a fresh copy of the library, loaded after the
+        // replay environment is set; the model now answers "negative",
+        // so "positive" can only come from the recording. EnvScope
+        // restores both phases' variables on drop.
         env.set("CORVID_REPLAY_TRACE_PATH", &record_path);
         env.set("CORVID_TRACE_DISABLE", "1");
         env.set(
             "CORVID_TEST_MOCK_LLM_REPLIES",
             "{\"classify_prompt\":\"negative\"}",
         );
+        let replay_copy = trace_dir.path().join(built.path.file_name().expect("library file name"));
+        std::fs::copy(&built.path, &replay_copy).expect("copy the library for the replay");
+        let replay_lib = Library::new(&replay_copy).expect("load the replay copy");
+        let call_agent: libloading::Symbol<
+            unsafe extern "C" fn(
+                *const c_char,
+                *const c_char,
+                usize,
+                *mut *mut c_char,
+                *mut usize,
+                *mut u64,
+                *mut CorvidApprovalRequired,
+            ) -> CorvidCallStatus,
+        > = replay_lib.get(b"corvid_call_agent").expect("resolve corvid_call_agent");
+        let free_result: libloading::Symbol<unsafe extern "C" fn(*mut c_char)> =
+            replay_lib.get(b"corvid_free_result").expect("resolve corvid_free_result");
 
         let mut replay_result = std::ptr::null_mut();
         let mut replay_result_len = 0usize;
@@ -379,6 +380,7 @@ fn prompt_call_agent_replays_recorded_trace_on_windows() {
         assert_ne!(replay_observation, 0);
         free_result(replay_result);
 
+        std::mem::forget(replay_lib);
         std::mem::forget(lib);
     }
 }

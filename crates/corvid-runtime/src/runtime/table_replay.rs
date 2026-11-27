@@ -2,7 +2,8 @@
 //!
 //! A table operation is recorded like a tool call: a `ToolCall` event
 //! named `table:<Table>.<op>` with its arguments, then a `ToolResult`
-//! with the outcome. Replay serves the recorded outcome through the
+//! with the outcome, preceded by a `DbTiming` event saying how long the
+//! operation waited for a connection and ran. Replay serves the recorded outcome through the
 //! same cursor tool calls use, so a replayed run reproduces the rows it
 //! read and the outcomes of its writes without touching the database,
 //! and a run whose operations differ from the trace diverges loudly.
@@ -37,8 +38,18 @@ impl Runtime {
                 args,
             });
         }
-        let outcome = live().await;
+        let (outcome, timing) = crate::tables::timing::measured(live()).await;
         if self.tracer.is_enabled() {
+            if timing.statements > 0 {
+                self.tracer.emit(TraceEvent::DbTiming {
+                    ts_ms: now_ms(),
+                    run_id: self.tracer.run_id().to_string(),
+                    tool: name.to_string(),
+                    wait_us: micros(timing.wait),
+                    statement_us: micros(timing.statement),
+                    statements: timing.statements,
+                });
+            }
             let result = match &outcome {
                 Ok(value) => value.clone(),
                 Err(error) => crate::replay::recorded_failure(error),
@@ -52,4 +63,9 @@ impl Runtime {
         }
         outcome
     }
+}
+
+/// Whole microseconds, saturating: no operation runs for 584,000 years.
+fn micros(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
 }

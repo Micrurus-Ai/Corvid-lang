@@ -10,6 +10,7 @@ use crate::migrate_cmd::{
 use anyhow::{Context, Result};
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
+use std::cell::Cell;
 use std::path::Path;
 
 pub(crate) fn open_database(database: &Path, writing: bool) -> Result<Option<Connection>> {
@@ -24,12 +25,45 @@ pub(crate) fn open_database(database: &Path, writing: bool) -> Result<Option<Con
     } else {
         Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
     };
-    let conn = conn.with_context(|| format!("cannot open migration database `{}`", database.display()))?;
+    let mut conn = conn.with_context(|| format!("cannot open migration database `{}`", database.display()))?;
     // Migrations create and copy money and time columns, which SQLite
     // refuses without their collations (B09 P8a).
     corvid_runtime::tables::register_sqlite_collations(&conn)
         .with_context(|| format!("cannot prepare migration database `{}`", database.display()))?;
+    // Only the runner may end the transaction that owns the history
+    // update: while a migration's own SQL runs, a `BEGIN`, `COMMIT` or
+    // `ROLLBACK` in it is refused. The authorizer is installed here, where
+    // the connection is held mutably, and is armed only for that SQL.
+    conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+        AuthAction::Transaction { .. } if MIGRATION_SQL_RUNNING.with(Cell::get) => Authorization::Deny,
+        _ => Authorization::Allow,
+    }))
+    .with_context(|| format!("cannot guard migration database `{}`", database.display()))?;
     Ok(Some(conn))
+}
+
+thread_local! {
+    /// Whether a migration's own SQL is running on this thread. SQLite
+    /// calls the authorizer on the thread that prepares the statement, so
+    /// migrations on other threads never see this one's setting.
+    static MIGRATION_SQL_RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Arms the authorizer for as long as it lives, even when the SQL fails
+/// or panics.
+struct MigrationSqlRunning;
+
+impl MigrationSqlRunning {
+    fn start() -> Self {
+        MIGRATION_SQL_RUNNING.with(|running| running.set(true));
+        Self
+    }
+}
+
+impl Drop for MigrationSqlRunning {
+    fn drop(&mut self) {
+        MIGRATION_SQL_RUNNING.with(|running| running.set(false));
+    }
 }
 
 pub(crate) fn read_history(
@@ -107,14 +141,10 @@ pub(crate) fn apply_pending_sql_migrations(
 }
 
 fn execute_migration_sql(tx: &Transaction<'_>, sql: &str) -> rusqlite::Result<()> {
-    // Only the runner may end the transaction that owns the history update.
-    tx.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
-        AuthAction::Transaction { .. } => Authorization::Deny,
-        _ => Authorization::Allow,
-    }));
-    let result = tx.execute_batch(sql);
-    tx.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-    result
+    // The connection's authorizer (see `open_database`) refuses a
+    // transaction statement in this SQL while this guard lives.
+    let _running = MigrationSqlRunning::start();
+    tx.execute_batch(sql)
 }
 
 pub(crate) fn execute_rollback_sql(tx: &Transaction<'_>, rollback: &Path, applied_name: &str) -> Result<()> {

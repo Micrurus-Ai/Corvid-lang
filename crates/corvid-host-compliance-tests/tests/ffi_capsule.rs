@@ -180,7 +180,7 @@ fn c_recording_replays_from_python_and_bad_json_is_not_silent() {
     let release_dir = demo_dir.join("target").join("release");
     let library = release_dir.join(shared_library_name("classify"));
     let host_source = demo_dir.join("host_c").join("capsule_host.c");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };

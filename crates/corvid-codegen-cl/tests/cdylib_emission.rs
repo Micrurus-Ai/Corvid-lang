@@ -123,29 +123,7 @@ fn build_cdylib(src: &str, stem: &str) -> PathBuf {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    let path = corvid_test_paths::test_tools_staticlib();
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::cdylib::runtime_staticlib_path`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn build_cdylib_with_extra_libs(src: &str, stem: &str, extra_libs: &[PathBuf]) -> PathBuf {
@@ -713,3 +691,121 @@ fn cdylib_struct_boundary_c_header_documents_json_schema() {
         "schema for return value must mention the `note` field. got:\n{header}"
     );
 }
+
+const RENAMED_BOUNDARY_SRC: &str = r#"
+@json(case: camel)
+type Ticket:
+    ticket_id: String
+    @json(key: "amount-cents")
+    amount_cents: Int
+
+@json(case: camel)
+type Receipt:
+    is_ok: Bool
+    note_text: String
+"#;
+
+/// The JSON keys in the header's schema for `ty_name`'s boundary role.
+fn header_schema_keys(header: &str, role_heading: &str) -> std::collections::BTreeSet<String> {
+    let start = header.find(role_heading).unwrap_or_else(|| panic!("`{role_heading}` in:\n{header}"));
+    let schema: String = header[start + role_heading.len()..]
+        .lines()
+        .skip(1)
+        .take_while(|line| line.starts_with("//   "))
+        .map(|line| line.trim_start_matches("//   "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let schema: serde_json::Value = serde_json::from_str(&schema).unwrap_or_else(|err| panic!("schema JSON: {err}\n{schema}"));
+    schema["properties"].as_object().expect("properties").keys().cloned().collect()
+}
+
+/// A record crossing the C ABI is its public JSON form, and the header
+/// documents exactly that form: renamed by `@json(case:)` and
+/// `@json(key:)` through the one key rule `to_json()` uses. The header's
+/// keys, the keys a host sends, and the keys it receives are one set.
+#[test]
+fn a_renamed_record_crosses_the_c_abi_under_the_keys_the_header_documents() {
+    let src = format!(
+        "{RENAMED_BOUNDARY_SRC}\npub extern \"c\"\nagent finalize_ticket(ticket: Ticket @borrowed) -> Receipt:\n    return Receipt(true, ticket.ticket_id)\n"
+    );
+    let bundle = frontend_of(&src);
+    let header = emit_header(&bundle.ir, &HeaderOptions { library_name: "renamed_ticket".into() });
+    let sent_keys = header_schema_keys(&header, "// JSON shape for parameter `ticket`:");
+    let returned_keys = header_schema_keys(&header, "// JSON shape for return value `return`:");
+    assert_eq!(sent_keys, ["amount-cents", "ticketId"].map(String::from).into_iter().collect());
+    assert_eq!(returned_keys, ["isOk", "noteText"].map(String::from).into_iter().collect());
+
+    let produced = build_cdylib(&src, "renamed_ticket_cdylib");
+    // SAFETY: symbols are loaded from the just-built library and invoked with valid ABI values.
+    unsafe {
+        let lib = load_library_leaked(&produced);
+        let finalize: libloading::Symbol<unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char> =
+            lib.get(b"finalize_ticket").expect("resolve finalize_ticket");
+        let free: libloading::Symbol<unsafe extern "C" fn(*const c_char)> =
+            lib.get(b"corvid_free_string").expect("resolve corvid_free_string");
+        let input = CString::new(r#"{"ticketId":"vip-007","amount-cents":42}"#).unwrap();
+        let mut observation = 0u64;
+        let output_ptr = finalize(input.as_ptr(), &mut observation as *mut u64);
+        assert!(!output_ptr.is_null(), "extern wrapper returned NULL");
+        let output = CStr::from_ptr(output_ptr).to_str().unwrap().to_owned();
+        free(output_ptr);
+        // The public form `to_json()` writes: sorted keys, renamed.
+        assert_eq!(output, r#"{"isOk":true,"noteText":"vip-007"}"#);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let keys: std::collections::BTreeSet<String> = parsed.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys, returned_keys, "the keys received are the keys the header documents");
+    }
+}
+
+/// Nested records, lists and options cross the C ABI as public JSON in
+/// both directions, through the same plan `from_json` and `to_json` use.
+#[test]
+fn nested_records_lists_and_options_cross_the_c_abi() {
+    let src = r#"
+type Line:
+    sku: String
+    qty: Int
+
+type Order:
+    id: String
+    lines: List<Line>
+    note: Option<String>
+
+pub extern "c"
+agent skus(order: Order @borrowed) -> List<String>:
+    out: List<String> = []
+    for line in order.lines:
+        out = out + [line.sku]
+    return out
+
+pub extern "c"
+agent first_line(order: Order @borrowed) -> Option<Line>:
+    for line in order.lines:
+        return Some(line)
+    return None
+"#;
+    let produced = build_cdylib(src, "nested_order_cdylib");
+    // SAFETY: symbols are loaded from the just-built library and invoked with valid ABI values.
+    unsafe {
+        let lib = load_library_leaked(&produced);
+        type Call = unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char;
+        let skus: libloading::Symbol<Call> = lib.get(b"skus").expect("resolve skus");
+        let first_line: libloading::Symbol<Call> = lib.get(b"first_line").expect("resolve first_line");
+        let free: libloading::Symbol<unsafe extern "C" fn(*const c_char)> =
+            lib.get(b"corvid_free_string").expect("resolve corvid_free_string");
+        let call = |f: &libloading::Symbol<Call>, json: &str| {
+            let input = CString::new(json).unwrap();
+            let mut observation = 0u64;
+            let out = f(input.as_ptr(), &mut observation as *mut u64);
+            assert!(!out.is_null());
+            let text = CStr::from_ptr(out).to_str().unwrap().to_owned();
+            free(out);
+            text
+        };
+        let order = r#"{"id":"o-1","lines":[{"sku":"a","qty":1},{"sku":"b","qty":2}],"note":null}"#;
+        assert_eq!(call(&skus, order), r#"["a","b"]"#);
+        assert_eq!(call(&first_line, order), r#"{"qty":1,"sku":"a"}"#);
+        assert_eq!(call(&first_line, r#"{"id":"o-2","lines":[],"note":"empty"}"#), "null");
+    }
+}
+

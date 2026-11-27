@@ -196,7 +196,7 @@ fn stable_hash(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
     let digest = hasher.finalize();
-    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
+    corvid_hex::encode_prefix(&digest, 16)
 }
 
 /// Convenience: build a Slack real client backed by the shared

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Generate Rust and Python host bindings from Corvid ABI descriptors."
 
 [dependencies]
+corvid-hex = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 corvid-abi = { workspace = true }

@@ -94,6 +94,7 @@ fn link_and_cdylib_do_not_read_corvid_staticlib_dir_via_env_macro() {
     for source_rel in &[
         "crates/corvid-codegen-cl/src/link.rs",
         "crates/corvid-codegen-cl/src/cdylib.rs",
+        "crates/corvid-codegen-cl/src/runtime_staticlib.rs",
         "crates/corvid-codegen-cl/tests/ffi_bridge_smoke.rs",
     ] {
         let body = read_repo_relative(source_rel);
@@ -108,8 +109,9 @@ fn link_and_cdylib_do_not_read_corvid_staticlib_dir_via_env_macro() {
     }
 }
 
-/// Adversarial: discovery module is wired into `lib.rs` and the
-/// two consumer sites both call into it. This is the positive
+/// Adversarial: discovery module is wired into `lib.rs`, the shared
+/// runtime-archive lookup calls it, and both link sites go through
+/// that lookup. This is the positive
 /// shape of the fix — without these wirings the previous tests
 /// could pass while the runtime resolution path was effectively
 /// dead. The test pins the call-site contract so a future
@@ -123,18 +125,21 @@ fn staticlib_discovery_module_is_wired_into_consumers() {
          `staticlib_discovery` — the runtime resolution path is \
          unreachable from `link.rs` / `cdylib.rs`."
     );
-    let link_rs = read_repo_relative("crates/corvid-codegen-cl/src/link.rs");
+    let lookup_rs = read_repo_relative("crates/corvid-codegen-cl/src/runtime_staticlib.rs");
     assert!(
-        link_rs.contains("staticlib_discovery::discover_staticlib"),
-        "`link.rs` does not call `staticlib_discovery::discover_staticlib` — \
-         the consumer site reverted to the baked-path path."
+        lookup_rs.contains("staticlib_discovery::discover_staticlib"),
+        "`runtime_staticlib.rs` does not call `staticlib_discovery::discover_staticlib` — \
+         the shared lookup reverted to the baked-path path."
     );
-    let cdylib_rs = read_repo_relative("crates/corvid-codegen-cl/src/cdylib.rs");
-    assert!(
-        cdylib_rs.contains("staticlib_discovery::discover_staticlib"),
-        "`cdylib.rs` does not call `staticlib_discovery::discover_staticlib` — \
-         the consumer site reverted to the baked-path path."
-    );
+    for consumer in ["link.rs", "cdylib.rs"] {
+        let body = read_repo_relative(&format!("crates/corvid-codegen-cl/src/{consumer}"));
+        assert!(
+            body.contains("runtime_staticlib::runtime_staticlib_path"),
+            "`{consumer}` does not locate the runtime archive through \
+             `runtime_staticlib::runtime_staticlib_path`, the one lookup that \
+             checks the runtime stamp."
+        );
+    }
 }
 
 /// Adversarial: the reproducible-build CI workflow file is

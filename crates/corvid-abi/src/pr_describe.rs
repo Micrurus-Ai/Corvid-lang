@@ -157,7 +157,7 @@ pub fn pr_describe_from_descriptors(base: &CorvidAbi, head: &CorvidAbi) -> PrDes
 
 fn descriptor_sha256_hex(descriptor: &CorvidAbi) -> String {
     match crate::canonical_hash::hash_abi(descriptor) {
-        Ok(bytes) => hex::encode(bytes),
+        Ok(bytes) => corvid_hex::encode(&bytes),
         Err(_) => String::new(),
     }
 }

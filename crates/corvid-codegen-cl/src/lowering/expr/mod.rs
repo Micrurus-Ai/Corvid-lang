@@ -11,7 +11,6 @@ mod refinement;
 mod scalar_call;
 mod try_propagate;
 mod try_retry;
-mod wrappers;
 pub(super) use binop::{
     lower_binop_strict, lower_binop_wrapping, lower_short_circuit, lower_unop, lower_unop_wrapping,
 };
@@ -27,7 +26,6 @@ pub(super) use overflow::{trap_if, with_overflow_trap};
 pub(super) use refinement::hold_refinement;
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
-use wrappers::tool_wrapper_symbol;
 
 fn allocate_slots(
     builder: &mut FunctionBuilder, module: &mut ObjectModule, runtime: &RuntimeFuncs,
@@ -129,11 +127,11 @@ pub(super) fn lower_expr(
         IrExprKind::Lambda { .. } | IrExprKind::Decl { .. } if crate::native_callback_type(&expr.ty) =>
             callback::create(builder, expr, env, func_ids_by_def, module, runtime),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
-            "lambdas are interpreter-only in 45j",
+            "lambdas run on the interpreter only",
             expr.span,
         )),
         IrExprKind::StructLiteral { .. } => Err(CodegenError::not_supported(
-            "named struct literals are interpreter-only in 45n (positional construction compiles natively)",
+            "named struct literals run on the interpreter only (positional construction compiles natively)",
             expr.span,
         )),
         IrExprKind::PageNew { .. } => Err(CodegenError::not_supported(
@@ -147,9 +145,14 @@ pub(super) fn lower_expr(
         IrExprKind::MapLiteral { keys, values } if crate::native_string_map(&expr.ty) => {
             let capacity = builder.ins().iconst(I64, keys.len() as i64);
             let new = module.declare_func_in_func(runtime.map_new, builder.func);
-            let Type::Map(_, element) = &expr.ty else { unreachable!() };
+            let Type::Map(key_ty, element) = &expr.ty else { unreachable!() };
             let owns_values = builder.ins().iconst(I64, i64::from(is_refcounted_type(element)));
-            let call = builder.ins().call(new, &[capacity, owns_values]);
+            // How the map finds a key: a String by its text, a text-held
+            // scalar by value through its own crate, as `==` compares it.
+            let key_kind = corvid_abi::equality::EqualityLayout::of_text_slot(crate::text_scalar::scalar_of(key_ty))
+                .expect("native_string_map admits only keys held as one text slot");
+            let key_kind = builder.ins().iconst(I64, key_kind as i64);
+            let call = builder.ins().call(new, &[capacity, owns_values, key_kind]);
             let map = builder.inst_results(call)[0];
             let set = module.declare_func_in_func(runtime.map_set, builder.func);
             for (key, value) in keys.iter().zip(values) {
@@ -583,8 +586,12 @@ pub(super) fn lower_expr(
                 lower_json_encode(builder, module, runtime, &receiver.ty, value, expr.span)
             }
         }
-        IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
-            "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
+        IrExprKind::BuiltinMethod { kind, receiver, .. } => Err(CodegenError::not_supported(
+            format!(
+                "`{}` on `{}` in native code",
+                corvid_types::builtin_methods::builtin_method_name(&receiver.ty, *kind).unwrap_or("this builtin method"),
+                receiver.ty.display_name()
+            ),
             expr.span,
         )),
         IrExprKind::Literal(IrLiteral::Int(n)) => Ok(builder.ins().iconst(I64, *n)),
@@ -674,6 +681,32 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // `left + right` on lists: a new list of left's entries, then
+        // right's. Without this arm a list `+` fell through to integer
+        // addition of the two pointers.
+        IrExprKind::BinOp { op: BinaryOp::Add, left, right } | IrExprKind::WrappingBinOp { op: BinaryOp::Add, left, right }
+            if matches!(&expr.ty, Type::List(_)) =>
+        {
+            let Type::List(elem_ty) = &expr.ty else { unreachable!() };
+            let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            runtime.return_temporaries.borrow_mut().push(l);
+            let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            runtime.return_temporaries.borrow_mut().pop();
+            let info = runtime
+                .list_typeinfos
+                .get(elem_ty.as_ref())
+                .ok_or_else(|| CodegenError::cranelift("missing list typeinfo for `+`", expr.span))?;
+            let data = module.declare_data_in_func(*info, builder.func);
+            let info = builder.ins().symbol_value(I64, data);
+            let concat = module.declare_func_in_func(runtime.list_concat, builder.func);
+            let call = builder.ins().call(concat, &[l, r, info]);
+            let result = builder.inst_results(call)[0];
+            // The operands are consumed, as every binop consumes its
+            // refcounted operands; the result holds its own references.
+            emit_release(builder, module, runtime, l);
+            emit_release(builder, module, runtime, r);
+            Ok(result)
+        }
         // Native dispatch N3 — `==` and `!=` on secrets are the runtime's
         // constant-time comparison; the checker refuses every other
         // operator on a secret.
@@ -752,6 +785,24 @@ pub(super) fn lower_expr(
                     builder, *op, l, r, l_borrowed, r_borrowed, expr.span, module, runtime,
                 );
             }
+            // Integer and float arithmetic is all that reaches here; any
+            // other operand type has its own arm above. Refuse one that
+            // does not, rather than doing integer arithmetic on its
+            // representation (a list `+` once added two pointers).
+            if matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
+                for operand in [left, right] {
+                    let plain = match &operand.ty {
+                        Type::Tainted(inner) | Type::Grounded(inner) => inner.as_ref(),
+                        other => other,
+                    };
+                    if !matches!(plain, Type::Int | Type::Float | Type::Unknown) {
+                        return Err(CodegenError::not_supported(
+                            format!("the `{op:?}` operator on `{}` in native code", operand.ty.display_name()),
+                            expr.span,
+                        ));
+                    }
+                }
+            }
             let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let result = lower_binop_strict(builder, *op, l, r, expr.span, module, runtime)?;
@@ -817,7 +868,7 @@ pub(super) fn lower_expr(
             }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(CodegenError::not_supported(
-                    "closure calls are interpreter-only in 45j",
+                    "closure calls run on the interpreter only",
                     expr.span,
                 ));
             }
@@ -923,13 +974,6 @@ pub(super) fn lower_expr(
                 Ok(result)
             }
             IrCallKind::Tool { def_id, .. } => {
-                // Emit a direct typed call to the tool's
-                // `#[tool]`-generated wrapper symbol. No JSON, no
-                // dynamic dispatch ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â just a `call` instruction against
-                // a named import. Link-time symbol resolution catches
-                // missing tool implementations; Cranelift-level
-                // type-matching catches wrong-type mismatches at
-                // parity-harness or codegen time.
                 let tool = runtime.ir_tools.get(def_id).cloned().ok_or_else(|| {
                     CodegenError::cranelift(
                         format!(
@@ -951,406 +995,40 @@ pub(super) fn lower_expr(
                         expr.span,
                     ));
                 }
-                // A connector operation is a runtime-owned call: the
-                // runtime sends it, records it and replays it.
-                if runtime.runtime_call_ops.contains(def_id) {
-                    return super::runtime_call::lower_runtime_call(
-                        builder, &tool, args, expr, current_return_ty, env, scope_stack,
-                        func_ids_by_def, module, runtime,
+                // Every tool call is a runtime-owned call (native dispatch,
+                // native scalar boundaries B2b): a connector operation, one
+                // of the runtime's own tools, or a tool of the program's own,
+                // which the runtime reaches through the tools library's
+                // registered entry points. The runtime records it, replays
+                // it, redacts and reveals its secrets, and decodes its answer
+                // through the embedded plan, as on the interpreter.
+                //
+                // A grounded answer is the tool's plain answer with the
+                // tool named as its source.
+                // A tool of the program's own is reached by name, so the
+                // binary keeps a reference to its `#[tool]` entry point:
+                // the linker then pulls in the tools library's object,
+                // whose startup registration the runtime dispatches to, and
+                // a tool nobody implemented is still a link error. Library
+                // targets get their tools from the host at run time.
+                if !runtime.runtime_call_ops.contains(def_id) && !runtime.tools_via_registry {
+                    anchor_tool_entry(module, runtime, *def_id, &tool.name, expr.span)?;
+                }
+                let grounded = matches!(tool.return_ty, Type::Grounded(_));
+                let mut plain = tool.clone();
+                if let Type::Grounded(inner) = &tool.return_ty {
+                    plain.return_ty = (**inner).clone();
+                }
+                let value = super::runtime_call::lower_runtime_call(
+                    builder, &plain, args, expr, current_return_ty, env, scope_stack,
+                    func_ids_by_def, module, runtime,
+                )?;
+                if grounded {
+                    return emit_grounded_value_attestation(
+                        builder, module, runtime, value, &tool.return_ty, &tool.name, 1.0, expr.span,
                     );
                 }
-                let types = |id: DefId| runtime.ir_types.get(&id).cloned();
-                if let Some(held) = tool.params.iter().map(|p| &p.ty).chain(std::iter::once(&tool.return_ty))
-                    .find_map(|ty| crate::text_scalar_boundary::held_text_scalar(ty, &types)) {
-                    return Err(CodegenError::not_supported(
-                        format!(
-                            "tool `{callee_name}`: {}",
-                            crate::text_scalar_boundary::text_scalar_boundary_requirement(&held.display_name())
-                        ),
-                        expr.span,
-                    ));
-                }
-
-                // Native binaries call the linked `__corvid_tool_<name>`
-                // wrapper directly; library targets dispatch through the
-                // runtime registry (below) and emit no such import.
-                let wrapper_id = if runtime.tools_via_registry {
-                    None
-                } else {
-                    let mut cache = runtime.tool_wrapper_ids.borrow_mut();
-                    let id = if let Some(id) = cache.get(def_id) {
-                        *id
-                    } else {
-                        let mut sig = module.make_signature();
-                        for p in &tool.params {
-                            sig.params.push(AbiParam::new(cl_type_for(&p.ty, p.span)?));
-                        }
-                        if !matches!(tool.return_ty, Type::Nothing) {
-                            sig.returns
-                                .push(AbiParam::new(cl_type_for(&tool.return_ty, tool.span)?));
-                        }
-                        let symbol = tool_wrapper_symbol(&tool.name);
-                        let id = module
-                            .declare_function(&symbol, Linkage::Import, &sig)
-                            .map_err(|e| {
-                                CodegenError::cranelift(
-                                    format!("declare tool wrapper `{symbol}`: {e}"),
-                                    expr.span,
-                                )
-                            })?;
-                        cache.insert(*def_id, id);
-                        id
-                    };
-                    Some(id)
-                };
-
-                // The tool borrows its inputs. Bare locals stay owned by
-                // their scope; computed arguments must survive until the
-                // call returns (or be released if a later argument exits).
-                let outer_temporaries = runtime.return_temporaries.borrow().len();
-                let mut arg_vals = Vec::with_capacity(args.len());
-                for arg in args {
-                    let (value, borrowed) = lower_container_maybe_borrowed(
-                        builder, arg, current_return_ty, env, scope_stack,
-                        func_ids_by_def, module, runtime,
-                    )?;
-                    if !borrowed && is_refcounted_type(&arg.ty) {
-                        runtime.return_temporaries.borrow_mut().push(value);
-                    }
-                    arg_vals.push(value);
-                }
-                let trace_arg_tys = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
-                let trace_payload =
-                    emit_trace_payload(builder, module, runtime, &arg_vals, &trace_arg_tys, expr.span)?;
-                let tool_name_val =
-                    emit_string_const(builder, module, runtime, &tool.name, expr.span)?;
-                let runtime_is_replay_ref =
-                    module.declare_func_in_func(runtime.runtime_is_replay, builder.func);
-                let runtime_is_replay_call = builder.ins().call(runtime_is_replay_ref, &[]);
-                let runtime_is_replay = builder.inst_results(runtime_is_replay_call)[0];
-                let replay_b = builder.create_block();
-                let live_b = builder.create_block();
-                let join_b = builder.create_block();
-                let result_ty = if matches!(expr.ty, Type::Nothing) {
-                    None
-                } else {
-                    Some(cl_type_for(&expr.ty, expr.span)?)
-                };
-                if let Some(result_ty) = result_ty {
-                    builder.append_block_param(join_b, result_ty);
-                }
-                // A struct-returning tool under registry dispatch
-                // records/replays its result as JSON (the dispatch and
-                // replay bridges return a JSON string the per-struct
-                // decoder turns into a struct handle).
-                let registry_struct_def_id = if runtime.tools_via_registry {
-                    match &expr.ty {
-                        Type::Struct(id) => Some(*id),
-                        Type::ImportedStruct(imported) => Some(imported.def_id),
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                let replay_cond = builder.ins().icmp_imm(IntCC::NotEqual, runtime_is_replay, 0);
-                builder
-                    .ins()
-                    .brif(replay_cond, replay_b, &[], live_b, &[]);
-
-                builder.switch_to_block(replay_b);
-                builder.seal_block(replay_b);
-                if let Some(struct_def_id) = registry_struct_def_id {
-                    // Replay a struct-returning tool: read the recorded
-                    // JSON string and decode it into a struct handle.
-                    let decoder_fid =
-                        lookup_or_emit_struct_decoder(module, runtime, struct_def_id, expr.span)?;
-                    let replay_ref =
-                        module.declare_func_in_func(runtime.replay_tool_call_string, builder.func);
-                    let replay_call = builder.ins().call(
-                        replay_ref,
-                        &[
-                            tool_name_val,
-                            trace_payload.type_tags,
-                            trace_payload.count,
-                            trace_payload.values_ptr,
-                        ],
-                    );
-                    let json_str = builder.inst_results(replay_call)[0];
-                    let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
-                    let decode_call = builder.ins().call(decoder_ref, &[json_str]);
-                    let struct_ptr = builder.inst_results(decode_call)[0];
-                    emit_release(builder, module, runtime, json_str);
-                    builder.ins().jump(join_b, &[struct_ptr]);
-                } else {
-                let replay_func = match &expr.ty {
-                    Type::Nothing => runtime.replay_tool_call_nothing,
-                    Type::Int => runtime.replay_tool_call_int,
-                    Type::Bool => runtime.replay_tool_call_bool,
-                    Type::Float => runtime.replay_tool_call_float,
-                    Type::String => runtime.replay_tool_call_string,
-                    Type::Grounded(inner) => match &**inner {
-                        Type::Int => runtime.replay_tool_call_int,
-                        Type::Bool => runtime.replay_tool_call_bool,
-                        Type::Float => runtime.replay_tool_call_float,
-                        Type::String => runtime.replay_tool_call_string,
-                        _ => {
-                            return Err(CodegenError::not_supported(
-                                format!(
-                                    "native replay for tool `{}` with return type `{}` is not implemented yet",
-                                    tool.name,
-                                    expr.ty.display_name()
-                                ),
-                                expr.span,
-                            ))
-                        }
-                    },
-                    _ => {
-                        return Err(CodegenError::not_supported(
-                            format!(
-                                "native replay for tool `{}` with return type `{}` is not implemented yet",
-                                tool.name,
-                                expr.ty.display_name()
-                            ),
-                            expr.span,
-                        ))
-                    }
-                };
-                let replay_ref = module.declare_func_in_func(replay_func, builder.func);
-                let replay_call = builder.ins().call(
-                    replay_ref,
-                    &[
-                        tool_name_val,
-                        trace_payload.type_tags,
-                        trace_payload.count,
-                        trace_payload.values_ptr,
-                    ],
-                );
-                if matches!(expr.ty, Type::Nothing) {
-                    builder.ins().jump(join_b, &[]);
-                } else {
-                    let replay_value = builder.inst_results(replay_call)[0];
-                    let replay_value = if matches!(expr.ty, Type::Grounded(_)) {
-                        emit_grounded_value_attestation(
-                            builder,
-                            module,
-                            runtime,
-                            replay_value,
-                            &expr.ty,
-                            &tool.name,
-                            1.0,
-                            expr.span,
-                        )?
-                    } else {
-                        replay_value
-                    };
-                    builder.ins().jump(join_b, &[replay_value]);
-                }
-                }
-
-                builder.switch_to_block(live_b);
-                builder.seal_block(live_b);
-                let trace_tool_call_ref =
-                    module.declare_func_in_func(runtime.trace_tool_call, builder.func);
-                builder.ins().call(
-                    trace_tool_call_ref,
-                    &[
-                        tool_name_val,
-                        trace_payload.type_tags,
-                        trace_payload.count,
-                        trace_payload.values_ptr,
-                    ],
-                );
-
-                if runtime.tools_via_registry {
-                    // Library target: dispatch through the runtime tool
-                    // registry; no link-time `__corvid_tool_<name>` symbol.
-                    let invoke_func = match &expr.ty {
-                        Type::Nothing => runtime.invoke_tool_nothing,
-                        Type::Int => runtime.invoke_tool_int,
-                        Type::Bool => runtime.invoke_tool_bool,
-                        Type::Float => runtime.invoke_tool_float,
-                        Type::String => runtime.invoke_tool_string,
-                        Type::Struct(_) | Type::ImportedStruct(_) => runtime.invoke_tool_struct,
-                        Type::Grounded(inner) => match &**inner {
-                            Type::Int => runtime.invoke_tool_int,
-                            Type::Bool => runtime.invoke_tool_bool,
-                            Type::Float => runtime.invoke_tool_float,
-                            Type::String => runtime.invoke_tool_string,
-                            _ => {
-                                return Err(CodegenError::not_supported(
-                                    format!(
-                                        "native dispatch for tool `{}` with return type `{}` is not implemented yet",
-                                        tool.name,
-                                        expr.ty.display_name()
-                                    ),
-                                    expr.span,
-                                ))
-                            }
-                        },
-                        _ => {
-                            return Err(CodegenError::not_supported(
-                                format!(
-                                    "native dispatch for tool `{}` with return type `{}` is not implemented yet",
-                                    tool.name,
-                                    expr.ty.display_name()
-                                ),
-                                expr.span,
-                            ))
-                        }
-                    };
-                    let invoke_ref = module.declare_func_in_func(invoke_func, builder.func);
-                    let invoke_call = builder.ins().call(
-                        invoke_ref,
-                        &[
-                            tool_name_val,
-                            trace_payload.type_tags,
-                            trace_payload.count,
-                            trace_payload.values_ptr,
-                        ],
-                    );
-                    if matches!(expr.ty, Type::Nothing) {
-                        let trace_ref = module
-                            .declare_func_in_func(runtime.trace_tool_result_null, builder.func);
-                        builder.ins().call(trace_ref, &[tool_name_val]);
-                        builder.ins().jump(join_b, &[]);
-                    } else if let Some(struct_def_id) = registry_struct_def_id {
-                        // Record the result JSON for replay, then decode
-                        // it into a struct handle. Recorder + decoder both
-                        // borrow the JSON; release the owned (+1) string.
-                        let json_str = builder.inst_results(invoke_call)[0];
-                        let trace_ref = module
-                            .declare_func_in_func(runtime.trace_tool_result_string, builder.func);
-                        builder.ins().call(trace_ref, &[tool_name_val, json_str]);
-                        let decoder_fid = lookup_or_emit_struct_decoder(
-                            module,
-                            runtime,
-                            struct_def_id,
-                            expr.span,
-                        )?;
-                        let decoder_ref = module.declare_func_in_func(decoder_fid, builder.func);
-                        let decode_call = builder.ins().call(decoder_ref, &[json_str]);
-                        let struct_ptr = builder.inst_results(decode_call)[0];
-                        emit_release(builder, module, runtime, json_str);
-                        builder.ins().jump(join_b, &[struct_ptr]);
-                    } else {
-                        let result_val = builder.inst_results(invoke_call)[0];
-                        let trace_result_ref = match &expr.ty {
-                            Type::Int => Some(runtime.trace_tool_result_int),
-                            Type::Bool => Some(runtime.trace_tool_result_bool),
-                            Type::Float => Some(runtime.trace_tool_result_float),
-                            Type::String => Some(runtime.trace_tool_result_string),
-                            Type::Grounded(inner) => match &**inner {
-                                Type::Int => Some(runtime.trace_tool_result_int),
-                                Type::Bool => Some(runtime.trace_tool_result_bool),
-                                Type::Float => Some(runtime.trace_tool_result_float),
-                                Type::String => Some(runtime.trace_tool_result_string),
-                                _ => None,
-                            },
-                            _ => None,
-                        };
-                        if let Some(trace_func) = trace_result_ref {
-                            let trace_result_call =
-                                module.declare_func_in_func(trace_func, builder.func);
-                            builder
-                                .ins()
-                                .call(trace_result_call, &[tool_name_val, result_val]);
-                        }
-                        let live_result = if matches!(expr.ty, Type::Grounded(_)) {
-                            emit_grounded_value_attestation(
-                                builder,
-                                module,
-                                runtime,
-                                result_val,
-                                &expr.ty,
-                                &tool.name,
-                                1.0,
-                                expr.span,
-                            )?
-                        } else {
-                            result_val
-                        };
-                        builder.ins().jump(join_b, &[live_result]);
-                    }
-                } else {
-                    // Native binary: direct call to the linked tool wrapper.
-                    let wrapper_id =
-                        wrapper_id.expect("native build declares the tool wrapper import");
-                    let fref = module.declare_func_in_func(wrapper_id, builder.func);
-                    let call = builder.ins().call(fref, &arg_vals);
-                    let result_vals: Vec<ClValue> =
-                        builder.inst_results(call).iter().copied().collect();
-                    let trace_result_ref = match &expr.ty {
-                        Type::Nothing => Some(runtime.trace_tool_result_null),
-                        Type::Int => Some(runtime.trace_tool_result_int),
-                        Type::Bool => Some(runtime.trace_tool_result_bool),
-                        Type::Float => Some(runtime.trace_tool_result_float),
-                        Type::String => Some(runtime.trace_tool_result_string),
-                        Type::Grounded(inner) => match &**inner {
-                            Type::Int => Some(runtime.trace_tool_result_int),
-                            Type::Bool => Some(runtime.trace_tool_result_bool),
-                            Type::Float => Some(runtime.trace_tool_result_float),
-                            Type::String => Some(runtime.trace_tool_result_string),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if let Some(trace_func) = trace_result_ref {
-                        let trace_result_call =
-                            module.declare_func_in_func(trace_func, builder.func);
-                        let trace_args = if matches!(expr.ty, Type::Nothing) {
-                            vec![tool_name_val]
-                        } else {
-                            vec![tool_name_val, result_vals[0]]
-                        };
-                        builder.ins().call(trace_result_call, &trace_args);
-                    }
-                    let live_result = if matches!(expr.ty, Type::Grounded(_)) {
-                        emit_grounded_value_attestation(
-                            builder,
-                            module,
-                            runtime,
-                            result_vals[0],
-                            &expr.ty,
-                            &tool.name,
-                            1.0,
-                            expr.span,
-                        )?
-                    } else {
-                        result_vals[0]
-                    };
-                    if matches!(expr.ty, Type::Nothing) {
-                        builder.ins().jump(join_b, &[]);
-                    } else if result_vals.len() == 1 {
-                        builder.ins().jump(join_b, &[live_result]);
-                    } else {
-                        return Err(CodegenError::cranelift(
-                            format!(
-                                "tool `{callee_name}` wrapper returned {} values; expected 1 for type `{}`",
-                                result_vals.len(),
-                                expr.ty.display_name()
-                            ),
-                            expr.span,
-                        ));
-                    }
-                }
-
-                builder.switch_to_block(join_b);
-                builder.seal_block(join_b);
-                emit_release(builder, module, runtime, trace_payload.type_tags);
-
-                for value in runtime.return_temporaries.borrow_mut().drain(outer_temporaries..).rev() {
-                    emit_release(builder, module, runtime, value);
-                }
-                emit_release(builder, module, runtime, tool_name_val);
-
-                // Return-value unpacking. For Nothing-returning tools
-                // there's no result to hand back; synthesize a
-                // zero-Int so the expr-result contract stays uniform.
-                if matches!(expr.ty, Type::Nothing) {
-                    Ok(builder.ins().iconst(I64, 0))
-                } else {
-                    Ok(builder.block_params(join_b)[0])
-                }
+                Ok(value)
             }
             // A prompt's arguments and reply cross in the public JSON form
             // through the embedded plan (B1b), text-held scalars included;
@@ -1750,3 +1428,38 @@ pub(super) fn lower_expr(
         }
     }
 }
+
+/// Keep the binary linked against `tool_name`'s `#[tool]` JSON entry
+/// point (`__corvid_tool_json_<name>`), once per tool: an exported data
+/// object holding its address. See the tool call above.
+fn anchor_tool_entry(
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    def_id: DefId,
+    tool_name: &str,
+    span: Span,
+) -> Result<(), CodegenError> {
+    if runtime.tool_wrapper_ids.borrow().contains_key(&def_id) {
+        return Ok(());
+    }
+    let mangled: String = tool_name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let error = |e: cranelift_module::ModuleError| CodegenError::cranelift(format!("link tool `{tool_name}`: {e}"), span);
+    let mut signature = module.make_signature();
+    signature.params.extend([AbiParam::new(I64), AbiParam::new(I64), AbiParam::new(I64)]);
+    signature.returns.push(AbiParam::new(I64));
+    let entry = module
+        .declare_function(&format!("__corvid_tool_json_{mangled}"), Linkage::Import, &signature)
+        .map_err(error)?;
+    let anchor = module
+        .declare_data(&format!("__corvid_linked_tool_{mangled}"), Linkage::Export, false, false)
+        .map_err(error)?;
+    let mut data = DataDescription::new();
+    data.set_align(8);
+    data.define(vec![0u8; 8].into_boxed_slice());
+    let entry_ref = module.declare_func_in_data(entry, &mut data);
+    data.write_function_addr(0, entry_ref);
+    module.define_data(anchor, &data).map_err(error)?;
+    runtime.tool_wrapper_ids.borrow_mut().insert(def_id, entry);
+    Ok(())
+}
+

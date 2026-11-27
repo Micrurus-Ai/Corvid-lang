@@ -18,7 +18,7 @@ On macOS or Linux, use `export` instead of `set`.
 Expected output includes:
 
 ```text
-SupportOutcome(... action: "escalate_to_human" ... audit_id: "esc_9001" ...)
+{"action":"escalate_to_human" ... "audit_id":"esc_9001" ...}
 ```
 
 ## What It Shows

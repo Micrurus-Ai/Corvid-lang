@@ -282,6 +282,6 @@ agent main() -> String:
     }
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
+    corvid_hex::encode(bytes)
+}
 }

@@ -73,6 +73,9 @@ fn interp_failure(kind: &InterpErrorKind) -> PublicFailure {
         InterpErrorKind::ApprovalDenied(_) | InterpErrorKind::Runtime(RuntimeError::ApprovalDenied { .. }) => {
             PublicFailure::new(403, "approval_denied", "an approval this request needed was denied")
         }
+        InterpErrorKind::CallerLacksAuthority { .. } => {
+            PublicFailure::new(403, "insufficient_authority", "an action this request called requires authority the caller does not hold")
+        }
         InterpErrorKind::Runtime(RuntimeError::ReplayDivergence(_)) => PublicFailure::new(
             500,
             "replay_divergence",
@@ -148,6 +151,12 @@ mod tests {
             (InterpErrorKind::TokenLimitExceeded { limit: 100, used: 140 }, 500, "token_limit_exceeded", "100 tokens"),
             (InterpErrorKind::ConfidenceFloorBreached { floor: 0.8, actual: 0.2 }, 500, "confidence_below_floor", "0.800"),
             (InterpErrorKind::ApprovalDenied("refund".into()), 403, "approval_denied", "denied"),
+            (
+                InterpErrorKind::CallerLacksAuthority { action: "archive".into(), caller: "u1".into(), missing: "permission `board.edit`".into() },
+                403,
+                "insufficient_authority",
+                "does not hold",
+            ),
         ];
         for (kind, status, code, detail) in cases {
             let failure = public_failure(&interp(kind));

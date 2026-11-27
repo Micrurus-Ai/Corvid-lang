@@ -371,7 +371,7 @@ fn inspect_signature(cdylib: &Path, key_path: Option<&Path>) -> Result<Signature
         &verifying_key,
     ) {
         Ok(payload) => Ok(SignatureInspection::Verified {
-            key_fingerprint: hex::encode(Sha256::digest(verifying_key.as_bytes())),
+            key_fingerprint: corvid_hex::encode(&Sha256::digest(verifying_key.as_bytes())),
             envelope_keyid,
             payload_bytes: payload.len(),
         }),

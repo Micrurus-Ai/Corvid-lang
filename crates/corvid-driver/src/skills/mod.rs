@@ -41,35 +41,32 @@ fn trust_rank(tier: &str) -> Option<usize> {
     TRUST_TIERS.iter().position(|t| *t == tier)
 }
 
-/// Map a stdlib executing tool name to its capability group.
+/// The capability group of a stdlib executing tool: the name of the std
+/// module that declares it (`std/crypto.cor`'s `random_token` is
+/// `crypto`). Read from the bundled std sources, so a tool added to a
+/// std module is audited under that module's group with no list here to
+/// keep in step.
 fn capability_group(tool: &str) -> Option<&'static str> {
-    let group = if tool.starts_with("io_") {
-        "io"
-    } else if tool.starts_with("http_") {
-        "http"
-    } else if tool.starts_with("db_") {
-        "db"
-    } else if tool.starts_with("json_") {
-        "json"
-    } else if tool.starts_with("time_") {
-        "time"
-    } else if tool == "random_token" || tool == "hash_password" {
-        // std/crypto, checked before the `random_` prefix of std/random.
-        "crypto"
-    } else if tool.starts_with("random_") {
-        "random"
-    } else if tool.starts_with("rag_") {
-        "rag"
-    } else if tool == "mcp_call" {
-        "mcp"
-    } else if tool == "secret_read" {
-        "secrets"
-    } else if tool.starts_with("cache_") {
-        "cache"
-    } else {
-        return None;
-    };
-    Some(group)
+    static GROUPS: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> = std::sync::OnceLock::new();
+    GROUPS.get_or_init(std_tool_groups).get(tool).copied()
+}
+
+/// Every tool each bundled std module declares, by the module's name.
+fn std_tool_groups() -> std::collections::HashMap<String, &'static str> {
+    let mut groups = std::collections::HashMap::new();
+    for (file, source) in crate::scaffold::BUNDLED_STD {
+        let Some(module) = file.strip_suffix(".cor") else { continue };
+        let source = std::str::from_utf8(source).expect("a bundled std module is UTF-8");
+        let tokens = lex(source).expect("a bundled std module lexes");
+        let (parsed, errors) = parse_file(&tokens);
+        assert!(errors.is_empty(), "bundled std module `{file}` parses: {errors:?}");
+        for decl in &parsed.decls {
+            if let corvid_ast::Decl::Tool(tool) = decl {
+                groups.insert(tool.name.name.clone(), module);
+            }
+        }
+    }
+    groups
 }
 
 /// The parsed `skill.toml`.
@@ -654,11 +651,28 @@ public agent summarize(repo: String) -> Result<String, String>:
         assert!(!HONEST_SOURCE.contains("http_"), "the source names no http_ identifier");
     }
 
+    /// Every std tool is in the group of the module that declares it,
+    /// including those a hand-kept list once missed (`secret`, the uuid,
+    /// path and browser tools), and a program's own name is in none.
     #[test]
-    fn std_crypto_tools_are_their_own_capability_group() {
-        assert_eq!(capability_group("random_token"), Some("crypto"));
-        assert_eq!(capability_group("hash_password"), Some("crypto"));
-        assert_eq!(capability_group("random_int"), Some("random"));
+    fn each_std_tool_is_in_its_modules_capability_group() {
+        for (tool, group) in [
+            ("random_token", "crypto"),
+            ("hash_password", "crypto"),
+            ("random_int", "random"),
+            ("secret", "secrets"),
+            ("secret_read", "secrets"),
+            ("uuid_v4", "uuid"),
+            ("uuid_v7", "uuid"),
+            ("path_join", "path"),
+            ("browser_open_scoped", "browser"),
+            ("io_read_text", "io"),
+            ("mcp_call", "mcp"),
+        ] {
+            assert_eq!(capability_group(tool), Some(group), "{tool}");
+        }
+        assert_eq!(capability_group("io_thing_of_my_own"), None);
+        assert_eq!(capability_group("lookup_order"), None);
     }
 
     #[test]

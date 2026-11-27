@@ -60,5 +60,7 @@ pub(crate) fn ev(
         input_fingerprint: String::new(),
         output_fingerprint: String::new(),
         redaction_policy_hash: String::new(),
+        db_wait_us: 0,
+        db_statement_us: 0,
     }
 }

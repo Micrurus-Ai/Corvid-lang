@@ -72,24 +72,7 @@ fn ir_of(src: &str) -> corvid_ir::IrFile {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // Override the runtime staticlib path so the linker pulls a
-    // single Rust-bundled artifact, matching the precedent set by
-    // `tests/record_native.rs` for MSVC duplicate-`std` avoidance.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 #[test]
@@ -205,15 +188,14 @@ agent run(amount: Int) -> Decision:
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Stdout should be the JSON object built by the encoder, in
-    // source-declaration field order, plus print_string's trailing
-    // newline.
+    // Stdout is the record's public JSON form, keys sorted as `to_json()`
+    // writes them: what the interpreter prints for the same result.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stdout_trimmed = stdout.trim();
-    let expected = r#"{"code":13,"confidence":0.42,"approved":false,"reason":"declined"}"#;
+    let expected = r#"{"approved":false,"code":13,"confidence":0.42,"reason":"declined"}"#;
     assert_eq!(
         stdout_trimmed, expected,
-        "entry struct print should match the source-order JSON encoding; got: {stdout_trimmed:?}",
+        "entry struct print should be the public JSON form; got: {stdout_trimmed:?}",
     );
 }
 
@@ -282,11 +264,19 @@ agent run(amount: Int) -> Int:
     );
 }
 
+/// A record reply that does not decode is retried as the prompt's
+/// `with repair N` says, as on the interpreter; without it, one call is
+/// all a prompt makes.
 #[test]
 fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     let _ = test_tools_lib_path();
 
-    let ir = ir_of(STRUCT_PROMPT_SRC);
+    let source = STRUCT_PROMPT_SRC.replace(
+        "prompt classify(amount: Int) -> Decision:\n",
+        "prompt classify(amount: Int) -> Decision:\n    with repair 2\n",
+    );
+    assert_ne!(source, STRUCT_PROMPT_SRC, "the fixture declares `with repair 2`");
+    let ir = ir_of(&source);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let bin_path = tmp.path().join("struct_prompt_retry");
@@ -298,15 +288,10 @@ fn native_prompt_struct_return_retries_on_decoder_failure_then_succeeds() {
     )
     .expect("compile native binary");
 
-    // First reply is missing the required `code` field — decoder
-    // returns 0, bridge retries. Second reply is missing `reason`.
-    // Third reply is well-formed; bridge returns the decoded ptr.
-    //
-    // The `field_present` check inside the decoder is what makes
-    // the first two attempts fail rather than silently returning
-    // garbage; if the present-check were missing, the decoder
-    // would happily build a struct with zero-sentinel field values
-    // and the test would observe "0" instead of "11".
+    // The first reply lacks the required `code` field and the second
+    // `reason`, so each is refused with the missing field and repaired;
+    // the third is well formed. Were a missing field not refused, the
+    // record would hold a made-up value and the test would not see 11.
     let mock_replies_json = serde_json::json!({
         "classify": [
             r#"{"confidence":0.5,"approved":false,"reason":"no code field"}"#,

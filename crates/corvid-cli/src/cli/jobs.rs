@@ -48,6 +48,10 @@ pub enum JobsCommand {
         /// Persist the job for a future run after this many milliseconds.
         #[arg(long, default_value = "0")]
         delay_ms: u64,
+        /// The program whose action `--task` names: the payload is then
+        /// checked against the action's input before the job is stored.
+        #[arg(long, value_name = "PATH")]
+        source: Option<PathBuf>,
     },
     /// Execute the first pending local job and persist the result metadata.
     RunOne {

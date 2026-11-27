@@ -1,8 +1,5 @@
 use anyhow::{Context, Result};
-use corvid_runtime::{
-    compute_lineage_drift_report, LineageEvent, LineageIncidentGroup, LineageKind, LineageStatus,
-};
-use std::fs;
+use corvid_runtime::{compute_lineage_drift_report, LineageIncidentGroup, LineageKind, LineageStatus};
 use std::path::{Path, PathBuf};
 
 mod drift;
@@ -103,58 +100,9 @@ pub fn run_drift(baseline: &Path, candidate: &Path, json: bool) -> Result<u8> {
     Ok(drift_exit_code(&report))
 }
 
-
-
-
-
-pub(super) fn read_lineage_events(path: &Path) -> Result<Vec<LineageEvent>> {
-    let text = fs::read_to_string(path)?;
-    let mut events = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let event: LineageEvent = serde_json::from_str(trimmed)
-            .with_context(|| format!("line {} is not a lineage event", index + 1))?;
-        events.push(event);
-    }
-    Ok(events)
-}
-
-pub(super) fn read_lineage_input(path: &Path) -> Result<Vec<LineageEvent>> {
-    if path.is_dir() {
-        let mut events = Vec::new();
-        let mut paths = fs::read_dir(path)?
-            .map(|entry| entry.map(|entry| entry.path()))
-            .collect::<std::io::Result<Vec<_>>>()?;
-        paths.sort();
-        for path in paths {
-            if is_lineage_jsonl(&path) {
-                events.extend(read_lineage_events(&path)?);
-            }
-        }
-        return Ok(events);
-    }
-    read_lineage_events(path)
-}
-
-pub(super) fn resolve_lineage_path(id_or_path: &str, trace_dir: Option<&Path>) -> PathBuf {
-    let direct = PathBuf::from(id_or_path);
-    if direct.exists() || direct.extension().is_some() {
-        return direct;
-    }
-    trace_dir
-        .unwrap_or_else(|| Path::new("target/trace"))
-        .join(format!("{id_or_path}.lineage.jsonl"))
-}
-
-pub(super) fn is_lineage_jsonl(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.ends_with(".lineage.jsonl"))
-        .unwrap_or(false)
-}
+pub(super) use crate::lineage_input::{
+    is_trace_jsonl, read_lineage_events, read_lineage_input, resolve_lineage_path,
+};
 
 pub(super) fn kind_name(kind: LineageKind) -> String {
     serde_json::to_value(kind)
@@ -190,6 +138,8 @@ pub(super) fn display_optional(value: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use corvid_runtime::LineageEvent;
+    use std::fs;
 
     fn write_lineage(path: &Path, events: &[LineageEvent]) {
         let body = events

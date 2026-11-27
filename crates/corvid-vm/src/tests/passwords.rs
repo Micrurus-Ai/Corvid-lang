@@ -104,6 +104,36 @@ agent main() -> String:
     assert!(error.contains("owasp_2023()"), "{error}");
 }
 
+/// A password check runs off the thread the program shares with other
+/// work. On a single-threaded runtime, a task that ticks every
+/// millisecond keeps ticking while the check runs; had the check run on
+/// that thread, the ticker could not advance until it finished.
+#[tokio::test(flavor = "current_thread")]
+async fn a_password_check_leaves_the_thread_free_for_other_work() {
+    let src = "agent check(key: Secret, hash: String) -> Bool:\n    return key.verify_password(hash)\n";
+    let ir = ir_of(src);
+    let hash = corvid_crypto::hash_password(b"correct horse", corvid_crypto::PasswordCost::OWASP_2023).unwrap();
+    let args = vec![Value::Secret(corvid_crypto::Secret::new("correct horse")), Value::String(hash.into())];
+    let rt = empty_runtime();
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let ticks = std::sync::atomic::AtomicUsize::new(0);
+    let run = async {
+        let verified = run_agent(&ir, "check", args, &rt).await.expect("run");
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        verified
+    };
+    let ticker = async {
+        while !done.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    };
+    let (verified, ()) = tokio::join!(run, ticker);
+    assert_eq!(verified, Value::Bool(true));
+    let ticked = ticks.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(ticked >= 3, "other work kept running during the check: {ticked} tick(s)");
+}
+
 #[tokio::test]
 async fn a_higher_declared_cost_is_recorded_in_the_hash_and_still_verifies() {
     let src = format!(

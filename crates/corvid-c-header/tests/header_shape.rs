@@ -123,6 +123,7 @@ fn scalar_ir() -> IrFile {
         servers: vec![],
         models: Vec::new(),
         connectors: vec![],
+        actions: vec![],
     }
 }
 

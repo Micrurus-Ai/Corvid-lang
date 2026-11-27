@@ -129,16 +129,10 @@ pub fn synthetic_route_agent_name(method: corvid_ast::HttpMethod, path: &str) ->
 }
 
 /// The synthetic struct type of the `actor` bound in an authenticated
-/// route body (slice 52a) — mirrors the checker's `actor_type()`:
-/// id / tenant / display_name / roles / permissions.
+/// route body (slice 52a): the checker's own definition, so the two
+/// layers cannot disagree about it.
 fn actor_route_params_type() -> Type {
-    Type::RouteParams(vec![
-        ("id".to_string(), Type::String),
-        ("tenant".to_string(), Type::String),
-        ("display_name".to_string(), Type::String),
-        ("roles".to_string(), Type::List(Box::new(Type::String))),
-        ("permissions".to_string(), Type::List(Box::new(Type::String))),
-    ])
+    Type::actor()
 }
 
 struct Lowerer<'a> {
@@ -341,6 +335,7 @@ impl<'a> Lowerer<'a> {
         let mut servers = Vec::new();
         let mut models = Vec::new();
         let mut connectors = Vec::new();
+        let mut actions = Vec::new();
 
         for decl in &file.decls {
             let Decl::Import(import) = decl else { continue };
@@ -383,7 +378,20 @@ impl<'a> Lowerer<'a> {
                 Decl::Database(_) => {}
                 Decl::Tool(t) => tools.push(self.lower_tool(t)),
                 Decl::Prompt(p) => prompts.push(self.lower_prompt(p)),
-                Decl::Agent(a) => agents.push(self.lower_agent(a)),
+                Decl::Agent(a) => {
+                    let agent = self.lower_agent(a);
+                    if let Some(spec) = &a.action {
+                        actions.push(crate::types::IrAction {
+                            name: a.name.name.clone(),
+                            agent: agent.id,
+                            policy: crate::types::IrRoutePolicy::from_ast(&spec.policy),
+                            approval: spec.approval.clone(),
+                            assistants: spec.assistants.clone(),
+                            span: spec.span,
+                        });
+                    }
+                    agents.push(agent);
+                }
                 Decl::Fn(f) => agents.push(self.lower_fn(f)),
                 Decl::Eval(e) => evals.push(self.lower_eval(e)),
                 Decl::Test(t) => tests.push(self.lower_test(t)),
@@ -495,6 +503,7 @@ impl<'a> Lowerer<'a> {
             servers,
             models,
             connectors,
+            actions,
         }
     }
 
@@ -526,6 +535,7 @@ impl<'a> Lowerer<'a> {
                 streams: op.streams,
                 stream_until: op.stream_until.clone(),
                 on_failure: op.on_failure.as_ref().map(|v| v.name.clone()),
+                bearer_param: op.auth.as_ref().map(|auth| auth.param().name.clone()),
                 headers: op
                     .headers
                     .iter()
@@ -678,11 +688,7 @@ impl<'a> Lowerer<'a> {
             upload_policy: r.upload.clone(),
             approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
-            policy: r.policy.as_ref().map(|p| crate::types::IrRoutePolicy {
-                authenticated: p.authenticated,
-                roles: p.roles.clone(),
-                permissions: p.permissions.clone(),
-            }),
+            policy: r.policy.as_ref().map(crate::types::IrRoutePolicy::from_ast),
             span: r.span,
         }
     }
@@ -1513,6 +1519,10 @@ impl<'a> Lowerer<'a> {
                         // checker reports a literal with no exact value.
                         .unwrap_or(corvid_decimal::Decimal::ZERO),
                 ))
+            }
+            // An integer literal the checker typed `Float` (exact by its check).
+            Expr::Literal { value: Literal::Int(n), .. } if matches!(ty, Type::Float) => {
+                IrExprKind::Literal(IrLiteral::Float(*n as f64))
             }
             // B06 — string literals the checker typed `Currency` or
             // `Locale`, read with the parser the checker used.
@@ -2413,7 +2423,7 @@ impl<'a> Lowerer<'a> {
             Some(Expr::Lambda { params, body, .. }) => {
                 let row = &params.first()?.name.name;
                 let condition = corvid_types::table_ops::query_condition(query.table, row, body).ok()?;
-                Some(self.lower_table_filter(&condition))
+                Some(self.lower_table_filter(&condition, query.table))
             }
             Some(_) => return None,
             None => None,
@@ -2425,24 +2435,91 @@ impl<'a> Lowerer<'a> {
             Some(_) => return None,
             None => None,
         };
+        let aggregate = match query.aggregate {
+            None => None,
+            Some((op, args)) => {
+                use corvid_types::table_ops::QueryAggregate;
+                // Each function reads one column, as the checker requires.
+                let columns = args
+                    .iter()
+                    .map(|of| match of {
+                        Expr::Lambda { params, body, .. } => {
+                            let column = corvid_types::table_ops::query_column(query.table, &params.first()?.name.name, body)?;
+                            let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
+                            Some((column, self.type_ref_to_type(&field.ty)))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                // `keys()` reads the table's one key column.
+                let table_key = || {
+                    let [key] = query.table.keys.as_slice() else { return None };
+                    let field = query.table.record.fields.iter().find(|f| f.name.name == key.name)?;
+                    Some((key.name.clone(), self.type_ref_to_type(&field.ty)))
+                };
+                let (key, value) = match (op, columns.as_slice()) {
+                    (QueryAggregate::Keys | QueryAggregate::ByKey, []) => (None, Some(table_key()?)),
+                    (QueryAggregate::CountBy, [key]) => (Some(key.clone()), None),
+                    (QueryAggregate::SumBy, [key, value]) => (Some(key.clone()), Some(value.clone())),
+                    (_, [value]) => (None, Some(value.clone())),
+                    _ => (None, None),
+                };
+                Some(crate::types::IrQueryAggregate {
+                    op,
+                    column: value.as_ref().map(|(column, _)| column.clone()),
+                    column_ty: value.map(|(_, ty)| ty),
+                    key,
+                })
+            }
+        };
         Some(IrExprKind::TableQuery {
             table: self.ir_table(query.table)?,
             filter,
             order,
             descending: query.descending,
             take: query.take.map(|count| Box::new(self.lower_expr(count))),
+            aggregate,
         })
     }
 
-    fn lower_table_filter(&self, condition: &corvid_types::table_ops::QueryCondition<'_>) -> crate::types::IrTableFilter {
+    /// `Other.where(...).keys()` as an inner query of `outer`'s query
+    /// (J3b), when `list` is one on a table in the same database. A table
+    /// in another database is read first as a list instead (J3a), with
+    /// the same result.
+    fn keys_subquery(&self, list: &Expr, outer: &corvid_ast::TableDecl) -> Option<crate::types::IrSubquery> {
+        let Expr::Call { callee, args, .. } = list else { return None };
+        let query = corvid_types::table_ops::table_query_call(callee, args, self.file, self.symbols, self.bindings)?;
+        if !matches!(query.aggregate, Some((corvid_types::table_ops::QueryAggregate::Keys, _))) || query.take.is_some() {
+            return None;
+        }
+        if self.ir_table(query.table)?.database.name != self.ir_table(outer)?.database.name {
+            return None;
+        }
+        let filter = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => {
+                let row = &params.first()?.name.name;
+                let condition = corvid_types::table_ops::query_condition(query.table, row, body).ok()?;
+                Some(self.lower_table_filter(&condition, query.table))
+            }
+            Some(_) => return None,
+            None => None,
+        };
+        Some(crate::types::IrSubquery { table: self.ir_table(query.table)?, filter })
+    }
+
+    fn lower_table_filter(&self, condition: &corvid_types::table_ops::QueryCondition<'_>, table: &corvid_ast::TableDecl) -> crate::types::IrTableFilter {
         use corvid_types::table_ops::QueryCondition as C;
         use crate::types::IrTableFilter as F;
         match condition {
             C::Const(b) => F::Const(*b),
             C::Column(column) => F::Column(column.clone()),
-            C::And(left, right) => F::And(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
-            C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left)), Box::new(self.lower_table_filter(right))),
-            C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner))),
+            C::And(left, right) => F::And(Box::new(self.lower_table_filter(left, table)), Box::new(self.lower_table_filter(right, table))),
+            C::Or(left, right) => F::Or(Box::new(self.lower_table_filter(left, table)), Box::new(self.lower_table_filter(right, table))),
+            C::Not(inner) => F::Not(Box::new(self.lower_table_filter(inner, table))),
+            C::InList { column, values } => match self.keys_subquery(values, table) {
+                Some(inner) => F::InQuery { column: column.clone(), inner: Box::new(inner) },
+                None => F::InList { column: column.clone(), values: Box::new(self.lower_expr(values)) },
+            },
             C::Compare { column, op, value } => {
                 F::Compare { column: column.clone(), op: *op, value: Box::new(self.lower_expr(value)) }
             }

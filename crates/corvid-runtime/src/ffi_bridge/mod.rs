@@ -60,11 +60,9 @@ mod db_exports;
 mod decimal;
 mod http_exports;
 mod io_exports;
-mod json_exports;
 mod llm_dispatch;
 mod native_scalar;
 mod prompt_exports;
-mod replay_exports;
 mod state;
 mod strings;
 mod text;
@@ -73,29 +71,15 @@ mod tokio_handle;
 mod tool_iter;
 mod typed_json;
 pub use approval_exports::{corvid_approve_sync, corvid_citation_verify_or_panic};
-pub use json_exports::{
-    corvid_json_field_present, corvid_json_get_field_bool, corvid_json_get_field_float,
-    corvid_json_get_field_int, corvid_json_get_field_str, corvid_json_object_finish,
-    corvid_json_object_new, corvid_json_object_set_bool, corvid_json_object_set_float,
-    corvid_json_object_set_int, corvid_json_object_set_str, corvid_json_parse,
-    corvid_json_release,
-};
-pub use prompt_exports::{
-    corvid_prompt_call_bool, corvid_prompt_call_float, corvid_prompt_call_int,
-    corvid_prompt_call_string, corvid_prompt_call_typed,
-};
-pub use replay_exports::{
-    corvid_replay_tool_call_bool, corvid_replay_tool_call_float, corvid_replay_tool_call_int,
-    corvid_replay_tool_call_nothing, corvid_replay_tool_call_string,
-};
+pub use prompt_exports::corvid_prompt_call_typed;
 pub(crate) use state::bridge;
 pub use state::{
     corvid_bench_approval_wait_ns, corvid_bench_json_bridge_ns, corvid_bench_mock_dispatch_ns,
     corvid_bench_prompt_wait_ns, corvid_bench_tool_wait_ns, corvid_bench_trace_overhead_ns,
-    corvid_runtime_embed_init_default, corvid_runtime_init, corvid_runtime_is_replay,
+    corvid_runtime_embed_init_default, corvid_runtime_init,
     corvid_runtime_probe, corvid_runtime_shutdown, runtime,
 };
-use state::{record_json_bridge_ns, BridgeState, BRIDGE};
+use state::{record_json_bridge_ns, BridgeState};
 pub(crate) use strings::{borrow_corvid_string, read_corvid_string};
 pub use strings::{
     corvid_free_string, corvid_string_into_cstr, release_string, string_from_rust,

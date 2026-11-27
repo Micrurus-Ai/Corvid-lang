@@ -45,7 +45,7 @@ pub fn run_release(channel: &str, version: Option<&str>, out: &Path) -> Result<(
     let binary_path = copy_current_binary(normalized, &version, out)?;
     let binary_bytes = fs::read(&binary_path)
         .with_context(|| format!("read release binary `{}`", binary_path.display()))?;
-    let binary_sha256 = hex::encode(Sha256::digest(&binary_bytes));
+    let binary_sha256 = corvid_hex::encode(&Sha256::digest(&binary_bytes));
 
     let changelog_name = "CHANGELOG.md";
     let changelog = render_changelog(normalized, &version);

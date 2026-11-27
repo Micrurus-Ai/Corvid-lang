@@ -39,7 +39,7 @@ pub(crate) fn new_instance_id() -> std::sync::Arc<str> {
     use rand_core::RngCore;
     let mut bytes = [0u8; 16];
     rand_core::OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect::<String>().into()
+    corvid_hex::encode(&bytes).into()
 }
 
 /// Postgres refuses a notification payload of 8000 bytes or more. Row

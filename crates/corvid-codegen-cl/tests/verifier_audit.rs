@@ -49,15 +49,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn test_tools_lib_path() -> PathBuf {
-    let path = corvid_test_paths::test_tools_staticlib();
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::link::link_binary`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn ir_of(src: &str) -> corvid_ir::IrFile {
@@ -246,3 +238,25 @@ agent main() -> Int:
     audit("nested_struct_with_string_traverses_cleanly", src);
 }
 
+
+/// A program that allocates past the collector's threshold keeps every
+/// value it holds. Before trial deletion this crashed: the collector marked
+/// from compiled frames' stack maps only, so it freed the block an
+/// allocation was returning and anything a runtime function was building.
+/// The fixtures above allocate too little for the collector to run; this
+/// one makes it run several times under the verifier.
+#[test]
+fn a_loop_building_a_string_survives_collection() {
+    let src = r#"
+agent main() -> Int:
+    s = "a"
+    i = 0
+    while i < 30:
+        s = s + "b"
+        i = i + 1
+    if s.length() == 31:
+        return 0
+    return 1
+"#;
+    audit("a_loop_building_a_string_survives_collection", src);
+}

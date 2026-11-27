@@ -1,7 +1,7 @@
+use crate::lineage_input::{read_lineage_events, resolve_lineage_path};
 use anyhow::{Context, Result};
-use corvid_runtime::{render_lineage_tree, LineageEvent};
-use std::fs;
-use std::path::{Path, PathBuf};
+use corvid_runtime::render_lineage_tree;
+use std::path::Path;
 
 pub fn run_lineage(id_or_path: &str, trace_dir: Option<&Path>) -> Result<u8> {
     let path = resolve_lineage_path(id_or_path, trace_dir);
@@ -11,35 +11,11 @@ pub fn run_lineage(id_or_path: &str, trace_dir: Option<&Path>) -> Result<u8> {
     Ok(0)
 }
 
-fn resolve_lineage_path(id_or_path: &str, trace_dir: Option<&Path>) -> PathBuf {
-    let direct = PathBuf::from(id_or_path);
-    if direct.exists() || direct.extension().is_some() {
-        return direct;
-    }
-    trace_dir
-        .unwrap_or_else(|| Path::new("target/trace"))
-        .join(format!("{id_or_path}.lineage.jsonl"))
-}
-
-fn read_lineage_events(path: &Path) -> Result<Vec<LineageEvent>> {
-    let text = fs::read_to_string(path)?;
-    let mut events = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let event: LineageEvent = serde_json::from_str(trimmed)
-            .with_context(|| format!("line {} is not a lineage event", index + 1))?;
-        events.push(event);
-    }
-    Ok(events)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use corvid_runtime::{LineageEvent, LineageKind, LineageStatus};
+    use std::fs;
 
     #[test]
     fn reads_lineage_jsonl_from_path() {

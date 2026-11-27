@@ -12,6 +12,10 @@
 //! - **Equality is constant-time.** `==` compares the bytes with
 //!   [`crate::constant_time_eq`], so checking a supplied token against
 //!   the expected one cannot leak it byte by byte.
+//! - **Its memory is wiped.** The bytes sit in a [`zeroize::Zeroizing`]
+//!   buffer, overwritten with zeros when the last clone drops, so a freed
+//!   secret does not linger in memory a later allocation or a core dump
+//!   could read.
 //! - **The text is read in one place.** [`Secret::expose_text`] is the
 //!   only way to the text outside this crate. The interpreter calls it
 //!   when it hands a tool its arguments, and nowhere else. HMAC and
@@ -26,14 +30,16 @@
 
 use std::fmt;
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 /// What `Debug` and `Display` write in place of a secret's text.
 pub const SECRET_DISPLAY: &str = "<secret>";
 
-/// Sensitive text, or a key decoded from it. Cloning shares the bytes.
+/// Sensitive text, or a key decoded from it. Cloning shares the bytes,
+/// which are wiped when the last clone drops.
 #[derive(Clone)]
 pub struct Secret {
-    bytes: Arc<[u8]>,
+    bytes: Arc<Zeroizing<Vec<u8>>>,
     /// Whether the bytes are the secret's text (read from the
     /// environment) rather than a key decoded from it.
     is_text: bool,
@@ -42,7 +48,7 @@ pub struct Secret {
 impl Secret {
     /// A secret holding `text`.
     pub fn new(text: &str) -> Self {
-        Secret { bytes: Arc::from(text.as_bytes()), is_text: true }
+        Secret { bytes: Arc::new(Zeroizing::new(text.as_bytes().to_vec())), is_text: true }
     }
 
     /// The secret's text, for the one caller that must hand it on: a
@@ -82,7 +88,7 @@ impl Secret {
         if key.is_empty() {
             return Err(format!("the secret holds no key after `{prefix}`"));
         }
-        Ok(Secret { bytes: Arc::from(key), is_text: false })
+        Ok(Secret { bytes: Arc::new(Zeroizing::new(key)), is_text: false })
     }
 
     /// `password.verify_password(hash)`: whether this secret is the
@@ -174,5 +180,25 @@ mod tests {
             Secret::new("whsec_").decode_base64_after("whsec_"),
             Err("the secret holds no key after `whsec_`".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod wipe_tests {
+    use super::Secret;
+
+    /// Whether a type overwrites its memory when dropped: a compile-time
+    /// check, since reading freed memory to observe it is undefined.
+    fn wiped_on_drop<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+
+    /// Text and decoded-key secrets alike hold their bytes in storage that
+    /// wipes itself, so dropping the last clone leaves no copy behind.
+    #[test]
+    fn a_secrets_bytes_are_wiped_when_it_drops() {
+        let text = Secret::new("hunter2");
+        wiped_on_drop(&*text.bytes);
+        let key = Secret::new("whsec_c2VjcmV0").decode_base64_after("whsec_").unwrap();
+        wiped_on_drop(&*key.bytes);
+        assert_eq!(key.key_bytes(), b"secret");
     }
 }

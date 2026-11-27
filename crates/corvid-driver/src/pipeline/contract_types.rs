@@ -98,7 +98,9 @@ pub(super) fn include_exchange_types(
             Decl::Type(t) if t.visibility.is_callable_from_outside_file() => {
                 schemas.fields(t, &root_path, &imports);
             }
-            Decl::Agent(a) if a.visibility.is_callable_from_outside_file() => {
+            // An action is called from outside by declaration, whatever its
+            // visibility, so the types it reads and returns are published.
+            Decl::Agent(a) if a.action.is_some() || a.visibility.is_callable_from_outside_file() => {
                 schemas.signature(&mut a.params, &mut a.return_ty, &root_path, &imports)
             }
             Decl::Prompt(p) if p.visibility.is_callable_from_outside_file() => {

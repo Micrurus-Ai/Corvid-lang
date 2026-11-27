@@ -55,45 +55,14 @@ pub fn link_binary(
         cmd.env(k, v);
     }
 
-    // Locate the corvid-runtime staticlib. `CORVID_STATICLIB_DIR` is set
-    // at build-script time to `<target>/<profile>/` — the directory
-    // where Cargo writes artifact files. The staticlib filename follows
-    // platform convention (`corvid_runtime.lib` on MSVC, `libcorvid_runtime.a`
-    // on Unix). Resolved here, not in the build script, so the exact
-    // filename matches the host we're linking on right now.
-    //
-    // Tests can set `CORVID_RUNTIME_STATICLIB_OVERRIDE` to point at a
-    // different staticlib that already bundles `corvid-runtime` as a
-    // transitive Rust dep (e.g. `corvid_test_tools.lib`). The
-    // override path replaces the default lib in the linker
-    // invocation; without it MSVC would see two Rust staticlibs each
-    // bundling `std` and reject the build with `LNK2005`. Outside
-    // tests this stays unset and the default runtime lib is used.
-    let runtime_staticlib_path =
-        if let Some(override_path) = std::env::var_os("CORVID_RUNTIME_STATICLIB_OVERRIDE") {
-            let path = PathBuf::from(override_path);
-            if !path.exists() {
-                return Err(CodegenError::link(format!(
-                    "CORVID_RUNTIME_STATICLIB_OVERRIDE points at non-existent path `{}`",
-                    path.display()
-                )));
-            }
-            path
-        } else {
-            let runtime_lib_name = if compiler.is_like_msvc() {
-                "corvid_runtime.lib"
-            } else {
-                "libcorvid_runtime.a"
-            };
-            match crate::staticlib_discovery::discover_staticlib(runtime_lib_name) {
-                Some(location) => location.path,
-                None => {
-                    return Err(CodegenError::link(missing_staticlib_diagnostic(
-                        std::path::Path::new(runtime_lib_name),
-                    )));
-                }
-            }
-        };
+    // The runtime archive, checked against this compiler's runtime
+    // stamp and rebuilt in a development checkout when stale (see
+    // `runtime_staticlib`). Tests can set
+    // `CORVID_RUNTIME_STATICLIB_OVERRIDE` to a staticlib that already
+    // bundles `corvid-runtime` (e.g. `corvid_test_tools.lib`): linking
+    // it in place of the default lib avoids MSVC's duplicate-`std`
+    // `LNK2005`.
+    let runtime_staticlib_path = crate::runtime_staticlib::runtime_staticlib_path(&compiler)?;
 
     if compiler.is_like_msvc() {
         // MSVC: cl.exe acts as the link driver. Always link the

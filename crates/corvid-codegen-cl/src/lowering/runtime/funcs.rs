@@ -24,6 +24,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub list_fold_int: FuncId,
     pub list_test_int: FuncId,
     pub list_snapshot: FuncId,
+    /// `corvid_list_concat(left, right, typeinfo)`: `left + right` on lists.
+    pub list_concat: FuncId,
     pub list_new: FuncId,
     pub list_bounds_error: FuncId,
     pub list_append: FuncId,
@@ -62,6 +64,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_json_encode_tool_argument`: one argument of a runtime call
     /// whose tool takes a secret, recorded (`<redacted>`) or revealed.
     pub json_encode_tool_argument: FuncId,
+    /// `corvid_json_encode_recorded`: a value a trace records, as public
+    /// JSON with secrets redacted, `null` for one it cannot write.
+    pub json_encode_recorded: FuncId,
     pub string_char_len: FuncId,
     pub string_char_at: FuncId,
     /// Single typed allocator replaces the older
@@ -101,21 +106,9 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub bench_next_trial: FuncId,
     pub bench_finish_trial: FuncId,
     // Runtime init/shutdown + replay bridges.
-    pub runtime_is_replay: FuncId,
-    pub replay_tool_call_nothing: FuncId,
-    pub replay_tool_call_int: FuncId,
-    pub replay_tool_call_bool: FuncId,
-    pub replay_tool_call_float: FuncId,
-    pub replay_tool_call_string: FuncId,
     // Live host-registered tool dispatch (library targets): the
     // cdylib/staticlib calls these instead of a link-time
     // `__corvid_tool_<name>` symbol.
-    pub invoke_tool_nothing: FuncId,
-    pub invoke_tool_int: FuncId,
-    pub invoke_tool_bool: FuncId,
-    pub invoke_tool_float: FuncId,
-    pub invoke_tool_string: FuncId,
-    pub invoke_tool_struct: FuncId,
     pub runtime_init: FuncId,
     /// `corvid_register_connectors(specs)`: install the embedded
     /// connector specs before `corvid_runtime_init`.
@@ -134,14 +127,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub runtime_shutdown: FuncId,
     pub runtime_embed_init: FuncId,
     pub sleep_ms: FuncId,
-    pub json_buffer_new: FuncId,
-    pub json_buffer_finish: FuncId,
-    pub json_buffer_append_raw: FuncId,
-    pub json_buffer_append_int: FuncId,
-    pub json_buffer_append_float: FuncId,
-    pub json_buffer_append_bool: FuncId,
-    pub json_buffer_append_null: FuncId,
-    pub json_buffer_append_string: FuncId,
     pub string_into_cstr: FuncId,
     pub begin_direct_observation: FuncId,
     pub finish_direct_observation: FuncId,
@@ -162,47 +147,14 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub string_from_float: FuncId,
     pub approve_sync: FuncId,
     // Typed prompt bridges, one per return type.
-    pub prompt_call_int: FuncId,
-    pub prompt_call_bool: FuncId,
-    pub prompt_call_float: FuncId,
-    pub prompt_call_string: FuncId,
-    /// The prompt bridge for every non-scalar reply (B1b): the standard
-    /// 7 args plus the schema text, the public JSON decode plan, its
-    /// length and typeinfo table, and the slot the decoded value is
-    /// written to.
+    /// `corvid_prompt_call_typed`, the bridge every native prompt call
+    /// uses: the interpreter's request and repair rule, the reply read
+    /// through the embedded public JSON plan.
     pub prompt_call_typed: FuncId,
-    /// Generic JSON parse / build primitives. Used inside codegen-
-    /// emitted per-struct decoder and encoder functions. Runtime
-    /// stays type-agnostic; the language-aware decoding logic lives
-    /// in codegen.
-    pub json_parse: FuncId,
-    pub json_release: FuncId,
-    pub json_field_present: FuncId,
-    pub json_get_field_int: FuncId,
-    pub json_get_field_bool: FuncId,
-    pub json_get_field_float: FuncId,
-    pub json_get_field_str: FuncId,
-    /// JSON-object build-side primitives. Used by codegen-emitted
-    /// per-struct `to_json` encoders to assemble a JSON object in
-    /// source-order matching `IrType.fields`.
-    pub json_object_new: FuncId,
-    pub json_object_set_int: FuncId,
-    pub json_object_set_bool: FuncId,
-    pub json_object_set_float: FuncId,
-    pub json_object_set_str: FuncId,
-    pub json_object_finish: FuncId,
     pub citation_verify_or_panic: FuncId,
     pub trace_run_started: FuncId,
-    pub trace_run_completed_int: FuncId,
-    pub trace_run_completed_bool: FuncId,
-    pub trace_run_completed_float: FuncId,
-    pub trace_run_completed_string: FuncId,
-    pub trace_tool_call: FuncId,
-    pub trace_tool_result_null: FuncId,
-    pub trace_tool_result_int: FuncId,
-    pub trace_tool_result_bool: FuncId,
-    pub trace_tool_result_float: FuncId,
-    pub trace_tool_result_string: FuncId,
+    /// `corvid_trace_run_completed_json`: a run's result as public JSON text.
+    pub trace_run_completed: FuncId,
     pub literal_counter: std::cell::Cell<u64>,
     /// When true, codegen-level scattered
     /// `emit_retain` / `emit_release` sites are skipped because the
@@ -240,22 +192,6 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `corvid_alloc_typed(size, &typeinfo)`.
     pub variant_typeinfos: HashMap<(DefId, u32), cranelift_module::DataId>,
     pub struct_typeinfos: HashMap<DefId, cranelift_module::DataId>,
-    /// Per-struct-type JSON-decoder functions. Emitted lazily on
-    /// first reference (a prompt with `Type::Struct(def_id)` return)
-    /// and cached so subsequent prompts returning the same struct
-    /// re-use one decoder. `RefCell` because emission paths hold
-    /// `&RuntimeFuncs` immutably; same pattern as `tool_wrapper_ids`.
-    /// Each decoder has the C-ABI signature `(CorvidString) -> i64`
-    /// (returns the heap struct pointer or `0` on parse failure).
-    pub struct_decoders: std::cell::RefCell<HashMap<DefId, FuncId>>,
-    /// Per-struct-type JSON-encoder functions. Emitted lazily on
-    /// first reference (an entry agent returning that struct, or
-    /// any other site that needs JSON serialisation) and cached.
-    /// Mirror of `struct_decoders`; same `RefCell` rationale (the
-    /// emission paths hold `&RuntimeFuncs` immutably). Each
-    /// encoder has the C-ABI signature `(struct_ptr: i64) -> i64`
-    /// returning a fresh `CorvidString` (refcount 1).
-    pub struct_to_json: std::cell::RefCell<HashMap<DefId, FuncId>>,
     /// Per-concrete-list-type typeinfo data symbols,
     /// keyed by the element `Type` (so `List<Int>` maps on `Type::Int`,
     /// `List<List<String>>` maps on `Type::List(Box::new(Type::String))`).

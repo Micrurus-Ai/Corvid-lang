@@ -51,6 +51,8 @@ pub enum BytesOperation {
     VerifyEd25519,
     /// 1 when two byte strings are equal, compared in constant time.
     Equal,
+    /// `a + b`: the two byte strings joined.
+    Concat,
     /// `Bytes(<hex>)`, the interpreter's printed form, for an entry
     /// agent that returns a byte string.
     Display,
@@ -80,6 +82,7 @@ impl BytesOperation {
             DecodeBase64After,
             VerifyEd25519,
             Equal,
+            Concat,
             Display,
         ]
     }
@@ -106,6 +109,7 @@ impl BytesOperation {
             DecodeBase64After => "corvid_secret_decode_base64_after",
             VerifyEd25519 => "corvid_bytes_verify_ed25519",
             Equal => "corvid_bytes_equal",
+            Concat => "corvid_bytes_concat",
             Display => "corvid_bytes_display",
         }
     }
@@ -117,7 +121,7 @@ impl BytesOperation {
         match self {
             FromUtf8Text | Length | ToHex | ToBase64 | Sha256 | Sha384 | Sha512 | Display => 1,
             ToUtf8 | FromHex | FromBase64 | FromBase64Url | HmacSha256 | HmacSha512 | HmacSha256Secret
-            | HmacSha512Secret | VerifyPassword | Equal => 2,
+            | HmacSha512Secret | VerifyPassword | Equal | Concat => 2,
             VerifyEd25519 | DecodeBase64After => 3,
         }
     }
@@ -144,11 +148,14 @@ impl BytesOperation {
     }
 }
 
-/// `==` and `!=` between two byte strings.
+/// `==`, `!=` and `+` between two byte strings.
 pub fn bytes_binary(op: BinaryOp, left: &Type, right: &Type) -> Option<ScalarBinary<BytesOperation>> {
     match (op, scalar_of(left), scalar_of(right)) {
         (BinaryOp::Eq | BinaryOp::NotEq, Type::Bytes, Type::Bytes) => {
             Some(ScalarBinary { operation: BytesOperation::Equal, swapped: false, reading: BinaryReading::Equality })
+        }
+        (BinaryOp::Add, Type::Bytes, Type::Bytes) => {
+            Some(ScalarBinary { operation: BytesOperation::Concat, swapped: false, reading: BinaryReading::Value })
         }
         _ => None,
     }

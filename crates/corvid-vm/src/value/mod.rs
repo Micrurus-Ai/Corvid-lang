@@ -20,6 +20,7 @@ use std::sync::Arc;
 mod cells;
 mod display;
 mod heap;
+mod map_key;
 mod object_ref;
 mod stream;
 mod weak;

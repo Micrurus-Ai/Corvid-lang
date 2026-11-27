@@ -720,6 +720,27 @@ agent helper() -> Result<Float, String>:
     return Ok(2.5)
 "#,
     ),
+    (
+        "shared_actions",
+        r#"type MoveCard:
+    card: Int
+    position: Int
+
+action move_card(move: MoveCard) -> Int requires permission("board.edit") and authenticated:
+    return move.position
+
+action ping() -> String requires anyone:
+    assistants: confirm "Check that the board answers."
+    return "pong"
+
+
+@budget($0.10)
+@approval(role: "reviewer", risk: "board_change", data: "internal", expires_ms: 900000, max_cost_usd: $1.0, irreversible: false)
+action wipe(column: Int) -> Int requires authenticated:
+    approve Wipe(column)
+    return column
+"#,
+    ),
 ];
 
 /// production name -> snippet name that exercises it. Every declared,
@@ -777,6 +798,9 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("browser_lifecycle_decl", "packing_callbacks"),
     ("bounded_ask", "native_ask"),
     ("agent_decl", "agents_annotations_extern"),
+    ("action_decl", "shared_actions"),
+    ("action_policy", "shared_actions"),
+    ("assistants_line", "shared_actions"),
     ("annotation", "agents_annotations_extern"),
     ("annotation_args", "agents_annotations_extern"),
     ("extern_abi", "agents_annotations_extern"),

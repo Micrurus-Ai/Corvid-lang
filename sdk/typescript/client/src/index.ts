@@ -9,7 +9,7 @@
 // pagination, auth redirects — lives in this package, not in the
 // generated code, so upgrades to the moat behavior happen in one place.
 
-export { CorvidClient, type CorvidClientOptions, type RouteShape } from "./transport.js";
+export { CorvidClient, type ApprovalPending, type CorvidClientOptions, type RouteShape } from "./transport.js";
 export { CorvidError } from "./errors.js";
 export type { LiveObserver } from "./live-connection.js";
 export {

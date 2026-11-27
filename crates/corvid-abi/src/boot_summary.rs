@@ -181,7 +181,7 @@ pub fn boot_summary_from_descriptor(descriptor: &CorvidAbi) -> BootSummary {
 
 fn descriptor_sha256_hex(descriptor: &CorvidAbi) -> String {
     match hash_abi(descriptor) {
-        Ok(bytes) => hex::encode(bytes),
+        Ok(bytes) => corvid_hex::encode(&bytes),
         Err(_) => String::new(),
     }
 }

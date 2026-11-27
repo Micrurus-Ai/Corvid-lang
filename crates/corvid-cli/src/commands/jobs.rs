@@ -35,7 +35,27 @@ pub(crate) fn cmd_jobs_enqueue(
     replay_key: Option<String>,
     idempotency_key: Option<String>,
     delay_ms: u64,
+    source: Option<&Path>,
 ) -> Result<u8> {
+    let payload_json: serde_json::Value = serde_json::from_str(payload).context("jobs payload must be valid JSON")?;
+    // With the program, a task that names an action is checked against
+    // the action's input now, so a bad job is refused before it is stored
+    // rather than failing on a worker later (B10-4b).
+    if let Some(source_path) = source {
+        let source_text = std::fs::read_to_string(source_path)
+            .with_context(|| format!("failed to read job source `{}`", source_path.display()))?;
+        let ir = match corvid_driver::compile_to_ir_with_config_at_path(&source_text, source_path, None) {
+            Ok(ir) => ir,
+            Err(diags) => {
+                eprint!("{}", corvid_driver::render_all_pretty(&diags, source_path, &source_text));
+                return Ok(1);
+            }
+        };
+        if let Err(refused) = crate::jobs_actions::check_enqueue(&ir, task, &payload_json) {
+            eprintln!("error: {refused}");
+            return Ok(1);
+        }
+    }
     if let Some(parent) = state
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -44,7 +64,7 @@ pub(crate) fn cmd_jobs_enqueue(
             .with_context(|| format!("failed to create jobs state dir `{}`", parent.display()))?;
     }
     let queue = DurableQueueRuntime::open(state)?;
-    let payload = serde_json::from_str(payload).context("jobs payload must be valid JSON")?;
+    let payload = payload_json;
     let next_run_ms = if delay_ms == 0 {
         None
     } else {
@@ -151,9 +171,13 @@ pub(crate) fn cmd_jobs_run(
     // Slice 52h-2: hand the executor the durable queue so a verified
     // provider protocol invoked inside a job persists its intent (and
     // every transition) as that job's checkpoints.
-    let executor: Arc<dyn JobRuntimeExecutor> = Arc::new(
-        DefaultJobRuntimeExecutor::new(Arc::new(ir)).with_durable_queue(queue.clone()),
-    );
+    // A job naming an action runs through the action path (B10-4b);
+    // every other job runs its agent as before.
+    let ir = Arc::new(ir);
+    let executor: Arc<dyn JobRuntimeExecutor> = Arc::new(crate::jobs_actions::ActionJobExecutor::new(
+        ir.clone(),
+        DefaultJobRuntimeExecutor::new(ir).with_durable_queue(queue.clone()),
+    )?);
     let job_executor = into_pool_executor(executor, runtime_handle);
 
     let pool = WorkerPool::new(queue.clone(), workers)

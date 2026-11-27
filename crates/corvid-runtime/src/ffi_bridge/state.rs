@@ -237,10 +237,6 @@ pub fn runtime() -> Arc<Runtime> {
     bridge().corvid_runtime()
 }
 
-#[no_mangle]
-pub extern "C" fn corvid_runtime_is_replay() -> bool {
-    bridge().corvid_runtime().is_replay_mode()
-}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -178,6 +178,26 @@ pub fn discover_staticlib(staticlib_name: &str) -> Option<StaticlibLocation> {
 /// since that's the canonical Cargo layout. Falls back to the
 /// nearest ancestor of `current_exe()` that has a `target`
 /// sibling. Returns `None` if no plausible target dir is found.
+/// Whether `dir` is a Cargo target directory: the one `CARGO_TARGET_DIR`
+/// names, one holding the `CACHEDIR.TAG` Cargo writes at every target
+/// directory's root, or one named like the default `target`. A target
+/// directory set elsewhere (`/root/corvid-target`) is recognized, so a
+/// stale development archive there is rebuilt instead of refused.
+fn is_cargo_target_dir(dir: &Path) -> bool {
+    if let Some(configured) = std::env::var_os("CARGO_TARGET_DIR") {
+        let configured = PathBuf::from(configured);
+        let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        if same(&configured, dir) {
+            return true;
+        }
+    }
+    dir.join("CACHEDIR.TAG").is_file()
+        || dir.file_name().is_some_and(|name| name.to_string_lossy().starts_with("target"))
+}
+
 pub(crate) fn guess_dev_target_profile_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let mut cur: Option<&Path> = exe.parent();
@@ -186,10 +206,8 @@ pub(crate) fn guess_dev_target_profile_dir() -> Option<PathBuf> {
             let name_str = name.to_string_lossy();
             if name_str == "debug" || name_str == "release" {
                 if let Some(parent) = dir.parent() {
-                    if let Some(parent_name) = parent.file_name() {
-                        if parent_name.to_string_lossy().starts_with("target") {
-                            return Some(dir.to_path_buf());
-                        }
+                    if is_cargo_target_dir(parent) {
+                        return Some(dir.to_path_buf());
                     }
                 }
             }
@@ -203,6 +221,21 @@ pub(crate) fn guess_dev_target_profile_dir() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// A target directory set to any name is recognized by the tag Cargo
+    /// writes at its root, so a stale archive there is rebuilt.
+    #[test]
+    fn a_target_directory_is_recognized_by_cargo_tag_not_only_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let custom = root.path().join("corvid-target");
+        std::fs::create_dir_all(&custom).unwrap();
+        assert!(!is_cargo_target_dir(&custom), "an untagged directory with another name is not one");
+        std::fs::write(custom.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n").unwrap();
+        assert!(is_cargo_target_dir(&custom), "Cargo tags every target directory it creates");
+        let named = root.path().join("target");
+        std::fs::create_dir_all(&named).unwrap();
+        assert!(is_cargo_target_dir(&named), "the default name is still recognized");
+    }
 
     /// `discover_staticlib` reads two process-global env vars
     /// (`CORVID_RUNTIME_STATICLIB_OVERRIDE` and

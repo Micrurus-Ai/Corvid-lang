@@ -38,7 +38,7 @@ pub fn render_pretty_with_severity(
     let start = char_offset(diag.span.start);
     let span = start..char_offset(diag.span.end).max(start);
 
-    let code = detect_error_code(&diag.message);
+    let code = diag.code;
     let with_color = std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal();
     let (header, accent) = match severity {
         Severity::Error => ("error", Color::Red),
@@ -138,56 +138,6 @@ pub enum Severity {
     Warning,
 }
 
-/// Best-effort mapping from a diagnostic message to a stable error code.
-/// These codes are documented and searchable.
-fn detect_error_code(msg: &str) -> &'static str {
-    if msg.contains("dangerous tool") && msg.contains("without a prior") {
-        "E0101"
-    } else if msg.contains("ungrounded return") {
-        "E0209"
-    } else if msg.contains("wrong number of arguments") {
-        "E0201"
-    } else if msg.contains("no field named") {
-        "E0202"
-    } else if msg.contains("cannot call a value") {
-        "E0203"
-    } else if msg.contains("field access requires a struct") {
-        "E0204"
-    } else if msg.contains("is a type, not a value") {
-        "E0205"
-    } else if msg.contains("is a function; call it with") {
-        "E0206"
-    } else if msg.contains("return type mismatch") {
-        "E0207"
-    } else if msg.contains("type mismatch") {
-        "E0208"
-    } else if msg.contains("undefined name") {
-        "E0301"
-    } else if msg.contains("duplicate declaration") {
-        "E0302"
-    } else if msg.contains("unterminated string") {
-        "E0001"
-    } else if msg.contains("tab character used for indentation") {
-        "E0002"
-    } else if msg.contains("unexpected character") {
-        "E0003"
-    } else if msg.contains("chained comparisons") {
-        "E0051"
-    } else if msg.contains("unclosed") {
-        "E0052"
-    } else if msg.contains("expected an indented block") {
-        "E0053"
-    } else if msg.contains("block is empty") {
-        "E0054"
-    } else if msg.contains("effect constraint violated") && msg.contains("budget") {
-        "E0250"
-    } else if msg.contains("cost analysis warning") {
-        "W0251"
-    } else {
-        "E0000"
-    }
-}
-
 /// Condensed one-line headline for the report's top message.
 /// ariadne duplicates the message if we pass the full text, so we keep
 /// the headline short and put detail on the label and help lines.
@@ -236,15 +186,14 @@ fn label_for(msg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_error_code, label_for, render_pretty};
+    use super::{label_for, render_pretty};
     use crate::Diagnostic;
     use corvid_ast::Span;
     use std::path::Path;
 
     #[test]
-    fn ungrounded_return_has_stable_code_and_label() {
+    fn ungrounded_return_has_its_label() {
         let msg = "ungrounded return in agent `answer`: no retrieval source feeds into the return value";
-        assert_eq!(detect_error_code(msg), "E0209");
         assert_eq!(
             label_for(msg),
             "return value lacks a proven grounded source"
@@ -252,9 +201,8 @@ mod tests {
     }
 
     #[test]
-    fn budget_violation_has_stable_code_and_label() {
+    fn budget_violation_has_its_label() {
         let msg = "effect constraint violated in agent `planner`: cost: $1.031 > $1.00 budget (path: search -> generate_plan)";
-        assert_eq!(detect_error_code(msg), "E0250");
         assert_eq!(
             label_for(msg),
             "static worst-case cost exceeds the declared budget"
@@ -262,9 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn unbounded_cost_warning_has_stable_code_and_label() {
+    fn unbounded_cost_warning_has_its_label() {
         let msg = "cost analysis warning in agent `planner`: static iteration count unknown";
-        assert_eq!(detect_error_code(msg), "W0251");
         assert_eq!(label_for(msg), "static cost bound could not be proven");
     }
 
@@ -288,6 +235,7 @@ mod tests {
             span: Span::new(0, 5),
             message: "type mismatch in agent `main`: Int vs String".to_string(),
             hint: Some("rebind one operand to match the other".to_string()),
+            code: "E0208",
         };
         let source = "agent main() -> Int:\n    return 0\n";
         let rendered = render_pretty(&diag, Path::new("main.cor"), source);

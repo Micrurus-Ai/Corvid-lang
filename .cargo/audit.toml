@@ -1,0 +1,23 @@
+# `cargo audit` configuration, read by the `dependency-advisories` CI job.
+#
+# CI runs `cargo audit --deny warnings`, so any new advisory against a
+# dependency fails the build when it appears: a vulnerability, a yanked
+# release or an unmaintained crate. The entries below are the only known
+# ones. Each is an "unmaintained" notice with no successor release yet, not
+# a vulnerability. Remove an entry when the crate is replaced or a
+# maintained release ships; never add one for a vulnerability.
+
+[advisories]
+ignore = [
+    # chrono: unmaintained, no fixed release. Used through chrono-tz and
+    # cron parsing.
+    "RUSTSEC-2026-0543",
+    # chrono-tz: unmaintained, no fixed release. The IANA zone data behind
+    # `TimeZone`.
+    "RUSTSEC-2026-0555",
+    # instant: unmaintained, no fixed release. A transitive dependency.
+    "RUSTSEC-2024-0384",
+    # ttf-parser: unmaintained, no fixed release. A transitive dependency of
+    # font handling.
+    "RUSTSEC-2026-0192",
+]

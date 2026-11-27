@@ -29,6 +29,8 @@ members = [
     "crates/corvid-macros",
     "crates/corvid-test-tools",
     "crates/corvid-test-paths",
+    "crates/corvid-source-stamp",
+    "crates/corvid-hex",
     "crates/corvid-driver",
     "crates/corvid-differential-verify",
     "crates/corvid-cli",
@@ -105,6 +107,8 @@ corvid-connector-runtime = { path = "crates/corvid-connector-runtime" }
 corvid-macros   = { path = "crates/corvid-macros" }
 corvid-test-tools = { path = "crates/corvid-test-tools" }
 corvid-test-paths = { path = "crates/corvid-test-paths" }
+corvid-source-stamp = { path = "crates/corvid-source-stamp" }
+corvid-hex = { path = "crates/corvid-hex" }
 corvid-public-json = { path = "crates/corvid-public-json" }
 corvid-text = { path = "crates/corvid-text" }
 corvid-decimal = { path = "crates/corvid-decimal" }

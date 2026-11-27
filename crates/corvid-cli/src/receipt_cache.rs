@@ -56,7 +56,7 @@ pub(crate) fn cache_dir() -> std::io::Result<PathBuf> {
 pub(crate) fn receipt_hash(payload: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }
 
 /// Store both the receipt JSON and its signed envelope under the

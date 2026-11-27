@@ -1,0 +1,10 @@
+[package]
+name = "corvid-source-stamp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Build-script helper: a stamp of a crate's sources and those of every workspace crate it depends on, so a native build can tell which runtime and code generator it holds."
+
+[dependencies]
+sha2 = "0.10"
