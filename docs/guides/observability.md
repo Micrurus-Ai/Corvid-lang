@@ -1,22 +1,36 @@
 # Observability
 
-The observability surface ships in v1.0 as the OTel-conformant
-runtime + the `corvid observe` CLI + the `corvid eval` /
-`corvid eval-drift` / `corvid eval-from-feedback` workflow. The
-source-level `obs.log.info({...})` / `obs.span("name", {...})`
-ergonomic surface is post-v1.0 — today every Corvid construct
-already emits the lineage events the observability stack consumes;
-agent code doesn't have to call a logging API to get observed.
+> **What runs today, and what does not yet.** `corvid run` and a compiled
+> binary record every run as a trace, `target/trace/<run_id>.jsonl`. That
+> trace is the record replay, `corvid trace show` and `corvid trace dag`
+> read. `corvid serve` records no trace yet.
+>
+> The tools on this page read a different file, the lineage trace
+> (`<run_id>.lineage.jsonl`): `corvid observe`, `corvid trace lineage`,
+> `corvid eval promote` and the OpenTelemetry export. Corvid does not yet
+> write that file for a run, so today these tools work on lineage files you
+> supply, such as the reference apps' `traces/demo.lineage.jsonl`. Also not
+> built yet: the `CORVID_OTEL_*` variables and a `corvid run --trace-out`
+> flag.
+>
+> The plan to derive lineage from the trace every run already writes, and
+> to let a served program declare where its traces go, is
+> [lineage from real runs](../proposals/lineage-from-runs.md).
+
+The observability surface is the OTel-conformant lineage model, the
+`corvid observe` CLI, and the `corvid eval`, `corvid eval-drift` and
+`corvid eval-from-feedback` workflow. The source-level
+`obs.log.info({...})` and `obs.span("name", {...})` surface comes later.
 
 ## What ships today
 
 Per the Phase 40 audit (`docs/phases/phase-40-audit-2026-05-17.md`):
 
-- **Lineage events** — every prompt / tool / agent / approve /
-  grounded-unwrap / budget / replay step emits a typed
-  `LineageEvent` with stable `(trace_id, span_id, parent_span_id)`
-  triples. Validated by
-  `corvid_runtime::lineage::validate_lineage`.
+- **Lineage events.** A typed `LineageEvent` model for prompt, tool,
+  agent, approval, database, retry and error steps, with stable
+  `(trace_id, span_id, parent_span_id)` triples. Validated by
+  `corvid_runtime::lineage::validate_lineage`. A run does not produce
+  these events yet (see the note above).
 - **OTel SDK export** —
   `crates/corvid-runtime/src/otel_sdk_export.rs` ships span
   emission through the standard `opentelemetry` +
@@ -61,12 +75,15 @@ machine-readable form the docs-site + downstream tooling consume.
 
 ## Trace + eval lifecycle
 
-```sh
-# 1. Run an agent and record its trace.
-corvid run examples/backend/personal_executive_agent/src/main.cor \
-    --trace-out /var/lib/corvid/traces/
+Steps 2 to 4 read lineage traces, which a run does not write yet (see
+the note at the top). Until it does, run them on a lineage file you
+supply.
 
-# 2. Inspect the trace.
+```sh
+# 1. Run an agent; its trace is recorded under target/trace/.
+corvid run examples/backend/personal_executive_agent/src/main.cor
+
+# 2. Inspect a lineage trace.
 corvid observe show <run-id> --trace-dir /var/lib/corvid/traces/
 
 # 3. Compare two traces (e.g. before/after a prompt change).
@@ -82,22 +99,20 @@ corvid eval tests/evals/regressions/ --source examples/backend/personal_executiv
 
 ## OTel export configuration
 
-Configure via environment variables on the running agent:
-
-```sh
-export CORVID_OTEL_ENDPOINT=http://otel-collector:4317
-export CORVID_OTEL_SERVICE_NAME=my-app
-export CORVID_OTEL_SAMPLE_RATE=1.0
-```
-
-The docker-compose Jaeger conformance harness (documented at
-`docs/operations/observability-conformance.md`) exercises the
-full wire path end-to-end against a real OTel collector.
+A running program does not export to OpenTelemetry yet. No
+configuration exists, and no `CORVID_OTEL_*` variable is read. The
+export turns lineage events into OTLP/HTTP JSON, and its wire path is
+tested against an in-process receiver. The docker-compose Jaeger harness
+in `docs/operations/observability-conformance.md` exercises the same
+path against a real collector. Exporting a served program's traces will
+be declared in its source, not switched on by a variable, because it
+sends what users did to another system. See
+[lineage from real runs](../proposals/lineage-from-runs.md).
 
 ## Redaction
 
-The runtime applies a built-in redaction policy to every lineage
-event before it leaves the process. Token-shaped values
+The redaction policy applies to every lineage event before it is
+exported. Token-shaped values
 (`Bearer <hex>`, SSN-like `\d{3}-\d{2}-\d{4}`) are replaced with
 shape-preserving placeholders; the (trace_id, span_id, parent
 linkage) topology is preserved so a redacted trace still
@@ -108,11 +123,9 @@ Adversarial test:
 seeds `"Bearer sk-live-123 for 123-45-6789"` into a span and
 asserts the SSN does not appear in the redacted JSON.
 
-The source-level `obs.log.info({...})` API that would let agent
-code emit arbitrary structured logs (with the redaction policy
-applied to user-supplied fields) is post-v1.0 — today the
-lineage events the runtime emits automatically are the
-authoritative record.
+A source-level `obs.log.info({...})` API, letting agent code emit its
+own structured logs with the redaction policy applied, comes later.
+Today a run's authoritative record is its trace.
 
 ## Drift attribution + cost optimisation
 
