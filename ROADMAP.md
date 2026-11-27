@@ -4,7 +4,9 @@
 
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
-- [ ] F08 integrated frontend check. Verify the orders item loop and generated route calls against the same stream protocol, then run the orders and live client Edge checks on the integrated revision.
+- [ ] F18 independent application acceptance. Checkout, sketchbook and collaborative workspace trials passed. Track the independent developer report in the [F18 acceptance record](docs/proposals/frontend-application-acceptance.md).
+
+- [x] F08 integrated frontend check. Verified the orders item loop and generated route calls against the same stream protocol, then ran the orders and live client Edge checks on the integrated revision.
 - [x] RT-4 / F08 live subscriptions. The generated TypeScript observer and
   Corvid child loop received a missed commit on reconnect and the next live
   edit over RT-3. Edge retained the unaffected row, input focus and selection.

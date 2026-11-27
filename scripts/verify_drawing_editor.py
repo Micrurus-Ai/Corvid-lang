@@ -70,6 +70,41 @@ def point(canvas, x, y):
             bounds["y"] + (y + 0.5) * bounds["height"] / 64)
 
 
+def check_canvas_capacity(browser, server, base):
+    cells = [[x, y] for y in range(64) for x in range(96)]
+    with browser.new_context() as context:
+        page = context.new_page()
+        page.goto(base)
+        canvas = page.locator("canvas")
+        count_marks = """() => {
+          const el = document.querySelector('canvas');
+          const data = el.getContext('2d').getImageData(0, 0, el.width, el.height).data;
+          return data.filter((alpha, i) => i % 4 === 3 && alpha === 255).length;
+        }"""
+        expect(page.locator("#sync-status")).to_have_text("Drawing synchronized.")
+        assert page.evaluate(count_marks) == 0
+        with server.lock:
+            server.document["cells"] = cells[:-1]
+            server.revision += 1
+        page.locator("#retry-sync").click()
+        page.wait_for_function(f"({count_marks})() === {len(cells) - 1}")
+        expect(page.locator("#offline")).to_have_text("Ready for offline reload.")
+        expect(page.get_by_role("status")).to_have_text("Drag to draw.")
+        context.set_offline(True)
+        bounds = canvas.bounding_box()
+        canvas.click(position={"x": bounds["width"] * 95.5 / 96,
+                               "y": bounds["height"] * 63.5 / 64})
+        expect(page.locator("#storage")).to_have_text("Drawing saved.")
+        assert page.evaluate(count_marks) == len(cells)
+        assert page.reload().from_service_worker
+        expect(page.get_by_role("status")).to_have_text("Drag to draw.")
+        assert page.evaluate(count_marks) == len(cells)
+        context.set_offline(False)
+        expect(page.locator("#sync-status")).to_have_text("Drawing synchronized.")
+        with server.lock:
+            assert sorted(server.document["cells"]) == sorted(cells)
+
+
 def verify(cli, channel):
     project = Path(__file__).resolve().parents[1] / "examples/drawing_editor"
     subprocess.run([cli, "build", "src/stroke.cor", "--target", "wasm"], cwd=project, check=True)
@@ -83,10 +118,14 @@ def verify(cli, channel):
         Thread(target=server.serve_forever, daemon=True).start()
         cleanup.callback(server.shutdown)
         browser = playwright.chromium.launch(channel=channel)
+        base = f"http://127.0.0.1:{server.server_port}/"
+        check_canvas_capacity(browser, server, base)
+        with server.lock:
+            server.document["cells"] = []
+            server.revision += 1
         context = browser.new_context()
         context.on("console", lambda message: print(message.text) if message.type == "error" else None)
         page = context.new_page()
-        base = f"http://127.0.0.1:{server.server_port}/"
         old_tab = context.new_page()
         old_tab.goto(base + "editor.js")
         old_tab.evaluate("""() => new Promise(resolve => {

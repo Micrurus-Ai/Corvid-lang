@@ -1,5 +1,9 @@
 # Corvid — learnings
 
+Entering zero for both products in the storefront returns an empty-cart page
+with a link back to the quantity fields. The packaged checkout accepts up to
+99 of each product. [F18 checkout and editor trials](docs/proposals/frontend-application-acceptance.md)
+
 Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
 
 A native library can include HTTP handlers with checked path and caller fields. The native compiler uses the same field names, order and types as the interpreter. [Native route parameter layouts](docs/proposals/native-dispatch.md#native-layouts-for-route-arguments)

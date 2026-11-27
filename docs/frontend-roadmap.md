@@ -22,7 +22,9 @@ F08 can exercise reconnect against the authenticated RT-3 endpoint. The transpor
 
 Task branches use descriptive names such as `frontend/semantic-html` and `frontend/responsive-styling`. The queue uses stable IDs to track dependencies and resume work. Dependencies identify the tasks that must already be integrated. Each row may take several tested increments. A task is complete only when its entire acceptance column works through the public toolchain.
 
-Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. F08 uses the integrated RT-3 endpoint. Verify the generated observer and Corvid child loop with `scripts/verify_generated_live_client.py` and the request, upload and stream flows with `scripts/verify_order_resources.py`, each with `--cli <corvid> --channel msedge`. Commerce and offline-editor acceptance can start before F08 merges. Final acceptance requires the merged F08 subscription contract and a passing collaborative-workspace reconnect and resubscription check.
+Offline edits can synchronize through ordinary request/response routes. Server rendering and assistant actions can also use the existing route and action contracts. F08 uses the integrated RT-3 endpoint. Verify the generated observer and Corvid child loop with `scripts/verify_generated_live_client.py` and the request, upload and stream flows with `scripts/verify_order_resources.py`, each with `--cli <corvid> --channel msedge`. The storefront, offline editor and collaborative workspace passed their hosted Edge trials. Final acceptance requires the independent component report.
+
+The [F18 acceptance record](proposals/frontend-application-acceptance.md) gives the tested project boundaries, hosted Edge results and independent component trial instructions.
 
 | ID | Deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
