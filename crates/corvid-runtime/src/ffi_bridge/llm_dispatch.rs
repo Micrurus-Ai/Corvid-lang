@@ -4,7 +4,8 @@ use crate::llm::LlmRequestRef;
 
 /// One structured LLM call, as the interpreter makes it: the rendered
 /// prompt and the reply's public-form schema as structured output, no
-/// text instructions. Returns the reply value the adapter gave (B1b).
+/// text instructions. Returns the reply value the adapter gave (B1b), or
+/// the runtime's error, which says whether it was an outage.
 pub(super) fn call_llm_structured(
     state: &BridgeState,
     prompt_name: &str,
@@ -12,7 +13,7 @@ pub(super) fn call_llm_structured(
     rendered: &str,
     args: &[serde_json::Value],
     schema: Option<&serde_json::Value>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, crate::RuntimeError> {
     let runtime = state.corvid_runtime();
     let req = LlmRequestRef {
         tool_turn: None,
@@ -34,7 +35,7 @@ pub(super) fn call_llm_structured(
                 &format!("corvid prompt `{prompt_name}` (model `{model}`) replay failed"),
                 &e,
             );
-            Err(format!("{e}"))
+            Err(e)
         }
     }
 }

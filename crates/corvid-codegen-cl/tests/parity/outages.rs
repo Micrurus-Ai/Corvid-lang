@@ -172,3 +172,50 @@ agent main() -> String:
     assert_eq!(out, "9");
 }
 
+
+/// A prompt whose reply never fits its declared type is an unusable
+/// reply, an outage on both tiers (recoverable failures TE-3c): the mock
+/// model answers text where an `Int` is declared, through every repair
+/// attempt.
+#[test]
+fn a_prompt_whose_reply_never_fits_takes_the_fallback_on_both_tiers() {
+    let src = r#"
+prompt estimate(item: String) -> Int:
+    "How many minutes does {item} take?"
+
+agent plan(item: String) -> Int:
+    held = "plan for " + item
+    minutes = estimate(item)
+    return minutes + held.length()
+
+agent main() -> Int:
+    return (try plan("laundry") else 15) + (try estimate("dishes") else 5)
+"#;
+    let ir = ir_of(src);
+    let mock = corvid_runtime::MockAdapter::new("mock-1").reply("estimate", serde_json::json!("about an hour"));
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .llm(Arc::new(mock))
+        .default_model("mock-1")
+        .build();
+    let interpreted = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async { corvid_vm::run_agent(&ir, entry_name(&ir), vec![], &runtime).await })
+        .expect("interpreter run");
+    assert_eq!(interpreted, corvid_vm::Value::Int(20));
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = crate::native_command(compile(&ir, &tmp))
+        .env("CORVID_DEBUG_ALLOC", "1")
+        .env("CORVID_TEST_MOCK_LLM", "1")
+        .env("CORVID_TEST_MOCK_LLM_RESPONSE", "about an hour")
+        .env("CORVID_MODEL", "mock-1")
+        .output()
+        .expect("run compiled binary");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "compiled binary failed: {stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "20", "stderr={stderr}");
+    assert_no_leaks(&stderr, src);
+}

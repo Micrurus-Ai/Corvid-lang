@@ -1,10 +1,10 @@
 //! Which native calls can raise an outage, and which `try` forms native
 //! code catches exactly (recoverable failures TE-3).
 //!
-//! A tool call is the native call that can fail with an outage: the
-//! runtime holds the outage instead of stopping (see the runtime's
-//! `ffi_bridge/outage.rs`). An agent can fail when it can reach a tool
-//! call. The expansion pass (`dup_drop/propagation.rs`) hoists each call
+//! A tool call and a prompt call are the native calls that can fail with
+//! an outage: the runtime holds the outage instead of stopping (see the
+//! runtime's `ffi_bridge/outage.rs`). An agent can fail when it can reach
+//! one. The expansion pass (`dup_drop/propagation.rs`) hoists each call
 //! that can fail into its own statement, followed by a test that unwinds
 //! by an ordinary `return`, so the ownership pass releases what is live.
 //!
@@ -14,9 +14,8 @@
 //! followed by a test that stops the program on an outage, which is what
 //! native code always did. A `try` that can reach one would then stop
 //! where the interpreter catches, so native lowering refuses that `try`
-//! by name, and so does the tier picker. So does a `try` that can reach a
-//! prompt, whose failures still stop the program until TE-3c. Both use
-//! this module, so they cannot disagree.
+//! by name, and so does the tier picker. Both use this module, so they
+//! cannot disagree.
 
 use corvid_ir::{IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrStmt};
 use corvid_resolve::DefId;
@@ -70,7 +69,7 @@ impl OutagePlan {
     /// Whether this call can raise an outage.
     pub fn call_can_fail(&self, kind: &IrCallKind) -> bool {
         match kind {
-            IrCallKind::Tool { .. } => true,
+            IrCallKind::Tool { .. } | IrCallKind::Prompt { .. } => true,
             IrCallKind::Agent { def_id } => self.fallible.contains(def_id),
             _ => false,
         }
@@ -184,9 +183,6 @@ impl OutagePlan {
             return None;
         };
         match kind {
-            IrCallKind::Prompt { .. } => Some(format!(
-                "it calls prompt `{callee_name}`, whose failures stop a native program until native prompts report outages (recoverable failures TE-3c)"
-            )),
             IrCallKind::Agent { def_id } if self.blocked.contains_key(def_id) => {
                 let name = self.names.get(def_id).map(String::as_str).unwrap_or(callee_name);
                 Some(format!("it calls agent `{name}`, and {}", self.blocked[def_id]))

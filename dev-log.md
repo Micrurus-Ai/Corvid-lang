@@ -2,6 +2,28 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native prompts report outages (TE-3c)
+
+`corvid_prompt_call_typed` now holds an outage instead of exiting, when
+the program can catch one:
+- a model call that fails with an outage;
+- a reply that still does not fit its type after the repair attempts,
+  which is an unusable reply.
+
+The native model call returned its error as text, which dropped the kind
+the outage rule needs. It now returns the `RuntimeError`. On the outage
+path, compiled code skips the strict citation check and the grounded
+attestation, which would otherwise read the zero bits of a reply that
+never arrived. The outage plan treats a prompt as a call that can fail
+instead of a reason to refuse, so a `try` over a prompt now runs
+natively.
+
+Proof: a parity test, under the leak detector, where the mock model
+answers text for an `Int` prompt, called inside an agent and directly;
+both tiers give 20. The tier picker test now expects a `try` over a
+prompt to run natively, and a new one names the agent whose `match` arm
+blocks it.
+
 ### Dependency scanning reads GitHub's advisories too
 
 Five Dependabot alerts passed `cargo audit --deny warnings`, because each

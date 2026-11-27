@@ -19,9 +19,9 @@ use std::time::Instant;
 //      c. On parse success, return.
 //      d. On parse failure, capture last response for next retry's
 //         stronger system prompt.
-//   4. After max retries, panic with a clear message including the
-//      last LLM response — compiled binary aborts with stderr trail
-//      so the user can see what went wrong.
+//   4. After max retries, stop with a clear message including the
+//      last LLM response, or hold the outage when the program has a
+//      `try` that catches it (recoverable failures TE-3c).
 //
 // String returns skip the parse-retry loop entirely (a String response
 // is by definition parseable as String). The shape stays uniform so
@@ -85,11 +85,13 @@ pub unsafe extern "C" fn corvid_prompt_call_typed(
     let mut attempt_rendered = rendered.clone();
     let mut last_failure = String::new();
     for _attempt in 0..=repair_attempts.max(0) {
-        let reply = call_llm_structured(state, &prompt_name, &model, &attempt_rendered, &llm_args, schema.as_ref())
-            .unwrap_or_else(|e| {
+        let reply = match call_llm_structured(state, &prompt_name, &model, &attempt_rendered, &llm_args, schema.as_ref()) {
+            Ok(reply) => reply,
+            Err(e) => {
                 record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
-                stop(&format!("prompt `{prompt_name}`: {e}"))
-            });
+                return fail(format!("corvid: prompt `{prompt_name}`: {e}"), e.is_outage(), payload);
+            }
+        };
         match decode(reply.clone()) {
             Ok(bits) => {
                 unsafe { payload.write(bits) };
@@ -103,12 +105,17 @@ pub unsafe extern "C" fn corvid_prompt_call_typed(
         }
     }
     record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
-    stop(&format!("unusable reply: {last_failure}"))
+    // A reply that never fits its type is an unusable reply: an outage
+    // on both tiers.
+    fail(format!("corvid: unusable reply: {last_failure}"), true, payload)
 }
 
-/// Stop the program with `message`, as the interpreter stops with its
-/// error: a panic cannot unwind out of this `extern "C"` bridge.
-fn stop(message: &str) -> ! {
-    eprintln!("corvid: {message}");
-    std::process::exit(1)
+/// A failed prompt call: stop the program with `message`, as the
+/// interpreter stops with its error, or hold an outage the program can
+/// catch and leave zero bits (recoverable failures TE-3c). A panic
+/// cannot unwind out of this `extern "C"` bridge.
+fn fail(message: String, outage: bool, payload: *mut i64) -> i64 {
+    super::outage::fail(message, outage);
+    unsafe { payload.write(0) };
+    0
 }

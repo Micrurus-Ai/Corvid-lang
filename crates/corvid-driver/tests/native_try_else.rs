@@ -25,7 +25,7 @@ agent main() -> Int:
 }
 
 #[test]
-fn a_try_that_reaches_a_prompt_names_the_prompt() {
+fn a_try_over_a_prompt_runs_natively() {
     let src = r#"
 prompt summarize(text: String) -> String:
     "Summarize {text}"
@@ -33,8 +33,25 @@ prompt summarize(text: String) -> String:
 agent main() -> String:
     return try summarize("notes") else "no summary"
 "#;
-    let reason = ability(src).expect_err("prompts still stop a native program");
-    assert!(reason.contains("runs on the interpreter") && reason.contains("prompt `summarize`"), "{reason}");
+    assert_eq!(ability(src), Ok(()));
+}
+
+#[test]
+fn a_try_that_reaches_a_failing_call_in_a_match_arm_names_the_agent() {
+    let src = r#"
+prompt summarize(text: String) -> String:
+    "Summarize {text}"
+
+agent pick(text: Option<String>) -> String:
+    return match text:
+        Some(t) -> summarize(t)
+        None -> ""
+
+agent main() -> String:
+    return try pick(Some("notes")) else "no summary"
+"#;
+    let reason = ability(src).expect_err("an arm cannot unwind yet");
+    assert!(reason.contains("runs on the interpreter") && reason.contains("`pick`"), "{reason}");
 }
 
 #[test]

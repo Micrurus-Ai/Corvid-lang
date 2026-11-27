@@ -278,6 +278,9 @@ pub(super) fn lower_prompt_call(
     return_ty: &Type,
     span: Span,
 ) -> Result<ClValue, CodegenError> {
+    // Whether the statement after this call tests the outage slot itself
+    // (recoverable failures TE-3c); read before lowering any argument.
+    let checked = runtime.outage_checked.replace(false);
     let prompt = runtime
         .ir_prompts
         .get(&def_id)
@@ -446,6 +449,7 @@ pub(super) fn lower_prompt_call(
             payload,
         ],
     );
+    super::expr::emit_outage_stop_unless_checked(builder, module, runtime, checked);
     let bits = builder.ins().stack_load(I64, payload_slot, 0);
     let result_value = match cl_type_for(reply_ty, span)? {
         I8 => builder.ins().ireduce(I8, bits),
@@ -454,6 +458,24 @@ pub(super) fn lower_prompt_call(
     };
     let result_vals = [result_value];
 
+    // On a held outage the reply is zero bits, which name no text to
+    // check or value to attest: the unwinding path skips both.
+    let skip_on_outage = |builder: &mut FunctionBuilder, module: &mut ObjectModule| {
+        let pending = module.declare_func_in_func(runtime.outage_pending, builder.func);
+        let pending = builder.ins().call(pending, &[]);
+        builder.inst_results(pending)[0]
+    };
+    let citation_join = if checked && prompt.cites_strictly_param.is_some() {
+        let pending = skip_on_outage(builder, module);
+        let check = builder.create_block();
+        let join = builder.create_block();
+        builder.ins().brif(pending, join, &[], check, &[]);
+        builder.switch_to_block(check);
+        builder.seal_block(check);
+        Some(join)
+    } else {
+        None
+    };
     if let Some(param_idx) = prompt.cites_strictly_param {
         let (context_text, context_borrowed) = emit_citation_text(
             builder,
@@ -486,6 +508,11 @@ pub(super) fn lower_prompt_call(
             emit_release(builder, module, runtime, response_text);
         }
     }
+    if let Some(join) = citation_join {
+        builder.ins().jump(join, &[]);
+        builder.switch_to_block(join);
+        builder.seal_block(join);
+    }
 
     emit_release(builder, module, runtime, prompt_name_val);
     if !rendered_borrowed {
@@ -502,7 +529,26 @@ pub(super) fn lower_prompt_call(
     }
 
     if matches!(return_ty, Type::Grounded(_)) {
-        return emit_grounded_prompt_attestation(
+        if !checked {
+            return emit_grounded_prompt_attestation(
+                builder,
+                module,
+                runtime,
+                result_vals[0],
+                return_ty,
+                &prompt.name,
+                prompt.effect_confidence,
+                span,
+            );
+        }
+        let pending = skip_on_outage(builder, module);
+        let attest = builder.create_block();
+        let done = builder.create_block();
+        let result = builder.append_block_param(done, cl_type_for(return_ty, span)?);
+        builder.ins().brif(pending, done, &[result_vals[0].into()], attest, &[]);
+        builder.switch_to_block(attest);
+        builder.seal_block(attest);
+        let attested = emit_grounded_prompt_attestation(
             builder,
             module,
             runtime,
@@ -511,7 +557,11 @@ pub(super) fn lower_prompt_call(
             &prompt.name,
             prompt.effect_confidence,
             span,
-        );
+        )?;
+        builder.ins().jump(done, &[attested.into()]);
+        builder.switch_to_block(done);
+        builder.seal_block(done);
+        return Ok(result);
     }
     Ok(result_vals[0])
 }

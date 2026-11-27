@@ -1,6 +1,6 @@
 # `try ... else` in native code (recoverable failures TE-3)
 
-**Status:** TE-3a, TE-3b and TE-3d built 2026-11-27; TE-3c (prompts) next. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
+**Status:** TE-3a to TE-3d built 2026-11-27. What remains is the widening on the roadmap (failing calls in `match` arms, guards and lambdas) and `timeout`. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
 **Owner:** backend (Claude Code, Mac session).
 **Roadmap:** `try ... else` TE-3 in [backend-ai-roadmap](../backend-ai-roadmap.md); parent proposal [recoverable failures](recoverable-failures.md).
 
@@ -76,7 +76,7 @@ The interpreter records a caught failure like the failure it replaces, so a repl
   Built 2026-11-27. `outage_plan.rs` decides which calls can fail and which `try` forms native code catches exactly; native lowering and the tier picker both ask it. The expansion that turns each into ordinary `return`, `continue` and `break` is `dup_drop/outage.rs`, in the pass that already exposed `?` to ownership analysis. A test holds the expansion and the plan together.
 
   Narrowed: a `try` that can reach a failing call inside a `match` arm, a guard, a lambda, or a `parallel` or `approve` statement runs on the interpreter, refused by name, because the IR has no statement form there to unwind through. A call in those positions is checked by stopping the program, as native code always did.
-- [ ] TE-3c. Prompts and table operations report outages through the same slot.
+- [x] TE-3c. Prompts report outages through the same slot. Built 2026-11-27. Table operations are not native yet (B09 P6); they will use the same slot when they are.
 - [x] TE-3d. Record and replay, with a cross-tier replay test. Proved 2026-11-27 in `replay_native.rs`; it needed no code, because a replayed failure carries its `outage` flag into the pending slot.
 
 ## Not in scope

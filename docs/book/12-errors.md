@@ -85,11 +85,10 @@ denied approval, an exceeded budget) still stop the run, so a fallback
 can never hide one. The failure may happen any number of calls inside
 the body; with `retry`, the body runs again before the fallback is used.
 
-Compiled programs catch outages from tool and connector calls the same
-way. Native code does not yet catch the failures of prompts, so a `try`
-that can reach a prompt, a `try` with a `timeout`, or a `try` that can
-reach a failing call inside a `match` arm, a guard or a lambda runs on
-the interpreter, and `corvid build` names which one.
+Compiled programs catch outages from tool, connector and prompt calls
+the same way. A `try` with a `timeout`, or one that can reach a failing
+call inside a `match` arm, a guard or a lambda, runs on the interpreter
+for now, and `corvid build` names which one.
 
 ## Timeouts
 
