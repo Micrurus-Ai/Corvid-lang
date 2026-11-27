@@ -13,20 +13,10 @@ env:
 
 jobs:
   dependency-advisories:
-    # A new advisory against any Rust dependency fails here when it
-    # appears, instead of surfacing later in a push notice. The known
-    # unmaintained crates, which have no successor release yet, are
-    # listed in .cargo/audit.toml; everything else is denied.
+    # The audit is defined once, in dependency-advisories.yml, which also
+    # runs it daily on its own.
     name: cargo audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Audit Cargo.lock
-        run: cargo audit --deny warnings
+    uses: ./.github/workflows/dependency-advisories.yml
 
   workspace-tests:
     name: cargo test --workspace

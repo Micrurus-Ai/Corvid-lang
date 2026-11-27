@@ -2,6 +2,23 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### The dependency audit also runs daily
+
+A new RustSec advisory is published with no code change, so the audit,
+which ran only on push and pull request, missed it on a quiet week. The
+Mac session pointed out the gap. A daily run costs Actions minutes, so the
+owner decided it (2026-11-27): daily, audit only.
+
+The audit is now defined once, in
+`.github/workflows/dependency-advisories.yml`:
+- it runs daily on its own (`schedule`, 06:17 UTC), and can be started by
+  hand;
+- `ci.yml`'s `dependency-advisories` job calls it (`workflow_call`) on
+  every push and pull request.
+
+A second copy of the steps for the daily run was rejected, because the
+two would drift. Both runs use `.cargo/audit.toml`.
+
 ### Lineage from real runs L1c: what a run's model calls cost
 
 A run's `prompt` steps now carry their tokens, cost and the model actually
