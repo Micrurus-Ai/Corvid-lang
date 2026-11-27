@@ -7,7 +7,7 @@ Approval-gated money movement in a minimal Corvid project.
 From this directory:
 
 ```sh
-cargo run -q -p corvid-cli -- build
+cargo run -q -p corvid-cli -- check
 cargo run -q -p corvid-cli -- run
 ```
 

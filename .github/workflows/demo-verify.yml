@@ -192,9 +192,9 @@ jobs:
       - name: cargo test -p corvid-cli --test demo_project_defaults
         run: cargo test -p corvid-cli --test demo_project_defaults
 
-      - name: refund_bot build
+      - name: Check refund bot
         working-directory: examples/refund_bot
-        run: cargo run -q -p corvid-cli -- build
+        run: cargo run -q -p corvid-cli -- check
 
       - name: refund_bot run
         working-directory: examples/refund_bot
@@ -281,9 +281,9 @@ jobs:
           cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_ollama.jsonl
           cargo run -q -p corvid-cli -- replay examples/model_provider_routing/seed/traces/model_provider_routing_anthropic.jsonl
 
-      - name: Knowledge base assistant build
+      - name: Check knowledge base assistant
         working-directory: examples/knowledge_base_assistant
-        run: cargo run -q -p corvid-cli -- build
+        run: cargo run -q -p corvid-cli -- check
 
       - name: Knowledge base assistant run
         working-directory: examples/knowledge_base_assistant
@@ -318,9 +318,9 @@ jobs:
           cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/traces/rag_qa_bot_refund_policy.jsonl
           cargo run -q -p corvid-cli -- replay examples/knowledge_base_assistant/seed/traces/rag_qa_bot_refund_policy.jsonl
 
-      - name: support_escalation_bot build
+      - name: Check support escalation bot
         working-directory: examples/support_escalation_bot
-        run: cargo run -q -p corvid-cli -- build
+        run: cargo run -q -p corvid-cli -- check
 
       - name: support_escalation_bot run
         working-directory: examples/support_escalation_bot
@@ -360,9 +360,9 @@ jobs:
             echo "seed approval-denied replay preserved denial"
           fi
 
-      - name: code_review_agent build
+      - name: Check code review agent
         working-directory: examples/code_review_agent
-        run: cargo run -q -p corvid-cli -- build
+        run: cargo run -q -p corvid-cli -- check
 
       - name: code_review_agent run
         working-directory: examples/code_review_agent
