@@ -99,6 +99,18 @@ pub fn lineage_to_otel_span(event: &LineageEvent) -> OtelSpanMapping {
     }
 }
 
+/// A `Db` span's time in the database, as integer microseconds:
+/// `corvid.db.wait_us` (waiting for a connection or a turn to write) and
+/// `corvid.db.statement_us` (running its statements). Both exporters
+/// call this, so they name and include them the same way. Empty for any
+/// other span, and for a `Db` span with no recorded timing.
+pub fn db_timing_attributes(event: &LineageEvent) -> Vec<(&'static str, u64)> {
+    if event.kind != crate::lineage::LineageKind::Db || (event.db_wait_us == 0 && event.db_statement_us == 0) {
+        return Vec::new();
+    }
+    vec![("corvid.db.wait_us", event.db_wait_us), ("corvid.db.statement_us", event.db_statement_us)]
+}
+
 pub fn required_otel_metrics() -> Vec<OtelMetricMapping> {
     vec![
         metric("corvid.request.count", "1", "Backend request count"),
@@ -149,6 +161,19 @@ fn format_float(value: f64) -> String {
 mod tests {
     use super::*;
     use crate::lineage::{LineageEvent, LineageKind, LineageStatus};
+
+    #[test]
+    fn a_database_span_exports_its_wait_and_statement_time_and_others_do_not() {
+        let run = LineageEvent::root("trace-1", LineageKind::Agent, "main", 0);
+        let mut db = LineageEvent::child(&run, LineageKind::Db, "Shelf.save", 0, 1);
+        assert!(db_timing_attributes(&db).is_empty(), "no recorded timing, no attributes");
+        db.db_wait_us = 4_200;
+        db.db_statement_us = 310;
+        assert_eq!(db_timing_attributes(&db), vec![("corvid.db.wait_us", 4_200), ("corvid.db.statement_us", 310)]);
+        let mut tool = LineageEvent::child(&run, LineageKind::Tool, "send_email", 1, 1);
+        tool.db_wait_us = 1;
+        assert!(db_timing_attributes(&tool).is_empty(), "only a database span carries database time");
+    }
 
     #[test]
     fn lineage_span_mapping_includes_required_corvid_attributes() {

@@ -235,7 +235,9 @@ CORVID_TEST_POSTGRES_URL=postgres://... CORVID_POOL_LOAD_SECONDS=10 \
   cargo test --release -p corvid-runtime --lib pool_under_concurrent_agents -- --ignored --nocapture
 ```
 
-The test creates and drops a table named `corvid_pool_load`, so point it at a scratch database. It measures the pool directly. A served program on Postgres under sustained load, as in [Sustained editing and backlog](#sustained-editing-and-backlog), is still to be measured.
+The test creates and drops a table named `corvid_pool_load`, so point it at a scratch database.
+
+A program's own runs show the same split. `corvid trace lineage <run-id>` prints each table operation's wait for a connection and its running time, for example `- db Shelf.save [ok] waited=11.560ms ran=3.020ms`, and the OpenTelemetry export carries them as `corvid.db.wait_us` and `corvid.db.statement_us`. A wait that grows while running time stays flat means `connections:` is too small. It measures the pool directly. A served program on Postgres under sustained load, as in [Sustained editing and backlog](#sustained-editing-and-backlog), is still to be measured.
 
 ### Cancellable AI stream
 

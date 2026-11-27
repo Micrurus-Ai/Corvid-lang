@@ -2,6 +2,54 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs L2: a run shows where its database time went
+
+Just before each recorded table operation's `ToolResult`, the trace now
+gets a `DbTiming` event. It records, in microseconds, how long the
+operation waited for a turn and how long its statements ran, and how many
+statements it ran:
+- **The turn.** On Postgres it is a connection from the pool; on SQLite
+  it is the writer queue (`execute_queued_timed`). A SQLite read takes no
+  turn.
+- **Adding up.** A task-local (`tables/timing.rs`) scoped around the live
+  operation sums every statement it runs. A `std.db` query outside an
+  operation records nothing.
+- **Replay.** `DbTiming` is evidence like `HttpExchange`, so replay skips
+  it through the same `is_dispatch_metadata` list. A test deletes the
+  database and replays the trace.
+- **Where it shows.** Lineage gives the `Db` span `db_wait_us` and
+  `db_statement_us`, left out when zero so existing lineage serializes
+  byte-identically. The tree prints `waited=0.031ms ran=0.241ms`, and both
+  OTLP exporters send `corvid.db.wait_us` and `corvid.db.statement_us`
+  through one helper, `otel_schema::db_timing_attributes`.
+- **Why not a field on `ToolResult`.** 24 places build a `ToolResult`, and
+  an evidence event beside it changes nothing they rely on.
+
+Found and fixed, each in its own commit:
+- **Failed calls showed as `Ok`.** L1 marked every tool result `Ok`. A
+  call that failed records its failure as its result, so its span is now
+  `Failed`. The projection decides through replay's own reader
+  (`replayed_failure`), and a typed conflict stays `Ok`, because it is an
+  answer.
+- **Steps printed out of order.** The lineage tree broke ties between
+  steps starting in the same millisecond by kind, then name. Steps under a
+  millisecond apart are common, so a run's steps printed out of the order
+  they ran (`Shelf.get` before an earlier `Shelf.insert`). It now keeps
+  recorded order within a millisecond. L1's test had passed only because
+  its timestamps happened to differ.
+
+Found and filed:
+- **Two exporters, two key sets.** The two OTLP attribute builders name
+  and include attributes differently (`corvid.effects` and
+  `corvid.duration_ms` from the SDK exporter, `corvid.effect_ids` and
+  `corvid.latency_ms` from the JSON one, and no tenant, actor or data
+  classes from the SDK). A collector sees different keys depending on the
+  exporter.
+- **The REPL copies the accessors.** The REPL replay re-derives each
+  event's run id and timestamp in its own matches instead of calling
+  `TraceEvent::run_id()` and `ts_ms()`, so every new event kind must be
+  added there too.
+
 ### Lineage from real runs L1: `observe` reads what a run records
 
 `corvid_runtime::lineage_from_trace` turns a run's trace into its

@@ -13,6 +13,8 @@
 //!   tool, `Prompt` for a model call, `Approval` for an approval. A call
 //!   whose result is a recorded failure is `Failed`; a typed conflict is
 //!   an answer, so it is `Ok`;
+//! - a table operation's `DbTiming` gives its `Db` span the time it
+//!   waited for a connection and the time its statements ran;
 //! - an HTTP exchange is a child of the tool span it belongs to, and a
 //!   retried attempt is a `Retry` span;
 //! - a run that ended in an error has a failed root and an `Error` child.
@@ -98,6 +100,14 @@ impl RunLineage {
                     };
                     run.close_span(&format!("tool:{tool}"), status, *ts_ms);
                 }
+                // Written just before the result that closes the earliest
+                // open call of the same name, so it belongs to that call.
+                TraceEvent::DbTiming { tool, wait_us, statement_us, .. } => {
+                    if let Some(at) = run.earliest_open(&format!("tool:{tool}")) {
+                        run.spans[at].db_wait_us = *wait_us;
+                        run.spans[at].db_statement_us = *statement_us;
+                    }
+                }
                 TraceEvent::LlmCall { ts_ms, prompt, model, .. } => {
                     let at = run.open_span(0, LineageKind::Prompt, prompt, *ts_ms, format!("prompt:{prompt}"));
                     if let Some(model) = model {
@@ -182,6 +192,10 @@ impl RunLineage {
 
     fn latest_open(&self, key: &str) -> Option<usize> {
         self.open.get(key)?.back().copied()
+    }
+
+    fn earliest_open(&self, key: &str) -> Option<usize> {
+        self.open.get(key)?.front().copied()
     }
 
     fn finish(&mut self, at: usize, status: LineageStatus, ended_ms: u64) {
@@ -402,6 +416,32 @@ mod tests {
         ]);
         let statuses: Vec<_> = lineage[1..].iter().map(|span| span.status).collect();
         assert_eq!(statuses, vec![LineageStatus::Failed, LineageStatus::Ok], "a conflict is an answer, not a failure");
+    }
+
+    #[test]
+    fn a_table_operation_carries_its_wait_and_statement_time() {
+        let timing = |ts_ms, wait_us, statement_us| TraceEvent::DbTiming {
+            ts_ms,
+            run_id: RUN.into(),
+            tool: "table:Shelf.save".into(),
+            wait_us,
+            statement_us,
+            statements: 2,
+        };
+        let lineage = lineage_from_trace(&[
+            started(0),
+            tool_call(1, "table:Shelf.save"),
+            tool_call(2, "table:Shelf.save"),
+            timing(3, 4_000, 900),
+            tool_result(3, "table:Shelf.save"),
+            timing(4, 0, 700),
+            tool_result(4, "table:Shelf.save"),
+            completed(5, None),
+        ]);
+        let times: Vec<_> = lineage[1..].iter().map(|span| (span.db_wait_us, span.db_statement_us)).collect();
+        assert_eq!(times, vec![(4_000, 900), (0, 700)], "each timing belongs to the call its result closes");
+        let line = serde_json::to_string(&lineage[2]).unwrap();
+        assert!(!line.contains("db_wait_us") && line.contains("\"db_statement_us\":700"), "a zero is left out: {line}");
     }
 
     #[test]

@@ -521,6 +521,9 @@ fn span_attributes(event: &LineageEvent) -> Vec<Value> {
     attrs.push(int_attr("corvid.started_ms", event.started_ms));
     attrs.push(int_attr("corvid.ended_ms", event.ended_ms));
     attrs.push(int_attr("corvid.latency_ms", event.latency_ms));
+    for (key, value) in crate::otel_schema::db_timing_attributes(event) {
+        attrs.push(int_attr(key, value));
+    }
     attrs
 }
 

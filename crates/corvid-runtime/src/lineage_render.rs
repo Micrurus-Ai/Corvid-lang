@@ -53,6 +53,12 @@ fn render_node(
     if event.cost_usd > 0.0 {
         out.push_str(&format!(" cost=${:.4}", event.cost_usd));
     }
+    // A database step's time split into waiting for a connection and
+    // running, so a pool that is too small shows as a growing wait.
+    if !crate::otel_schema::db_timing_attributes(event).is_empty() {
+        let ms = |us: u64| format!("{}.{:03}ms", us / 1000, us % 1000);
+        out.push_str(&format!(" waited={} ran={}", ms(event.db_wait_us), ms(event.db_statement_us)));
+    }
     if !event.guarantee_id.is_empty() {
         out.push_str(" guarantee=");
         out.push_str(&event.guarantee_id);

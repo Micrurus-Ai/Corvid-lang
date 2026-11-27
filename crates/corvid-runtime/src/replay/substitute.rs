@@ -14,6 +14,7 @@ pub(crate) fn is_dispatch_metadata(event: &TraceEvent) -> bool {
         TraceEvent::ModelSelected { .. }
             | TraceEvent::HostEvent { .. }
             | TraceEvent::HttpExchange { .. }
+            | TraceEvent::DbTiming { .. }
             | TraceEvent::ProgressiveEscalation { .. }
             | TraceEvent::ProgressiveExhausted { .. }
             | TraceEvent::StreamUpgrade { .. }

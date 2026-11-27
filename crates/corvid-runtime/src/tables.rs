@@ -20,6 +20,7 @@ use crate::Runtime;
 use corvid_ast::DatabaseLocation;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 mod conflict;
 mod dialect;
@@ -34,6 +35,7 @@ mod query;
 mod recorded;
 mod schema;
 mod shared_commits;
+pub(crate) mod timing;
 mod transaction;
 pub(crate) use shared_commits::new_instance_id;
 pub use shared_commits::LISTENER_NAME;
@@ -146,28 +148,54 @@ impl Runtime {
         Ok(connections.entry(id).or_insert(connection).clone())
     }
 
-    /// Run a write; the number of rows it changed.
+    /// Run a write; the number of rows it changed. Its wait for a turn and
+    /// its running time go to the operation's timing.
     async fn table_execute(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<u64, RuntimeError> {
-        let changed = match self.table_connection(table).await.map_err(|e| named(table, e))? {
+        let asked = Instant::now();
+        let (changed, waited) = match self.table_connection(table).await.map_err(|e| named(table, e))? {
             TableConnection::Sqlite(handle) => {
-                self.db_registry().execute_queued(&handle, sql, params).await.map(|r| r.rows_affected)
+                let (result, waited) = self.db_registry().execute_queued_timed(&handle, sql, params).await;
+                (result.map(|r| r.rows_affected), waited)
             }
-            TableConnection::Postgres(pool) => pool.borrow().await?.connection().execute(sql, params).await,
-            TableConnection::PostgresHeld(held) => held.lock().await.connection().execute(sql, params).await,
+            TableConnection::Postgres(pool) => {
+                let borrowed = pool.borrow().await?;
+                let waited = asked.elapsed();
+                (borrowed.connection().execute(sql, params).await, waited)
+            }
+            TableConnection::PostgresHeld(held) => {
+                let held = held.lock().await;
+                let waited = asked.elapsed();
+                (held.connection().execute(sql, params).await, waited)
+            }
         };
+        timing::record(waited, asked.elapsed().saturating_sub(waited));
         changed.map_err(|e| named(table, e))
     }
 
-    /// Run a read; its rows in [`TableRef::columns`] order.
+    /// Run a read; its rows in [`TableRef::columns`] order. Its wait for a
+    /// connection and its running time go to the operation's timing.
     async fn table_select(&self, table: &TableRef<'_>, sql: &str, params: &[DbValue]) -> Result<Vec<Row>, RuntimeError> {
-        let rows = match self.table_connection(table).await.map_err(|e| named(table, e))? {
-            TableConnection::Sqlite(handle) => self
-                .db_registry()
-                .query_table_rows(handle.handle_id, sql, params)
-                .map(|rows| rows.rows.into_iter().map(|cells| ordered_row(table, cells)).collect()),
-            TableConnection::Postgres(pool) => pool.borrow().await?.connection().select(sql, params, table.columns).await,
-            TableConnection::PostgresHeld(held) => held.lock().await.connection().select(sql, params, table.columns).await,
+        let asked = Instant::now();
+        let (rows, waited) = match self.table_connection(table).await.map_err(|e| named(table, e))? {
+            // A SQLite read takes no turn in the writer queue.
+            TableConnection::Sqlite(handle) => (
+                self.db_registry()
+                    .query_table_rows(handle.handle_id, sql, params)
+                    .map(|rows| rows.rows.into_iter().map(|cells| ordered_row(table, cells)).collect()),
+                Duration::ZERO,
+            ),
+            TableConnection::Postgres(pool) => {
+                let borrowed = pool.borrow().await?;
+                let waited = asked.elapsed();
+                (borrowed.connection().select(sql, params, table.columns).await, waited)
+            }
+            TableConnection::PostgresHeld(held) => {
+                let held = held.lock().await;
+                let waited = asked.elapsed();
+                (held.connection().select(sql, params, table.columns).await, waited)
+            }
         };
+        timing::record(waited, asked.elapsed().saturating_sub(waited));
         rows.map_err(|e| named(table, e))
     }
 

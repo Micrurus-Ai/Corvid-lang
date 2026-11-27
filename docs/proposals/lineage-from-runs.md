@@ -45,7 +45,13 @@ The runtime trace stays the one record of a run. Lineage becomes a projection of
 
 ### Time spent in the database (L2)
 
-A table operation's `ToolResult` gains an optional `timing` field: how long the operation waited for a connection, and how long its statement ran. Older traces have no `timing` and read unchanged. Replay ignores the field, because timing is not part of a result. The `Db` span shows the two times as `corvid.db.wait_ms` and `corvid.db.statement_ms`, and the OTLP export carries them. A saturated pool then shows in every trace: wait grows while statement time stays flat, which is the pattern the [pool measurement](../guides/performance.md#choosing-a-postgres-pool-size) shows.
+Just before a table operation's `ToolResult`, the trace gets a `DbTiming` event. It records, in microseconds, how long the operation waited for a turn and how long its statements ran, and how many statements it ran. On Postgres the turn is a connection from the pool; on SQLite it is the writer queue. A read on SQLite takes no turn.
+
+`DbTiming` is evidence, like `HttpExchange`. Replay skips it through the same list (`is_dispatch_metadata`), because timing is not part of a result, and older traces simply have none. The `Db` span carries the two times as `db_wait_us` and `db_statement_us`, which are left out of serialized lineage when zero. The tree prints them as `waited=0.031ms ran=0.241ms`. Both OTLP exporters send them as `corvid.db.wait_us` and `corvid.db.statement_us`, through one helper.
+
+A saturated pool then shows in every trace: wait grows while statement time stays flat, which is the pattern the [pool measurement](../guides/performance.md#choosing-a-postgres-pool-size) shows.
+
+A field on `ToolResult` was rejected because 24 places build one. An evidence event beside it, skipped by replay's existing rule, changes nothing those places rely on.
 
 ### A served program declares its traces (L3, shared grammar)
 
@@ -100,7 +106,7 @@ traces:
 - [x] L1. `lineage_from_trace`, with a test per row of the table. `corvid observe list | show`, `corvid trace lineage` and `corvid eval promote` accept a run trace, and a trace from a real `corvid run` renders as a tree. The tests run a program, not a fixture. Built 2026-11-27. Four copies of the lineage reader across `observe`, `trace lineage`, `eval promote` and the observe helpers became one, `corvid-cli`'s `lineage_input`. One copy had already drifted: it read every `.jsonl` in a directory as lineage.
 - [ ] L1b. A call from one agent to another is recorded in the trace, so lineage shows the agent nesting. Today a run's steps sit directly under it, because the trace holds only the run's own start and end.
 - [ ] L1c. Model calls record token counts and cost in the trace, so `Prompt` spans and `observe`'s cost totals are real. Today the trace records the model but not its usage, so derived lineage shows zero cost.
-- [ ] L2. `timing` on table results, filled on both engines. `corvid.db.wait_ms` and `corvid.db.statement_ms` on `Db` spans and in the OTLP export. Replay ignores the field.
+- [x] L2. The time each table operation waited for a turn and ran, on both engines: a `DbTiming` evidence event in the trace, `db_wait_us` and `db_statement_us` on `Db` spans, `waited=` and `ran=` in the tree, and `corvid.db.wait_us` and `corvid.db.statement_us` in both OTLP exporters. Replay skips it. Built 2026-11-27. A run's trace replays with the database deleted.
 - [ ] L3. The `traces:` block (`location:`, `keep:`, `none`) parsed and checked, and required with a `server` block. `corvid serve` records one run per request, with the route as root, and deletes traces older than `keep:`. Served examples declare it. Needs the frontend review.
 - [ ] L4. `export: otlp(env(...))`, exporting each finished run's redacted lineage. Needs the frontend review.
 - [ ] L5. Compiled binaries follow the `traces:` block, not the working directory.

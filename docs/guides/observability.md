@@ -5,7 +5,10 @@
 > trace is the record replay reads, and the tools on this page read it
 > too: `corvid observe`, `corvid trace lineage` and `corvid eval promote`
 > derive a run's lineage from its trace. The run is the root. Each table
-> operation is a `db` step, each other tool a `tool` step, each model call
+> operation is a `db` step showing how long it waited for a connection or
+> a turn to write and how long it ran (`waited=0.031ms ran=0.241ms`;
+> `corvid.db.wait_us` and `corvid.db.statement_us` when exported). Each
+> other tool is a `tool` step, each model call
 > a `prompt` step, each approval an `approval` step, and each HTTP attempt
 > sits under its tool. A lineage file (`*.lineage.jsonl`) is still read as
 > written.

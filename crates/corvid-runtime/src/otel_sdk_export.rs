@@ -315,6 +315,9 @@ pub fn corvid_span_attributes(event: &LineageEvent) -> Vec<KeyValue> {
         "corvid.duration_ms",
         event.latency_ms as i64,
     ));
+    for (key, value) in crate::otel_schema::db_timing_attributes(event) {
+        attrs.push(KeyValue::new(key, i64::try_from(value).unwrap_or(i64::MAX)));
+    }
     attrs
 }
 
@@ -359,6 +362,8 @@ mod tests {
             input_fingerprint: String::new(),
             output_fingerprint: String::new(),
             redaction_policy_hash: String::new(),
+            db_wait_us: 0,
+            db_statement_us: 0,
         }
     }
 

@@ -244,6 +244,24 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
+    /// Where one recorded table operation spent its time in the
+    /// database. It is written just before the operation's `ToolResult`,
+    /// and `tool` names the operation (`table:<Table>.<op>`). Waiting
+    /// covers a turn at the Postgres pool or at SQLite's writer queue; a
+    /// growing wait with steady statement time means `connections:` is
+    /// too small. Evidence only: replay never substitutes it, because
+    /// timing is not part of a result.
+    DbTiming {
+        ts_ms: u64,
+        run_id: String,
+        tool: String,
+        /// Microseconds spent waiting for a connection or a turn to write.
+        wait_us: u64,
+        /// Microseconds spent running the operation's statements.
+        statement_us: u64,
+        /// How many statements the operation ran.
+        statements: u32,
+    },
     /// A pseudo-random number read. Recorded per draw so replay
     /// can reproduce the exact sequence even when the seeded PRNG
     /// runs through different call paths.
@@ -416,6 +434,7 @@ impl TraceEvent {
             | Self::HumanChoiceResponse { run_id, .. }
             | Self::HostEvent { run_id, .. }
             | Self::HttpExchange { run_id, .. }
+            | Self::DbTiming { run_id, .. }
             | Self::SeedRead { run_id, .. }
             | Self::ClockRead { run_id, .. }
             | Self::ModelSelected { run_id, .. }
@@ -452,6 +471,7 @@ impl TraceEvent {
             | Self::HumanChoiceResponse { ts_ms, .. }
             | Self::HostEvent { ts_ms, .. }
             | Self::HttpExchange { ts_ms, .. }
+            | Self::DbTiming { ts_ms, .. }
             | Self::SeedRead { ts_ms, .. }
             | Self::ClockRead { ts_ms, .. }
             | Self::ModelSelected { ts_ms, .. }

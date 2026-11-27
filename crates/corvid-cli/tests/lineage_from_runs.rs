@@ -87,6 +87,23 @@ fn a_real_run_renders_as_a_lineage_tree_with_its_database_steps() {
         "each table operation is a database step, in the order it ran:\n{tree}"
     );
     assert!(tree.lines().skip(1).all(|line| line.starts_with("  ")), "the steps sit under the run:\n{tree}");
+    assert!(
+        lines[1..].iter().all(|line| line.contains(" waited=") && line.contains(" ran=")),
+        "each database step shows its wait for a turn and its running time (L2):\n{tree}"
+    );
+}
+
+/// The timing a run records is evidence, not a result: the same trace
+/// replays with the database gone.
+#[test]
+fn a_run_with_database_timing_still_replays_without_the_database() {
+    let (project, trace_dir, run_id) = project_after_one_run();
+    let trace = trace_dir.join(format!("{run_id}.jsonl"));
+    let text = std::fs::read_to_string(&trace).unwrap();
+    assert_eq!(text.matches("\"kind\":\"db_timing\"").count(), 3, "one timing per table operation:\n{text}");
+    std::fs::remove_file(project.path().join("library.sqlite")).unwrap();
+    let replayed = corvid(&["replay", trace.to_str().unwrap(), "--source", "src/main.cor"], project.path());
+    assert!(replayed.contains("Reading | taken by Reading | Reading"), "replay serves the recorded rows:\n{replayed}");
 }
 
 #[test]
