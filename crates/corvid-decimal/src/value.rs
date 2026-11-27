@@ -90,6 +90,14 @@ impl Decimal {
     }
 
     /// The coefficient rescaled to `scale` (which must be at least
+    /// this value's scale) when it fits in 128 bits: the fast path every
+    /// operation tries before computing in arbitrary precision.
+    pub(crate) fn small_coefficient_at_scale(&self, scale: u8) -> Option<i128> {
+        debug_assert!(scale >= self.scale);
+        self.coefficient.checked_mul(power_of_ten(scale - self.scale)?)
+    }
+
+    /// The coefficient rescaled to `scale` (which must be at least
     /// this value's scale), exactly.
     pub(crate) fn coefficient_at_scale(&self, scale: u8) -> BigInt {
         debug_assert!(scale >= self.scale);
@@ -123,9 +131,18 @@ impl Hash for Decimal {
     }
 }
 
+/// `10^exponent` when it fits in an `i128`, which holds through
+/// `10^38`.
+pub(crate) fn power_of_ten(exponent: u8) -> Option<i128> {
+    10i128.checked_pow(u32::from(exponent))
+}
+
 impl Ord for Decimal {
     fn cmp(&self, other: &Self) -> Ordering {
         let scale = self.scale.max(other.scale);
+        if let (Some(a), Some(b)) = (self.small_coefficient_at_scale(scale), other.small_coefficient_at_scale(scale)) {
+            return a.cmp(&b);
+        }
         self.coefficient_at_scale(scale)
             .cmp(&other.coefficient_at_scale(scale))
     }

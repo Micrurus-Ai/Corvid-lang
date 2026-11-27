@@ -8493,3 +8493,12 @@ Not yet:
 
 A compiled program that built a string, a list or a `Decimal` total in a loop, or otherwise allocated more than about ten thousand values, could stop with `corvid_release on already-freed allocation` or crash outright. The native memory collector freed values the program still held. It now keeps every value something still references, and frees only unreachable cycles, so these programs run to completion with the same results as the interpreter.
 
+### `Decimal` arithmetic is fast on both tiers
+
+`Decimal` arithmetic, comparison, rounding and division run about six
+times faster in both `corvid run` and compiled programs. A loop of
+600 000 operations now takes under a tenth of a second. Results and error
+messages are exactly what they were: every value still has at most 38
+digits and 28 decimal places, and nothing is rounded unless a rounding
+mode is named.
+

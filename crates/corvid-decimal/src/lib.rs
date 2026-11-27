@@ -21,5 +21,6 @@ mod text;
 mod value;
 
 pub use error::DecimalError;
+pub use text::CanonicalText;
 pub use rounding::{check_places, RoundingMode};
 pub use value::{Decimal, MAX_DIGITS, MAX_SCALE};

@@ -2,6 +2,45 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `Decimal` arithmetic computes in 128 bits
+
+The roadmap item for a compact native `Decimal` asked to measure first.
+Profiling showed the cost was not the native text form. It was in
+`corvid_decimal` itself, shared by both tiers. `Decimal::parse` collected
+the text into a `Vec<char>` and two `String`s and read the digits as a
+`BigInt`. `+`, `-`, `%` and comparison rescaled both operands as `BigInt`s,
+and `*`, rounding and division also went through arbitrary precision.
+That happened on every call, though a coefficient is at most 38 digits
+and always fits an `i128`.
+
+Every operation now computes in `i128` when every intermediate fits,
+which is nearly always. It falls back to the arbitrary-precision code,
+unchanged, when a rescale or product would overflow, or when a product
+needs more than 28 fractional digits. Parsing reads the ASCII bytes
+straight into an `i128`; the existing length checks already guarantee
+the digits fit. Error positions are unchanged, because everything before
+the first refused byte is ASCII. Formatting writes into a 41-byte stack
+buffer (`Decimal::canonical_text`), which `Display` and the native bridge
+both use, so there is still one formatter.
+
+Measured (600 000 decimal operations, `total = total + price * 1.08`):
+- parse: 288 ns before, 12 ns after
+- `+`: 190 ns before, 5 ns after
+- `*`: 74 ns before, 3 ns after
+- the whole loop: 0.46 s before, 0.06 s after natively, and 0.46 s before, 0.07 s after on the interpreter
+
+Proof that nothing changed: tests compare each fast path with the
+arbitrary-precision computation it replaces. They cover `+ - * %`,
+comparison, every rounding mode and division at scales 0 to 28, with
+coefficients up to the 38-digit limit, both signs and zero divisors.
+Another test checks the stack formatter against the old text at every
+scale, and parse tests cover non-ASCII text and the widest accepted
+values.
+
+The compact native form stays on the roadmap with the new numbers. The
+rest of the cost is one parse, one format and one allocation per
+operation, so it would save perhaps 0.05 µs per operation.
+
 ### Native compilation of route parameters
 
 A fixed route still has an empty path argument. Native compilation used to reject this argument before reaching the ABI verifier in every reference app. Each distinct ordered list of path or caller fields now uses one ordinary native record layout, including field access and ownership. This keeps the HTTP server on its existing execution path.

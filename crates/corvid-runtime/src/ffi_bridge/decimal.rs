@@ -13,7 +13,7 @@
 //! arithmetic error does, with the same message.
 
 use super::native_scalar::{canonical, runtime_trap, slot_string};
-use super::strings::{borrow_corvid_string, string_from_rust};
+use super::strings::{borrow_corvid_string, string_from_rust, string_from_str};
 use crate::abi::CorvidString;
 use corvid_decimal::{Decimal, DecimalError, RoundingMode};
 
@@ -30,8 +30,10 @@ pub(crate) unsafe fn decimal_of(value: &CorvidString) -> Decimal {
     unsafe { canonical(value, "Decimal", Decimal::parse) }
 }
 
+/// The result as a native Decimal: its canonical text, written on the
+/// stack and copied once into the new String.
 fn text_of(value: Decimal) -> CorvidString {
-    string_from_rust(value.to_string())
+    string_from_str(&value.canonical_text())
 }
 
 macro_rules! decimal_binary {

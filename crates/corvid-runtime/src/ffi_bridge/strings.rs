@@ -69,7 +69,7 @@ pub fn string_from_rust(s: String) -> CorvidString {
     string_from_str(&s)
 }
 
-fn string_from_str(s: &str) -> CorvidString {
+pub(crate) fn string_from_str(s: &str) -> CorvidString {
     let bytes = s.as_bytes();
     let ptr = bytes.as_ptr();
     let len = bytes.len() as i64;

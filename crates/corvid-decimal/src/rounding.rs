@@ -1,11 +1,12 @@
 //! Declared rounding: `round_<mode>(places)` and `divide_<mode>(b, places)`.
 //!
 //! These are the only operations that drop digits, and each one names
-//! its mode. Both compute the exact quotient in arbitrary precision and
-//! round it once, so there is never double rounding.
+//! its mode. Both compute the exact quotient and round it once, so there
+//! is never double rounding: in 128 bits when the scaled operands fit,
+//! and in arbitrary precision otherwise, with the same result.
 
 use crate::error::DecimalError;
-use crate::value::{Decimal, MAX_SCALE};
+use crate::value::{power_of_ten, Decimal, MAX_SCALE};
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
@@ -81,18 +82,48 @@ fn divide_rounded(numerator: &BigInt, denominator: &BigInt, mode: RoundingMode) 
     };
     let twice_remainder: BigInt = remainder.abs() * BigInt::from(2);
     let half = twice_remainder.cmp(&denominator.abs());
-    let round_away = match mode {
+    if rounds_away(mode, negative, half, quotient.is_odd()) {
+        away
+    } else {
+        quotient
+    }
+}
+
+/// Whether a quotient with this remainder moves one step away from
+/// zero under `mode`. `half` compares the remainder with half the
+/// divisor; `odd` says whether the truncated quotient is odd.
+fn rounds_away(mode: RoundingMode, negative: bool, half: std::cmp::Ordering, odd: bool) -> bool {
+    match mode {
         RoundingMode::TowardZero => false,
         RoundingMode::AwayFromZero => true,
         RoundingMode::Floor => negative,
         RoundingMode::Ceiling => !negative,
         RoundingMode::HalfUp => half.is_ge(),
-        RoundingMode::HalfEven => half.is_gt() || (half.is_eq() && quotient.is_odd()),
-    };
-    if round_away {
-        away
+        RoundingMode::HalfEven => half.is_gt() || (half.is_eq() && odd),
+    }
+}
+
+/// `numerator / denominator` rounded to an integer with `mode`, in 128
+/// bits. `denominator` is non-zero. `None` only when the rounded
+/// quotient leaves the `i128` range.
+fn divide_rounded_small(numerator: i128, denominator: i128, mode: RoundingMode) -> Option<i128> {
+    let quotient = numerator.checked_div(denominator)?;
+    let remainder = numerator.checked_rem(denominator)?;
+    if remainder == 0 {
+        return Some(quotient);
+    }
+    let negative = (numerator < 0) != (denominator < 0);
+    // Compares 2|r| with |d| without doubling: |r| against |d| - |r|.
+    let (r, d) = (remainder.unsigned_abs(), denominator.unsigned_abs());
+    let half = r.cmp(&(d - r));
+    if rounds_away(mode, negative, half, quotient % 2 != 0) {
+        if negative {
+            quotient.checked_sub(1)
+        } else {
+            quotient.checked_add(1)
+        }
     } else {
-        quotient
+        Some(quotient)
     }
 }
 
@@ -102,7 +133,15 @@ impl Decimal {
     pub fn round(&self, places: i64, mode: RoundingMode) -> Result<Decimal, DecimalError> {
         let places = check_places(places)?;
         if places >= self.scale() {
+            if let Some(coefficient) = self.small_coefficient_at_scale(places) {
+                return Decimal::from_parts(coefficient, places);
+            }
             return Decimal::from_big(self.coefficient_at_scale(places), usize::from(places));
+        }
+        if let Some(divisor) = power_of_ten(self.scale() - places) {
+            if let Some(rounded) = divide_rounded_small(self.coefficient(), divisor, mode) {
+                return Decimal::from_parts(rounded, places);
+            }
         }
         let divisor = BigInt::from(10).pow(u32::from(self.scale() - places));
         let rounded = divide_rounded(&self.big_coefficient(), &divisor, mode);
@@ -124,6 +163,13 @@ impl Decimal {
         // self / divisor × 10^places
         //   = (a × 10^-sa) / (b × 10^-sb) × 10^places
         //   = (a × 10^(places + sb)) / (b × 10^sa)
+        let small_numerator = power_of_ten(places + divisor.scale()).and_then(|p| self.coefficient().checked_mul(p));
+        let small_denominator = power_of_ten(self.scale()).and_then(|p| divisor.coefficient().checked_mul(p));
+        if let (Some(numerator), Some(denominator)) = (small_numerator, small_denominator) {
+            if let Some(rounded) = divide_rounded_small(numerator, denominator, mode) {
+                return Decimal::from_parts(rounded, places);
+            }
+        }
         let ten = BigInt::from(10);
         let numerator =
             self.big_coefficient() * ten.pow(u32::from(places) + u32::from(divisor.scale()));
@@ -195,6 +241,55 @@ mod tests {
     #[test]
     fn division_by_zero_is_an_error() {
         assert_eq!(d("1").divide(&d("0.00"), 2, HalfEven), Err(DecimalError::DivisionByZero));
+    }
+
+    /// Rounding and division as they were computed before the 128-bit
+    /// path existed: in arbitrary precision throughout.
+    fn reference_round(value: &Decimal, places: u8, mode: RoundingMode) -> Result<Decimal, DecimalError> {
+        if places >= value.scale() {
+            return Decimal::from_big(value.coefficient_at_scale(places), usize::from(places));
+        }
+        let divisor = BigInt::from(10).pow(u32::from(value.scale() - places));
+        Decimal::from_big(divide_rounded(&value.big_coefficient(), &divisor, mode), usize::from(places))
+    }
+
+    fn reference_divide(a: &Decimal, b: &Decimal, places: u8, mode: RoundingMode) -> Result<Decimal, DecimalError> {
+        if b.is_zero() {
+            return Err(DecimalError::DivisionByZero);
+        }
+        let ten = BigInt::from(10);
+        let numerator = a.big_coefficient() * ten.pow(u32::from(places) + u32::from(b.scale()));
+        let denominator = b.big_coefficient() * ten.pow(u32::from(a.scale()));
+        Decimal::from_big(divide_rounded(&numerator, &denominator, mode), usize::from(places))
+    }
+
+    #[test]
+    fn the_128_bit_path_rounds_and_divides_as_arbitrary_precision_does() {
+        let limit = 10i128.pow(crate::MAX_DIGITS) - 1;
+        let magnitudes = [0, 1, 5, 15, 25, 35, 49, 50, 51, 999, 1_000_000_007, 10i128.pow(20) + 5, limit / 3, limit];
+        let scales = [0u8, 1, 2, 3, 10, 27, 28];
+        let mut values = Vec::new();
+        for &m in &magnitudes {
+            for &s in &scales {
+                for sign in [1, -1] {
+                    values.push(Decimal::from_parts(sign * m, s).unwrap());
+                }
+            }
+        }
+        for mode in RoundingMode::ALL {
+            for places in [0u8, 1, 2, 4, 14, 28] {
+                for a in &values {
+                    assert_eq!(a.round(i64::from(places), mode), reference_round(a, places, mode), "{a} round {places} {mode:?}");
+                    for b in values.iter().step_by(3) {
+                        assert_eq!(
+                            a.divide(b, i64::from(places), mode),
+                            reference_divide(a, b, places, mode),
+                            "{a} / {b} to {places} {mode:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
