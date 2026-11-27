@@ -2,6 +2,20 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A `live` without `requires` is a compile error
+
+Who may watch a live query is a consequential choice. A `live` could be
+written without `requires`, and only `corvid serve` refused it, at start
+time. `check_live` now reports the omission at the declaration, and names
+`requires anyone` for a public list, which already parses as "open to
+anyone" and stays allowed. So the rule catches a forgotten clause, never a
+deliberate one.
+
+No program, example, book page or frontend verification script declared a
+`live` without `requires`. Ten compiler tests did; they now say `requires
+anyone`. A new test checks the error and that `requires anyone` passes.
+The serve refusal stays as a second line of defence.
+
 ### B10-4b: actions as background jobs, and a forged-caller path closed
 
 `jobs enqueue --task <action>` now takes `--source`. With it, the payload

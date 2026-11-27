@@ -230,6 +230,15 @@ impl<'a> Checker<'a> {
             }
             Some(_) => {}
         }
+        // Who may watch a live query is a consequential choice, so it is
+        // written, never left to a default (RT-1 follow-up). A public list
+        // says `requires anyone`.
+        if route.policy.is_none() {
+            invalid(
+                self,
+                "declares no `requires`; say who may watch it: `requires anyone` for a public list, or `requires authenticated`, `role(\"...\")` or `permission(\"...\")`".into(),
+            );
+        }
         let row_name = match route.response.live_row() {
             Some(corvid_ast::TypeRef::Named { name, .. }) => name.name.clone(),
             _ => {
