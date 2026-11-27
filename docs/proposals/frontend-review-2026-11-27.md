@@ -157,3 +157,29 @@ route POST "/videos" body Upload<Video> requires authenticated -> json Receipt:
 1. Does your side parse `@upload(...)` arguments, and if so, is one more named `INT` argument safe for it?
 
 **Answer:**
+
+---
+
+## 8. Keys and encryption at rest
+
+[Proposal](encryption-at-rest.md). Added 2026-11-27.
+
+```corvid
+database billing:
+    engine: postgres
+    location: env("BILLING_DATABASE_URL")
+    encryption: key(secret("BILLING_DATA_KEY"))
+
+table Customer:
+    key id: Int
+    stripe_key: Secret
+```
+
+- `encryption: key(secret("..."))` in a `database` block gives it a data key. A `Secret` column becomes legal under it and is stored encrypted, bound to its row.
+
+**Frontend owns:** nothing now. A `Secret` never reaches a browser.
+
+**Question:**
+1. Does your side parse `database` blocks? If so, is one more item safe for it?
+
+**Answer:**
