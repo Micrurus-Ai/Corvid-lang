@@ -10,7 +10,9 @@
 //! - the root is the run (`Agent`, named after the agent it started);
 //! - a call and its result become one span: `Db` for a table operation
 //!   (`table:<Table>.<op>`, named `<Table>.<op>`), `Tool` for any other
-//!   tool, `Prompt` for a model call, `Approval` for an approval;
+//!   tool, `Prompt` for a model call, `Approval` for an approval. A call
+//!   whose result is a recorded failure is `Failed`; a typed conflict is
+//!   an answer, so it is `Ok`;
 //! - an HTTP exchange is a child of the tool span it belongs to, and a
 //!   retried attempt is a `Retry` span;
 //! - a run that ended in an error has a failed root and an `Error` child.
@@ -85,8 +87,16 @@ impl RunLineage {
                     };
                     run.open_span(0, kind, name, *ts_ms, format!("tool:{tool}"));
                 }
-                TraceEvent::ToolResult { ts_ms, tool, .. } => {
-                    run.close_span(&format!("tool:{tool}"), LineageStatus::Ok, *ts_ms);
+                TraceEvent::ToolResult { ts_ms, tool, result, .. } => {
+                    // A call that failed records its failure as its result,
+                    // in the form replay serves it back; the same reader
+                    // decides here, so the two never disagree.
+                    let status = if crate::replay::replayed_failure(result).is_some() {
+                        LineageStatus::Failed
+                    } else {
+                        LineageStatus::Ok
+                    };
+                    run.close_span(&format!("tool:{tool}"), status, *ts_ms);
                 }
                 TraceEvent::LlmCall { ts_ms, prompt, model, .. } => {
                     let at = run.open_span(0, LineageKind::Prompt, prompt, *ts_ms, format!("prompt:{prompt}"));
@@ -372,6 +382,26 @@ mod tests {
                 (LineageKind::Error, "the database is unreachable", LineageStatus::Failed, 4, 4),
             ]
         );
+    }
+
+    #[test]
+    fn a_call_that_failed_is_a_failed_span_and_a_typed_conflict_is_not() {
+        let failure = crate::replay::recorded_failure(&crate::errors::RuntimeError::Other("the database is locked".into()));
+        let lineage = lineage_from_trace(&[
+            started(0),
+            tool_call(1, "table:Shelf.save"),
+            TraceEvent::ToolResult { ts_ms: 2, run_id: RUN.into(), tool: "table:Shelf.save".into(), result: failure },
+            tool_call(3, "table:Shelf.insert"),
+            TraceEvent::ToolResult {
+                ts_ms: 4,
+                run_id: RUN.into(),
+                tool: "table:Shelf.insert".into(),
+                result: json!({"conflict": "Taken", "row": [1, "Reading", 1]}),
+            },
+            completed(5, None),
+        ]);
+        let statuses: Vec<_> = lineage[1..].iter().map(|span| span.status).collect();
+        assert_eq!(statuses, vec![LineageStatus::Failed, LineageStatus::Ok], "a conflict is an answer, not a failure");
     }
 
     #[test]
