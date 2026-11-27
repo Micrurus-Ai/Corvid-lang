@@ -24,7 +24,7 @@ pub fn lower_binop_strict(
     module: &mut ObjectModule,
     runtime: &RuntimeFuncs,
 ) -> Result<ClValue, CodegenError> {
-    // Promote mixed Int + Float operands to F64 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â same widening the
+    // Promote mixed Int + Float operands to F64 — same widening the
     // interpreter applies in `eval_arithmetic`.
     let (l, r, dom) = promote_arith(builder, l, r, span)?;
 
@@ -164,7 +164,7 @@ fn promote_arith(
     if lt == I64 && rt == I64 {
         return Ok((l, r, ArithDomain::Int));
     }
-    // Bool == Bool is Int domain ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â both sides are I8.
+    // Bool == Bool is Int domain — both sides are I8.
     if lt == I8 && rt == I8 {
         return Ok((l, r, ArithDomain::Int));
     }
@@ -178,7 +178,7 @@ fn promote_arith(
     }
     Err(CodegenError::cranelift(
         format!(
-            "unsupported operand width combination for binop: {lt:?} and {rt:?} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"
+            "unsupported operand width combination for binop: {lt:?} and {rt:?} — typecheck should have caught this"
         ),
         span,
     ))
@@ -186,7 +186,7 @@ fn promote_arith(
 
 /// Lower unary operators.
 ///
-/// - `Not` flips a Bool via `icmp_eq(v, 0)` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â 0ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢1, 1ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and produces `I8`.
+/// - `Not` flips a Bool via `icmp_eq(v, 0)` — 0→1, 1→0 — and produces `I8`.
 /// - `Neg` on `Int` is `0 - x` with overflow trap, matching the
 ///   interpreter's `checked_neg` semantics for `i64::MIN`.
 pub fn lower_unop(
@@ -204,12 +204,12 @@ pub fn lower_unop(
             Ok(builder.ins().icmp(IntCC::Equal, v, zero))
         }
         UnaryOp::Neg if vt == F64 => {
-            // Float negation is IEEE ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â flips the sign bit, no trap. NaN
+            // Float negation is IEEE — flips the sign bit, no trap. NaN
             // negation produces NaN with the sign flipped, also fine.
             Ok(builder.ins().fneg(v))
         }
         UnaryOp::Neg if vt == I64 => {
-            // Int `-x` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ `0 - x`, trap on overflow (only at i64::MIN).
+            // Int `-x` ≡ `0 - x`, trap on overflow (only at i64::MIN).
             let zero = builder.ins().iconst(I64, 0);
             with_overflow_trap(builder, zero, v, module, runtime, |b| {
                 b.ins().ssub_overflow(zero, v)
@@ -218,7 +218,7 @@ pub fn lower_unop(
         // Elided at IR lowering (numeric identity).
         UnaryOp::Pos => Ok(v),
         UnaryOp::Neg => Err(CodegenError::cranelift(
-            format!("unary `-` applied to value of width {vt:?} ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"),
+            format!("unary `-` applied to value of width {vt:?} — typecheck should have caught this"),
             span,
         )),
     }

@@ -212,7 +212,7 @@ fn lower_stmt(
                 }
             };
             // The return value is an Owned temp (per the three-state
-            // ownership model Ã¢â‚¬â€ every `lower_expr` returns Owned for
+            // ownership model — every `lower_expr` returns Owned for
             // refcounted types). The caller will receive the +1 we
             // hold; nothing more to do for the value itself.
             //
@@ -243,7 +243,7 @@ fn lower_stmt(
             //     time, so we release to match.
             //   - If the expression is anything else (call, composite,
             //     literal), it produced a fresh Owned temp with no
-            //     owner Ã¢â‚¬â€ always release, regardless of flag, since
+            //     owner — always release, regardless of flag, since
             //     the pass has no Local to drop.
             if is_refcounted_type(&expr.ty) {
                 let is_bare_local = matches!(&expr.kind, IrExprKind::Local { .. });
@@ -265,14 +265,14 @@ fn lower_stmt(
             // Declare-or-reuse: a fresh `LocalId` gets a new Cranelift
             // `Variable`; reassignment to a name already bound in this
             // function reuses the existing Variable. A type change on
-            // reassignment is a typechecker bug Ã¢â‚¬â€ we surface it as a
+            // reassignment is a typechecker bug — we surface it as a
             // clean `CodegenError` instead of letting Cranelift panic.
             let (var, is_reassignment) = match env.get(local_id) {
                 Some(&(existing_var, existing_ty)) => {
                     if existing_ty != cl_ty {
                         return Err(CodegenError::cranelift(
                             format!(
-                                "variable redeclared with different type: was {existing_ty}, now {cl_ty} Ã¢â‚¬â€ typechecker should have caught this"
+                                "variable redeclared with different type: was {existing_ty}, now {cl_ty} — typechecker should have caught this"
                             ),
                             *span,
                         ));
@@ -319,7 +319,7 @@ fn lower_stmt(
             }
             builder.def_var(var, v);
             // Track this binding in the current scope so it gets
-            // released at scope exit. Only on first binding Ã¢â‚¬â€ a
+            // released at scope exit. Only on first binding — a
             // reassignment is already tracked by the original Let.
             if refcounted && !is_reassignment {
                 if let Some(top) = scope_stack.last_mut() {
@@ -484,7 +484,7 @@ fn lower_stmt(
         // path the ownership analysis pass hasn't been
         // written yet, so these variants never appear in the IR
         // codegen receives (only `None` borrow_sigs and no
-        // Dup/Drop statements Ã¢â‚¬â€ all ownership is still handled by
+        // Dup/Drop statements — all ownership is still handled by
         // the scattered `emit_retain`/`emit_release` calls in the
         // expression lowerings). 17b-1b replaces that with the
         // analysis pass that actually emits these. For forward
@@ -502,13 +502,13 @@ fn lower_stmt(
             // Non-refcounted locals use I64/F64/I8 for primitives;
             // only I64 values that point at refcounted payloads need
             // retain. The analysis pass is responsible for only
-            // emitting Dup on refcounted locals Ã¢â‚¬â€ if a non-I64
+            // emitting Dup on refcounted locals — if a non-I64
             // slipped through, that's a bug in the analysis, not
             // a silent no-op here.
             if cl_ty != I64 {
                 return Err(CodegenError::cranelift(
                     format!(
-                        "Dup on non-I64 local (cl_ty={cl_ty:?}) Ã¢â‚¬â€ analysis \
+                        "Dup on non-I64 local (cl_ty={cl_ty:?}) — analysis \
                          should have filtered this out"
                     ),
                     *span,
@@ -528,7 +528,7 @@ fn lower_stmt(
             if cl_ty != I64 {
                 return Err(CodegenError::cranelift(
                     format!(
-                        "Drop on non-I64 local (cl_ty={cl_ty:?}) Ã¢â‚¬â€ analysis \
+                        "Drop on non-I64 local (cl_ty={cl_ty:?}) — analysis \
                          should have filtered this out"
                     ),
                     *span,
@@ -853,14 +853,14 @@ fn lower_break_or_continue(
     let ctx = loop_stack.last().ok_or_else(|| {
         CodegenError::cranelift(
             format!(
-                "`{}` outside of a loop Ã¢â‚¬â€ typecheck or parser should have caught this",
+                "`{}` outside of a loop — typecheck or parser should have caught this",
                 if is_break { "break" } else { "continue" }
             ),
             span,
         )
     })?;
     // Walk scopes deeper than `scope_depth_at_entry`, releasing
-    // refcounted locals. Don't pop Ã¢â‚¬â€ the lower_block that created
+    // refcounted locals. Don't pop — the lower_block that created
     // those scopes is still on the stack above us.
     if !runtime.dup_drop_enabled {
         for depth in (ctx.scope_depth_at_entry..scope_stack.len()).rev() {
@@ -1068,7 +1068,7 @@ fn lower_if(
     // cond-false path flows straight to merge via the brif above.
     let mut any_fell_through = else_b.is_none();
 
-    // Then branch Ã¢â‚¬â€ push a new scope for branch-local refcounted Lets;
+    // Then branch — push a new scope for branch-local refcounted Lets;
     // pop after lowering, releasing each local's refcount if the
     // branch fell through normally.
     builder.switch_to_block(then_b);
@@ -1089,7 +1089,7 @@ fn lower_if(
         // Release branch-scope refcounted locals before jumping to merge.
         // Under the .6d pass, the analysis handles branch-scope drops
         // via block-exit drops on locals with different last-use
-        // points across branches Ã¢â‚¬â€ skip the scattered emission.
+        // points across branches — skip the scattered emission.
         let scope = scope_stack.pop().unwrap_or_default();
         if !runtime.dup_drop_enabled {
             for (_, var) in scope.iter().rev() {
@@ -1100,7 +1100,7 @@ fn lower_if(
         builder.ins().jump(merge_b, &[]);
         any_fell_through = true;
     } else {
-        // Branch terminated (return) Ã¢â‚¬â€ its return path already emitted
+        // Branch terminated (return) — its return path already emitted
         // releases for all live locals across all scopes. Just pop.
         scope_stack.pop();
     }
@@ -1139,7 +1139,7 @@ fn lower_if(
     builder.switch_to_block(merge_b);
     builder.seal_block(merge_b);
     if !any_fell_through {
-        // Nothing flows here Ã¢â‚¬â€ both branches returned. Terminate the
+        // Nothing flows here — both branches returned. Terminate the
         // unreachable merge with a trap so Cranelift's verifier is
         // satisfied, and tell the enclosing block the statement
         // terminated.

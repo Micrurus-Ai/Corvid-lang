@@ -1,8 +1,8 @@
 //! Agent + eval declaration checking.
 //!
-//! `check_agent` validates an `agent name(params) -> T: body` Ã¢â‚¬â€
+//! `check_agent` validates an `agent name(params) -> T: body` —
 //! parameter binding, return-type matching, yield/stream legality.
-//! `check_eval` validates an `eval name: body` Ã¢â‚¬â€ including
+//! `check_eval` validates an `eval name: body` — including
 //! trace-assert (`assert called X before Y`) and statistical
 //! confidence modifiers.
 //!
@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
         }
 
         // Phase 21 slice 21-inv-F: enforce `@deterministic`. Strictly
-        // stronger than `@replayable` Ã¢â‚¬â€ the body must be a pure
+        // stronger than `@replayable` — the body must be a pure
         // function of its parameters. No LLM / tool / approve
         // calls, no catalog-registered nondeterminism, and calls
         // to other agents must target agents that are themselves

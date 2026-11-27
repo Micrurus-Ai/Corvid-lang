@@ -10,7 +10,7 @@ impl<'a> Checker<'a> {
     /// Walk `body` looking for calls to functions the determinism
     /// catalog flags as nondeterministic. Emits one
     /// `NonReplayableCall` error per offending call site. Safe to
-    /// call on any body Ã¢â‚¬â€ a catalog-empty walk is a no-op.
+    /// call on any body — a catalog-empty walk is a no-op.
     pub(super) fn check_replayable_body(&mut self, agent_name: &str, body: &Block) {
         let mut violations = Vec::new();
         collect_replayability_violations_in_block(body, &mut violations);
@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
                 // Walk subexpressions so determinism violations
                 // nested inside a replay arm still surface. The
                 // `replay` expression itself is treated as pure
-                // substrate today Ã¢â‚¬â€ full classification lands with
+                // substrate today — full classification lands with
                 // the checker slice (21-inv-E-3).
                 self.walk_deterministic_expr(agent, trace);
                 for arm in arms {
@@ -208,7 +208,7 @@ impl<'a> Checker<'a> {
     /// Classify a call target inside a `@deterministic` body and
     /// emit a `NonDeterministicCall` error if the target fails
     /// the contract. Unresolved or dynamic callees (subscripts,
-    /// chained calls) are passed over Ã¢â‚¬â€ they cannot be statically
+    /// chained calls) are passed over — they cannot be statically
     /// classified, so the conservative choice is to let the
     /// existing call-check machinery handle them.
     fn classify_deterministic_call(&mut self, agent: &str, callee: &Expr, span: Span) {
@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
 
         // Catalog-registered nondeterminism (clocks, PRNGs, etc.)
         // fails `@deterministic` for the same reason it fails
-        // `@replayable` Ã¢â‚¬â€ but the error message is stricter.
+        // `@replayable` — but the error message is stricter.
         if let Some(source) = classify_call_target(&name) {
             self.errors.push(TypeError::with_guarantee(
                 TypeErrorKind::NonDeterministicCall {
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
         // `@deterministic` agent, flag it. Method-call form
         // `x.foo()` is handled by the type checker's method
         // machinery and is deliberately out of scope here for
-        // v1 Ã¢â‚¬â€ the catalog + ident-call coverage is enough to
+        // v1 — the catalog + ident-call coverage is enough to
         // enforce the contract on realistic programs; a
         // follow-up slice can extend to method dispatch if
         // users start writing `@deterministic` bodies that
@@ -329,12 +329,12 @@ impl<'a> Checker<'a> {
 // ----------------------------------------------------------------
 //
 // These walk an agent body and collect `ReplayabilityViolation`
-// entries Ã¢â‚¬â€ one per call site that resolves to a nondeterministic
+// entries — one per call site that resolves to a nondeterministic
 // builtin the trace schema cannot capture. Free functions (not
 // methods) so the walk doesn't need `Checker` state; the checker
 // pushes the resulting violations into its own error vec.
 
-/// One replayability violation Ã¢â‚¬â€ a call in a `@replayable` body
+/// One replayability violation — a call in a `@replayable` body
 /// that resolves to a nondeterministic builtin.
 struct ReplayabilityViolation {
     call_name: String,
@@ -504,7 +504,7 @@ fn collect_replayability_violations_in_expr(expr: &Expr, out: &mut Vec<Replayabi
 /// Pull a static callee name out of an expression, if the callee
 /// is a bare identifier or dotted path. Dynamic callees (subscript,
 /// call-returning-call, etc.) return `None`, which the replayability
-/// walk treats as "out of catalog scope" Ã¢â‚¬â€ the checker cannot
+/// walk treats as "out of catalog scope" — the checker cannot
 /// classify them statically, and runtime paths already route
 /// through the recorded dispatch layer.
 fn callee_name(callee: &Expr) -> Option<String> {

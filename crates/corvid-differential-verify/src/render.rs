@@ -713,7 +713,7 @@ fn render_expr(expr: &Expr) -> String {
         } => {
             // One-line rendering for shrink output. Indented
             // multi-line form can land with a dedicated pretty
-            // printer later â€” the shrink harness only needs the
+            // printer later — the shrink harness only needs the
             // shape to be parseable and faithful, not beautiful.
             let mut text = format!("replay {}:", render_expr(trace));
             for arm in arms {

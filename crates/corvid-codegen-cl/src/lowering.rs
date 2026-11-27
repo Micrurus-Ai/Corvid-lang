@@ -1,4 +1,4 @@
-//! IR ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ Cranelift IR lowering.
+//! IR → Cranelift IR lowering.
 //!
 //! Native lowering starts with the scalar command-line boundary:
 //! `Int` parameters and returns, integer literals, integer arithmetic
@@ -124,9 +124,9 @@ pub fn lower_file(
     // Emit per-type metadata in dependency order:
     //
     //   1. Struct destructors (existing): release refcounted fields
-    //      when rcÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢0. Only for structs with refcounted fields.
+    //      when rc→0. Only for structs with refcounted fields.
     //   2. Struct trace fns (new in 17a): walk refcounted fields for
-    //      the collector's mark walk. Emitted for every refcounted struct ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
+    //      the collector's mark walk. Emitted for every refcounted struct —
     //      even ones with no refcounted fields get an empty-body
     //      trace so dispatch is uniform (linker folds duplicates).
     //   3. Struct typeinfo blocks (new): .rodata record referenced
@@ -145,10 +145,10 @@ pub fn lower_file(
     // typeinfos to reference at allocation sites.
 
     // Structs: destructors (only for refcounted fields), traces
-    // (every struct, empty body if no refcounted fields ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â linker
+    // (every struct, empty body if no refcounted fields — linker
     // folds duplicates), typeinfos (every struct, uniform allocation
     // path). The pre-17a "primitive-only structs skip typeinfo"
-    // short-circuit is gone ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â uniformity means 17d doesn't need a
+    // short-circuit is gone — uniformity means 17d doesn't need a
     // special case for them in the mark walk.
     for ty in &ir.types {
         let has_refcounted_field = ty.fields.iter().any(|f| is_refcounted_type(&f.ty));
@@ -323,7 +323,7 @@ pub fn lower_file(
         // and registers `corvid_runtime_shutdown` via atexit ONLY if the
         // program actually uses the async runtime. Pure-computation
         // programs skip these calls to preserve startup
-        // benchmark numbers ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â multi-thread tokio startup is ~5-10ms on
+        // benchmark numbers — multi-thread tokio startup is ~5-10ms on
         // Windows, which would otherwise regress every tool-free
         // `corvid run` invocation.
         let uses_runtime = ir_uses_runtime(ir);

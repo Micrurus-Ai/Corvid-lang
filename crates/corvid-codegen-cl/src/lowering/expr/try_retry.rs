@@ -68,7 +68,7 @@ pub fn lower_try_retry_result(
     if expr.ty != body.ty {
         return Err(CodegenError::cranelift(
             format!(
-                "retry expression type `{}` did not match body type `{}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this",
+                "retry expression type `{}` did not match body type `{}` — typecheck should have caught this",
                 expr.ty.display_name(),
                 body.ty.display_name()
             ),

@@ -629,7 +629,7 @@ pub(super) fn lower_expr(
         IrExprKind::Local { local_id, name } => {
             let (var, _ty) = env.get(local_id).ok_or_else(|| {
                 CodegenError::cranelift(
-                    format!("no variable for local `{name}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â compiler bug"),
+                    format!("no variable for local `{name}` — compiler bug"),
                     expr.span,
                 )
             })?;
@@ -641,7 +641,7 @@ pub(super) fn lower_expr(
             //
             // Under the .6d unified pass, we rely on the pass's Dup
             // insertion at non-last consuming uses instead of
-            // retaining on every read ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the last use of a local
+            // retaining on every read — the last use of a local
             // consumes the existing +1 directly.
             if (!runtime.dup_drop_enabled || runtime.in_match_operand.get()) && is_refcounted_type(&expr.ty) {
                 emit_retain(builder, module, runtime, v);
@@ -774,7 +774,7 @@ pub(super) fn lower_expr(
             //
             // Non-bare-Local operands (literals, nested expressions,
             // call results) still produce an Owned +1 and are
-            // released by the helper as before ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the original
+            // released by the helper as before — the original
             // ownership contract.
             if matches!(&left.ty, Type::String) && matches!(&right.ty, Type::String) {
                 let (l, l_borrowed) =
@@ -915,7 +915,7 @@ pub(super) fn lower_expr(
                         if let IrExprKind::Local { local_id, name } = &a.kind {
                             let (var, _ty) = env.get(local_id).ok_or_else(|| {
                                 CodegenError::cranelift(
-                                    format!("no variable for local `{name}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â compiler bug"),
+                                    format!("no variable for local `{name}` — compiler bug"),
                                     a.span,
                                 )
                             })?;
@@ -982,13 +982,13 @@ pub(super) fn lower_expr(
                 let tool = runtime.ir_tools.get(def_id).cloned().ok_or_else(|| {
                     CodegenError::cranelift(
                         format!(
-                            "tool `{callee_name}` metadata missing from ir_tools ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â declare-pass invariant violated"
+                            "tool `{callee_name}` metadata missing from ir_tools — declare-pass invariant violated"
                         ),
                         expr.span,
                     )
                 })?;
 
-                // Arity cross-check ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â belt-and-braces vs. the
+                // Arity cross-check — belt-and-braces vs. the
                 // typechecker's check that already ran.
                 if tool.params.len() != args.len() {
                     return Err(CodegenError::cranelift(
@@ -1103,7 +1103,7 @@ pub(super) fn lower_expr(
                 expr.span,
             )),
             IrCallKind::Unknown => Err(CodegenError::cranelift(
-                format!("call to `{callee_name}` did not resolve ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this"),
+                format!("call to `{callee_name}` did not resolve — typecheck should have caught this"),
                 expr.span,
             )),
         },
@@ -1117,7 +1117,7 @@ pub(super) fn lower_expr(
             // post-extract release of the struct pointer. The load
             // of the field only reads the struct's memory; we never
             // mutate the struct's refcount. The Local's binding
-            // stays Live ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â its scope-exit release handles cleanup.
+            // stays Live — its scope-exit release handles cleanup.
             let (struct_ptr, struct_borrowed) = lower_container_maybe_borrowed(
                 builder, target, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
             )?;
@@ -1128,7 +1128,7 @@ pub(super) fn lower_expr(
                 offset,
             );
             // Retain refcounted field so caller gets an Owned ref.
-            // This retain is NOT redundant pass traffic ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â it's the
+            // This retain is NOT redundant pass traffic — it's the
             // ownership conversion from "field slot inside a parent"
             // to "standalone result value the caller owns." The .6d
             // pass cannot replace this because the extracted value
@@ -1141,7 +1141,7 @@ pub(super) fn lower_expr(
             // Release the temp +1 on the struct pointer only if we
             // created one. `struct_borrowed = false` means the target
             // was a fresh temp (call result, constructor, nested field
-            // access) not a bare Local ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the .6d pass doesn't see
+            // access) not a bare Local — the .6d pass doesn't see
             // those, so codegen must drop unconditionally. Borrowed
             // reads have no +1 to release.
             if !struct_borrowed {
@@ -1157,7 +1157,7 @@ pub(super) fn lower_expr(
             let elem_refcounted = is_refcounted_type(&elem_ty);
 
             // Same borrow-at-use-site trick
-            // as FieldAccess ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â if the list target is a bare Local,
+            // as FieldAccess — if the list target is a bare Local,
             // borrow it (no retain) and skip the post-extract release.
             // The bounds-check + load only read the list's memory;
             // never mutate its refcount or escape the pointer.
@@ -1183,7 +1183,7 @@ pub(super) fn lower_expr(
                 0,
             );
             // Retain extracted element as ownership conversion from
-            // list slot ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ standalone caller-owned value. The .6d
+            // list slot → standalone caller-owned value. The .6d
             // pass can't replace this because the extracted value
             // never gets an IR Local. Pairs with list_ptr release.
             if elem_refcounted {
@@ -1191,7 +1191,7 @@ pub(super) fn lower_expr(
             }
             // Release the temp +1 on the list pointer only if we
             // actually took one. `list_borrowed = false` means the
-            // target was a fresh temp, not a bare Local ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the .6d
+            // target was a fresh temp, not a bare Local — the .6d
             // pass doesn't see internal temps, so codegen drops
             // unconditionally. Borrowed reads have no +1 to drop.
             if !list_borrowed {
@@ -1306,7 +1306,7 @@ pub(super) fn lower_expr(
         // other positions the typecheck doesn't intercept.
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => {
             Err(CodegenError::not_supported(
-                "`Result<T, E>` construction (`Ok(...)` / `Err(...)`) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â native tagged-union lowering is not implemented yet; use the interpreter tier (`corvid run --tier interp`) until then",
+                "`Result<T, E>` construction (`Ok(...)` / `Err(...)`) — native tagged-union lowering is not implemented yet; use the interpreter tier (`corvid run --tier interp`) until then",
                 expr.span,
             ))
         }
@@ -1340,7 +1340,7 @@ pub(super) fn lower_expr(
                 )
             } else {
                 Err(CodegenError::not_supported(
-                    "`Some(...)` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â native codegen currently supports nullable-pointer `Option<T>` when `T` is refcounted plus wide scalar `Option<Int|Bool|Float>`",
+                    "`Some(...)` — native codegen currently supports nullable-pointer `Option<T>` when `T` is refcounted plus wide scalar `Option<Int|Bool|Float>`",
                     expr.span,
                 ))
             }

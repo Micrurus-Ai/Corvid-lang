@@ -135,7 +135,7 @@ pub fn lower_result_constructor(
 ) -> Result<ClValue, CodegenError> {
     if !is_native_result_type(&expr.ty) {
         return Err(CodegenError::not_supported(
-            "`Result<T, E>` construction outside the supported native subset ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â native lowering currently supports one-word payload shapes only",
+            "`Result<T, E>` construction outside the supported native subset — native lowering currently supports one-word payload shapes only",
             expr.span,
         ));
     }
@@ -152,7 +152,7 @@ pub fn lower_result_constructor(
         _ => {
             return Err(CodegenError::cranelift(
                 format!(
-                    "Result constructor expression has non-Result type `{}` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â typecheck should have caught this",
+                    "Result constructor expression has non-Result type `{}` — typecheck should have caught this",
                     expr.ty.display_name()
                 ),
                 expr.span,
@@ -283,11 +283,11 @@ pub fn lower_string_literal(
     let mut data = vec![0u8; total];
     // refcount = i64::MIN (immortal)
     data[0..8].copy_from_slice(&i64::MIN.to_le_bytes());
-    // typeinfo_ptr (offset 8) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â relocation below points it at
+    // typeinfo_ptr (offset 8) — relocation below points it at
     // `corvid_typeinfo_String` so runtime tracers can dispatch
     // uniformly through the same typeinfo path as heap-allocated
     // strings.
-    // bytes_ptr placeholder at offset 16 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â written by the relocation
+    // bytes_ptr placeholder at offset 16 — written by the relocation
     // length at offset 24
     data[24..32].copy_from_slice(&len.to_le_bytes());
     // bytes at offset 32
@@ -303,7 +303,7 @@ pub fn lower_string_literal(
     let mut desc = DataDescription::new();
     desc.set_align(8);
     desc.define(data.into_boxed_slice());
-    // typeinfo_ptr at offset 8 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ &corvid_typeinfo_String
+    // typeinfo_ptr at offset 8 → &corvid_typeinfo_String
     let ti_gv = module.declare_data_in_data(runtime.string_typeinfo, &mut desc);
     desc.write_data_addr(8, ti_gv, 0);
     // Self-relative relocation: at offset 16, write the address of

@@ -13,7 +13,7 @@ pub(in crate::lowering) fn lower_container_maybe_borrowed(
     if let IrExprKind::Local { local_id, name } = &expr.kind {
         let (var, _ty) = env.get(local_id).ok_or_else(|| {
             CodegenError::cranelift(
-                format!("no variable for local `{name}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â compiler bug"),
+                format!("no variable for local `{name}` — compiler bug"),
                 expr.span,
             )
         })?;
@@ -38,17 +38,17 @@ pub(in crate::lowering) fn lower_container_maybe_borrowed(
 /// ordering compare). Returns `(value, borrowed)`:
 ///
 ///   * `borrowed = true` iff the operand was a bare `IrExprKind::Local`
-///     ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â in that case we skip the ownership-conversion retain that
+///     — in that case we skip the ownership-conversion retain that
 ///     `lower_expr` would normally emit, and the caller must NOT
 ///     release the value afterward. The returned `ClValue` is a
 ///     borrow of the binding's current refcount (caller's scope
 ///     still governs the Drop).
-///   * `borrowed = false` for every other expression shape ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the
+///   * `borrowed = false` for every other expression shape — the
 ///     value is a fresh Owned +1 produced by `lower_expr`, and the
 ///     caller is responsible for the corresponding release.
 ///
 /// Safe because the String runtime helpers (`corvid_string_concat`,
-/// `corvid_string_eq`, `corvid_string_cmp`) only read their inputs ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
+/// `corvid_string_eq`, `corvid_string_cmp`) only read their inputs —
 /// they never mutate the operand refcount nor store the pointer. So
 /// passing a borrow vs. an Owned +1 is indistinguishable from the
 /// helper's perspective; the only observable difference is the net
@@ -65,7 +65,7 @@ pub(in crate::lowering) fn lower_string_operand_maybe_borrowed(
 ) -> Result<(ClValue, bool), CodegenError> {
     // Under the .6d unified pass: take the non-peephole path for bare
     // Local operands. If we returned `borrowed=true`, BinOp would skip
-    // the release and the caller's +1 would leak ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the pass's
+    // the release and the caller's +1 would leak — the pass's
     // analysis treats BinOp operands as Owned-consumed and does NOT
     // schedule a Drop for an operand that's consumed (there's no
     // later use), so codegen MUST release to retire the +1.
@@ -73,7 +73,7 @@ pub(in crate::lowering) fn lower_string_operand_maybe_borrowed(
         if let IrExprKind::Local { local_id, name } = &expr.kind {
             let (var, _ty) = env.get(local_id).ok_or_else(|| {
                 CodegenError::cranelift(
-                    format!("no variable for local `{name}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â compiler bug"),
+                    format!("no variable for local `{name}` — compiler bug"),
                     expr.span,
                 )
             })?;

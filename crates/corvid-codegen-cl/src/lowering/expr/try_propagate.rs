@@ -25,20 +25,20 @@ pub fn lower_try_propagate_option(
         Type::Option(payload) if is_refcounted_type(payload) => (&**payload, false),
         Type::Option(_) => {
             return Err(CodegenError::not_supported(
-                "postfix `?` on `Option<T>` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â native lowering currently supports nullable-pointer `Option<T>` with refcounted payloads plus wide scalar `Option<Int|Bool|Float>`",
+                "postfix `?` on `Option<T>` — native lowering currently supports nullable-pointer `Option<T>` with refcounted payloads plus wide scalar `Option<Int|Bool|Float>`",
                 expr.span,
             ))
         }
         Type::Result(_, _) => {
             return Err(CodegenError::not_supported(
-                "postfix `?` on `Result<T, E>` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â native tagged-union lowering is not implemented yet; use the interpreter tier until then",
+                "postfix `?` on `Result<T, E>` — native tagged-union lowering is not implemented yet; use the interpreter tier until then",
                 expr.span,
             ))
         }
         _ => {
             return Err(CodegenError::cranelift(
                 format!(
-                    "postfix `?` saw non-Option inner type `{}` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â typecheck should have caught this",
+                    "postfix `?` saw non-Option inner type `{}` — typecheck should have caught this",
                     inner.ty.display_name()
                 ),
                 expr.span,
@@ -51,7 +51,7 @@ pub fn lower_try_propagate_option(
         Type::Option(_) if is_native_wide_option_type(current_return_ty) => {}
         _ => {
             return Err(CodegenError::not_supported(
-                "postfix `?` on `Option<T>` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â native lowering currently supports only functions returning native `Option<T>` shapes",
+                "postfix `?` on `Option<T>` — native lowering currently supports only functions returning native `Option<T>` shapes",
                 expr.span,
             ))
         }
@@ -120,14 +120,14 @@ pub fn lower_try_propagate_result(
         Type::Result(ok, err) if is_native_result_type(&inner.ty) => (&**ok, &**err),
         Type::Result(_, _) => {
             return Err(CodegenError::not_supported(
-                "postfix `?` on `Result<T, E>` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â this concrete shape is outside the current native subset",
+                "postfix `?` on `Result<T, E>` — this concrete shape is outside the current native subset",
                 expr.span,
             ))
         }
         _ => {
             return Err(CodegenError::cranelift(
                 format!(
-                    "postfix `?` saw non-Result inner type `{}` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â typecheck should have caught this",
+                    "postfix `?` saw non-Result inner type `{}` — typecheck should have caught this",
                     inner.ty.display_name()
                 ),
                 expr.span,
@@ -207,7 +207,7 @@ pub fn lower_try_propagate_result(
             }
         }
         return Err(CodegenError::not_supported(
-            "postfix `?` on `Result<T, E>` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â the current native subset supports propagation only when the enclosing function returns the same concrete `Result<T, E>` shape",
+            "postfix `?` on `Result<T, E>` — the current native subset supports propagation only when the enclosing function returns the same concrete `Result<T, E>` shape",
             expr.span,
         ));
     }

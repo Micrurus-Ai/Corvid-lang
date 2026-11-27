@@ -40,7 +40,7 @@ fn stmt_uses_runtime(stmt: &IrStmt) -> bool {
         IrStmt::Expr { expr, .. } => expr_uses_runtime(expr),
         IrStmt::Break { .. } | IrStmt::Continue { .. } | IrStmt::Pass { .. } => false,
         // Dup/Drop emit direct runtime calls (corvid_retain/release)
-        // but those don't need the async bridge ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â runtime is a C ABI
+        // but those don't need the async bridge — runtime is a C ABI
         // library linked in regardless.
         IrStmt::Dup { .. } | IrStmt::Drop { .. } => false,
     }
@@ -153,7 +153,7 @@ pub(super) fn emit_entry_main(
 
     // Validate that every entry parameter and the return type are
     // representable at the command-line / stdout boundary. Struct and
-    // List are deliberately excluded ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â they need a serialization implementation.
+    // List are deliberately excluded — they need a serialization implementation.
     let types: Vec<corvid_ir::IrType> = runtime.ir_types.values().cloned().collect();
     check_entry_boundary(entry_agent, &types)?;
 
@@ -187,7 +187,7 @@ pub(super) fn emit_entry_main(
         let argc_i32 = builder.block_params(entry_block)[0];
         let argv = builder.block_params(entry_block)[1];
 
-        // 1. corvid_init() ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â registers atexit handler for leak counters.
+        // 1. corvid_init() — registers atexit handler for leak counters.
         let init_ref = module.declare_func_in_func(runtime.entry_init, builder.func);
         builder.ins().call(init_ref, &[]);
 
@@ -196,7 +196,7 @@ pub(super) fn emit_entry_main(
         // registered via `atexit` so worker threads join cleanly at
         // exit. Shutdown runs BEFORE the leak-counter atexit (atexit
         // is LIFO), so any refcount activity from the runtime settles
-        // before the counter prints ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â that's the intended ordering.
+        // before the counter prints — that's the intended ordering.
         if let Some(specs) = connector_specs {
             let text = super::prompt::emit_string_const(&mut builder, module, runtime, specs, entry_agent.span)?;
             let register_ref = module.declare_func_in_func(runtime.register_connectors, builder.func);

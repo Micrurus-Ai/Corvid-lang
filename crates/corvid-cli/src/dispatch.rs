@@ -1,4 +1,4 @@
-//! Top-level dispatch tree ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â slice 20j-A1 commit 11f.
+//! Top-level dispatch tree — slice 20j-A1 commit 11f.
 //!
 //! Owns one entry point [`run`] that takes the parsed [`Cli`]
 //! and dispatches into the per-command modules
