@@ -50,7 +50,7 @@ use opentelemetry::trace::{
 };
 use opentelemetry::{global, Context, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
 
@@ -128,7 +128,7 @@ impl OtelSdkExporter {
             .build()
             .map_err(|e| OtelSdkExportError::BuildFailed(format!("{e}")))?;
 
-        let resource = Resource::new(resource_attributes(&config));
+        let resource = Resource::builder_empty().with_attributes(resource_attributes(&config)).build();
 
         let provider = SdkTracerProvider::builder()
             .with_resource(resource)
@@ -154,14 +154,11 @@ impl OtelSdkExporter {
         for event in events {
             emit_span_for_event(&tracer, event);
         }
-        // SDK 0.27 force_flush returns Vec<TraceResult<()>>; map
-        // any individual error to our typed surface so callers
+        // Map the SDK's flush error to our typed surface so callers
         // don't depend on the SDK's internal error enum.
-        for result in self.provider.force_flush() {
-            if let Err(e) = result {
-                return Err(OtelSdkExportError::Flush(format!("{e}")));
-            }
-        }
+        self.provider
+            .force_flush()
+            .map_err(|e| OtelSdkExportError::Flush(format!("{e}")))?;
         Ok(OtelSdkExportReport {
             spans_emitted: events.len(),
         })
