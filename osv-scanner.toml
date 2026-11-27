@@ -1,0 +1,24 @@
+# osv-scanner configuration, read by the `osv-scan` job in
+# .github/workflows/dependency-advisories.yml.
+#
+# OSV reads GitHub's advisories (GHSA) as well as RustSec's, so it catches
+# what `cargo audit` cannot see. The job fails on any finding not listed
+# here. The entries are the same four "unmaintained" notices
+# .cargo/audit.toml accepts, and the job fails if the two lists differ.
+# Change both together. Never add an entry for a vulnerability.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+reason = "chrono: unmaintained, no fixed release. Used through chrono-tz and cron parsing."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0555"
+reason = "chrono-tz: unmaintained, no fixed release. The IANA zone data behind TimeZone."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0384"
+reason = "instant: unmaintained, no fixed release. A transitive dependency."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+reason = "ttf-parser: unmaintained, no fixed release. A transitive dependency of font handling."

@@ -6,6 +6,8 @@
 # ones. Each is an "unmaintained" notice with no successor release yet, not
 # a vulnerability. Remove an entry when the crate is replaced or a
 # maintained release ships; never add one for a vulnerability.
+# osv-scanner.toml accepts the same IDs for the OSV scan, and CI fails if
+# the two lists differ: change both together.
 
 [advisories]
 ignore = [

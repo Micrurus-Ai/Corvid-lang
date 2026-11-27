@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Dependency scanning reads GitHub's advisories too
+
+Five Dependabot alerts passed `cargo audit --deny warnings`, because each
+advisory was GitHub-only (GHSA) and `cargo audit` reads RustSec alone. The
+audit workflow now also runs an OSV scan, which reads both:
+- **The tool.** osv-scanner v2.7.1, a pinned release whose SHA-256 is
+  checked against Google's published `osv-scanner_SHA256SUMS`. The owner
+  approved trying the downloaded binary locally first.
+- **What it scans.** `Cargo.lock` and every tracked npm lockfile, daily and
+  on every push. It fails on any finding not accepted.
+- **Accepted findings.** `osv-scanner.toml` lists the same four
+  unmaintained notices as `.cargo/audit.toml`. Two lists can drift, so a
+  step compares the IDs and fails if they differ.
+- **Checked both ways locally.** The scan passes as committed and exits 1
+  with an accepted entry removed. The list check catches an ID removed
+  from one file.
+
+Its first local run already earned it: `block-buffer` 0.12.0
+(GHSA-qwgh-2vcv-g2f7, out-of-bounds access after a caught panic), which
+neither Dependabot nor `cargo audit` reported, is now 0.12.1.
+
+Fixed today, as the scan's starting point:
+- `jsonwebtoken` 12, with claims checked by type;
+- `tar` 0.4.46;
+- `block-buffer` 0.12.1;
+- `opentelemetry` 0.33.1.
+
+OSV now reports only the four accepted notices.
+
 ### A caught native outage replays to the same fallback (TE-3d)
 
 There are two tests in `replay_native.rs`:
@@ -83,6 +112,7 @@ Proof: six parity tests in `parity/outages.rs` cover:
 
 `outage_expansion.rs` checks that the pass and the plan agree, and
 `native_try_else.rs` covers the tier picker.
+
 
 ### Sign-in tokens: jsonwebtoken 12, and claims checked by type
 

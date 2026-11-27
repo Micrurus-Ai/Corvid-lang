@@ -1,6 +1,7 @@
 name: dependency advisories
 
-# The shared definition of the Rust and npm dependency audits. ci.yml calls it on every
+# The shared definition of the Rust and npm dependency audits (cargo audit,
+# an OSV scan that also reads GitHub's advisories, and npm audit). ci.yml calls it on every
 # push and pull request, and it also runs on its own once a day, because a
 # new advisory is published with no code change: on a quiet week nothing
 # else would notice it. The daily run is only this audit, not the whole
@@ -28,6 +29,43 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Audit Cargo.lock
         run: cargo audit --deny warnings
+
+  osv-scan:
+    # cargo audit reads RustSec alone, so an advisory published only in
+    # GitHub's database (GHSA) passes it: five Dependabot alerts did on
+    # 2026-11-27. OSV reads both, for Cargo.lock and every npm lockfile.
+    # Known findings are listed in osv-scanner.toml, which must hold the
+    # same IDs as .cargo/audit.toml.
+    name: osv-scanner
+    runs-on: ubuntu-latest
+    env:
+      # A pinned release, checked against the SHA-256 Google publishes
+      # with it (osv-scanner_SHA256SUMS). Update both together.
+      OSV_SCANNER_VERSION: v2.7.1
+      OSV_SCANNER_SHA256: fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install osv-scanner
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: Accepted findings match cargo audit's
+        shell: bash
+        run: |
+          diff \
+            <(grep -o 'RUSTSEC-[0-9]\{4\}-[0-9]\{4\}' .cargo/audit.toml | sort -u) \
+            <(grep -o '^id = "[^"]*"' osv-scanner.toml | sed 's/^id = "\(.*\)"$/\1/' | sort -u) \
+            || { echo "::error::.cargo/audit.toml and osv-scanner.toml accept different advisories"; exit 1; }
+      - name: Scan Cargo.lock and every npm lockfile
+        shell: bash
+        run: |
+          args=(--lockfile Cargo.lock)
+          while IFS= read -r -d '' lockfile; do
+            args+=(--lockfile "$lockfile")
+          done < <(git ls-files -z -- 'package-lock.json' '**/package-lock.json')
+          "$RUNNER_TEMP/osv-scanner" scan source --config osv-scanner.toml --format table "${args[@]}"
 
   npm-audit:
     name: npm audit
