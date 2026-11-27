@@ -2,6 +2,45 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Sign-in tokens: jsonwebtoken 12, and claims checked by type
+
+GitHub's Dependabot reported five moderate alerts on main that `cargo
+audit --deny warnings` passed. Codex confirmed they are all Rust:
+- `jsonwebtoken` 9.3.1: GHSA-h395-gr6q-cpjc, where a claim of the wrong
+  type could pass validation. This is on the sign-in token path.
+- `opentelemetry_sdk` 0.27.1: GHSA-w9wp-h8wv-79jx, unbounded memory on an
+  inbound baggage header.
+- `tar` 0.4.45: GHSA-3pv8-6f4r-ffg2, a PAX header desync.
+
+Each advisory exists only in GitHub's database, and `cargo audit` reads
+RustSec's alone. So the strict audit I built on 2026-11-27 was green while
+these stood. I had also guessed the alerts were npm; they were not.
+
+This commit fixes the JWT one:
+- **The upgrade.** `jsonwebtoken` 12.0.0, on the pure-Rust backend
+  (`rust_crypto`), which also moves `rsa` to 0.10. It needs no C
+  toolchain, unlike `aws-lc-rs`.
+- **Claims checked by type.** The verifier no longer trusts the library
+  for the claims it relies on:
+  - `exp` is required;
+  - `exp`, `nbf` and `iat` must be numbers of seconds;
+  - `iss` must equal the contract's issuer;
+  - `aud` must be the contract's audience, or a list containing it.
+  Our own re-check had the same hole as the advisory: it skipped a token
+  whose `exp` was not a number (`exp_ms > 0 && ...`), and it never checked
+  `nbf`.
+- **Fractional times.** I first refused fractional times, then checked
+  RFC 7519: a NumericDate may be fractional, so a fractional `exp` is a
+  time. A string, a negative or any other type is refused by name.
+- **Real tokens in the tests.** The tests sign real Ed25519 tokens, so
+  each passes the signature, key and algorithm checks and fails only on
+  the claim it is about. No earlier verifier test reached the signature
+  check.
+
+Filed:
+- `tar` and `opentelemetry_sdk` as sub-items of Codex's alert item.
+- An OSV scan, which reads GHSA and RustSec, for the audit workflow.
+
 ### `Decimal` arithmetic computes in 128 bits
 
 The roadmap item for a compact native `Decimal` asked to measure first.
@@ -40,6 +79,7 @@ values.
 The compact native form stays on the roadmap with the new numbers. The
 rest of the cost is one parse, one format and one allocation per
 operation, so it would save perhaps 0.05 µs per operation.
+
 
 ### Native compilation of route parameters
 

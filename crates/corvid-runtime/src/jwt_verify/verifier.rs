@@ -1,4 +1,4 @@
-//! JWT verifier — `jsonwebtoken 9.3` wired against a
+//! JWT verifier — `jsonwebtoken` 12 wired against a
 //! [`crate::jwt_verify::JwksFetcher`] so production uses reqwest
 //! plus a TTL cache and tests inject canned keys.
 //!
@@ -121,24 +121,39 @@ impl JwtVerifier {
         .map_err(map_jwt_error)?;
 
         let claims = token_data.claims;
-        let exp_ms = claims
-            .get("exp")
-            .and_then(|v| v.as_u64())
-            .map(|s| s.saturating_mul(1_000))
-            .unwrap_or(0);
-        let iat_ms = claims
-            .get("iat")
-            .and_then(|v| v.as_u64())
-            .map(|s| s.saturating_mul(1_000))
-            .unwrap_or(0);
 
-        // Belt-and-suspenders: jsonwebtoken already checked `exp`,
-        // but the contract may carry a tighter clock-skew window
-        // than `validation.leeway` allows. We re-check against the
-        // caller-supplied `now_ms` so the semantics stay
-        // deterministic in tests.
-        if exp_ms > 0 && exp_ms.saturating_add(contract.clock_skew_ms) < now_ms {
+        // The claims this verifier relies on are checked here with their
+        // types, whatever the library already did. A claim with the wrong
+        // type is refused, never read as absent: a string `exp` or `nbf`
+        // skipping the time checks is the bug class behind
+        // GHSA-h395-gr6q-cpjc, which jsonwebtoken 9 had.
+        let exp_ms = time_claim_ms(&claims, "exp")?
+            .ok_or_else(|| JwtVerifyError::MissingClaim("exp".to_string()))?;
+        let nbf_ms = time_claim_ms(&claims, "nbf")?;
+        let iat_ms = time_claim_ms(&claims, "iat")?.unwrap_or(0);
+        if claims.get("iss").and_then(|v| v.as_str()) != Some(contract.issuer.as_str()) {
+            return Err(JwtVerifyError::IssuerMismatch);
+        }
+        let audience_matches = match claims.get("aud") {
+            Some(serde_json::Value::String(aud)) => aud == &contract.audience,
+            // RFC 7519 allows a list of audiences; ours must be one of them.
+            Some(serde_json::Value::Array(auds)) => auds.iter().any(|a| a.as_str() == Some(contract.audience.as_str())),
+            _ => false,
+        };
+        if !audience_matches {
+            return Err(JwtVerifyError::AudienceMismatch);
+        }
+
+        // Re-check the times against the caller's clock: the contract may
+        // allow a tighter skew than `validation.leeway`, and tests stay
+        // deterministic without depending on system time.
+        if exp_ms.saturating_add(contract.clock_skew_ms) < now_ms {
             return Err(JwtVerifyError::ExpiredToken);
+        }
+        if let Some(nbf_ms) = nbf_ms {
+            if nbf_ms > now_ms.saturating_add(contract.clock_skew_ms) {
+                return Err(JwtVerifyError::NotYetValid);
+            }
         }
 
         let subject = claims
@@ -184,6 +199,21 @@ impl JwtVerifier {
             iat_ms,
             raw: claims,
         })
+    }
+}
+
+/// A NumericDate claim (RFC 7519 §2: seconds since the epoch, which may
+/// be fractional) in whole milliseconds; `None` when absent. A string, a
+/// negative number or anything that is not a number is refused by name.
+fn time_claim_ms(claims: &serde_json::Value, name: &str) -> Result<Option<u64>, JwtVerifyError> {
+    let Some(value) = claims.get(name) else { return Ok(None) };
+    if let Some(seconds) = value.as_u64() {
+        return Ok(Some(seconds.saturating_mul(1_000)));
+    }
+    match value.as_f64() {
+        // `as` saturates a float to u64's range, so a huge value stays huge.
+        Some(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(Some((seconds * 1_000.0) as u64)),
+        _ => Err(JwtVerifyError::MalformedToken(format!("the `{name}` claim is not a number of seconds since 1970"))),
     }
 }
 
@@ -473,6 +503,163 @@ mod tests {
         let verifier = JwtVerifier::new(fetcher);
         let err = verifier.verify(&token, &con, 0).unwrap_err();
         assert_eq!(err.slug(), "unsupported_algorithm");
+    }
+
+    /// Tokens really signed with Ed25519, so each test below passes the
+    /// signature, key and algorithm checks and fails only on the claim it
+    /// is about.
+    mod signed {
+        use super::*;
+        use base64::Engine;
+        use ed25519_dalek::{Signer, SigningKey};
+
+        const NOW_MS: u64 = 1_800_000_000_000;
+
+        fn b64(bytes: &[u8]) -> String {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        }
+
+        fn signing_key() -> SigningKey {
+            SigningKey::from_bytes(&[7u8; 32])
+        }
+
+        fn verifier() -> JwtVerifier {
+            let jwk = JsonWebKey {
+                kty: "OKP".to_string(),
+                alg: Some("EdDSA".to_string()),
+                kid: Some("k1".to_string()),
+                n: None,
+                e: None,
+                crv: Some("Ed25519".to_string()),
+                x: Some(b64(signing_key().verifying_key().as_bytes())),
+                y: None,
+                r#use: Some("sig".to_string()),
+            };
+            JwtVerifier::new(Arc::new(StubFetcher::new(JsonWebKeySet { keys: vec![jwk] })))
+        }
+
+        fn eddsa_contract() -> JwtVerificationContract {
+            JwtVerificationContract { algorithm: "EdDSA".to_string(), ..contract() }
+        }
+
+        fn sign(claims: serde_json::Value) -> String {
+            let header = b64(&serde_json::to_vec(&serde_json::json!({"alg": "EdDSA", "typ": "JWT", "kid": "k1"})).unwrap());
+            let payload = b64(&serde_json::to_vec(&claims).unwrap());
+            let input = format!("{header}.{payload}");
+            let signature = signing_key().sign(input.as_bytes());
+            format!("{input}.{}", b64(&signature.to_bytes()))
+        }
+
+        /// A well-formed token's claims, with `change` applied.
+        fn token_with(change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>)) -> String {
+            let mut claims = serde_json::json!({
+                "iss": "https://issuer.test",
+                "aud": "corvid-test",
+                "sub": "user-1",
+                "tenant": "t-1",
+                "exp": NOW_MS / 1_000 + 3_600,
+                "iat": NOW_MS / 1_000,
+            });
+            change(claims.as_object_mut().unwrap());
+            sign(claims)
+        }
+
+        fn verify(token: &str) -> Result<VerifiedJwtClaims, JwtVerifyError> {
+            verifier().verify(token, &eddsa_contract(), NOW_MS)
+        }
+
+        #[test]
+        fn a_well_formed_signed_token_verifies() {
+            let claims = verify(&token_with(|_| {})).expect("a valid token verifies");
+            assert_eq!((claims.subject.as_str(), claims.tenant.as_str()), ("user-1", "t-1"));
+            assert_eq!(claims.exp_ms, (NOW_MS / 1_000 + 3_600) * 1_000);
+        }
+
+        #[test]
+        fn a_time_claim_of_the_wrong_type_is_refused_not_ignored() {
+            for (name, value) in [
+                ("exp", serde_json::json!("9999999999")),
+                ("exp", serde_json::json!(-1)),
+                ("exp", serde_json::json!(null)),
+                ("nbf", serde_json::json!("0")),
+                ("iat", serde_json::json!({"seconds": 0})),
+            ] {
+                let token = token_with(|claims| {
+                    claims.insert(name.to_string(), value.clone());
+                });
+                let err = verify(&token).expect_err(&format!("`{name}: {value}` must be refused"));
+                assert!(
+                    matches!(err, JwtVerifyError::MalformedToken(_) | JwtVerifyError::MissingClaim(_)),
+                    "`{name}: {value}` gave {err:?}"
+                );
+            }
+        }
+
+        /// RFC 7519 lets a NumericDate be fractional, so a fractional
+        /// `exp` in the future is valid, and one in the past has expired.
+        #[test]
+        fn a_fractional_time_is_a_time() {
+            let future = token_with(|claims| {
+                claims.insert("exp".into(), serde_json::json!(NOW_MS as f64 / 1_000.0 + 3_600.5));
+            });
+            let claims = verify(&future).expect("a fractional future exp verifies");
+            assert_eq!(claims.exp_ms, NOW_MS + 3_600_500);
+            let past = token_with(|claims| {
+                claims.insert("exp".into(), serde_json::json!(1.5e9));
+            });
+            assert!(matches!(verify(&past).unwrap_err(), JwtVerifyError::ExpiredToken));
+        }
+
+        #[test]
+        fn a_missing_exp_is_refused() {
+            let err = verify(&token_with(|claims| {
+                claims.remove("exp");
+            }))
+            .unwrap_err();
+            assert!(matches!(err, JwtVerifyError::MissingClaim(ref name) if name == "exp"), "{err:?}");
+        }
+
+        #[test]
+        fn a_token_not_yet_valid_or_expired_is_refused_by_the_callers_clock() {
+            let later = token_with(|claims| {
+                claims.insert("nbf".into(), serde_json::json!(NOW_MS / 1_000 + 600));
+            });
+            assert!(matches!(verify(&later).unwrap_err(), JwtVerifyError::NotYetValid));
+            let expired = token_with(|claims| {
+                claims.insert("exp".into(), serde_json::json!(NOW_MS / 1_000 - 600));
+            });
+            assert!(matches!(verify(&expired).unwrap_err(), JwtVerifyError::ExpiredToken));
+        }
+
+        #[test]
+        fn issuer_and_audience_of_the_wrong_type_or_value_are_refused() {
+            for (name, value) in [
+                ("iss", serde_json::json!(["https://issuer.test"])),
+                ("iss", serde_json::json!("https://attacker.test")),
+                ("aud", serde_json::json!(7)),
+                ("aud", serde_json::json!(["someone-else"])),
+            ] {
+                let token = token_with(|claims| {
+                    claims.insert(name.to_string(), value.clone());
+                });
+                let err = verify(&token).expect_err(&format!("`{name}: {value}` must be refused"));
+                assert!(
+                    matches!(
+                        err,
+                        JwtVerifyError::IssuerMismatch
+                            | JwtVerifyError::AudienceMismatch
+                            | JwtVerifyError::MalformedToken(_)
+                            | JwtVerifyError::MissingClaim(_)
+                    ),
+                    "`{name}: {value}` gave {err:?}"
+                );
+            }
+            // A list of audiences that includes ours is valid (RFC 7519 §4.1.3).
+            let listed = token_with(|claims| {
+                claims.insert("aud".into(), serde_json::json!(["other", "corvid-test"]));
+            });
+            verify(&listed).expect("an audience list containing ours verifies");
+        }
     }
 
     /// Slice 39K adversarial: a token claiming `alg=none` or a
