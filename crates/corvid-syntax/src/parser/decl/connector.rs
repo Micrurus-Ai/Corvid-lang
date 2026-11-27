@@ -465,6 +465,7 @@ impl<'a> Parser<'a> {
         let mut streams: Option<corvid_ast::StreamFormat> = None;
         let mut stream_until: Option<String> = None;
         let mut on_failure: Option<Ident> = None;
+        let mut auth: Option<corvid_ast::OperationAuth> = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -540,6 +541,36 @@ impl<'a> Parser<'a> {
                 self.expect_newline()?;
                 continue;
             }
+            if self.peek_ident_is("auth") {
+                let key_span = self.peek_span();
+                self.bump(); // auth
+                self.expect(TokKind::Colon, "`:` after `auth`")?;
+                let (scheme, scheme_span) = self.expect_ident()?;
+                if scheme != "bearer" {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`auth: {scheme}(...)` on an operation"),
+                            expected: "`auth: bearer(token)`, naming a `Secret` parameter of the operation".into(),
+                        },
+                        span: scheme_span,
+                    });
+                }
+                self.expect(TokKind::LParen, "`(` after `bearer`")?;
+                let (param, param_span) = self.expect_ident().map_err(|_| ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: describe_token(self.peek()),
+                        expected: "the name of a `Secret` parameter, as in `auth: bearer(token)`; a connector's own key is `auth: bearer(secret(\"NAME\"))` on the connector".into(),
+                    },
+                    span: self.peek_span(),
+                })?;
+                self.expect(TokKind::RParen, "`)` to close `bearer(...)`")?;
+                if auth.is_some() {
+                    return Err(duplicate_connector_key("auth", key_span));
+                }
+                auth = Some(corvid_ast::OperationAuth::Bearer(Ident::new(param, param_span)));
+                self.expect_newline()?;
+                continue;
+            }
             if self.peek_ident_is("timeout") {
                 let key_span = self.peek_span();
                 self.bump(); // timeout
@@ -604,6 +635,7 @@ impl<'a> Parser<'a> {
             headers,
             error_map,
             on_failure,
+            auth,
             timeout_secs,
             mock,
             protocol,

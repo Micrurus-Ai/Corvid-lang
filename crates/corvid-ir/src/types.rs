@@ -143,6 +143,9 @@ pub struct IrOperation {
     pub stream_until: Option<String>,
     /// `on failure -> Variant`: the error variant every failure becomes.
     pub on_failure: Option<String>,
+    /// `auth: bearer(token)`: the `Secret` parameter this call sends as
+    /// its bearer credential, in place of the connector's `auth:`.
+    pub bearer_param: Option<String>,
     /// `on STATUS -> Variant` map: an HTTP status becomes a typed error
     /// variant instead of a transport failure (slice 52g-4).
     pub error_map: Vec<IrStatusErrorMapping>,

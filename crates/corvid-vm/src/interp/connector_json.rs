@@ -63,6 +63,18 @@ pub(super) fn connector_arguments(
         let (record, send) = if payload_param == Some(param.name.as_str()) {
             payload_forms(value, &param.ty, types_by_id)
                 .map_err(|e| format!("argument `{}` cannot be sent: {e}", param.name))?
+        } else if param.ty == Type::Secret {
+            // An operation's `auth: bearer(token)` credential, the only
+            // `Secret` the checker lets an operation take: every record of
+            // the call holds `<redacted>`, and only the request gets the text.
+            let form = |secrets| {
+                crate::public_json::encode_tool_argument(value, &param.ty, types_by_id, secrets)
+                    .map_err(|e| format!("argument `{}` cannot be sent: {e}", param.name))
+            };
+            (
+                form(crate::public_json::SecretArgument::Recorded)?,
+                form(crate::public_json::SecretArgument::Revealed)?,
+            )
         } else {
             let json = encode_public_json(value, &param.ty, types_by_id)
                 .map_err(|e| format!("argument `{}` cannot be sent as JSON: {e}", param.name))?;

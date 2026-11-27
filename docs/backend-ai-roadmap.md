@@ -338,7 +338,7 @@ Order amendment: B14 starts before B10 and B11 finish, because frontend F08 wait
 - [x] 3a. Connector bodies and responses through B01's public mapping (an `Option` is its value or `null`), field-path errors naming the declared type, undeclared response fields ignored, a non-JSON 2xx body refused instead of read as `null`.
 - [x] 3b. `query <param>` records (a `None` field omitted, a `List` repeated, flat fields only) and `header "Name": value` lines from a `String` parameter or a fixed string, kept off the credential, body and transport headers, each set once, a line break refused.
 - [ ] A per-call credential for calls made on a user's behalf: an operation-level `auth: bearer(token)` taking a `Secret` parameter, recorded as `<redacted>`, refused on `async:` operations whose arguments are persisted. Decided against `Secret` header lines in B05 slice 3b. [Decision 4](proposals/http-client.md#decisions). Proposed 2026-11-26 as [user credentials](proposals/user-credentials.md):
-  - [ ] C1. Operation `auth: bearer(param)` (backend-only connector grammar, built now).
+  - [x] C1. Operation `auth: bearer(param)` (backend-only connector grammar). Built 2026-11-26.
   - [ ] C2. `keep_token: scopes(...)` on an identity provider and `Caller.token("provider")`, held in memory beside the session (posted for frontend review).
   - [ ] C3. Durable encrypted token storage and refresh, after the key-storage design.
   - [ ] C4. Native code.

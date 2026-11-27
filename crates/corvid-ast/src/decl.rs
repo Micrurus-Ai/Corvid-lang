@@ -620,6 +620,23 @@ pub enum ConnectorAuth {
     Basic { username: SecretRef, password: SecretRef },
 }
 
+/// An operation's own credential, taken from one of its parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationAuth {
+    /// `auth: bearer(token)` — `Authorization: Bearer <token>`, where
+    /// `token` is a `Secret` parameter of the operation.
+    Bearer(Ident),
+}
+
+impl OperationAuth {
+    /// The parameter the credential comes from.
+    pub fn param(&self) -> &Ident {
+        match self {
+            OperationAuth::Bearer(param) => param,
+        }
+    }
+}
+
 /// A `secret("NAME")` reference (slice 52g) — the name of a secret the
 /// runtime resolves from its configured secret store. The value is never
 /// a literal in source and never enters a trace.
@@ -694,6 +711,11 @@ pub struct OperationDecl {
     /// carrying the reason when the variant has one `String` field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<Ident>,
+    /// `auth: bearer(token)` on the operation — this call's own
+    /// credential, from one of its `Secret` parameters, in place of the
+    /// connector's `auth:`: a call made as the signed-in person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OperationAuth>,
     /// `timeout: <n>s` on the operation — overrides the connector's
     /// timeout for this operation only (a slow upload, a long report).
     #[serde(default, skip_serializing_if = "Option::is_none")]

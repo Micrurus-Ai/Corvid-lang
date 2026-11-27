@@ -71,7 +71,7 @@ impl Boundary {
             }
             Boundary::PromptResult => "a model cannot produce a secret; return the text the model writes as a `String`",
             Boundary::ConnectorOperation => {
-                "a connector's credential is declared once on the connector, as `auth`, and never travels in its operations; pass a secret to a `tool` instead"
+                "a connector's own credential is declared once on the connector, as `auth`; a call made with a person's token takes it as a `Secret` parameter named by the operation's `auth: bearer(token)`, and goes nowhere else"
             }
             Boundary::ActionSignature => {
                 "an action is called by a form, a client or an assistant, which supply its inputs and read its result as JSON; read the secret inside with `secret(name)` from std/secrets and return what it proves, such as a `Bool`"
@@ -180,7 +180,19 @@ impl<'a> Checker<'a> {
                 Decl::Prompt(prompt) => self.refuse_in_prompt(&prompt.params, &prompt.return_ty),
                 Decl::Connector(connector) => {
                     for op in &connector.operations {
-                        self.refuse_in_signature(&op.params, &op.return_ty, Boundary::ConnectorOperation);
+                        // The one place an operation holds a `Secret`: the
+                        // parameter its own `auth:` sends as the credential.
+                        // The connector checker requires that it is exactly
+                        // a `Secret` and used nowhere else.
+                        let credential = op.auth.as_ref().map(|auth| auth.param().name.as_str());
+                        for param in &op.params {
+                            let is_credential = credential == Some(param.name.name.as_str())
+                                && matches!(self.type_refs.get(&param.ty.span()), Some(Type::Secret));
+                            if !is_credential {
+                                self.refuse_at(&param.ty, Boundary::ConnectorOperation);
+                            }
+                        }
+                        self.refuse_at(&op.return_ty, Boundary::ConnectorOperation);
                     }
                 }
                 Decl::Agent(agent) if agent.action.is_some() => {

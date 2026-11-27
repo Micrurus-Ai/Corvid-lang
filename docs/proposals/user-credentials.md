@@ -31,8 +31,8 @@ connector github_api:
     modes: [mock, replay, real]
 
     operation create_issue(token: Secret, repo: String, issue: NewIssue) -> Result<Issue, IssueError>:
-        auth: bearer(token)
         POST "/repos/{repo}/issues" body issue
+        auth: bearer(token)
         on status 401 -> SignInAgain
         on failure -> Unavailable
 
@@ -81,7 +81,7 @@ action file_issue(repo: String, title: String, by: Caller) -> Result<Issue, Issu
 
 ## Slices
 
-- [ ] C1. Operation `auth: bearer(param)` on the interpreter: parser, checker (a `Secret` parameter, only in `auth:`, refused on `async:`), the runtime sending the revealed token, `<redacted>` recording and replay without the token, and tests for each refusal, for a cross-origin redirect, and that the token reaches no trace or log.
+- [x] C1. Operation `auth: bearer(param)` on the interpreter: parser, checker (a `Secret` parameter, only in `auth:`, refused on `async:`), the runtime sending the revealed token, `<redacted>` recording and replay without the token, and tests for each refusal, for a cross-origin redirect, and that the token reaches no trace or log. Built 2026-11-26. The token is marked as the request's credential header, which the existing redirect handling drops on another origin. The test asserts the marking rather than adding a second redirect test.
 - [ ] C2. `keep_token: scopes(...)` and `Caller.token("provider")`, with the token held in memory beside its session, after frontend review.
 - [ ] C3. Durable, encrypted token storage and refresh, after the key-storage design.
 - [ ] C4. Native code, with the native connector dispatch.

@@ -684,6 +684,7 @@ impl<'a> Checker<'a> {
             self.check_operation_query_and_headers(decl, op, &param_names);
             self.check_operation_response_shape(decl, op);
             self.check_operation_on_failure(decl, op);
+            self.check_operation_auth(decl, op);
             self.check_operation_stream(decl, op);
             self.check_operation_body(decl, op);
 
@@ -1947,6 +1948,65 @@ impl<'a> Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// `auth: bearer(token)` on an operation: `token` is one of its
+    /// parameters, exactly a `Secret`, and sent only as the credential.
+    /// Refused on an `async:` operation, whose arguments are kept so it
+    /// can be polled later: a person's token is never stored.
+    fn check_operation_auth(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let Some(auth) = &op.auth else { return };
+        let credential = auth.param();
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                credential.span,
+            )
+        };
+        let operation = &op.name.name;
+        let name = &credential.name;
+        let Some(param) = op.params.iter().find(|p| p.name.name == *name) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `auth: bearer({name})`, but it declares no parameter named `{name}`; add `{name}: Secret` to its parameters"
+            )));
+            return;
+        };
+        let ty = self.type_ref_to_type(&param.ty);
+        if ty != Type::Secret {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `{name}` as its credential, so `{name}` must be a `Secret`, which never reaches a trace or a log; it is a `{}`",
+                ty.display_name()
+            )));
+        }
+        if op.protocol.is_some() {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` has an `async:` protocol, whose arguments are kept so it can be polled later; a person's token is never stored, so it cannot take `auth: bearer({name})`"
+            )));
+        }
+        let mut uses = Vec::new();
+        if op.body.as_ref().is_some_and(|body| body.param.name == *name) {
+            uses.push("the body".to_string());
+        }
+        if op.query.as_ref().is_some_and(|query| query.name == *name) {
+            uses.push("the query".to_string());
+        }
+        if op.url_param.as_ref().is_some_and(|url| url.name == *name) {
+            uses.push("the URL".to_string());
+        }
+        if path_placeholders(&op.path).iter().any(|placeholder| placeholder == name) {
+            uses.push("a path segment".to_string());
+        }
+        for header in &op.headers {
+            if matches!(&header.value, corvid_ast::OperationHeaderValue::Param(p) if p.name == *name) {
+                uses.push(format!("header `{}`", header.name));
+            }
+        }
+        if !uses.is_empty() {
+            self.errors.push(invalid(format!(
+                "`{name}` is operation `{operation}`'s credential, so only `auth:` may send it; it is also sent as {}",
+                uses.join(" and ")
+            )));
+        }
+    }
+
     /// `on failure -> Variant` turns every failure into a typed error, so
     /// the operation returns a `Result` whose error type declares the
     /// variant, with no fields or one `String` field for the reason.

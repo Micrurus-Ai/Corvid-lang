@@ -2,6 +2,41 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### User credentials C1: an operation's own `auth: bearer(token)`
+
+A connector had one credential, the application's. Calls made as the
+signed-in person had no form, because B04 keeps every `Secret` out of an
+operation's signature and B05 decided against `Secret` header lines. Now
+`auth: bearer(token)`, written after the request line, names a `Secret`
+parameter that is sent as the bearer credential in place of the
+connector's `auth:`.
+
+The checker exempts exactly that parameter from the boundary rule, and
+only when its type is exactly `Secret`. It refuses:
+- a missing parameter;
+- a parameter of another type;
+- the same parameter sent as the path, query, URL, body or a header;
+- the form on an `async:` operation, whose arguments are persisted.
+
+The interpreter already passes a connector call two forms of its arguments,
+the recorded form and the form the request is built from. It now gives
+the credential `<redacted>` in the first and its text in the second. The
+runtime's new `ConnectorAuthSpec::BearerArgument` reads the second and
+refuses `<redacted>`, an empty token or a line break. The header is
+marked as the credential, so the existing redirect handling drops it on
+another origin.
+
+Tests:
+- an end-to-end real run whose provider matches only the person's token
+  (the connector's own key is unset);
+- a trace holding neither the token nor its prefix, with `"args":["<redacted>"]`;
+- a replay with a different token and no provider;
+- checker tests for each refusal and for a second, unnamed `Secret`;
+- runtime tests for the header, its credential marking and the refused values.
+
+The grammar reference holds the new item, and the differential verifier
+renders it.
+
 ### Live re-checks for decimal, duration and instant orders
 
 L2 placed re-checked rows only under an `Int`, `Bool` or SQLite text

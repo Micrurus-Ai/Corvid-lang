@@ -535,6 +535,7 @@ impl<'a> Lowerer<'a> {
                 streams: op.streams,
                 stream_until: op.stream_until.clone(),
                 on_failure: op.on_failure.as_ref().map(|v| v.name.clone()),
+                bearer_param: op.auth.as_ref().map(|auth| auth.param().name.clone()),
                 headers: op
                     .headers
                     .iter()
