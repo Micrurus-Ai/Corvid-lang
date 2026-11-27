@@ -5936,8 +5936,8 @@ agent main() -> Int:
     assert!(
         c.errors
             .iter()
-            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
-        "expected NotCallable for Int.length(), got {:?}",
+            .any(|e| matches!(&e.kind, TypeErrorKind::UnknownMethod { .. })),
+        "expected UnknownMethod for Int.length(), got {:?}",
         c.errors
     );
 }
@@ -6812,8 +6812,8 @@ agent main() -> Int:
     assert!(
         c.errors
             .iter()
-            .any(|e| matches!(&e.kind, TypeErrorKind::NotCallable { .. })),
-        "expected NotCallable for List<struct>.sort(), got {:?}",
+            .any(|e| matches!(&e.kind, TypeErrorKind::UnknownMethod { .. })),
+        "expected UnknownMethod for List<struct>.sort(), got {:?}",
         c.errors
     );
 }
@@ -8800,3 +8800,40 @@ fn no_two_error_kinds_share_a_code() {
     }
 }
 
+
+/// A call to a method a type lacks names the type and the method, suggests
+/// the builtin it most likely meant, and says how to reach the value inside
+/// an `Option` or `Result`.
+#[test]
+fn an_unknown_method_names_the_type_and_suggests_the_method_meant() {
+    let first = |src: &str| {
+        let checked = check(src);
+        let error = checked.errors.into_iter().next().expect("an error");
+        (error.kind.code(), error.kind.message(), error.kind.hint().unwrap_or_default())
+    };
+    let (code, message, hint) = first("agent main() -> Int:\n    return \"corvid\".lenght()\n");
+    assert_eq!(code, "E0240");
+    assert_eq!(message, "`String` has no method `lenght`");
+    assert_eq!(hint, "did you mean `length`?");
+    let (_, message, hint) = first("agent main() -> String:\n    x: Option<Int> = Some(1)\n    return x.to_string()\n");
+    assert_eq!(message, "`Option<Int>` has no method `to_string`");
+    assert!(hint.contains("unwrap_or(default).to_string()"), "{hint}");
+}
+
+/// The method-name list `closest_builtin_method` searches is exactly the
+/// names `builtin_method` matches on.
+#[test]
+fn builtin_method_names_match_the_table() {
+    let source = include_str!("builtin_methods.rs").replace("\r\n", "\n");
+    let body = &source[source.find("pub fn builtin_method(receiver: &Type, name: &str)").unwrap()..];
+    let body = &body[..body.find("\n}\n").unwrap()];
+    let mut in_table = std::collections::BTreeSet::new();
+    for piece in body.split(", \"").skip(1) {
+        let name: String = piece.chars().take_while(|c| *c != '"').collect();
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') && piece[name.len()..].trim_start_matches('"').trim_start().starts_with(')') {
+            in_table.insert(name);
+        }
+    }
+    let listed: std::collections::BTreeSet<String> = crate::builtin_methods::BUILTIN_METHOD_NAMES.iter().map(|n| n.to_string()).collect();
+    assert_eq!(listed, in_table);
+}

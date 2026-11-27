@@ -8453,3 +8453,7 @@ A `pub extern "c"` agent takes and returns any record, variant, list, option, re
 
 Using a record, list or other compound value as a map key stores a copy of it, so changing the original afterwards does not change the key. After `m: Map<P, Int> = {p: 10}` and then `p.x = 2`, `m.get(P(1))` still finds 10. Before, the key inside the map changed along with `p`. A key read back with `keys()` is a copy too, so changing it leaves the map as it was. Maps with record keys are now as fast at large sizes as maps with text keys.
 
+### Calling a method a type does not have
+
+A call to a method a type lacks says so plainly and suggests the method you likely meant: `"corvid".lenght()` gives `[E0240] error: `String` has no method `lenght`` with `help: did you mean `length`?`. On an `Option` or `Result` the help says to take the value out first, for example `value.unwrap_or(default).to_string()`. Before, the message read "cannot call a value of type `method …`" and cited internal slice numbers.
+

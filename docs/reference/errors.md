@@ -91,6 +91,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0237` | `TypeErrorKind::NonScalarInExternC` | `pub extern "c"` currently supports only scalar ABI types. |
 | `E0238` | `TypeErrorKind::AmbiguousExternOwnership` | The compiler cannot infer a sound ownership contract for an extern-visible boundary slot without an explicit annotation. |
 | `E0239` | `TypeErrorKind::ExternOwnershipMismatch` | A user-declared ownership annotation disagrees with the compiler's inference for the same extern-visible boundary slot. |
+| `E0240` | `TypeErrorKind::UnknownMethod` | A method call on a type that has no method of that name: neither a builtin method nor, for a record, one added with `extend`. |
 | `E0250` | `TypeErrorKind::EffectConstraintViolation` | A dimensional effect constraint was violated. |
 
 ## E03xx: Names and imports

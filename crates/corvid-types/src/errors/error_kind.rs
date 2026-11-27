@@ -489,6 +489,9 @@ pub enum TypeErrorKind {
     /// B06 — a duration literal that names no exact length: a calendar
     /// unit, a fraction of a nanosecond, or a value out of range.
     DurationLiteralInvalid { message: String },
+    /// A method call on a type that has no method of that name: neither a
+    /// builtin method nor, for a record, one added with `extend`.
+    UnknownMethod { receiver: String, method: String, suggestion: Option<String> },
     /// An integer literal where a `Float` is meant that no `Float` holds
     /// exactly (beyond 2^53), so reading it as one would round it.
     FloatLiteralInexact { literal: i64 },
@@ -775,6 +778,7 @@ impl TypeErrorKind {
             Self::RefinementInvalid { .. } => "E0404",
             Self::DurationLiteralInvalid { .. } => "E0515",
             Self::FloatLiteralInexact { .. } => "E0516",
+            Self::UnknownMethod { .. } => "E0240",
             Self::JsonKeyInvalid { .. } => "E0405",
             Self::TableQueryNotTranslatable { .. } => "E0603",
             Self::TableColumnHistoryConflict { .. } => "E0604",
@@ -1202,6 +1206,7 @@ impl TypeErrorKind {
             }
             Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
             Self::DurationLiteralInvalid { message } => message.clone(),
+            Self::UnknownMethod { receiver, method, .. } => format!("`{receiver}` has no method `{method}`"),
             Self::FloatLiteralInexact { literal } => {
                 format!("`{literal}` has no exact `Float` value, so reading it as one would round it")
             }
@@ -1706,6 +1711,16 @@ impl TypeErrorKind {
             Self::FloatLiteralInexact { .. } => Some(
                 "a `Float` holds every whole number up to 9007199254740992 (2^53) exactly; write the nearest value you mean as a `Float` literal, or keep it an `Int`".into(),
             ),
+            Self::UnknownMethod { receiver, method, suggestion } => Some(match suggestion {
+                Some(suggestion) => format!("did you mean `{suggestion}`?"),
+                None if receiver.starts_with("Option<") => format!(
+                    "an `Option` may hold nothing: take the value out first, with `value.unwrap_or(default).{method}()` or a `match`"
+                ),
+                None if receiver.starts_with("Result<") => format!(
+                    "a `Result` may hold an error: take the value out first, with `?`, `value.unwrap_or(default).{method}()` or a `match`"
+                ),
+                None => "a record type gets methods with `extend`; the reference lists each type's builtin methods".into(),
+            }),
             Self::DurationLiteralInvalid { .. } => Some(
                 "a duration is a number and one of nanoseconds, microseconds, milliseconds, seconds, minutes or hours, such as `30 seconds` or `1.5 hours`".into(),
             ),

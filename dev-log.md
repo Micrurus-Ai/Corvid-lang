@@ -2,6 +2,22 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A clear error for a method a type lacks
+
+The error for `x.to_string()` on an `Option<Int>` reused `NotCallable` with a
+hand-built message, "cannot call a value of type `method `to_string` on
+receiver of type …` — no builtin method with this name (String.length()
+shipped in 45c; method batches land in 45d/45e/45f/45l)". It cited
+internal slice numbers, was wrapped in the wrong sentence, and pointed at
+the whole call. `UnknownMethod` (`E0240`) now says "`Option<Int>` has no
+method `to_string`" and points at the method name. Its hint suggests the
+nearest builtin the receiver actually has (`lenght` → `length`, at most two
+edits away). On an `Option` or `Result` it says to take the value out first.
+
+The suggestion searches `BUILTIN_METHOD_NAMES`. `builtin_method` is one match
+on (receiver, name) pairs and can't be enumerated, so a test holds the list
+to the names the match contains. The error reference is regenerated.
+
 ### Map keys are snapshots
 
 [Proposal](docs/proposals/map-key-snapshots.md). Testing why compound map
