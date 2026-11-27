@@ -329,6 +329,24 @@ impl Type {
         ])
     }
 
+    /// The built-in type `name` names in a file, given whether the file
+    /// itself declares or imports a type by that name. The core scalars
+    /// (`Int`, `Float`, `String`, `Bool`, `Nothing`) always mean the
+    /// built-in, and the checker refuses a declaration that reuses one.
+    /// Every other built-in yields to the program's own type, so adding a
+    /// built-in later (as `Caller` and `JsonError` were) never changes the
+    /// meaning of a program that already had a type of that name; the
+    /// checker warns where the program's type hides the built-in.
+    pub fn builtin_named(name: &str, declared_in_file: bool) -> Option<Type> {
+        let known = Self::compiler_known(name)?;
+        (!declared_in_file || Self::is_reserved_name(name)).then_some(known)
+    }
+
+    /// Whether `name` is a core scalar a program can never declare.
+    pub fn is_reserved_name(name: &str) -> bool {
+        matches!(name, "Int" | "Float" | "String" | "Bool" | "Nothing")
+    }
+
     pub fn compiler_known(name: &str) -> Option<Type> {
         Some(match name {
             "Int" => Type::Int,

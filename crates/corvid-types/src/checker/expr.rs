@@ -847,13 +847,14 @@ impl<'a> Checker<'a> {
 fn type_ref_to_type_readonly(tr: &corvid_ast::TypeRef, checker: &Checker<'_>) -> Type {
     use corvid_ast::TypeRef;
     match tr {
-        TypeRef::Named { name, .. } => Type::compiler_known(&name.name).unwrap_or_else(|| {
-            checker
+        TypeRef::Named { name, .. } => {
+            let declared = checker
                 .symbols
                 .lookup_def(&name.name)
-                .map(Type::Struct)
-                .unwrap_or(Type::Unknown)
-        }),
+                .filter(|id| checker.symbols.get(*id).kind == corvid_resolve::DeclKind::Type);
+            Type::builtin_named(&name.name, declared.is_some())
+                .unwrap_or_else(|| declared.map(Type::Struct).unwrap_or(Type::Unknown))
+        }
         TypeRef::Generic { name, args, .. } if args.len() == 1 => {
             let inner = type_ref_to_type_readonly(&args[0], checker);
             match name.name.as_str() {

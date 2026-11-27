@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A program's own type wins over a built-in of its name
+
+Every type-name lookup asked `Type::compiler_known` first, so a built-in
+always beat a type the program declared or imported. That is how adding
+`Actor` broke every reference app. Three resolvers did it: the checker's
+`named_type_to_type`, `named_type_in_module` and the read-only resolver
+in `expr.rs`. Lowering reads the checker's results, so fixing those three
+fixes every layer.
+
+They now share `Type::builtin_named(name, declared_in_file)`:
+- the core scalars (`Int`, `Float`, `String`, `Bool`, `Nothing`) always
+  mean the built-in;
+- every other built-in yields to a type or imported `use` of that name in
+  the file. A `use` that names something other than a type leaves the
+  built-in in place.
+
+`check_builtin_type_names` refuses a core scalar declared as a type, table
+or imported name (E0308), and warns where a program's type hides a
+built-in (W0301). The warning's hint says why: a value a built-in gives
+you, such as `from_json`'s `JsonError`, is still the built-in type.
+
+Tests:
+- a program declaring its own `Caller` and `JsonError` reads their fields
+  and gets one warning for each;
+- a program using the built-in `JsonError` is unchanged and silent;
+- each core scalar is refused;
+- a rule test asserts that every current built-in except the core scalars
+  yields, so a new built-in yields by default;
+- a driver test imports a `Caller` record from another module, the shape
+  that broke the reference apps, and gets the record.
+
+The error reference is regenerated, with a new "Warnings: names" area for
+W03.
+
 ### Integer literals beyond `Int`'s range
 
 `price: Decimal = 99999999999999999999` failed in the lexer
@@ -16,6 +50,7 @@ silently. `Literal::Int(i64)` and the grammar's INT token are unchanged,
 rather than carrying text on every integer literal through the compiler.
 Tests cover the checker and native parity, and the error reference is
 regenerated.
+
 
 ### rusqlite 0.43 for the bundled SQLite CVE
 

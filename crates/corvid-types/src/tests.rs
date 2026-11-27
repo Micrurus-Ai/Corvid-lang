@@ -3,6 +3,7 @@ use corvid_resolve::{resolve, ResolveErrorKind};
 use corvid_syntax::{lex, parse_file};
 
 mod regex_methods;
+mod builtin_type_names;
 mod decimal;
 mod time;
 mod time_zones;

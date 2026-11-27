@@ -105,6 +105,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0305` | `TypeErrorKind::ImportedDeclIsPrivate` | `alias.Name` references an imported file that exists, but the declaration `Name` in that file is `Private` (no `public` / `public(package)` modifier). The `lang-pub-toplevel` private-by-default rule means imports only see declarations their owner opted to expose. |
 | `E0306` | `TypeErrorKind::UnknownImportMember` | `alias.Name` references a name that isn't declared in the imported file at all (publicly or privately). |
 | `E0307` | `TypeErrorKind::UnknownGenericHead` | A generic type application whose head is not a known generic type (slice 45q): `Lst<Int>`, `option<T>`. Unknown heads used to silently resolve to `Type::Unknown`. |
+| `E0308` | `TypeErrorKind::ReservedTypeName` | A declaration reuses the name of a core scalar (`Int`, `Float`, `String`, `Bool`, `Nothing`), which always means the built-in, so the program's type could never be named. |
 | `E0320` | `ResolveErrorKind::ExtendTargetNotAType` | `extend T:` block targets a type that doesn't exist (or isn't a type — e.g., the user wrote `extend foo:` where `foo` is an agent name). |
 | `E0321` | `ResolveErrorKind::DuplicateMethod` | Two methods with the same name declared inside the same `extend T:` block (or split across multiple `extend T:` blocks for the same type). |
 | `E0322` | `ResolveErrorKind::MethodFieldCollision` | A method's name collides with a field name on the same type. `.foo` would be ambiguous (field access vs zero-arg method call), so we reject at declaration time. |
@@ -255,6 +256,12 @@ This page is generated from the compiler's diagnostic kinds by
 | `W0201` | `TypeWarningKind::UnsafePythonImport` | `effects: unsafe` on a Python import is explicit but should be reviewed. |
 | `W0202` | `TypeWarningKind::InferenceNeedsAnnotation` | An unannotated binding whose initializer cannot determine its full type (slice 45q): `x = []` (element type Unknown) or `x = None` (payload type Unknown). Downstream checking weakens to Unknown-accepts-everything; an annotation restores full checking. |
 | `W0251` | `TypeWarningKind::UnboundedCostAnalysis` | The cost explorer could not prove a static upper bound. |
+
+## W03xx: Warnings: names
+
+| Code | Error | Meaning |
+| --- | --- | --- |
+| `W0301` | `TypeWarningKind::BuiltinTypeHidden` | A type the file declares or imports has the name of a built-in type, so in this file the name means the program's type and the built-in is hidden. Allowed, so a built-in added later never breaks a program, but said, because a value a built-in returns (such as `from_json`'s `JsonError`) is still the built-in type. |
 
 ## W07xx: Warnings: identity
 

@@ -52,6 +52,7 @@ const AREAS: &[(&str, &str)] = &[
     ("E52", "Identity, access and startup"),
     ("W01", "Warnings: effects and replay"),
     ("W02", "Warnings: types"),
+    ("W03", "Warnings: names"),
     ("W07", "Warnings: identity"),
     ("W09", "Warnings: streams and schedules"),
 ];

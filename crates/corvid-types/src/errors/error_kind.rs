@@ -138,6 +138,11 @@ pub enum TypeErrorKind {
     /// A table column that holds a `Secret`.
     SecretTableColumn { column: String, at: String },
 
+    /// A declaration reuses the name of a core scalar (`Int`, `Float`,
+    /// `String`, `Bool`, `Nothing`), which always means the built-in, so
+    /// the program's type could never be named.
+    ReservedTypeName { name: String },
+
     /// `ask` answering with, or `choose` offering, a `Secret`.
     SecretShownToPerson { builtin: String, at: String },
 
@@ -715,6 +720,7 @@ impl TypeErrorKind {
             Self::HmacKeyType { .. } => "E0517",
             Self::SecretAtBoundary { .. } => "E0105",
             Self::SecretTableColumn { .. } => "E0601",
+            Self::ReservedTypeName { .. } => "E0308",
             Self::SecretShownToPerson { .. } => "E0106",
             Self::BareFunctionReference { .. } => "E0206",
             Self::InvalidTryPropagate { .. } => "E0213",
@@ -927,6 +933,9 @@ impl TypeErrorKind {
             }
             Self::SecretTableColumn { column, at } => {
                 format!("table column `{column}` cannot hold a `Secret`{at}: a stored secret could be read back and shown")
+            }
+            Self::ReservedTypeName { name } => {
+                format!("`{name}` is a built-in type, so a program cannot declare its own `{name}`")
             }
             Self::SecretShownToPerson { builtin, at } => match builtin.as_str() {
                 "ask" => format!("`ask` cannot answer with a `Secret`{at}: a person's answer is recorded in the trace"),
@@ -1459,6 +1468,7 @@ impl TypeErrorKind {
                 "read a signing key with `secret(name)` from std/secrets, so it never reaches a trace; a key the program holds as bytes, such as `Bytes.from_hex(text)?`, works too".into(),
             ),
             Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
+            Self::ReservedTypeName { name } => Some(format!("give your type another name, such as `{name}Value`")),
             Self::SecretTableColumn { .. } => Some(
                 "never store a secret's text. To check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
             ),

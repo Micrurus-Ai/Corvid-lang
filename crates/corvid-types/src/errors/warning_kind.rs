@@ -39,6 +39,12 @@ pub enum TypeWarningKind {
     /// via `insecure_opt_out: true` (slice 51g). Allowed, but never
     /// silent: the weakened posture surfaces in review and audit.
     IdentityInsecureSession { identity: String, reasons: String },
+    /// A type the file declares or imports has the name of a built-in
+    /// type, so in this file the name means the program's type and the
+    /// built-in is hidden. Allowed, so a built-in added later never breaks
+    /// a program, but said, because a value a built-in returns (such as
+    /// `from_json`'s `JsonError`) is still the built-in type.
+    BuiltinTypeHidden { name: String },
 }
 
 impl TypeWarningKind {
@@ -54,6 +60,7 @@ impl TypeWarningKind {
             Self::ScheduleNotExecutable { .. } => "W0902",
             Self::InferenceNeedsAnnotation { .. } => "W0202",
             Self::IdentityInsecureSession { .. } => "W0701",
+            Self::BuiltinTypeHidden { .. } => "W0301",
         }
     }
 }
@@ -100,6 +107,9 @@ impl TypeWarningKind {
                     "W0300: `identity {identity}` weakens a session safe-default ({reasons}) via `insecure_opt_out: true` — allowed, but ship this only for local development"
                 )
             }
+            Self::BuiltinTypeHidden { name } => {
+                format!("`{name}` in this file is the type the program declares, which hides the built-in `{name}`")
+            }
         }
     }
 
@@ -126,6 +136,9 @@ impl TypeWarningKind {
             Self::IdentityInsecureSession { .. } => Some(
                 "remove `insecure_opt_out` (and the weakened options) before production — restore `secure`, `http_only`, a non-`none` SameSite, and session rotation".into(),
             ),
+            Self::BuiltinTypeHidden { name } => Some(format!(
+                "a value a built-in gives you is still the built-in `{name}`, so it will not match a `{name}` annotation here; rename your type to use both"
+            )),
         }
     }
 }
