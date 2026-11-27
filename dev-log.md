@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Integer literals beyond `Int`'s range
+
+`price: Decimal = 99999999999999999999` failed in the lexer
+("invalid number literal") before the checker could see that a `Decimal` was
+meant. Now an integer beyond `Int`'s range keeps its exact digits, as the
+lexer already keeps a float literal's (`Literal::Float { value, text }`). The
+checker reads it by its slot. A `Decimal` slot reads the text exactly
+through the existing decimal path, natively too. A `Float` slot takes it only
+when a `Float` holds it exactly. Anywhere else the new `IntLiteralOutOfRange`
+(`E0518`) names the range and suggests a `Decimal`. Nothing is rounded
+silently. `Literal::Int(i64)` and the grammar's INT token are unchanged,
+rather than carrying text on every integer literal through the compiler.
+Tests cover the checker and native parity, and the error reference is
+regenerated.
+
 ### rusqlite 0.43 for the bundled SQLite CVE
 
 RUSTSEC-2026-0459 is in the C SQLite that `rusqlite`'s `bundled` feature

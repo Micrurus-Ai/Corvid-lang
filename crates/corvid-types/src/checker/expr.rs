@@ -38,6 +38,20 @@ impl<'a> Checker<'a> {
                 }
                 Type::Float
             }
+            // A whole number beyond `Int`'s range, which the lexer keeps as
+            // its digits. A `Decimal` slot reads it exactly (the arm
+            // above); a `Float` slot takes it when a `Float` holds it
+            // exactly; anywhere else it is refused, never rounded.
+            Expr::Literal { value: Literal::Float { value, text }, span }
+                if !text.contains('.') && !matches!(expected, Some(Type::Decimal)) =>
+            {
+                if matches!(expected, Some(Type::Float)) && format!("{value:.0}") == *text {
+                    Type::Float
+                } else {
+                    self.errors.push(TypeError::new(TypeErrorKind::IntLiteralOutOfRange { literal: text.clone() }, *span));
+                    Type::Int
+                }
+            }
             // B06 — likewise for a `Currency` and a `Locale`.
             Expr::Literal { value: Literal::String(code), span } if matches!(expected, Some(Type::Currency)) => {
                 self.check_currency_literal(code, *span)

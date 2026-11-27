@@ -154,6 +154,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0515` | `TypeErrorKind::DurationLiteralInvalid` | B06 — a duration literal that names no exact length: a calendar unit, a fraction of a nanosecond, or a value out of range. |
 | `E0516` | `TypeErrorKind::FloatLiteralInexact` | An integer literal where a `Float` is meant that no `Float` holds exactly (beyond 2^53), so reading it as one would round it. |
 | `E0517` | `TypeErrorKind::HmacKeyType` | An HMAC key that is neither `Bytes` nor a `Secret`. |
+| `E0518` | `TypeErrorKind::IntLiteralOutOfRange` | A whole-number literal beyond `Int`'s range where no `Decimal`, or `Float` that holds it exactly, is meant. |
 
 ## E06xx: Tables and databases
 

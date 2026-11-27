@@ -8461,3 +8461,7 @@ A call to a method a type lacks says so plainly and suggests the method you like
 
 `a + b` on two `Bytes` values gives their bytes one after the other, on both tiers, so a signed message with a binary part can be built as bytes: `"DSSEv1 ".utf8() + payload`. Bytes and text still never mix: `"digest: " + bytes` is a compile error whose help names `utf8()` and the encodings.
 
+### Whole numbers too large for `Int`
+
+A whole-number literal larger than `Int` holds (beyond 9223372036854775807) is read exactly where a `Decimal` is meant: `total: Decimal = 99999999999999999999` keeps every digit, on both tiers. Where an `Int` is meant, the compiler refuses it with `[E0518]`, names the `Int` range and suggests a `Decimal`. It used to stop as an invalid number. Where a `Float` is meant, it is accepted only if a `Float` holds it exactly.
+

@@ -36,7 +36,7 @@ A number literal is a `Decimal` wherever a `Decimal` is meant, and the compiler 
 
 The comparison rule is one rule for every type, not only `Decimal`: `zone == "Europe/Berlin"` reads the text as a `TimeZone` (checked against the IANA database, so an unknown zone is a compile error), `money != "USD"` as a `Currency`, and `zones == ["UTC"]` as a `List<TimeZone>`. It applies only to a side written as literals (text, numbers, `None`, `Some`, `Ok` or `Err` of one, or a list of them); a variable keeps its own type, so a `String` variable is never compared with a `TimeZone`.
 
-A literal keeps its scale, so `2.50` prints as `2.50`. A literal with more than 28 digits after the point, or more than 38 significant digits, is a compile error. An integer literal must fit in `Int`; write a larger whole number with a point, such as `100000000000000000000.0`.
+A literal keeps its scale, so `2.50` prints as `2.50`. A literal with more than 28 digits after the point, or more than 38 significant digits, is a compile error. A whole number too large for `Int`, such as `100000000000000000000`, is read exactly as a `Decimal` literal; where an `Int` is meant it is a compile error naming `Int`'s range.
 
 Text that arrives at run time goes through `text.parse_decimal()`, which trims whitespace like `parse_int` and returns `Result<Decimal, String>`. It accepts an optional sign, digits, and optionally a point followed by digits. It rejects exponents (`1e3`), digit separators (`1,000`) and a bare point (`.5`, `5.`), and the error names the problem and its position.
 

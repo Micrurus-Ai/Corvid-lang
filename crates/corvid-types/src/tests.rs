@@ -8837,3 +8837,16 @@ fn builtin_method_names_match_the_table() {
     let listed: std::collections::BTreeSet<String> = crate::builtin_methods::BUILTIN_METHOD_NAMES.iter().map(|n| n.to_string()).collect();
     assert_eq!(listed, in_table);
 }
+
+/// A whole number beyond `Int`'s range keeps its digits: a `Decimal` slot
+/// reads it exactly, a `Float` slot takes it only when a `Float` holds it
+/// exactly, and anywhere else it is refused with the range, never rounded.
+#[test]
+fn integer_literals_beyond_int_are_decimals_or_refused() {
+    let errors = |src: &str| -> Vec<String> { check(src).errors.iter().map(|e| e.kind.message()).collect() };
+    assert!(errors("agent main() -> Decimal:\n    price: Decimal = 99999999999999999999\n    return price\n").is_empty());
+    assert!(errors("agent main() -> Float:\n    return 100000000000000000000\n").is_empty(), "1e20 is an exact Float");
+    let refused = errors("agent main() -> Int:\n    return 99999999999999999999\n");
+    assert_eq!(refused, vec!["`99999999999999999999` is beyond `Int`'s range, -9223372036854775808 to 9223372036854775807"]);
+    assert!(!errors("agent main() -> Float:\n    return 99999999999999999999\n").is_empty(), "no exact Float, so refused");
+}

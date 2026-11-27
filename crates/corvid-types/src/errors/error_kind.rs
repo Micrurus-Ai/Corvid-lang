@@ -495,6 +495,9 @@ pub enum TypeErrorKind {
     /// An integer literal where a `Float` is meant that no `Float` holds
     /// exactly (beyond 2^53), so reading it as one would round it.
     FloatLiteralInexact { literal: i64 },
+    /// A whole-number literal beyond `Int`'s range where no `Decimal`, or
+    /// `Float` that holds it exactly, is meant.
+    IntLiteralOutOfRange { literal: String },
     /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
     /// empty or name one key twice.
     JsonKeyInvalid { type_name: String, message: String },
@@ -678,6 +681,7 @@ impl TypeErrorKind {
     /// leaves its old number empty, so no code ever named two errors.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::IntLiteralOutOfRange { .. } => "E0518",
             Self::NonExhaustiveMatch { .. } => "E0401",
             Self::LiveDeclarationInvalid { .. } => "E0701",
             Self::RefinementOutOfRange { .. } => "E0402",
@@ -1207,6 +1211,9 @@ impl TypeErrorKind {
             Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
             Self::DurationLiteralInvalid { message } => message.clone(),
             Self::UnknownMethod { receiver, method, .. } => format!("`{receiver}` has no method `{method}`"),
+            Self::IntLiteralOutOfRange { literal } => {
+                format!("`{literal}` is beyond `Int`'s range, -9223372036854775808 to 9223372036854775807")
+            }
             Self::FloatLiteralInexact { literal } => {
                 format!("`{literal}` has no exact `Float` value, so reading it as one would round it")
             }
@@ -1707,6 +1714,9 @@ impl TypeErrorKind {
             ),
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
+            ),
+            Self::IntLiteralOutOfRange { .. } => Some(
+                "a `Decimal` holds a whole number of up to 38 digits exactly: declare the value as a `Decimal` (`total: Decimal = ...`)".into(),
             ),
             Self::FloatLiteralInexact { .. } => Some(
                 "a `Float` holds every whole number up to 9007199254740992 (2^53) exactly; write the nearest value you mean as a `Float` literal, or keep it an `Int`".into(),
