@@ -288,7 +288,7 @@ agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref
 # an agent's annotations, and an `@approval(...)` in any position among
 # them, required when the body can reach an `approve`.
 action_decl       ::= (annotation NEWLINE | approval_annotation NEWLINE)* 'action' IDENT params '->' type_ref uses_clause? action_policy ':' INDENT assistants_line? block DEDENT
-action_policy     ::= 'requires' 'anyone' | route_policy
+action_policy     ::= route_policy
 
 # Only as an action's first line, so `assistants` is an ordinary name
 # elsewhere. Without it no assistant is offered the action. `allow`
@@ -362,7 +362,9 @@ path_placeholder  ::= '{' IDENT (':' ('Int' | 'String'))? '}'
 
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref
-route_policy      ::= 'requires' route_requirement ('and' route_requirement)*
+# `requires anyone` stands alone: an open caller policy is written, never
+# an omission. A `live` must have a `route_policy`; a route may leave it out.
+route_policy      ::= 'requires' 'anyone' | 'requires' route_requirement ('and' route_requirement)*
 route_requirement ::= 'authenticated' | ('role' | 'permission') '(' STRING_LITERAL ')'
 
 upload_annotation ::= '@' 'upload' '(' (upload_arg (',' upload_arg)* ','?)? ')'
