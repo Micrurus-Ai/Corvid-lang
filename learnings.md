@@ -8530,3 +8530,13 @@ archive = View(button_for(archive_card, card.id, "Archive"))
 - **What the browser gets back.** A plain form gets `303` back to the page it came from when the action succeeds, and only ever to this server's own pages. A refusal gets a page naming the field or error, with a link back.
 
 [Browser views](docs/book/19-browser-views.md)
+
+### A tool written in Rust can fail
+
+A `#[tool]` whose `async fn` returns `Result<T, E>` now fails by
+returning `Err`. Corvid sees a failed tool call carrying the error's
+message, so `try … else` takes its fallback, in `corvid run` and in a
+compiled program alike. A tool returning plain `T` cannot fail, as
+before. Host tools written in C can report a failure with
+`corvid_tool_failed`.
+

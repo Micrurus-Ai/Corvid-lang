@@ -246,3 +246,43 @@ agent main() -> Int:
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "20", "stderr={stderr}");
     assert_no_leaks(&stderr, src);
 }
+
+/// A Rust `#[tool]` that returns `Err` is a failed call, an outage, on
+/// both tiers: natively the test tools library's `lookup_or_fail`
+/// returns `Err` for an empty name, and on the interpreter its handler
+/// fails the same way.
+#[test]
+fn a_rust_tool_that_returns_err_is_caught_and_one_that_returns_ok_is_not() {
+    let src = r#"
+tool lookup_or_fail(name: String) -> Int
+
+agent main() -> String:
+    found = try lookup_or_fail("abc") else -1
+    missing = try lookup_or_fail("") else -1
+    return found.to_string() + " " + missing.to_string()
+"#;
+    let ir = ir_of(src);
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .tool("lookup_or_fail", |args| async move {
+            let name = args[0].as_str().unwrap_or_default().to_string();
+            if name.is_empty() {
+                Err(RuntimeError::ToolFailed { tool: "lookup_or_fail".into(), message: "the lookup service is down".into() })
+            } else {
+                Ok(serde_json::json!(name.chars().count()))
+            }
+        })
+        .build();
+    let interpreted = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async { corvid_vm::run_agent(&ir, entry_name(&ir), vec![], &runtime).await })
+        .expect("interpreter run");
+    assert_eq!(interpreted, corvid_vm::Value::String("3 -1".into()));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (stdout, stderr, status) = run_with_leak_detector(&compile(&ir, &tmp));
+    assert!(status.success(), "compiled binary failed: {stderr}");
+    assert_eq!(stdout.trim(), "3 -1", "stderr={stderr}");
+    assert_no_leaks(&stderr, src);
+}

@@ -126,6 +126,17 @@ async fn greet_string(name: String) -> String {
     format!("hi {name}")
 }
 
+/// Fails with a message when `name` is empty, as a tool whose service
+/// is down does: the `Err` reaches Corvid as a failed call, an outage.
+#[tool("lookup_or_fail")]
+async fn lookup_or_fail(name: String) -> Result<i64, String> {
+    if name.is_empty() {
+        Err("the lookup service is down".to_string())
+    } else {
+        Ok(name.chars().count() as i64)
+    }
+}
+
 #[tool("string_len")]
 async fn string_len(s: String) -> i64 {
     s.chars().count() as i64

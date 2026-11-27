@@ -154,26 +154,63 @@ pub unsafe extern "C" fn corvid_invoke_tool(
     callback(args_json, args_len, user_data as *mut c_void)
 }
 
-/// Public in-process bridge for host code that has registered tools via
-/// [`corvid_register_tool`] (or via a dlopened cdylib whose
-/// `__corvid_tool_<name>` symbols the host registered) and now wants to
-/// dispatch through the same path the C ABI uses, from Rust, without
-/// re-entering the C boundary. Returns `Some(result_json)` when a
-/// callback is registered for `name` and produces a result; `None` when
-/// no tool is registered or the callback fails.
-///
-/// Used by `corvid serve --with-tools-cdylib` to bridge interpreter
-/// tool calls into the host-registered C registry — the interpreter's
-/// Rust `ToolRegistry` gets a handler per declared tool whose body
-/// serializes args to JSON, calls this function, and parses the result
-/// back to a `Value`. Concrete site:
-/// `crates/corvid-cli/src/serve_cmd.rs::register_cdylib_tool_handlers`.
 /// Whether a tool is registered under `name`: a linked `#[tool]` or one
 /// an embedding host registered.
 pub fn host_tool_registered(name: &str) -> bool {
     registry().lock().unwrap().contains_key(name)
 }
 
+thread_local! {
+    /// The failure a tool reported on this thread, read right after its
+    /// entry point returns. The entry point runs on the calling thread,
+    /// so a thread-local pairs each report with its call.
+    static REPORTED_FAILURE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Report that the tool running on this thread failed with `message`;
+/// its entry point then returns null. A `#[tool]` whose `async fn`
+/// returns `Err` does this, and so may any host tool.
+pub fn report_tool_failure(message: String) {
+    REPORTED_FAILURE.with(|slot| *slot.borrow_mut() = Some(message));
+}
+
+/// `report_tool_failure` for a host tool written in C: call it with a
+/// NUL-terminated message, then return null from the tool's callback.
+///
+/// # Safety
+/// `message` must be null or a valid NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn corvid_tool_failed(message: *const c_char) {
+    let message = super::grounded_bridge::read_c_string(message).unwrap_or_else(|_| "the tool failed".to_string());
+    report_tool_failure(message);
+}
+
+/// Call the host tool registered under `name` with `args`, as both the
+/// runtime and `corvid serve --with-tools-cdylib` do, so the two read a
+/// tool's answer and its failures the same way. A tool that is not
+/// registered is `UnknownTool`; a reported failure, a missing answer and
+/// an answer that is not JSON are `ToolFailed`, which is an outage.
+pub fn call_registered_host_tool(name: &str, args: &[serde_json::Value]) -> Result<serde_json::Value, crate::RuntimeError> {
+    let failed = |message: String| crate::RuntimeError::ToolFailed { tool: name.to_string(), message };
+    if !host_tool_registered(name) {
+        return Err(crate::RuntimeError::UnknownTool(name.to_string()));
+    }
+    let args_json = serde_json::to_string(args).map_err(|e| failed(format!("its arguments are not JSON: {e}")))?;
+    REPORTED_FAILURE.with(|slot| slot.borrow_mut().take());
+    let answer = dispatch_registered_tool(name, &args_json);
+    if let Some(message) = REPORTED_FAILURE.with(|slot| slot.borrow_mut().take()) {
+        return Err(failed(message));
+    }
+    let answer = answer.ok_or_else(|| failed("the implementation returned no answer".into()))?;
+    serde_json::from_str(&answer).map_err(|e| failed(format!("its answer is not JSON: {e}")))
+}
+
+/// Public in-process bridge for host code that has registered tools via
+/// [`corvid_register_tool`] and wants the raw JSON answer. Returns
+/// `Some(result_json)` when a callback is registered for `name` and
+/// produces a result; `None` when no tool is registered or the callback
+/// fails. Prefer [`call_registered_host_tool`], which also reads a
+/// reported failure.
 pub fn dispatch_host_tool(name: &str, args_json: &str) -> Option<String> {
     dispatch_registered_tool(name, args_json)
 }
@@ -207,6 +244,37 @@ fn dispatch_registered_tool(name: &str, args_json: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    unsafe extern "C" fn reports_a_failure(_args: *const c_char, _len: usize, _user: *mut c_void) -> *mut c_char {
+        let message = CString::new("the upstream is down").unwrap();
+        unsafe { corvid_tool_failed(message.as_ptr()) };
+        ptr::null_mut()
+    }
+
+    unsafe extern "C" fn answers_nothing(_args: *const c_char, _len: usize, _user: *mut c_void) -> *mut c_char {
+        ptr::null_mut()
+    }
+
+    #[test]
+    fn a_reported_failure_is_a_failed_call_and_a_missing_tool_is_unknown() {
+        let reported = CString::new("reporting_tool").unwrap();
+        let silent = CString::new("silent_tool").unwrap();
+        unsafe {
+            corvid_register_tool(reported.as_ptr(), Some(reports_a_failure), ptr::null_mut());
+            corvid_register_tool(silent.as_ptr(), Some(answers_nothing), ptr::null_mut());
+        }
+        match call_registered_host_tool("reporting_tool", &[]) {
+            Err(crate::RuntimeError::ToolFailed { message, .. }) => assert_eq!(message, "the upstream is down"),
+            other => panic!("expected a failed call, got {other:?}"),
+        }
+        match call_registered_host_tool("silent_tool", &[]) {
+            Err(error @ crate::RuntimeError::ToolFailed { .. }) => assert!(error.is_outage()),
+            other => panic!("expected a failed call, got {other:?}"),
+        }
+        // The report does not leak into the next call.
+        assert!(matches!(call_registered_host_tool("silent_tool", &[]), Err(crate::RuntimeError::ToolFailed { ref message, .. }) if message.contains("no answer")));
+        assert!(matches!(call_registered_host_tool("never_registered", &[]), Err(crate::RuntimeError::UnknownTool(_))));
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

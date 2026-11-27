@@ -57,7 +57,7 @@ use corvid_resolve::DefId;
 use corvid_runtime::approval_authorization::ApprovalActorContext;
 use corvid_runtime::approval_queue::ApprovalQueueRuntime;
 use corvid_runtime::approvals::ProgrammaticApprover;
-use corvid_runtime::catalog_c_api::{corvid_register_tool, dispatch_host_tool, CorvidToolFn};
+use corvid_runtime::catalog_c_api::{corvid_register_tool, CorvidToolFn};
 use corvid_types::Type;
 use corvid_vm::{
     decode_public_json, encode_public_json, JsonDecodeError,
@@ -2204,25 +2204,9 @@ fn register_cdylib_tool_handlers(ir: &IrFile, cdylib_path: &Path) -> Result<Tool
         let tool_name_owned = tool.name.clone();
         registry.register(tool_name_owned.clone(), move |args| {
             let tool_name = tool_name_owned.clone();
-            async move {
-                let args_json = serde_json::to_string(&args).map_err(|e| {
-                    RuntimeError::ToolFailed {
-                        tool: tool_name.clone(),
-                        message: format!("serialize args to JSON: {e}"),
-                    }
-                })?;
-                match dispatch_host_tool(&tool_name, &args_json) {
-                    Some(result_json) => {
-                        serde_json::from_str(&result_json).map_err(|e| {
-                            RuntimeError::ToolFailed {
-                                tool: tool_name.clone(),
-                                message: format!("parse host tool result JSON: {e}"),
-                            }
-                        })
-                    }
-                    None => Err(RuntimeError::UnknownTool(tool_name)),
-                }
-            }
+            // The runtime's one reading of a host tool's answer and its
+            // failures, the one compiled and interpreted calls use.
+            async move { corvid_runtime::catalog_c_api::call_registered_host_tool(&tool_name, &args) }
         });
 
         registered_tools.push(tool.name.clone());

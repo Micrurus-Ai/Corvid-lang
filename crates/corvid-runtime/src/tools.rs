@@ -94,14 +94,10 @@ impl ToolRegistry {
 /// `async fn` with `block_on`), so it runs on a blocking thread, never
 /// on the task that awaits it.
 async fn call_host_tool(name: &str, args: Vec<serde_json::Value>) -> Result<serde_json::Value, RuntimeError> {
-    let failed = |message: String| RuntimeError::ToolFailed { tool: name.to_string(), message };
-    let args_json = serde_json::to_string(&args).map_err(|e| failed(format!("its arguments are not JSON: {e}")))?;
     let tool = name.to_string();
-    let answer = tokio::task::spawn_blocking(move || crate::catalog_c_api::dispatch_host_tool(&tool, &args_json))
+    tokio::task::spawn_blocking(move || crate::catalog_c_api::call_registered_host_tool(&tool, &args))
         .await
-        .map_err(|e| failed(format!("the implementation stopped: {e}")))?
-        .ok_or_else(|| failed("the implementation returned no answer".into()))?;
-    serde_json::from_str(&answer).map_err(|e| failed(format!("its answer is not JSON: {e}")))
+        .map_err(|e| RuntimeError::ToolFailed { tool: name.to_string(), message: format!("the implementation stopped: {e}") })?
 }
 
 #[cfg(test)]

@@ -101,7 +101,11 @@ provide one:
    `std/json` tools are implemented inside the runtime itself (real
    Rust: reqwest, rusqlite, serde). No host code at all.
 2. **Rust FFI** — a `#[tool]`-annotated Rust function compiled into a
-   signed cdylib and loaded by the runtime.
+   signed cdylib and loaded by the runtime. An `async fn` returning
+   `Result<T, E>` with `E: Display` fails by returning `Err`: Corvid
+   sees a failed tool call with `E`'s message, which `try … else`
+   catches on both tiers. A host tool written in C reports a failure
+   by calling `corvid_tool_failed(message)` and returning null.
 3. **Python host tools** — a matching function in the project's
    `tools.py`, executed via the embedded Python runtime.
 

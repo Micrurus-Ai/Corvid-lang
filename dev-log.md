@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A Rust `#[tool]` can fail
+
+The `#[tool]` macro accepted only an `async fn` returning `T`, so a tool
+written in Rust had no way to report that its service was down. Tools
+reach the runtime through a JSON entry point with no error channel.
+
+Now a tool can fail:
+- **A Rust tool** whose `async fn` returns `Result<T, E: Display>`
+  reports `Err` through a thread-local slot
+  (`catalog_c_api::report_tool_failure`) and returns no answer. The
+  entry point runs on the calling thread, so the report pairs with its
+  call.
+- **A C host tool** can report a failure the same way with
+  `corvid_tool_failed(message)`.
+
+`call_registered_host_tool` reads an answer or a reported failure, and
+gives:
+- `ToolFailed`, an outage, for a reported failure, a missing answer, or
+  an answer that is not JSON;
+- `UnknownTool` for a tool that is not registered.
+
+Found and fixed: `corvid serve --with-tools-cdylib` had its own copy of
+that reading, which called a missing answer `UnknownTool`, not an outage,
+while the runtime called it `ToolFailed`. Both now call the one function.
+A misplaced doc comment in `tool_bridge.rs` is also fixed.
+
+Proof:
+- a runtime test with C-style callbacks: a reported failure, a silent
+  null, a report that does not leak into the next call, and an
+  unregistered tool;
+- a parity test where the test tools library's `lookup_or_fail` returns
+  `Err` and `Ok` under `try ... else` on both tiers, under the leak
+  detector.
+
 ### B10-2b-5: forms and buttons that call actions
 
 Frontend development approved the form binding on 2026-11-27 (review item

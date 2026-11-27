@@ -33,10 +33,11 @@
 //! - It doesn't decide which Rust types map to which Corvid ABI types
 //!   — that mapping lives in `corvid-runtime::abi` and is shared with
 //!   the codegen side. The macro just calls the conversion traits.
-//! - It doesn't do error handling beyond what the user's `async fn`
-//!   already does. Tools whose `async fn` returns `T` cannot fail at
-//!   the Corvid level today — the macro does not support a
-//!   `Result<T, E>` return path yet.
+//! - A tool fails by returning `Err`. An `async fn` returning
+//!   `Result<T, E>` with `E: Display` gives Corvid the `T`, or, on `Err`,
+//!   a failed tool call carrying `E`'s message: an outage, which
+//!   `try ... else` catches on both tiers. A tool returning plain `T`
+//!   cannot fail.
 //! - It doesn't support sync `fn` (only `async fn`). Users wrap a
 //!   sync body in `async { ... }` trivially; keeping the macro
 //!   async-only means one codepath to test and maintain.
@@ -222,7 +223,22 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         })
         .collect();
     let json_call_args: Vec<TokenStream2> = json_args.iter().map(|(n, _)| quote! { #n }).collect();
-    let json_result = if return_is_unit {
+    let returns_result = native_ret_ty.as_ref().is_some_and(is_result_type);
+    let json_result = if returns_result {
+        // `Err` is a failed call: report its message and return no
+        // answer; the runtime reads the report.
+        quote! {
+            match __handle.block_on(async { #fn_ident(#(#json_call_args),*).await }) {
+                ::std::result::Result::Ok(__value) => ::corvid_runtime::serde_json::to_value(&__value).expect(concat!(
+                    "#[tool] `", #tool_name, "`: failed to serialize result to JSON"
+                )),
+                ::std::result::Result::Err(__error) => {
+                    ::corvid_runtime::catalog_c_api::report_tool_failure(::std::string::ToString::to_string(&__error));
+                    return ::std::ptr::null_mut();
+                }
+            }
+        }
+    } else if return_is_unit {
         quote! {
             __handle.block_on(async { #fn_ident(#(#json_call_args),*).await });
             ::corvid_runtime::serde_json::Value::Null
@@ -389,6 +405,16 @@ fn abi_type_for(ty: &Type) -> syn::Result<TokenStream2> {
             ),
         )),
     }
+}
+
+/// Whether `ty` is a `Result<T, E>`: the last path segment is `Result`
+/// with two type arguments.
+fn is_result_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    path.path.segments.last().is_some_and(|segment| {
+        segment.ident == "Result"
+            && matches!(&segment.arguments, syn::PathArguments::AngleBracketed(args) if args.args.len() == 2)
+    })
 }
 
 /// The wrapper symbol name embeds the tool name. Tool names that aren't
