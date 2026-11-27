@@ -29,3 +29,29 @@ fn building_a_map_scales_with_its_size() {
     // constant time, sixteen when it is a scan.
     assert!(large.as_secs_f64() < small.as_secs_f64() * 8.0, "building grows faster than its size");
 }
+
+fn build_records(n: i64) -> std::time::Duration {
+    use corvid_vm::value::StructValue;
+    let key = |i: i64| Value::Struct(StructValue::new(corvid_resolve::DefId(1), "P", [("x".to_string(), Value::Int(i))]));
+    let start = std::time::Instant::now();
+    let map = MapValue::new(std::iter::empty());
+    for i in 0..n {
+        map.insert_or_update(key(i), Value::Int(i));
+    }
+    for i in 0..n {
+        assert!(map.get_by_key(&key(i)).is_some());
+    }
+    start.elapsed()
+}
+
+/// Record keys hash structurally too, now that a map holds snapshots of
+/// them, so a map of records scales with its size as a map of text does.
+#[test]
+#[ignore = "timing measurement"]
+fn a_map_of_record_keys_scales_with_its_size() {
+    let small = build_records(20_000);
+    let large = build_records(80_000);
+    eprintln!("20k record keys: {small:?}, 80k: {large:?}, ratio {:.1}", large.as_secs_f64() / small.as_secs_f64());
+    assert!(large.as_secs_f64() < small.as_secs_f64() * 8.0, "building grows faster than its size");
+}
+

@@ -19,7 +19,7 @@ use corvid_resolve::{DefId, LocalId};
 use crate::cycle_collector;
 
 use super::heap::HeapMeta;
-use super::map_key::MapKey;
+use super::map_key::{is_compound_key, snapshot_key, MapKey};
 use super::{ObjectRef, Value};
 
 // Recursive Corvid types pass through a named record or variant. A back
@@ -482,7 +482,7 @@ impl MapValue {
     pub fn new(entries: impl IntoIterator<Item = (Value, Value)>) -> Self {
         let mut out = MapEntries::default();
         for (k, v) in entries {
-            out.insert(MapKey(k), v);
+            out.insert(stored_key(k), v);
         }
         Self(Arc::new(MapInner {
             meta: HeapMeta::new(),
@@ -518,7 +518,7 @@ impl MapValue {
     pub fn insert_or_update(&self, key: Value, value: Value) {
         let _access = cycle_collector::heap_access();
         if let Some(entries) = self.0.entries.lock().expect("map lock").as_mut() {
-            entries.insert(MapKey(key), value);
+            entries.insert(stored_key(key), value);
         }
     }
 
@@ -536,7 +536,7 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .map(|e| e.keys().map(|k| k.0.clone()).collect())
+            .map(|e| e.keys().map(|k| handed_out(&k.0)).collect())
             .unwrap_or_default()
     }
 
@@ -558,13 +558,25 @@ impl MapValue {
             .lock()
             .expect("map lock")
             .as_ref()
-            .map(|e| e.iter().map(|(k, v)| (k.0.clone(), v.clone())).collect())
+            .map(|e| e.iter().map(|(k, v)| (handed_out(&k.0), v.clone())).collect())
             .unwrap_or_default()
     }
 
     pub fn ptr_key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
     }
+}
+
+/// A key as the map stores it: a snapshot of a compound key, so a later
+/// change to the program's value cannot reach inside the map.
+fn stored_key(key: Value) -> MapKey {
+    MapKey(if is_compound_key(&key) { snapshot_key(&key) } else { key })
+}
+
+/// A key as the map hands it out: another snapshot, so the program never
+/// holds the map's own copy.
+fn handed_out(key: &Value) -> Value {
+    if is_compound_key(key) { snapshot_key(key) } else { key.clone() }
 }
 
 impl Clone for ClosureValue {

@@ -8449,3 +8449,7 @@ Looking up, adding or replacing a key in a `Map` takes about the same time whate
 
 A `pub extern "c"` agent takes and returns any record, variant, list, option, result or map that has a JSON form, including nested records and lists of records, as a JSON string in the public form. Before, it took only flat records of `Int`, `Float`, `Bool` and `String` fields. A type with no JSON form, such as a `Secret` or a stream, is still refused, and the error names it.
 
+### A map keeps its own copy of a record key
+
+Using a record, list or other compound value as a map key stores a copy of it, so changing the original afterwards does not change the key. After `m: Map<P, Int> = {p: 10}` and then `p.x = 2`, `m.get(P(1))` still finds 10. Before, the key inside the map changed along with `p`. A key read back with `keys()` is a copy too, so changing it leaves the map as it was. Maps with record keys are now as fast at large sizes as maps with text keys.
+

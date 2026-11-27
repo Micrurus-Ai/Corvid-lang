@@ -2,6 +2,30 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Map keys are snapshots
+
+[Proposal](docs/proposals/map-key-snapshots.md). Testing why compound map
+keys couldn't be hashed showed a correctness problem behind the speed one.
+Records are shared by reference, so `p = P(1)`, `m = {p: 10}`, `p.x = 2` left
+`m.get(P(1))` empty and `m.get(P(2))` at 10: the key changed inside the map.
+A map now stores a detached snapshot of every compound key (`snapshot_key`,
+which keeps cycles intact) and hands out another snapshot from `keys()` and
+entry iteration. No part of the program ever holds the map's own copy.
+
+With stored keys that cannot change, records, lists, maps, options, results
+and variants hash structurally, by exactly the parts their `==` compares:
+type and fields for a record (by field name, since the fields are a hash
+map), elements in order for a list, and entries in any order for a map.
+Measured: 80,000 record keys build in 90 ms with a 2.5× ratio for 4× the
+keys. Before, compound keys shared one hash and were scanned. Unit tests
+cover the snapshot both on the way in and the way out. The probe program now
+prints `10 0 2`. Native maps take only immutable scalar keys, so native
+behavior is unchanged.
+
+Noted for later: the error for a missing builtin method wraps its text in
+"cannot call a value of type `method …`" and cites old slice numbers
+(`45c`, `45d`).
+
 ### Query J4: `by_key()`
 
 `by_key()` is a zero-argument stage typed `Map<K, Row>` for a table keyed
