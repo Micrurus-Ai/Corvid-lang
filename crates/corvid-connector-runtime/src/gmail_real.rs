@@ -200,17 +200,7 @@ fn build_rfc2822_message(to: &str, subject: &str, body: &str) -> String {
 }
 
 fn url_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 8);
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            b' ' => out.push_str("%20"),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    corvid_text::encode_url_component(value)
 }
 
 /// Convenience: build a Gmail real client backed by the shared

@@ -2,6 +2,17 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One URL component encoder
+
+Four hand-written percent-encoders (the runtime's connector path builder,
+`corvid connectors`, and the GitHub and Gmail adapters) all copied
+`corvid_text::encode_url_component`, the function `text.encode_url_component()`
+uses: RFC 3986 unreserved bytes kept, every other byte as uppercase `%XX`.
+They now call it, so a connector's URL and a Corvid program's encode the
+same bytes the same way. The hex guard also refuses `:02X}`, the
+uppercase format a new hand-written percent-encoder would use, and names
+the function to call instead.
+
 ### A clear error for a method a type lacks
 
 The error for `x.to_string()` on an `Option<Int>` reused `NotCallable` with a

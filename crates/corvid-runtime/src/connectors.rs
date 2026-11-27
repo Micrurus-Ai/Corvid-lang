@@ -734,17 +734,7 @@ fn encode_form(value: &serde_json::Value) -> String {
 /// characters that must not appear unescaped in a path segment or form
 /// value. Deterministic (no allocation surprises) so replay stays stable.
 fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            b' ' => out.push_str("%20"),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
+    corvid_text::encode_url_component(s)
 }
 
 fn build_auth_header(

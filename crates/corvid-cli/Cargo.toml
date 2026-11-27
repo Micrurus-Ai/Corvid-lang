@@ -10,6 +10,7 @@ name = "corvid"
 path = "src/main.rs"
 
 [dependencies]
+corvid-text = { workspace = true }
 corvid-hex = { workspace = true }
 # Ed25519 verification goes through corvid-crypto's strict check.
 corvid-crypto = { workspace = true }

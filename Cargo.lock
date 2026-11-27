@@ -745,6 +745,7 @@ dependencies = [
  "corvid-runtime",
  "corvid-syntax",
  "corvid-test-paths",
+ "corvid-text",
  "corvid-tour-catalog",
  "corvid-trace-schema",
  "corvid-types",
@@ -838,6 +839,7 @@ version = "0.0.1"
 dependencies = [
  "base64",
  "corvid-hex",
+ "corvid-text",
  "hmac 0.12.1",
  "reqwest",
  "serde",
