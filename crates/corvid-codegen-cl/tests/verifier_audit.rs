@@ -238,3 +238,27 @@ agent main() -> Int:
     audit("nested_struct_with_string_traverses_cleanly", src);
 }
 
+
+/// The cycle collector frees values the program still holds once it runs
+/// on a real allocation count. A loop that builds a string, a chain of
+/// concatenations, and a list grown in a loop all crash under
+/// `CORVID_GC_TRIGGER=10`; at the default threshold (10 000) the same
+/// happens to any program that allocates enough. The fixtures above
+/// allocate too little for the collector to run. Ignored until fixed:
+/// see the roadmap's native collector item.
+#[test]
+#[ignore = "known: the collector frees live values (roadmap: native cycle collector frees live values)"]
+fn a_loop_building_a_string_survives_collection() {
+    let src = r#"
+agent main() -> Int:
+    s = "a"
+    i = 0
+    while i < 30:
+        s = s + "b"
+        i = i + 1
+    if s.length() == 31:
+        return 0
+    return 1
+"#;
+    audit("a_loop_building_a_string_survives_collection", src);
+}

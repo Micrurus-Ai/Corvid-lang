@@ -105,6 +105,10 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 
 ### Task progress
 
+**Native memory safety** (found 2026-11-27, macOS session; brought to the front because it crashes ordinary programs)
+
+- [ ] The native cycle collector frees values the program still holds. Any native program that allocates more than `CORVID_GC_TRIGGER` values (default 10 000) can crash with `corvid_release on already-freed allocation` or a segfault: `while i < 20000: total = total + price` on a `Decimal`, a string built in a loop, a list grown in a loop, even a straight chain of eleven string concatenations under `CORVID_GC_TRIGGER=10`. With `CORVID_GC_TRIGGER=0` (collector off) every one is correct, so the refcounting is sound and the collector's marking is not. Reproduced by the ignored test `verifier_audit::a_loop_building_a_string_survives_collection`; the existing fixtures allocate too little for the collector ever to run (the "loop allocating strings" fixture allocates none in its loop). Ruled out so far, on arm64 macOS: the stack-map table exists and its `pc_offset`s are the calls' return addresses; the walk's `sp_at_call = frame + 16` matches the frames checked; declaring loop variables with `declare_var_needs_stack_map` did not fix it. The verifier reports a `String` with refcount 2 where it reaches 1, so one live holder is not a root, most likely an operand held only in a register across a runtime call that allocates (the borrowed-operand peephole for string `+` is a suspect). Stronger: find the missing root, make the fixtures allocate past the threshold under the verifier, and run the native parity suite with `CORVID_GC_TRIGGER=10` so the collector is exercised on every program. Until then a native program that allocates heavily is safer with `CORVID_GC_TRIGGER=0`, which leaks cycles but frees everything else.
+
 **Removing the limits** (decided by the owner 2026-11-26; [the plan](proposals/removing-limits.md)). Amends the order: these come first, because each is a hole or a block that a first real application hits.
 
 - [x] One typed reader for path segments and query fields (the item under B14 below).

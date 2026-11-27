@@ -2,6 +2,19 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Found: the native cycle collector frees live values
+
+Timing a decimal-heavy native loop (the roadmap's compact-`Decimal`
+measurement) crashed it with `corvid_release on already-freed allocation`.
+It fails from about 10 000 iterations, the collector's default trigger. A
+string built in a loop, a list grown in a loop and a plain chain of
+concatenations fail the same way when the collector runs (`CORVID_GC_TRIGGER=10`),
+and every one is correct with it off, on `main` too. So this predates today's
+work. The collector's own fixtures allocate too little for it to run. What I
+checked and ruled out is in the roadmap item, now at the front of the order.
+An ignored test reproduces it. The decimal measurement waits on the fix,
+since the benchmark cannot finish natively.
+
 ### Lineage from real runs L2: a run shows where its database time went
 
 Just before each recorded table operation's `ToolResult`, the trace now
