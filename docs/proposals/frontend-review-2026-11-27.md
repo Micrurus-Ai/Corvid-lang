@@ -137,3 +137,23 @@ Not a proposal, a change to check against: an integer literal too large for `Int
 1. Does your parser range-check integer literals itself? If so it would now disagree with ours on a large literal in a `Decimal` slot, such as `price: Decimal = 123456789012345678901234567890`.
 
 **Answer:**
+
+---
+
+## 7. Large uploads held on disk
+
+[Proposal](upload-to-disk.md). Added 2026-11-27.
+
+```corvid
+@upload(max_mb: 500, mime: "video/mp4", disk_over_mb: 16)
+route POST "/videos" body Upload<Video> requires authenticated -> json Receipt:
+```
+
+- `disk_over_mb: N` on `@upload` holds a file larger than N MB in a private temporary file instead of memory, deleted when the request ends. Without it, nothing is written to disk, as today.
+
+**Frontend owns:** nothing. The browser uploads exactly as before. It is listed because `@upload` arguments are in the shared grammar reference.
+
+**Question:**
+1. Does your side parse `@upload(...)` arguments, and if so, is one more named `INT` argument safe for it?
+
+**Answer:**
