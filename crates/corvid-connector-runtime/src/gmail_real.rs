@@ -292,32 +292,7 @@ mod tests {
     }
 
     fn percent_decode(value: &str) -> String {
-        let bytes = value.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                if let (Some(h), Some(l)) =
-                    (hex_value(bytes[i + 1]), hex_value(bytes[i + 2]))
-                {
-                    out.push(h * 16 + l);
-                    i += 3;
-                    continue;
-                }
-            }
-            out.push(bytes[i]);
-            i += 1;
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    }
-
-    fn hex_value(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            _ => None,
-        }
+        corvid_text::decode_url_component(value).expect("test URLs are percent-encoded")
     }
 
     /// Slice 41K-C: search builds a GET to

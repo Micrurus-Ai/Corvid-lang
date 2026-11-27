@@ -108,21 +108,10 @@ pub(crate) fn urlencoded_value(
 }
 
 /// Decode form-encoded query text as UTF-8 after expanding percent escapes.
+/// A query-string or form-body value: `corvid_text::decode_form_component`,
+/// where `+` is a space.
 pub(crate) fn urldecode(s: &str) -> Result<String, String> {
-    let mut decoded = Vec::with_capacity(s.len());
-    let mut bytes = s.bytes();
-    while let Some(byte) = bytes.next() {
-        match byte {
-            b'+' => decoded.push(b' '),
-            b'%' => {
-                let mut digit = || bytes.next().and_then(|b| char::from(b).to_digit(16))
-                    .ok_or_else(|| "invalid percent escape in query".to_string());
-                decoded.push((digit()? * 16 + digit()?) as u8);
-            }
-            other => decoded.push(other),
-        }
-    }
-    String::from_utf8(decoded).map_err(|_| "query parameter must be UTF-8".into())
+    corvid_text::decode_form_component(s)
 }
 
 pub(crate) fn coerce_str_to_value(raw: &str, ty: &Type, types_by_id: &HashMap<DefId, &IrType>) -> Result<Value, String> {

@@ -139,9 +139,24 @@ pub fn encode_url_component(text: &str) -> String {
 /// `text.decode_url_component()`: `%XX` becomes byte `XX`; every other
 /// character, including `+`, stands for itself.
 pub fn decode_url_component(text: &str) -> Result<String, String> {
+    decode_percent(text, false)
+}
+
+/// A query-string or form-body value (`application/x-www-form-urlencoded`):
+/// as `decode_url_component`, and `+` is a space. A literal `+` arrives as
+/// `%2B`.
+pub fn decode_form_component(text: &str) -> Result<String, String> {
+    decode_percent(text, true)
+}
+
+fn decode_percent(text: &str, plus_is_space: bool) -> Result<String, String> {
     let mut bytes = Vec::with_capacity(text.len());
     let mut chars = text.char_indices().enumerate().peekable();
     while let Some((position, (_, ch))) = chars.next() {
+        if plus_is_space && ch == '+' {
+            bytes.push(b' ');
+            continue;
+        }
         if ch != '%' {
             let mut buffer = [0u8; 4];
             bytes.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
@@ -324,5 +339,19 @@ mod tests {
             "not URL-encoded: `%` at position 1 must be followed by two hex digits"
         );
         assert!(decode_url_component("%ff").unwrap_err().starts_with("the decoded bytes are not UTF-8"));
+    }
+}
+
+#[cfg(test)]
+mod form_component_tests {
+    use super::{decode_form_component, decode_url_component};
+
+    /// A form value reads `+` as a space and `%2B` as a plus; a URL
+    /// component reads `+` as itself.
+    #[test]
+    fn plus_is_a_space_only_in_form_encoding() {
+        assert_eq!(decode_form_component("a%20b+c%2Bd").unwrap(), "a b c+d");
+        assert_eq!(decode_url_component("a+b").unwrap(), "a+b");
+        assert!(decode_form_component("50%").unwrap_err().contains("position 2"));
     }
 }

@@ -2,6 +2,20 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One URL component decoder
+
+The Windows session pointed at the decoding side of the URL encoder
+merge. `corvid serve` read query strings and form bodies with its own
+`urldecode` in `request_text.rs` (`+` as a space), and the GitHub and Gmail
+adapter tests each carried a lenient `percent_decode`. `corvid-text` now
+has `decode_form_component`, for `application/x-www-form-urlencoded`:
+`decode_url_component` with `+` as a space, sharing one implementation
+(`decode_percent`). `request_text` calls it, and the adapter tests call
+`decode_url_component`. A malformed escape in a request now reports its
+position (`` `%` at position 2 must be followed by two hex digits ``) rather
+than "invalid percent escape in query". The existing `urldecode` test
+passes unchanged.
+
 ### One URL component encoder
 
 Four hand-written percent-encoders (the runtime's connector path builder,
