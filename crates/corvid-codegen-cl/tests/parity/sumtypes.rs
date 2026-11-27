@@ -5,7 +5,6 @@ use super::{
 use corvid_runtime::{ProgrammaticApprover, Runtime};
 use corvid_vm::Value;
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::Arc;
 #[track_caller]
 fn assert_parity_bool_with_mock_llm_queue(
@@ -39,7 +38,7 @@ fn assert_parity_bool_with_mock_llm_queue(
     let tmp = tempfile::tempdir().expect("tempdir");
     let bin_path = tmp.path().join("prog");
     let produced = compile_without_tools_lib(&ir, &bin_path);
-    let output = Command::new(&produced)
+    let output = crate::native_command(&produced)
         .env("CORVID_DEBUG_ALLOC", "1")
         .env("CORVID_APPROVE_AUTO", "1")
         .env("CORVID_TEST_MOCK_LLM", "1")

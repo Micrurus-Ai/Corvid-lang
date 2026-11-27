@@ -2,7 +2,6 @@ use super::{assert_no_leaks, entry_name, ir_of, test_tools_lib_path};
 use corvid_codegen_cl::build_native_to_disk;
 use corvid_runtime::{ProgrammaticApprover, Runtime};
 use corvid_vm::Value;
-use std::process::Command;
 use std::sync::Arc;
 
 #[track_caller]
@@ -47,7 +46,7 @@ fn assert_parity_with_mock_llm(
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
     };
-    let output = Command::new(&produced)
+    let output = crate::native_command(&produced)
         .env("CORVID_DEBUG_ALLOC", "1")
         .env("CORVID_APPROVE_AUTO", "1")
         .env("CORVID_TEST_MOCK_LLM", "1")
@@ -151,7 +150,7 @@ agent main() -> Grounded<String>:
     return answer(ctx)
 "#;
     let (_tmp, produced) = build_prompt_binary(src);
-    let output = Command::new(&produced)
+    let output = crate::native_command(&produced)
         .env("CORVID_DEBUG_ALLOC", "1")
         .env("CORVID_APPROVE_AUTO", "1")
         .env("CORVID_TEST_MOCK_LLM", "1")
@@ -190,7 +189,7 @@ agent main() -> Grounded<String>:
     return answer(ctx)
 "#;
     let (_tmp, produced) = build_prompt_binary(src);
-    let output = Command::new(&produced)
+    let output = crate::native_command(&produced)
         .env("CORVID_DEBUG_ALLOC", "1")
         .env("CORVID_APPROVE_AUTO", "1")
         .env("CORVID_TEST_MOCK_LLM", "1")

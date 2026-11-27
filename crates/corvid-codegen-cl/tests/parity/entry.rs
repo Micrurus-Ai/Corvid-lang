@@ -2,7 +2,6 @@ use super::{assert_no_leaks, ir_of, test_tools_lib_path};
 use corvid_codegen_cl::build_native_to_disk;
 use corvid_runtime::{ProgrammaticApprover, Runtime};
 use corvid_vm::Value;
-use std::process::Command;
 use std::sync::Arc;
 
 /// Run a compiled binary with CLI args + leak detector. Returns
@@ -11,7 +10,7 @@ fn run_compiled_with_args(
     bin: &std::path::Path,
     args: &[&str],
 ) -> (String, String, std::process::ExitStatus) {
-    let output = Command::new(bin)
+    let output = crate::native_command(bin)
         .args(args)
         .env("CORVID_DEBUG_ALLOC", "1")
         .output()
@@ -220,7 +219,7 @@ fn arity_mismatch_exits_nonzero() {
         &[test_tools_lib_path().as_path()],
     )
     .expect("compile + link");
-    let output = Command::new(&produced).output().expect("run");
+    let output = crate::native_command(&produced).output().expect("run");
     assert!(
         !output.status.success(),
         "expected non-zero exit on arity mismatch, got success. stdout={}",
@@ -246,7 +245,7 @@ fn parse_error_on_bad_int_argv_exits_nonzero() {
         &[test_tools_lib_path().as_path()],
     )
     .expect("compile + link");
-    let output = Command::new(&produced)
+    let output = crate::native_command(&produced)
         .arg("notanint")
         .output()
         .expect("run");
