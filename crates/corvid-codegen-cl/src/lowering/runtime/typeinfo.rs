@@ -22,7 +22,7 @@ use super::*;
 /// offset 16: fn_ptr trace_fn        (8B)
 /// offset 24: fn_ptr weak_fn         (8B — NULL in 17a, reserved for 17g)
 /// offset 32: data_ptr elem_typeinfo (8B — NULL for non-lists)
-/// offset 40: data_ptr name          (8B — NULL in 17a; 17d will fill for dump_graph)
+/// offset 40: data_ptr name          (8B — the type's name, NUL-terminated, for runtime reports)
 /// total:     48 bytes, 8-byte aligned
 /// ```
 const TYPEINFO_BYTES: usize = 48;
@@ -33,7 +33,6 @@ const TYPEINFO_OFF_TRACE_FN: u32 = 16;
 #[allow(dead_code)]
 const TYPEINFO_OFF_WEAK_FN: u32 = 24;
 const TYPEINFO_OFF_ELEM_TYPEINFO: u32 = 32;
-#[allow(dead_code)]
 const TYPEINFO_OFF_NAME: u32 = 40;
 
 /// Typeinfo flags — must match `CORVID_TI_*` in alloc.c. Bits beyond
@@ -58,6 +57,31 @@ pub use corvid_runtime::native_layout::{
     OPTION_PAYLOAD_BYTES, OPTION_PAYLOAD_OFFSET, RESULT_PAYLOAD_BYTES, RESULT_PAYLOAD_OFFSET, RESULT_TAG_ERR,
     RESULT_TAG_OFFSET, RESULT_TAG_OK,
 };
+
+/// Point the typeinfo's name slot at the type's name, so a runtime
+/// report about a value (the cycle collector's, for one) can say which
+/// type it was. The name is the typeinfo symbol without its prefix.
+fn write_type_name(
+    module: &mut ObjectModule,
+    desc: &mut DataDescription,
+    symbol: &str,
+) -> Result<(), CodegenError> {
+    let span = Span::new(0, 0);
+    let name = symbol.strip_prefix("corvid_typeinfo_").unwrap_or(symbol);
+    let id = module
+        .declare_anonymous_data(false, false)
+        .map_err(|e| CodegenError::cranelift(format!("declare type name `{name}`: {e}"), span))?;
+    let mut text = DataDescription::new();
+    let mut bytes = name.as_bytes().to_vec();
+    bytes.push(0);
+    text.define(bytes.into_boxed_slice());
+    module
+        .define_data(id, &text)
+        .map_err(|e| CodegenError::cranelift(format!("define type name `{name}`: {e}"), span))?;
+    let gv = module.declare_data_in_data(id, desc);
+    desc.write_data_addr(TYPEINFO_OFF_NAME, gv, 0);
+    Ok(())
+}
 
 /// Emit `corvid_typeinfo_<TypeName>` as a .rodata data symbol with
 /// function-pointer relocations to the type's destroy_fn (if any)
@@ -106,6 +130,7 @@ pub fn emit_struct_typeinfo(
     let weak_ref = module.declare_func_in_data(runtime.weak_clear_self, &mut desc);
     desc.write_function_addr(TYPEINFO_OFF_WEAK_FN, weak_ref);
 
+    write_type_name(module, &mut desc, &symbol)?;
     module.define_data(data_id, &desc).map_err(|e| {
         CodegenError::cranelift(format!("define typeinfo `{symbol}`: {e}"), ty.span)
     })?;
@@ -146,6 +171,7 @@ pub fn emit_result_typeinfo(
     let weak_ref = module.declare_func_in_data(runtime.weak_clear_self, &mut desc);
     desc.write_function_addr(TYPEINFO_OFF_WEAK_FN, weak_ref);
 
+    write_type_name(module, &mut desc, &symbol)?;
     module.define_data(data_id, &desc).map_err(|e| {
         CodegenError::cranelift(format!("define typeinfo `{symbol}`: {e}"), Span::new(0, 0))
     })?;
@@ -189,6 +215,7 @@ pub fn emit_option_typeinfo(
     let weak_ref = module.declare_func_in_data(runtime.weak_clear_self, &mut desc);
     desc.write_function_addr(TYPEINFO_OFF_WEAK_FN, weak_ref);
 
+    write_type_name(module, &mut desc, &symbol)?;
     module.define_data(data_id, &desc).map_err(|e| {
         CodegenError::cranelift(
             format!("define option typeinfo `{symbol}`: {e}"),
@@ -258,6 +285,7 @@ pub fn emit_list_typeinfo(
         desc.write_data_addr(TYPEINFO_OFF_ELEM_TYPEINFO, elem_gv, 0);
     }
 
+    write_type_name(module, &mut desc, &symbol)?;
     module.define_data(data_id, &desc).map_err(|e| {
         CodegenError::cranelift(
             format!("define list typeinfo `{symbol}`: {e}"),
