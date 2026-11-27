@@ -52,7 +52,7 @@ table Customer:
 
 ## Slices
 
-- [ ] K1. `corvid-crypto` gains XChaCha20-Poly1305 sealing bound to associated data, with known-answer tests and a test that a ciphertext moved to another row fails.
+- [x] K1. `corvid-crypto` gains XChaCha20-Poly1305 sealing bound to associated data, with known-answer tests and a test that a ciphertext moved to another row fails. Built 2026-11-27 as `corvid_crypto::DataKey` (`seal`, `open`, `sealed_key_id`, `generate_base64`), checked against draft-irtf-cfrg-xchacha's published vector, with the key's bytes wiped on drop and its `Debug` showing only the key id.
 - [ ] K2. `encryption: key(secret(...))` parsed and checked; a `Secret` column allowed only under it; an encrypted column refused in `where` and `order_by`.
 - [ ] K3. Writes encrypt and reads decrypt on both engines, the trace holds ciphertext, and replay without the key is a typed refusal.
 - [ ] K4. `previous:` keys, `corvid migrate rekey`, and `corvid keys new`.

@@ -2,6 +2,36 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Encryption at rest K1: `DataKey`
+
+`corvid_crypto::DataKey` seals and opens values with XChaCha20-Poly1305.
+- Each value gets a fresh random 24-byte nonce, so one key takes any number
+  of writes.
+- The value is bound to its place through associated data. A sealed
+  `Customer.stripe_key` for row 1 does not open as row 2's, or as another
+  column's.
+- The sealed form is `corvid:v1:<key id>:<base64url(nonce + ciphertext)>`.
+- The key id is the first 8 bytes of an HMAC-SHA256 of a fixed label under
+  the key. It names the key without revealing it, so a store mid-rotation
+  can pick the key, or name the one it lacks.
+- The key's bytes live in `Zeroizing`, and `Debug` prints only the id.
+
+The id's HMAC calls the `hmac` crate directly rather than
+`crate::hmac_sha256`. That function takes its key as `Bytes`, which would
+copy the data key into a buffer that is not wiped; the comment says so.
+
+Tests:
+- the published XChaCha20-Poly1305 vector of draft-irtf-cfrg-xchacha
+  (A.3.1), byte for byte;
+- a value moved to another row or column is refused as `Tampered`;
+- sealing twice differs;
+- a changed value, another key (named by id) and plain text are refused;
+- a key must be 32 bytes of base64 and never appears in `Debug`.
+
+`cargo audit` passes with the new `chacha20poly1305` dependency, and
+Cargo.lock is committed with it. No grammar is involved; K2 onward follow
+the review window.
+
 ### `cargo audit` in CI
 
 The SQLite advisory (RUSTSEC-2026-0459) was found in a push notice, after
