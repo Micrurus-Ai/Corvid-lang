@@ -1,5 +1,7 @@
 # Corvid — Build Roadmap
 
+- Native library builds lower checked route parameter and caller records before ownership analysis. Verify all five reference app descriptors against their sources.
+
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
 - [ ] F08 integrated frontend check. Verify the orders item loop and generated route calls against the same stream protocol, then run the orders and live client Edge checks on the integrated revision.

@@ -1,5 +1,9 @@
 # Corvid dev log
 
+### Native compilation of route parameters
+
+A fixed route still has an empty path argument. Native compilation used to reject this argument before reaching the ABI verifier in every reference app. Each distinct ordered list of path or caller fields now uses one ordinary native record layout, including field access and ownership. This keeps the HTTP server on its existing execution path.
+
 Weekly journal. Non-negotiable. Every entry is one commit.
 
 ### The parity suite runs the collector at every allocation
