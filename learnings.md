@@ -8441,3 +8441,7 @@ A `pub extern "c"` agent's record parameter and record result travel as the reco
 
 Looking up, adding or replacing a key in a `Map` takes about the same time whatever the map's size. A map of 80,000 text keys now builds in about 20 ms, where it took 24 seconds before. That speeds up `count_by` and `sum_by` over many groups too. Keys still match exactly as `==` decides: `1`, `1.0` and a `Decimal` `1.00` are one key where those types meet, and a map keeps the order its keys were first added. A key that is a record, list, option or result is still found by comparing it with each key in turn.
 
+### Joining lists with `+` in native code
+
+`a + b` on two lists gives a new list of `a`'s entries followed by `b`'s, in native code as on the interpreter, so `out = out + [item]` inside a loop builds a list in a compiled program too. Native code used to stop such a program with a "capacity overflow" crash.
+

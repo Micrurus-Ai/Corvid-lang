@@ -68,6 +68,22 @@ corvid_list* corvid_list_snapshot(corvid_list* source, const struct corvid_typei
     return result;
 }
 
+/* `left + right`: a new list holding left's entries, then right's. The
+ * operands are borrowed; each entry gains a reference in the result. */
+corvid_list* corvid_list_concat(corvid_list* left, corvid_list* right, const struct corvid_typeinfo* info) {
+    const int64_t left_count = left->length;
+    const int64_t right_count = right->length;
+    if (left_count > INT64_MAX - right_count) abort();
+    corvid_list* result = corvid_list_new(left_count + right_count, info);
+    memcpy(result->data, corvid_list_slots(left), (size_t)left_count * sizeof(int64_t));
+    memcpy(result->data + left_count, corvid_list_slots(right), (size_t)right_count * sizeof(int64_t));
+    if (info->elem_typeinfo) {
+        for (int64_t i = 0; i < left_count + right_count; i++) corvid_retain((void*)(intptr_t)result->data[i]);
+    }
+    result->length = left_count + right_count;
+    return result;
+}
+
 /* Called for both reference-count destruction and cycle collection. */
 void corvid_list_free_storage(void* payload) {
     corvid_list* list = payload;

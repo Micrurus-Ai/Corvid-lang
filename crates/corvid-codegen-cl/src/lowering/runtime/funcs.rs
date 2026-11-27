@@ -24,6 +24,8 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub list_fold_int: FuncId,
     pub list_test_int: FuncId,
     pub list_snapshot: FuncId,
+    /// `corvid_list_concat(left, right, typeinfo)`: `left + right` on lists.
+    pub list_concat: FuncId,
     pub list_new: FuncId,
     pub list_bounds_error: FuncId,
     pub list_append: FuncId,

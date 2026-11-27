@@ -43,6 +43,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let list_filter_int = declare("corvid_list_filter_int", 4, true)?;
     let list_fold_int = declare("corvid_list_fold_int", 5, true)?;
     let list_snapshot = declare("corvid_list_snapshot", 2, true)?;
+    let list_concat = declare("corvid_list_concat", 3, true)?;
     let list_new = declare("corvid_list_new", 2, true)?;
     let list_bounds_error = declare("corvid_list_bounds_error", 2, false)?;
     let list_append = declare("corvid_list_append", 2, false)?;
@@ -751,7 +752,7 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         release: release_id,
         structural_eq, equality_layouts: Default::default(), json_decode_plans: Default::default(),
         list_map_int, list_filter_int, list_fold_int, list_test_int,
-        list_snapshot, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
+        list_snapshot, list_concat, list_new, list_append, list_bounds_error, return_temporaries: Default::default(),
         map_new, map_set, map_find, map_require_int, map_snapshot,
         string_concat: concat_id,
         grounded_string_concat,

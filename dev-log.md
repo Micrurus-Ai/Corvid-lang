@@ -31,6 +31,26 @@ Tests:
 
 No new diagnostic kind.
 
+### Native list `+`
+
+While testing nested records across the C ABI, a natively built
+`out = out + [line.sku]` crashed with "capacity overflow". So did the
+simplest list `+` in any native program, and `main` had the same fault.
+Native binop lowering had no list arm, so `a + b` on lists fell through to
+integer addition of the two list pointers. The resulting garbage pointer
+crashed the first runtime call that read it. Nothing refused it; the
+interpreter, which handles list `+`, never ran it.
+
+Fixed by `corvid_list_concat(left, right, typeinfo)` in `lists.c`, a fresh
+growable list holding both operands' entries with each retained, beside
+`corvid_list_snapshot`, and a lowering arm that calls it and consumes both
+operands. Made stronger at the cause: the generic arithmetic path now refuses
+an operand that is neither `Int` nor `Float`, naming its type, instead of
+doing integer arithmetic on whatever it is. A future type without its own
+arm stops the build rather than miscompiling. A parity test under the leak
+detector covers strings, integers, records, an empty list and a list built in
+a loop.
+
 ### Maps index their keys by a hash that agrees with `==`
 
 The Windows session filed it and handed it over: `MapValue` was a vector

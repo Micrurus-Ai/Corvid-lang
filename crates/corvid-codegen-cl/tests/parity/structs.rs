@@ -177,3 +177,21 @@ agent main() -> Int:
         17,
     );
 }
+
+/// `left + right` on lists gives a new list of both operands' entries on
+/// both tiers, releasing everything it allocates. Native code used to add
+/// the two list pointers as integers, which crashed the program.
+#[test]
+fn list_concatenation_matches_the_interpreter() {
+    for (src, printed) in [
+        ("agent f() -> List<Int>:\n    a: List<Int> = [1]\n    return a + [2, 3]\n", "[1,2,3]"),
+        ("agent f() -> List<String>:\n    out: List<String> = [\"x\"]\n    out = out + [\"y\"]\n    return out\n", r#"["x","y"]"#),
+        (
+            "type Line:\n    sku: String\n\nagent f() -> List<String>:\n    lines = [Line(\"a\"), Line(\"b\")] + [Line(\"c\")]\n    out: List<String> = []\n    for line in lines:\n        out = out + [line.sku]\n    return out\n",
+            r#"["a","b","c"]"#,
+        ),
+        ("agent f() -> List<Int>:\n    empty: List<Int> = []\n    return empty + empty\n", "[]"),
+    ] {
+        assert_eq!(assert_parity_text(src), printed, "{src}");
+    }
+}
