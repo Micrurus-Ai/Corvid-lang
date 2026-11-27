@@ -6,6 +6,8 @@ license.workspace = true
 description = "Cryptography rules for Corvid: the Bytes and Secret types with constant-time equality, the hex and base64 forms of bytes, SHA-2 hashing, HMAC, Ed25519 signature verification, random tokens and Argon2id password hashing. The checker, the interpreter and the native runtime all call this one implementation."
 
 [dependencies]
+# Wipes a secret's bytes when its last reference drops.
+zeroize = "1"
 corvid-hex = { workspace = true }
 # The byte codecs are corvid-text's, so text and bytes share one
 # alphabet, one strictness rule and one set of error messages.

@@ -30,6 +30,18 @@ live list of cards on her boards.
 The live declaration tests now check that a list calling an agent is
 refused and a literal list is not.
 
+### A secret's memory is wiped when it drops
+
+`corvid_crypto::Secret` held its bytes in an `Arc<[u8]>`, freed but not
+overwritten, so a password, token or signing key could linger in freed
+memory that a later allocation or a core dump could read. The bytes now sit
+in `Arc<zeroize::Zeroizing<Vec<u8>>>`, wiped when the last clone drops. A
+decoded key moves into it without a copy. Reading freed memory to prove the
+wipe is undefined behavior, so the test asserts at compile time that both
+kinds of secret store their bytes in a `ZeroizeOnDrop` type. Filed: copies
+of a secret's text made outside `Secret` (a tool's argument string, the
+environment value) are not wiped.
+
 ### One URL component decoder
 
 The Windows session pointed at the decoding side of the URL encoder
