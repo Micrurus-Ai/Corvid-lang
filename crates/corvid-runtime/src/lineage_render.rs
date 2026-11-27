@@ -72,13 +72,12 @@ fn render_node(
     out.push('\n');
 
     if let Some(children) = by_parent.get(event.span_id.as_str()) {
+        // By start time, and within one millisecond in the order the
+        // events were recorded: steps a millisecond apart or less are
+        // common, and sorting their ties by kind or name would print
+        // them out of the order they ran. The sort is stable.
         let mut sorted = children.clone();
-        sorted.sort_by(|left, right| {
-            left.started_ms
-                .cmp(&right.started_ms)
-                .then_with(|| left.kind.cmp(&right.kind))
-                .then_with(|| left.name.cmp(&right.name))
-        });
+        sorted.sort_by_key(|child| child.started_ms);
         for child in sorted {
             render_node(child, by_parent, depth + 1, out);
         }
@@ -138,6 +137,17 @@ mod tests {
         assert!(rendered.contains("approval=approval-1"));
         assert!(rendered.contains("data=private"));
         assert!(rendered.contains("    - approval SendEmail [ok] latency=4ms"));
+    }
+
+    #[test]
+    fn steps_in_the_same_millisecond_print_in_the_order_they_ran() {
+        let run = LineageEvent::root("trace-1", LineageKind::Agent, "main", 0).finish(LineageStatus::Ok, 2);
+        let insert = LineageEvent::child(&run, LineageKind::Db, "Shelf.insert", 0, 1).finish(LineageStatus::Ok, 1);
+        let get = LineageEvent::child(&run, LineageKind::Db, "Shelf.get", 1, 1).finish(LineageStatus::Ok, 1);
+        let send = LineageEvent::child(&run, LineageKind::Approval, "Send", 2, 1).finish(LineageStatus::Ok, 1);
+        let rendered = render_lineage_tree(&[run, insert, get, send]);
+        let names: Vec<_> = rendered.lines().skip(1).map(|line| line.split(" [").next().unwrap().trim()).collect();
+        assert_eq!(names, vec!["- db Shelf.insert", "- db Shelf.get", "- approval Send"]);
     }
 
     #[test]
