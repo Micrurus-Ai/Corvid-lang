@@ -606,7 +606,7 @@ pub fn build_or_get_cached_native(
         .unwrap_or_default();
     let base = native_cache::cache_key_with_tools(source, &tools_lib_str);
     let key = match ir.import_fingerprint {
-        Some(digest) => format!("{base}-{}", hex::encode(digest)),
+        Some(digest) => format!("{base}-{}", corvid_hex::encode(&digest)),
         None => base,
     };
     let cached = native_cache::cached_binary_path(&cache_dir, &key);

@@ -257,7 +257,7 @@ fn decode_ed25519_seed(raw: &[u8], source_label: &str) -> Result<[u8; 32], SignE
     // Try hex first if the bytes look textual.
     if trimmed.iter().all(|b| b.is_ascii_hexdigit()) && trimmed.len() == 64 {
         let mut out = [0u8; 32];
-        hex::decode_to_slice(&trimmed, &mut out).map_err(|e| SignError::KeyFormat {
+        corvid_hex::decode(std::str::from_utf8(&trimmed).unwrap_or_default()).map(|bytes| out.copy_from_slice(&bytes)).map_err(|e| SignError::KeyFormat {
             path_or_source: source_label.to_string(),
             reason: format!("hex decode failed: {e}"),
         })?;
@@ -400,7 +400,7 @@ pub(crate) fn load_verifying_key(path: &std::path::Path) -> Result<VerifyingKey,
 
     let bytes: [u8; 32] = if trimmed.iter().all(|b| b.is_ascii_hexdigit()) && trimmed.len() == 64 {
         let mut out = [0u8; 32];
-        hex::decode_to_slice(&trimmed, &mut out).map_err(|e| VerifyError::VerifyKeyFormat {
+        corvid_hex::decode(std::str::from_utf8(&trimmed).unwrap_or_default()).map(|bytes| out.copy_from_slice(&bytes)).map_err(|e| VerifyError::VerifyKeyFormat {
             reason: format!("hex decode failed: {e}"),
         })?;
         out
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn hex_encoded_seed_round_trips() {
         let key = fresh_key();
-        let hex_seed = hex::encode(key.to_bytes());
+        let hex_seed = corvid_hex::encode(&key.to_bytes());
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("key.hex");
         std::fs::write(&path, &hex_seed).unwrap();
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn hex_seed_with_trailing_newline_is_accepted() {
         let key = fresh_key();
-        let hex_seed = format!("{}\n", hex::encode(key.to_bytes()));
+        let hex_seed = format!("{}\n", corvid_hex::encode(&key.to_bytes()));
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("key.hex");
         std::fs::write(&path, hex_seed).unwrap();
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn env_var_source_works() {
         let key = fresh_key();
-        let hex_seed = hex::encode(key.to_bytes());
+        let hex_seed = corvid_hex::encode(&key.to_bytes());
         let loaded = load_signing_key(&KeySource::Env(hex_seed)).unwrap();
         assert_eq!(loaded.to_bytes(), key.to_bytes());
     }

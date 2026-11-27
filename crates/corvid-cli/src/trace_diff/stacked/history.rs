@@ -118,5 +118,5 @@ pub(super) fn compute_stack_hash(components: &[StackComponent], range_spec: &str
     }
     hasher.update(b"|");
     hasher.update(range_spec.as_bytes());
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }

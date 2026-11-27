@@ -17,6 +17,33 @@ exactly what one `Board.get` per card answers. That includes a card whose
 board does not exist, which the filter leaves out. A filtered `by_key`
 holds only its rows.
 
+### One hex encoder
+
+Lowercase hex was written by hand about forty times across thirteen crates:
+`{:02x}` loops, nibble tables, five copies of `hex_prefix`, three
+hand-written decoders, and the external `hex` crate in the driver, CLI and
+ABI crates. Those copies write content hashes, signatures, cache keys, CSRF
+tokens, webhook signatures and trace ids, so one that drifted in case, or in
+how a decoder treats odd lengths, would make the same bytes read
+differently. The Windows session agreed before I touched its files.
+
+`corvid-hex` is a new crate with no dependencies, so `corvid-ast` and
+`corvid-resolve` can use it without pulling in `corvid-text`'s regex. It holds
+corvid-text's codec, moved verbatim, so the language's `encode_hex` and
+`Bytes.from_hex` errors are unchanged. It also gains `encode_prefix(bytes,
+digits)` for the short ids. Every copy calls it. Each decoder keeps its own
+contract (an anyhow error, an exact 32-byte key, an `Option`) and only
+the digit parsing moved. `format_uuid` builds on it too. The `hex` crate is
+now only a dev-dependency.
+
+`tests/no_hand_written_hex.rs` scans every crate's source and fails on a new
+`{:02x}`, nibble table or `hex::encode`/`decode` call. Its first version
+matched `hex::encode(` inside `corvid_hex::encode(`. My fix for that then let
+`{x:02x}` through, which a probe caught, so the name-boundary rule now applies
+only to the `hex::` patterns. Excluded: percent-encoding (`%XX`, a
+different encoding) and the `corvid-bind` template, which is Rust text
+written into a user's bindings.
+
 ### One reader for an event's run and time
 
 Six trace readers each matched all thirty event kinds by hand to read

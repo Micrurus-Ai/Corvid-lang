@@ -631,6 +631,7 @@ dependencies = [
  "corvid-ast",
  "corvid-crypto",
  "corvid-guarantees",
+ "corvid-hex",
  "corvid-ir",
  "corvid-prompt-format",
  "corvid-public-json",
@@ -639,7 +640,6 @@ dependencies = [
  "corvid-test-paths",
  "corvid-types",
  "ed25519-dalek",
- "hex",
  "libloading",
  "serde",
  "serde_json",
@@ -658,6 +658,7 @@ dependencies = [
  "corvid-abi",
  "corvid-ast",
  "corvid-driver",
+ "corvid-hex",
  "corvid-ir",
  "corvid-resolve",
  "corvid-syntax",
@@ -671,6 +672,7 @@ dependencies = [
 name = "corvid-ast"
 version = "0.0.1"
 dependencies = [
+ "corvid-hex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -682,6 +684,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "corvid-abi",
+ "corvid-hex",
  "insta",
  "serde_json",
  "tempfile",
@@ -735,6 +738,7 @@ dependencies = [
  "corvid-differential-verify",
  "corvid-driver",
  "corvid-guarantees",
+ "corvid-hex",
  "corvid-ir",
  "corvid-repl",
  "corvid-resolve",
@@ -833,6 +837,7 @@ name = "corvid-connector-runtime"
 version = "0.0.1"
 dependencies = [
  "base64",
+ "corvid-hex",
  "hmac 0.12.1",
  "reqwest",
  "serde",
@@ -847,6 +852,7 @@ name = "corvid-crypto"
 version = "0.0.1"
 dependencies = [
  "argon2",
+ "corvid-hex",
  "corvid-text",
  "ed25519-dalek",
  "hmac 0.12.1",
@@ -911,6 +917,7 @@ dependencies = [
  "corvid-codegen-wasm",
  "corvid-crypto",
  "corvid-guarantees",
+ "corvid-hex",
  "corvid-ir",
  "corvid-resolve",
  "corvid-runtime",
@@ -941,6 +948,10 @@ dependencies = [
 
 [[package]]
 name = "corvid-guarantees"
+version = "0.0.1"
+
+[[package]]
+name = "corvid-hex"
 version = "0.0.1"
 
 [[package]]
@@ -1044,6 +1055,7 @@ name = "corvid-resolve"
 version = "0.0.1"
 dependencies = [
  "corvid-ast",
+ "corvid-hex",
  "corvid-syntax",
  "serde",
 ]
@@ -1065,6 +1077,7 @@ dependencies = [
  "corvid-currency",
  "corvid-decimal",
  "corvid-guarantees",
+ "corvid-hex",
  "corvid-ir",
  "corvid-public-json",
  "corvid-resolve",
@@ -1184,6 +1197,7 @@ name = "corvid-text"
 version = "0.0.1"
 dependencies = [
  "base64",
+ "corvid-hex",
  "regex",
  "regex-syntax",
 ]

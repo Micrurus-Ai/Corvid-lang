@@ -166,36 +166,11 @@ fn compute_hmac(binding_id: &str, server_secret: &[u8]) -> Result<Vec<u8>, CsrfE
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode(bytes)
 }
 
 fn hex_decode(input: &str) -> Option<Vec<u8>> {
-    if !input.len().is_multiple_of(2) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(input.len() / 2);
-    let bytes = input.as_bytes();
-    for pair in bytes.chunks_exact(2) {
-        let hi = decode_nibble(pair[0])?;
-        let lo = decode_nibble(pair[1])?;
-        out.push((hi << 4) | lo);
-    }
-    Some(out)
-}
-
-fn decode_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
+    corvid_hex::decode(input).ok()
 }
 
 #[cfg(test)]

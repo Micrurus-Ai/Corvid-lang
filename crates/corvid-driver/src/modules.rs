@@ -822,7 +822,7 @@ fn dfs_collect(
         fingerprint.update(b"ref");
         fingerprint.update((module.ordinal as u64).to_le_bytes());
         if let Some(pin) = expected_hash {
-            let actual = hex::encode(module.digest);
+            let actual = corvid_hex::encode(&module.digest);
             if actual != pin.hex {
                 errors.push(ModuleLoadError::HashMismatch {
                     importing_file: importing_target.key(),
@@ -885,7 +885,7 @@ fn dfs_collect(
 
     let digest: [u8; 32] = Sha256::digest(&bytes).into();
     if let Some(expected_hash) = expected_hash {
-        let actual = hex::encode(digest);
+        let actual = corvid_hex::encode(&digest);
         if actual != expected_hash.hex {
             errors.push(ModuleLoadError::HashMismatch {
                 importing_file: importing_target.key(),

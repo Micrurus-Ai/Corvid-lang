@@ -135,7 +135,7 @@ pub(super) struct Waypoint {
 pub(super) fn trace_id_from_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }
 
 /// Canonical content hash of a [`ReproducibilityEnvelope`]. The
@@ -149,7 +149,7 @@ pub(super) fn envelope_hash(envelope: &ReproducibilityEnvelope) -> String {
         .expect("ReproducibilityEnvelope is trivially serializable");
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }
 
 /// Canonical hash of a per-waypoint replay outcome. Takes a short
@@ -160,7 +160,7 @@ pub(super) fn envelope_hash(envelope: &ReproducibilityEnvelope) -> String {
 pub(super) fn verdict_result_hash(tag: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(tag.as_bytes());
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }
 
 /// Extract the set of agents a recorded trace exercises. Scans

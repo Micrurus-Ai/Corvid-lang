@@ -165,7 +165,7 @@ pub(super) fn build(entry: &Path) -> Result<u8> {
     for relative in locked {
         let path = stage.path().join(&relative);
         if path.try_exists()? {
-            let digest = hex::encode(Sha256::digest(fs::read(&path)?));
+            let digest = corvid_hex::encode(&Sha256::digest(fs::read(&path)?));
             if relative.file_stem().and_then(|s| s.to_str()) != Some(digest.as_str()) {
                 bail!("locked package digest mismatch for {}", relative.display());
             }

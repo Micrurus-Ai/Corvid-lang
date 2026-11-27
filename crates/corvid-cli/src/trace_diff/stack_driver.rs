@@ -269,7 +269,7 @@ fn per_commit_receipt_hash(
         hasher.update(record.summary.as_bytes());
         hasher.update(b"\n");
     }
-    hex::encode(hasher.finalize())
+    corvid_hex::encode(&hasher.finalize())
 }
 
 /// `git show <rev>:<path>` — reused from the single-commit path

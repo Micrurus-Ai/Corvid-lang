@@ -104,7 +104,7 @@ pub(super) struct Predicate<'a> {
 pub(super) fn head_source_digest(head_source: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(head_source);
-    hex::encode(h.finalize())
+    corvid_hex::encode(&h.finalize())
 }
 
 /// Render the Statement as pretty JSON with a trailing newline,

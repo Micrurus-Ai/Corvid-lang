@@ -54,16 +54,8 @@ fn hex_value(byte: u8) -> Option<u8> {
 
 /// The canonical text of sixteen UUID bytes.
 pub fn format_uuid(bytes: &[u8; 16]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(36);
-    for (index, byte) in bytes.iter().enumerate() {
-        if matches!(index, 4 | 6 | 8 | 10) {
-            out.push('-');
-        }
-        out.push(DIGITS[usize::from(byte >> 4)] as char);
-        out.push(DIGITS[usize::from(byte & 0x0f)] as char);
-    }
-    out
+    let hex = corvid_hex::encode(bytes);
+    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
 }
 
 /// Set the version nibble and the RFC 9562 variant bits (`10`).

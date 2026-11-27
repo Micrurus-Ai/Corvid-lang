@@ -24,6 +24,7 @@ cc = "1"
 corvid-source-stamp = { workspace = true }
 
 [dependencies]
+corvid-hex = { workspace = true }
 async-stream = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }

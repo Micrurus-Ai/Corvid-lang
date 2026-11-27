@@ -983,7 +983,7 @@ impl ProviderProtocolDecl {
     /// may have been produced by an earlier build.
     pub fn fingerprint_of(canonical_encoding: &str) -> String {
         let digest = <sha2::Sha256 as sha2::Digest>::digest(canonical_encoding.as_bytes());
-        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let hex = corvid_hex::encode(&digest);
         format!("{PROTOCOL_FINGERPRINT_ALGORITHM}:{hex}")
     }
 }

@@ -177,7 +177,7 @@ mod tests {
 
     fn tag_of(phc: &str) -> String {
         let parsed = PasswordHash::new(phc).unwrap();
-        parsed.hash.unwrap().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect()
+        corvid_hex::encode(parsed.hash.unwrap().as_bytes())
     }
 
     #[test]

@@ -595,16 +595,7 @@ fn otel_span_id(value: &str) -> String {
 }
 
 fn hash_hex(value: &str, nibbles: usize) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let mut out = String::with_capacity(nibbles);
-    for byte in digest {
-        if out.len() >= nibbles {
-            break;
-        }
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out.truncate(nibbles);
-    out
+    corvid_hex::encode_prefix(&Sha256::digest(value.as_bytes()), nibbles)
 }
 
 fn millis_to_nanos_string(ms: u64) -> String {
