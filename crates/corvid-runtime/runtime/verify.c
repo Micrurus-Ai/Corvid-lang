@@ -55,9 +55,11 @@ typedef struct corvid_tracking_node {
     /* The collector's scratch count: the references to this block from
      * outside the heap (collector.c, trial deletion). */
     long long gc_external;
-    /* Keeps the node a multiple of 16 bytes, so payload alignment is
-     * unchanged. */
-    long long gc_reserved;
+    /* Stamped by each collection on every block it finds in the live
+     * list, so a reference to anything else is caught before the
+     * collector writes through it (collector.c). It also keeps the node
+     * a multiple of 16 bytes, so payload alignment is unchanged. */
+    unsigned long long gc_live_stamp;
 } corvid_tracking_node;
 
 #define CORVID_TRACKING_BYTES (sizeof(corvid_tracking_node))

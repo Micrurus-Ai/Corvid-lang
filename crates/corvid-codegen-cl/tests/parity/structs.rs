@@ -33,7 +33,7 @@ fn struct_entry_return_builds_and_prints_json_encoded_struct() {
         "emitted native binary missing at `{}`",
         produced.display()
     );
-    let output = std::process::Command::new(&produced)
+    let output = crate::native_command(&produced)
         .output()
         .expect("run native binary");
     let stdout = String::from_utf8_lossy(&output.stdout);

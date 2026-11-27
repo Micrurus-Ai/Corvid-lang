@@ -26,6 +26,8 @@ use std::pin::Pin;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
+#[path = "parity/route_parameters.rs"]
+mod route_parameters;
 #[path = "parity/int.rs"]
 mod int;
 #[path = "parity/bool.rs"]
@@ -82,11 +84,22 @@ fn test_tools_lib_path() -> PathBuf {
     corvid_test_paths::linked_test_tools_staticlib()
 }
 
+/// The command that runs a compiled fixture. Every run forces a
+/// collection after each allocation (`CORVID_GC_TRIGGER=1`), so the
+/// cycle collector runs at every point a program allocates. The
+/// fixtures are too small to reach the default threshold, which is how
+/// a collector that freed live values once passed this whole suite.
+fn native_command(bin: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(bin);
+    cmd.env("CORVID_GC_TRIGGER", "1");
+    cmd
+}
+
 /// Run a compiled binary with the leak detector enabled. Returns
 /// (stdout, stderr, exit_status). Caller is responsible for verifying
 /// stdout / status; this helper handles the env var.
 fn run_with_leak_detector(bin: &std::path::Path) -> (String, String, std::process::ExitStatus) {
-    let output = Command::new(bin)
+    let output = crate::native_command(bin)
         .env("CORVID_DEBUG_ALLOC", "1")
         .output()
         .expect("run compiled binary");
@@ -115,7 +128,7 @@ fn run_with_leak_detector_and_mocks(
     bin: &std::path::Path,
     mocks: &[(&str, i64)],
 ) -> (String, String, std::process::ExitStatus) {
-    let mut cmd = Command::new(bin);
+    let mut cmd = crate::native_command(bin);
     cmd.env("CORVID_DEBUG_ALLOC", "1")
         .env("CORVID_APPROVE_AUTO", "1");
     for (name, value) in mocks {
@@ -376,7 +389,7 @@ fn assert_parity_overflow(src: &str) {
     let bin_path = tmp.path().join("prog");
     let produced = build_native_to_disk(&ir, "corvid_parity_test", &bin_path, &[test_tools_lib_path().as_path()])
         .expect("compile + link");
-    let output = Command::new(&produced).output().expect("run compiled binary");
+    let output = crate::native_command(&produced).output().expect("run compiled binary");
     assert!(
         !output.status.success(),
         "compiled binary should have exited non-zero on overflow/div-zero: stdout={}",

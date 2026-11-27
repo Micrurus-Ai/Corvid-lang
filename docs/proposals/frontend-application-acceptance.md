@@ -56,4 +56,4 @@ python -B scripts/verify_generated_live_client.py --cli $cli --channel msedge
 
 ## Remaining acceptance criteria
 
-F08 [merged on 2026-11-27](https://github.com/Micrurus-Ai/Corvid-lang/pull/32). The three automated application trials have passed. F18 stays open until an independent developer completes the public-docs-only component trial above and submits the outcome.
+F08 [merged on 2026-11-27](https://github.com/Micrurus-Ai/Corvid-lang/pull/32). All three automated application trials passed together at `58c9f033a4249c037484d4bdd70581a6c0a7eddc` in the [integrated Edge run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/46050207374). F18 stays open until an independent developer completes the public-docs-only component trial above and submits the outcome.

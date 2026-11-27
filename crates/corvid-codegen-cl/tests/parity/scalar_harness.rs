@@ -53,7 +53,7 @@ pub(super) fn assert_parity_trap(src: &str, message: &str) {
         "interpreter error {error} is not the arithmetic error `{message}`; src=\n{src}"
     );
     let tmp = tempfile::tempdir().expect("tempdir");
-    let output = std::process::Command::new(compile(&ir, &tmp)).output().expect("run compiled binary");
+    let output = crate::native_command(compile(&ir, &tmp)).output().expect("run compiled binary");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "the compiled binary must trap; stdout={}", String::from_utf8_lossy(&output.stdout));
     assert!(
@@ -71,7 +71,7 @@ pub(super) fn assert_parity_stop(src: &str, message: &str) {
     let error = interpret(&ir).expect_err("the interpreter must stop");
     assert!(error.to_string().contains(message), "interpreter error `{error}` does not carry `{message}`; src=\n{src}");
     let tmp = tempfile::tempdir().expect("tempdir");
-    let output = std::process::Command::new(compile(&ir, &tmp)).output().expect("run compiled binary");
+    let output = crate::native_command(compile(&ir, &tmp)).output().expect("run compiled binary");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "the compiled binary must stop; stdout={}", String::from_utf8_lossy(&output.stdout));
     assert!(

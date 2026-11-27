@@ -108,6 +108,17 @@ static CYCLE24_TYPEINFO: CorvidTypeinfo = CorvidTypeinfo {
     name: c"Cycle24".as_ptr() as *const u8,
 };
 
+/// A size no other test allocates, so its pool bucket is this test's own.
+static REUSED40_TYPEINFO: CorvidTypeinfo = CorvidTypeinfo {
+    size: 40,
+    flags: 0x01,
+    destroy_fn: Some(cell_destroy),
+    trace_fn: Some(cell_trace),
+    weak_fn: None,
+    elem_typeinfo: std::ptr::null(),
+    name: c"Reused40".as_ptr() as *const u8,
+};
+
 /// Unreachable 2-block cycle with NO roots → collector frees both.
 #[test]
 fn cycle_with_no_roots_is_collected() {
@@ -122,9 +133,7 @@ fn cycle_with_no_roots_is_collected() {
     unsafe {
         let a = corvid_alloc_typed(16, &CELL_TYPEINFO);
         let b = corvid_alloc_typed(16, &CELL_TYPEINFO);
-        // field0 points at the other block, field1 is NULL
-        // (zero-init required because corvid_alloc_typed doesn't
-        // zero payload; cell_destroy walks both fields).
+        // field0 points at the other block, field1 is NULL.
         (a as *mut *mut u8).write(b);
         (a as *mut *mut u8).add(1).write(std::ptr::null_mut());
         (b as *mut *mut u8).write(a);
@@ -231,12 +240,8 @@ fn acyclic_refcount_path_still_works() {
 
     unsafe {
         let p = corvid_alloc_typed(16, &CELL_TYPEINFO);
-        // Zero the fields — `corvid_alloc_typed` does NOT zero the
-        // payload, and `cell_destroy` walks both fields calling
-        // `corvid_release` on each. Uninitialized memory → UB.
-        let slots = p as *mut *mut u8;
-        slots.write(std::ptr::null_mut());
-        slots.add(1).write(std::ptr::null_mut());
+        // `corvid_alloc_typed` returns the fields empty, so
+        // `cell_destroy` finds nothing to release.
         corvid_release(p); // refcount 1 → 0, destroy_fn fires, free.
     }
 
@@ -311,6 +316,40 @@ fn the_threshold_collection_frees_cycles_and_keeps_what_a_local_holds() {
         corvid_release(c);
         corvid_gc();
         assert_eq!(corvid_release_count - start_releases, 5, "released, the held block and the cycle go");
+    }
+}
+
+/// A block comes back from the allocator with its fields empty, even
+/// when it is a pooled block that held references before. The collector
+/// traces every live block, and a collection can run before the caller
+/// fills the fields (inside the allocation, or while the program
+/// allocates what goes in them), so a field not yet written must read
+/// as no value. When it read the old contents instead, the collector
+/// subtracted from whatever those stale pointers named, which changed
+/// one byte of an unrelated string ("input" became "inout").
+#[test]
+fn a_reused_block_comes_back_with_its_fields_empty() {
+    let _guard = test_lock();
+    unsafe {
+        let target = corvid_alloc_typed(40, &REUSED40_TYPEINFO);
+        let first = corvid_alloc_typed(40, &REUSED40_TYPEINFO);
+        corvid_retain(target);
+        (first as *mut *mut u8).write(target);
+        (first as *mut *mut u8).add(1).write(target);
+        corvid_retain(target);
+        corvid_release(first); // releases both references to `target`; `first` goes to the pool
+
+        let second = corvid_alloc_typed(40, &REUSED40_TYPEINFO);
+        assert_eq!(second, first, "the pool handed back the same block");
+        let slots = second as *mut *mut u8;
+        for i in 0..5 {
+            assert!(slots.add(i).read().is_null(), "field {i} of a reused block is empty");
+        }
+
+        corvid_gc();
+        assert!(!target.is_null());
+        corvid_release(second);
+        corvid_release(target);
     }
 }
 

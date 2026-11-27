@@ -1,5 +1,9 @@
 # Corvid dev log
 
+### Native compilation of route parameters
+
+A fixed route still has an empty path argument. Native compilation used to reject this argument before reaching the ABI verifier in every reference app. Each distinct ordered list of path or caller fields now uses one ordinary native record layout, including field access and ownership. This keeps the HTTP server on its existing execution path.
+
 Weekly journal. Non-negotiable. Every entry is one commit.
 
 ### F18 checkout and sketchbook boundaries
@@ -14,6 +18,42 @@ Hosted Edge passed the responsive storefront and offline sketchbook checks at
 of the full canvas. F18 still needs F08 to merge, a workspace subscription to
 resume after disconnect, and the independent component report.
 [Hosted run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45624130574)
+
+### The parity suite runs the collector at every allocation
+
+The first run of the native parity suite with collection forced turned up
+a second fault, in the trial-deletion collector that had just landed. One
+time test printed "inout" where the interpreter printed "input", one byte
+lower. Trial deletion traces every live block, including one whose fields
+the program has not written yet: the block an allocation is about to
+return, or a record or Result waiting for the values being allocated to go
+in it. `corvid_alloc_typed` did not clear the payload, so the trace read
+leftover memory as references and decremented whatever those addresses
+held. The old stack-map marking never reached such blocks, which is why the
+fault was new. A temporary stamp check traced it to
+`corvid_trace_Result_Instant_String` reading the Result block that
+`parse_instant` was about to fill.
+
+The fix is in the allocator: a block of any type whose trace function reads
+fields now starts with every field empty (NULL, tag 0, empty list). Text
+is never traced and skips the clearing. The stamp check stays as a guard.
+Each collection stamps every block on the live list with its address mixed
+with a per-collection value. A traced reference to anything unstamped stops
+the program, naming the parent type, before the collector writes through
+it. Compiled typeinfos now carry their type's name for that report; the name
+slot was always NULL before.
+
+Every parity fixture now runs with `CORVID_GC_TRIGGER=1`, through one
+`native_command` helper that replaced 13 separate `Command::new` sites. The
+suite passes at that setting and at 10. With the zeroing removed, many
+tests fail, so a regression cannot pass quietly again. A new
+`cycle_collector` test checks that a pooled block comes back empty.
+
+Simpler alternatives considered: collecting before the new block is linked
+fixes only the block being allocated, not a record waiting for its fields.
+Zeroing in compiled code at each allocation site would repeat the rule in
+every place that allocates. The allocator is the one place every block
+passes through.
 
 ### F08 route stream integration
 

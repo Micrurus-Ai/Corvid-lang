@@ -73,9 +73,11 @@ typedef struct corvid_tracking_node {
     /* The collector's scratch count: the references to this block from
      * outside the heap (collector.c, trial deletion). */
     long long gc_external;
-    /* Keeps the node a multiple of 16 bytes, so payload alignment is
-     * unchanged. */
-    long long gc_reserved;
+    /* Stamped by each collection on every block it finds in the live
+     * list, so a reference to anything else is caught before the
+     * collector writes through it (collector.c). It also keeps the node
+     * a multiple of 16 bytes, so payload alignment is unchanged. */
+    unsigned long long gc_live_stamp;
 } corvid_tracking_node;
 
 #define CORVID_TRACKING_BYTES (sizeof(corvid_tracking_node))
@@ -233,14 +235,39 @@ static void corvid_gc_sweep(void) {
 
 static int corvid_gc_running = 0;
 
+/* The stamp this collection writes on every live block: the node's
+ * address mixed with a per-collection value, so neither a stale stamp
+ * from an earlier collection nor arbitrary memory matches it. */
+static unsigned long long corvid_gc_stamp_salt = 0;
+
+static unsigned long long corvid_gc_live_stamp_for(const corvid_tracking_node* n) {
+    return ((unsigned long long)(uintptr_t)n) ^ corvid_gc_stamp_salt;
+}
+
+/* The block whose trace function is running, for the report below. */
+static const corvid_header* corvid_gc_tracing_parent = NULL;
+
 /* Trial deletion: subtract each reference one heap block holds to
- * another from the target's scratch count. */
+ * another from the target's scratch count. A reference to something
+ * that is not a live heap block means a trace function read a slot
+ * that holds no value; writing through it would corrupt memory, so the
+ * program stops and names the type instead. */
 static void corvid_gc_subtract_internal(void* payload, void* ctx) {
     (void)ctx;
     if (payload == NULL) return;
     corvid_header* h = (corvid_header*)((char*)payload - CORVID_HEADER_BYTES);
     if (h->refcount_word == CORVID_REFCOUNT_IMMORTAL) return;
     corvid_tracking_node* node = (corvid_tracking_node*)((char*)h - CORVID_TRACKING_BYTES);
+    if (node->gc_live_stamp != corvid_gc_live_stamp_for(node)) {
+        const corvid_typeinfo* parent =
+            corvid_gc_tracing_parent != NULL ? corvid_gc_tracing_parent->typeinfo : NULL;
+        fprintf(stderr,
+                "corvid: the cycle collector found a reference to %p, which is not a live "
+                "value, inside a `%s` value; this is a bug in Corvid, not in your program\n",
+                payload,
+                parent != NULL && parent->name != NULL ? parent->name : "unnamed");
+        abort();
+    }
     node->gc_external--;
 }
 
@@ -248,17 +275,21 @@ static void corvid_gc_subtract_internal(void* payload, void* ctx) {
  * and everything reachable from it. Returns the roots for the verifier,
  * each repeated by its outside count, when `roots` is not NULL. */
 static size_t corvid_gc_mark_external(void*** roots_out) {
+    corvid_gc_stamp_salt = (corvid_gc_stamp_salt + 0x9E3779B97F4A7C15ULL) | 1ULL;
     for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
         corvid_header* h = (corvid_header*)((char*)n + CORVID_TRACKING_BYTES);
+        n->gc_live_stamp = corvid_gc_live_stamp_for(n);
         n->gc_external = h->refcount_word == CORVID_REFCOUNT_IMMORTAL ? 0 : (h->refcount_word & CORVID_RC_MASK);
     }
     for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
         corvid_header* h = (corvid_header*)((char*)n + CORVID_TRACKING_BYTES);
         if (h->refcount_word == CORVID_REFCOUNT_IMMORTAL) continue;
         if (h->typeinfo != NULL && h->typeinfo->trace_fn != NULL) {
+            corvid_gc_tracing_parent = h;
             h->typeinfo->trace_fn((char*)h + CORVID_HEADER_BYTES, corvid_gc_subtract_internal, NULL);
         }
     }
+    corvid_gc_tracing_parent = NULL;
     size_t count = 0;
     for (corvid_tracking_node* n = corvid_live_head; n != NULL; n = n->next) {
         if (n->gc_external > 0) count += (size_t)n->gc_external;

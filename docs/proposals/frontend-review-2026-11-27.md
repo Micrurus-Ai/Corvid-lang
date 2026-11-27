@@ -29,6 +29,9 @@ archive = View(button_for(archive_card, card.id, "Archive"))
 
 **Answer:**
 
+1. OK. Fill the field in the shared page submit handler, immediately before serializing a generated same-origin action form. The SDK has a cookie-to-header helper and the reading list has local handlers in `reviews.cor` and `handoff.cor`. Consolidate the cookie reader and use the existing receipt flow. Reserve the hidden field name so it cannot collide with an action input. A missing token still fails closed.
+2. Switch the action overload straight to `button_for(action, value, label)` with a diagnostic showing the replacement. Migrate in-tree callers in the same change. Ordinary UI buttons and browser callbacks retain their behavior.
+
 ---
 
 ## 2. Assistant authority (B11-1)
@@ -55,6 +58,9 @@ action label_card(card: Int, label: String, by: Caller) -> Card requires permiss
 
 **Answer:**
 
+1. OK to add it. The frontend uses the shared Corvid parser. Its identity body dispatches known items explicitly, so the shared parser needs a delegation arm and an omission test. There is no second frontend grammar to extend.
+2. OK to `allow` and `confirm`. The grant screen should display the effective actions and expiry from the server. Omitting delegation continues to grant no delegated authority.
+
 ---
 
 ## 3. Verified webhooks (W1 to W3)
@@ -73,6 +79,8 @@ route POST "/webhooks/stripe" body PaymentEvent verified stripe(secret: "STRIPE_
 1. Does your side parse route lines, and if so, is a `verified ...` clause before `->` safe for it?
 
 **Answer:**
+
+1. OK. Compiled views use the shared route parser. Add the clause there before the response arrow and carry the verified-route marker in the contract. Generated page clients, the console and assistant discovery must filter on that marker, including for a verified route whose response would otherwise qualify for a generated method.
 
 ---
 
@@ -103,6 +111,9 @@ action file_issue(repo: String, title: String, by: Caller) -> Result<Issue, Issu
 
 **Answer:**
 
+1. OK to the indented provider block. The shared provider parser currently expects a newline after the provider name or OIDC alias. Extend it for the colon and keep the simple provider line working.
+2. Yes to declared scope names as contract metadata for explaining consent. The server constructs the actual OAuth request from source. Browser parameters cannot enlarge the scopes, and tokens or per-person grant details never enter the public contract.
+
 ---
 
 ## 5. Refinements on parameters
@@ -127,6 +138,9 @@ action search(query: String, limit: Int where between(1, 50)) -> List<Book> requ
 
 **Answer:**
 
+1. OK to the change. Today `parse_param` reads the type followed by optional ownership. Invoke the existing field refinement parser between them and publish the resulting constraint once for all consumers.
+2. Show the bound before submission, associate it with the control for assistive technology, and show a field-level error when violated. Use the contract bound for both. Computed calls still need the server check.
+
 ---
 
 ## 6. Integer literals beyond `Int`'s range (already on main, 3ec5ae7e)
@@ -137,6 +151,8 @@ Not a proposal, a change to check against: an integer literal too large for `Int
 1. Does your parser range-check integer literals itself? If so it would now disagree with ours on a large literal in a `Decimal` slot, such as `price: Decimal = 123456789012345678901234567890`.
 
 **Answer:**
+
+1. OK. Compiled frontend source uses the shared lexer and checker, with no independent JavaScript integer range check during parsing. I ran `corvid check` on the exact 30-digit Decimal initializer in the question and it passed. Keep the digits exact throughout compilation; the existing E0518 test covers an out-of-range Int.
 
 ---
 
@@ -157,6 +173,8 @@ route POST "/videos" body Upload<Video> requires authenticated -> json Receipt:
 1. Does your side parse `@upload(...)` arguments, and if so, is one more named `INT` argument safe for it?
 
 **Answer:**
+
+1. OK. The shared compiler parses the attribute. The frontend uses the published upload limits and MIME types for the picker. Extend the shared attribute parser for the named integer. The disk threshold is server storage policy and must not become a second client-side file-size limit.
 
 ---
 
@@ -184,6 +202,8 @@ table Customer:
 
 **Answer:**
 
+1. OK. The shared declaration parser handles database blocks and needs an explicit encryption item. Browser code consumes public types. Keep secret columns out of forms, client schemas and live row projections; public row types must remain usable without the secret.
+
 ---
 
 ## 9. A served program declares its traces
@@ -208,3 +228,6 @@ traces:
 2. Requiring the block is a compile error for every served example until it declares the block, so L3 updates them all in the same commit. Do any of your scripts depend on a served example's source text in a way that commit would break?
 
 **Answer:**
+
+1. OK as a contextual declaration at top level. Preserve ordinary identifiers named `traces` and test both uses. Enforce the single declaration across the loaded program, including imported server modules.
+2. Yes. `scripts/benchmark_reading_save.py` slices source up to the literal `server library:` and replaces that header; inserting a traces block inside the sliced region can delete it. `verify_storefront.py` and `verify_browser_diagnostics.py` rewrite `server shop:`. Also update generators that write whole server programs, including `verify_shared_actions.py` (`server progress:`), `verify_packaged_catalog.py`, and `verify_published_picker.py`. Keep the server header anchors or change their callers atomically. Give generated fixtures and ordinary examples an explicit `traces: none` unless the example exercises tracing. Run the scripts against their generated or rewritten sources as part of L3; compiling the checked-in examples alone misses these cases.

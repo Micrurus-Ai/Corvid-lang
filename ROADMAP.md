@@ -1,5 +1,7 @@
 # Corvid — Build Roadmap
 
+- Native library builds lower checked route parameter and caller records before ownership analysis. Verify all five reference app descriptors against their sources.
+
 Frontend implementation follows the [ordered browser frontend queue](docs/frontend-roadmap.md#ordered-tasks), with its own resumable loop.
 
 - [ ] F18 independent application acceptance. Checkout, sketchbook and collaborative workspace trials passed. Track the independent developer report in the [F18 acceptance record](docs/proposals/frontend-application-acceptance.md).
