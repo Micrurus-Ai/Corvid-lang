@@ -72,24 +72,7 @@ fn ir_of(src: &str) -> corvid_ir::IrFile {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // Override the runtime staticlib path so the linker pulls a
-    // single Rust-bundled artifact, matching the precedent set by
-    // `tests/record_native.rs` for MSVC duplicate-`std` avoidance.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 #[test]

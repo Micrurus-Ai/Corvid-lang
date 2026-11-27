@@ -50,27 +50,7 @@ fn entry_name(ir: &corvid_ir::IrFile) -> &str {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // `corvid_test_tools.lib` already bundles `corvid-runtime` as a
-    // transitive Rust dep (along with the C runtime objects) because
-    // `corvid-test-tools` lists `corvid-runtime` as a workspace dep.
-    // Routing the linker through this single Rust staticlib avoids
-    // the duplicate-`std` LNK2005 that linking it alongside the
-    // standalone `corvid_runtime.lib` produces on MSVC.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn interpreter_runtime(trace_dir: &Path) -> Runtime {

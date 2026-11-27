@@ -2,6 +2,27 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One test-tools helper, built once per process
+
+After the last rebase the parity suite failed: the runtime stamp refused a
+`libcorvid_test_tools.a` built before the rebase brought in runtime changes.
+The cause was sixteen copies of `fn test_tools_lib_path` across the test
+files. Five never built the library (parity, stack maps, the verifier audit
+and two ownership suites), so they linked whatever was on disk. The others
+each ran `cargo build` per call, so tests in one process could link while
+another's build rewrote the library, the race filed on the roadmap.
+`corvid_test_paths::linked_test_tools_staticlib` now builds it once per test
+process and sets the override, and fifteen files call it. A probe edit to a
+runtime source made the library stale, and the parity suite rebuilt it and
+passed. `ffi_capsule` keeps its own helper because it builds into a separate
+target directory.
+
+A slip of mine on the way: that rebase's verification and its push ran in
+one chained command, so `main` received the push before the verification
+reported. The code was sound: the failure was the stale library, and 255
+parity and 13 cdylib tests pass on what was pushed. From now on the push is
+always a separate step after the checks pass.
+
 ### Query J3b: another table's keys in one statement
 
 `keys()` is a new zero-argument stage: `List<K>` of the key column alone,
