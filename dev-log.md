@@ -2,6 +2,34 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Query J5: live queries that filter by another table
+
+`live` refused every list filter, because a list may come from a table the
+feed did not watch. Now:
+- `read_tables` walks the handler's IR for every table a query reads,
+  including inner `keys()` queries. It is used by `watched_tables` and by
+  `share_commits`, so the commit listeners cover the same databases.
+- `wait_for_commit` takes the `Watched` set. A commit to another watched
+  table makes the batch incomplete. The query then re-runs in full, and a
+  row that left without being written arrives in a snapshot, since it has
+  no removal revision.
+- A write to the delivered table alone still re-checks only its rows (L2).
+
+The checker now refuses only a list that calls something by name. An
+agent, tool, prompt or function could read any table, so the feed could not
+know when to refresh. Literals, `path`, `actor`, table queries and methods
+are allowed.
+
+Test (`a_live_query_follows_writes_to_the_table_its_filter_reads`): ada's
+live list of cards on her boards.
+- Giving her a board, which writes only `Board`, delivers that board's card
+  as `added`.
+- Taking a board away delivers a snapshot without its card.
+- A new card on her board still arrives as a change.
+
+The live declaration tests now check that a list calling an agent is
+refused and a literal list is not.
+
 ### One URL component decoder
 
 The Windows session pointed at the decoding side of the URL encoder
@@ -43,6 +71,7 @@ The suggestion searches `BUILTIN_METHOD_NAMES`. `builtin_method` is one match
 on (receiver, name) pairs and can't be enumerated, so a test holds the list
 to the names the match contains. The error reference is regenerated.
 
+
 ### Map keys are snapshots
 
 [Proposal](docs/proposals/map-key-snapshots.md). Testing why compound map
@@ -66,6 +95,7 @@ behavior is unchanged.
 Noted for later: the error for a missing builtin method wraps its text in
 "cannot call a value of type `method …`" and cites old slice numbers
 (`45c`, `45d`).
+
 
 ### Query J4: `by_key()`
 

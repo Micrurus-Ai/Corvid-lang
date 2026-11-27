@@ -353,8 +353,15 @@ agent card_titles() -> String:
     return out
 ```
 
-A `live` query cannot filter by a list or another table's keys yet,
-because it does not watch that table's writes ([J5](../proposals/query-aggregates-and-joins.md)).
+A `live` query may filter by another table's keys, or by a list built from
+literals, `path`, `actor` and table queries. It then follows every table
+its query reads: giving a board to a person brings that board's cards into
+their live list, though no card was written. A write to the delivered
+table is re-checked row by row, as always. A write to another table it
+reads re-runs the query and sends a snapshot when rows leave, because those
+rows were not written and have no removal revision of their own. A list
+that calls an agent, tool, prompt or function by name is refused in `live`,
+because the server cannot see what the call reads.
 
 The value on the other side of a comparison is computed by the agent
 before the query runs, so it may use the agent's variables and calls but

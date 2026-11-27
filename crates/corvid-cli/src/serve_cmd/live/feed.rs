@@ -4,7 +4,7 @@ use super::shared::{QueryKey, SharedQueries, Step};
 use super::{Failure, Subscription};
 use crate::serve_cmd::ReplyEncoding;
 use corvid_driver::{run_agent_reading_written_rows, run_ir_with_runtime, Runtime, Value, WrittenKeys};
-use corvid_ir::{for_each_expr, IrAgent, IrExprKind, IrFile, IrRoute, IrStmt, IrTable, IrType};
+use corvid_ir::{for_each_expr, IrAgent, IrExprKind, IrFile, IrRoute, IrStmt, IrTable, IrTableFilter, IrType};
 use corvid_runtime::tables::{
     column_kind, live_changes, merge_rechecked, ColumnKind, LiveChange, LiveChangeKind,
     LiveMessage, LiveRow, OrderColumn, RowOrder, TableCommit, TableEngine, WrittenRows,
@@ -96,10 +96,15 @@ pub(in crate::serve_cmd) async fn share_commits(
         .flat_map(|s| &s.routes)
         .filter(|r| r.response_kind == corvid_ast::RouteResponseKind::Live)
     {
-        let db = &query_table(route)
-            .ok_or_else(|| anyhow::anyhow!("live query {} has no table", route.path))?
-            .database;
-        if listening.insert(&db.name) {
+        // Every database whose tables the query reads: the delivered
+        // table's, and any its condition reads through another table (J5).
+        let table = query_table(route).ok_or_else(|| anyhow::anyhow!("live query {} has no table", route.path))?;
+        let mut tables = vec![table.clone()];
+        tables.extend(read_tables(ir, &route.handler_agent));
+        for db in tables.iter().map(|table| &table.database) {
+            if !listening.insert(db.name.clone()) {
+                continue;
+            }
             let engine =
                 TableEngine::from_declaration(&db.engine, db.tls.as_deref(), db.connections)
                     .ok_or_else(|| {
@@ -148,11 +153,84 @@ fn change_frame(change: LiveChange) -> Result<Delivery, Failure> {
     Ok(Delivery::Change { change })
 }
 
-/// Wait for a relevant commit. Lag requires a full replacement snapshot.
+/// The tables a live query reads (J5): the one it delivers, whose written
+/// rows can be re-checked alone, and any its condition reads through a
+/// list or an inner query, a write to which can change which rows match
+/// without writing them.
+#[derive(Debug, Clone)]
+struct Watched {
+    database: String,
+    table: String,
+    others: Vec<(String, String)>,
+}
+
+impl Watched {
+    fn reads(database: &str, table: &str, c: &TableCommit) -> bool {
+        c.database == database && (c.tables.is_empty() || c.tables.contains(table))
+    }
+
+    fn relevant(&self, c: &TableCommit) -> bool {
+        Self::reads(&self.database, &self.table, c) || self.others.iter().any(|(d, t)| Self::reads(d, t, c))
+    }
+
+    fn touches_others(&self, c: &TableCommit) -> bool {
+        self.others.iter().any(|(d, t)| Self::reads(d, t, c))
+    }
+}
+
+/// Every table the handler reads through a query: the delivered one, any
+/// a list in its condition queries, and each inner `keys()` query's (J5).
+fn read_tables(ir: &IrFile, handler: &str) -> Vec<IrTable> {
+    fn inner_tables(filter: &IrTableFilter, out: &mut Vec<IrTable>) {
+        match filter {
+            IrTableFilter::And(left, right) | IrTableFilter::Or(left, right) => {
+                inner_tables(left, out);
+                inner_tables(right, out);
+            }
+            IrTableFilter::Not(inner) => inner_tables(inner, out),
+            IrTableFilter::InQuery { inner, .. } => {
+                out.push(inner.table.clone());
+                if let Some(filter) = &inner.filter {
+                    inner_tables(filter, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut tables = Vec::new();
+    for_each_expr(ir, &mut |owner, expr| {
+        if owner != handler {
+            return;
+        }
+        if let IrExprKind::TableQuery { table, filter, .. } = &expr.kind {
+            tables.push(table.clone());
+            if let Some(filter) = filter {
+                inner_tables(filter, &mut tables);
+            }
+        }
+    });
+    tables
+}
+
+/// What a live query watches: its delivered table, and every other table
+/// [`read_tables`] finds.
+fn watched_tables(ir: &IrFile, handler: &str, delivered: &IrTable) -> Watched {
+    let own = (delivered.database.name.clone(), delivered.name.clone());
+    let mut others: Vec<(String, String)> = read_tables(ir, handler)
+        .into_iter()
+        .map(|table| (table.database.name, table.name))
+        .filter(|other| *other != own)
+        .collect();
+    others.sort();
+    others.dedup();
+    Watched { database: own.0, table: own.1, others }
+}
+
+/// Wait for a relevant commit. Lag requires a full replacement snapshot,
+/// and a commit to another table the query reads requires a full re-read.
 async fn wait_for_commit(
     commits: &mut Receiver<TableCommit>,
-    database: &str,
-    table: &str,
+    watched: &Watched,
 ) -> Result<Option<WrittenRows>, Failure> {
     loop {
         let commit = match commits.recv().await {
@@ -163,16 +241,17 @@ async fn wait_for_commit(
             }
             Err(RecvError::Closed) => return Err(Failure::Unavailable),
         };
-        let relevant = |c: &TableCommit| {
-            c.database == database && (c.tables.is_empty() || c.tables.contains(table))
-        };
-        if !relevant(&commit) {
+        if !watched.relevant(&commit) {
             continue;
         }
+        let table = watched.table.as_str();
         let mut written = WrittenRows::default();
         let mut complete = true;
         let mut merge = |commit: TableCommit| {
-            if relevant(&commit) {
+            if watched.touches_others(&commit) {
+                complete = false;
+            }
+            if Watched::reads(&watched.database, table, &commit) {
                 if let Some(rows) = commit.rows.get(table) {
                     written.merge(rows);
                 } else {
@@ -290,6 +369,7 @@ fn evaluation(
         }
         args.push(value.clone());
     }
+    let watched = watched_tables(&ir, &handler, &table);
     let evaluation = Evaluation {
         ir,
         runtime,
@@ -299,6 +379,7 @@ fn evaluation(
         args,
         order,
         rows_read: queries.rows_read.clone(),
+        watched,
     };
     Ok((key, evaluation))
 }
@@ -314,6 +395,8 @@ struct Evaluation {
     /// Set when written rows can be re-checked alone (live L2).
     order: Option<RowOrder>,
     rows_read: Arc<AtomicU64>,
+    /// Every table whose commits can change the query's rows (J5).
+    watched: Watched,
 }
 
 impl Evaluation {
@@ -392,7 +475,7 @@ impl Evaluation {
                 }
                 yield (next.clone(), frames);
                 previous = next;
-                batch = wait_for_commit(&mut commits, &self.table.database.name, &self.table.name).await?;
+                batch = wait_for_commit(&mut commits, &self.watched).await?;
             }
         }
         .boxed()
@@ -428,7 +511,8 @@ mod tests {
         };
         announce("archive", &[]);
         announce("boards", &["Note"]);
-        let read = wait_for_commit(&mut receiver, "boards", "Card");
+        let card = Watched { database: "boards".into(), table: "Card".into(), others: Vec::new() };
+        let read = wait_for_commit(&mut receiver, &card);
         tokio::pin!(read);
         assert!(futures::poll!(&mut read).is_pending());
         announce("boards", &[]);
@@ -438,7 +522,7 @@ mod tests {
         for _ in 0..5 {
             announce("boards", &["Card"]);
         }
-        assert!(wait_for_commit(&mut slow, "boards", "Card")
+        assert!(wait_for_commit(&mut slow, &card)
             .await
             .unwrap()
             .is_none());
@@ -454,7 +538,8 @@ mod tests {
         connection.execute_batch(
             "CREATE TABLE Card (card INTEGER PRIMARY KEY NOT NULL, board TEXT NOT NULL, revision INTEGER NOT NULL);
              CREATE TABLE Task (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, rank INTEGER NOT NULL, revision INTEGER NOT NULL);
-             CREATE TABLE Bill (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, total DECIMAL TEXT COLLATE corvid_decimal NOT NULL, revision INTEGER NOT NULL)"
+             CREATE TABLE Bill (id INTEGER PRIMARY KEY NOT NULL, list TEXT NOT NULL, total DECIMAL TEXT COLLATE corvid_decimal NOT NULL, revision INTEGER NOT NULL);
+             CREATE TABLE Board (board TEXT PRIMARY KEY NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL)"
         ).unwrap();
         let source = include_str!("../../../tests/fixtures/live_cards.cor")
             .replace(
@@ -463,7 +548,7 @@ mod tests {
             )
             .replace(
                 "    route GET \"/archive\"",
-                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    live \"/lists/{list}/tasks\" -> Task requires permission(\"board.view\"):\n        return Task.where(fn (t) -> t.list == path.list).order_by(fn (t) -> t.rank).descending()\n    live \"/lists/{list}/bills\" -> Bill requires permission(\"board.view\"):\n        return Bill.where(fn (b) -> b.list == path.list).order_by(fn (b) -> b.total)\n    route GET \"/archive\"",
+                "    live \"/my_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> c.board == actor.id)\n    live \"/lists/{list}/tasks\" -> Task requires permission(\"board.view\"):\n        return Task.where(fn (t) -> t.list == path.list).order_by(fn (t) -> t.rank).descending()\n    live \"/lists/{list}/bills\" -> Bill requires permission(\"board.view\"):\n        return Bill.where(fn (b) -> b.list == path.list).order_by(fn (b) -> b.total)\n    live \"/owners/{owner}/owned_cards\" -> Card requires permission(\"board.view\"):\n        return Card.where(fn (c) -> Board.where(fn (b) -> b.owner == path.owner).keys().contains(c.board))\n    route GET \"/archive\"",
             );
         let program = source
             + r#"
@@ -523,6 +608,25 @@ agent change_bill(id: Int, list: String, total: Decimal) -> String:
         None -> "missing"
 
 fn bill_written(result: Result<Bill, Conflict<Bill>>) -> String:
+    return match result:
+        Ok(row) -> "written"
+        Err(_) -> "conflict"
+
+table Board:
+    key board: String
+    owner: String
+
+agent add_board(board: String, owner: String) -> String:
+    return match Board.insert(Board(board, owner)):
+        Ok(row) -> "added"
+        Err(_) -> "taken"
+
+agent give_board(board: String, owner: String) -> String:
+    return match Board.get(board):
+        Some(row) -> board_written(Board.save(Board { owner: owner, ..row }))
+        None -> "missing"
+
+fn board_written(result: Result<Board, Conflict<Board>>) -> String:
     return match result:
         Ok(row) -> "written"
         Err(_) -> "conflict"
@@ -742,6 +846,62 @@ fn bill_written(result: Result<Bill, Conflict<Bill>>) -> String:
             ("change_bill", vec![int(2), text("home"), total("0.001")]),
         ];
         assert_rechecked_like_full_query("/lists/home/bills", first, writes).await;
+    }
+
+    /// J5: a live query that filters by another table's keys follows that
+    /// table's writes too. Giving a board to ada brings its cards into her
+    /// list though no card was written; taking one away removes them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_live_query_follows_writes_to_the_table_its_filter_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let ir = board_program(&dir);
+        let runtime = Runtime::builder().build();
+        let routes = Routes::new(&ir).unwrap();
+        let (route, path) = routes.resolve(&ir, "/owners/ada/owned_cards").unwrap();
+        let queries = Arc::new(SharedQueries::default());
+        let run = |agent: &'static str, args: Vec<Value>| {
+            let (ir, runtime) = (ir.clone(), runtime.clone());
+            async move { run_ir_with_runtime(&ir, Some(agent), args, &runtime).await.unwrap() }
+        };
+        let text = |s: &str| Value::String(s.into());
+        run("add_board", vec![text("home"), text("ada")]).await;
+        run("add_board", vec![text("away"), text("grace")]).await;
+        write(&ir, &runtime, "add", 1, "home").await;
+        write(&ir, &runtime, "add", 2, "away").await;
+        let mut watcher = subscribe(
+            &queries,
+            ir.clone(),
+            runtime.clone(),
+            Arc::new(ir.types.clone()),
+            route,
+            path,
+            Value::Nothing,
+        )
+        .unwrap();
+        let card = |card: i64, board: &str| json!({"card": card, "board": board, "revision": 1});
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"snapshot","rows":[{"revision":"1","row":card(1, "home")}]})
+        );
+        // Only `Board` is written: card 2 joins ada's list.
+        run("give_board", vec![text("away"), text("ada")]).await;
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"change","kind":"added","index":1,"revision":"1","row":card(2, "away")})
+        );
+        // `home` leaves her: card 1 leaves, though it was not written, so its
+        // removal has no revision of its own and a snapshot replaces the list.
+        run("give_board", vec![text("home"), text("grace")]).await;
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"snapshot","rows":[{"revision":"1","row":card(2, "away")}]})
+        );
+        // A card written on her board still arrives as a change.
+        write(&ir, &runtime, "add", 3, "away").await;
+        assert_eq!(
+            frame(&mut watcher).await,
+            json!({"type":"change","kind":"added","index":1,"revision":"1","row":card(3, "away")})
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

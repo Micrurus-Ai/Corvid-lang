@@ -126,7 +126,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [x] J3b. `Other.where(...).keys().contains(row.col)` as `IN (SELECT ...)` in one statement, and `keys()` as a stage. Built 2026-11-26.
   - [x] J3a. `contains` on a held list inside `where` (`IN (values)`), `None` matched as `==` matches it. Built 2026-11-26; at most 10,000 values for now.
   - [x] J4. `by_key()`. Built 2026-11-27.
-  - [ ] J5. `live` over a query that filters by another table.
+  - [x] J5. `live` over a query that filters by another table. Built 2026-11-27.
   - [ ] J6. Native code.
 
 **Retire the Python build target** (decided by the owner 2026-11-25; brought forward under "Make what you find stronger", because the default build misled new users)

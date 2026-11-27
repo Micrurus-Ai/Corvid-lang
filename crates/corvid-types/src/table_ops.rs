@@ -355,14 +355,18 @@ pub enum QueryCondition<'e> {
     InList { column: String, values: &'e Expr },
 }
 
-impl QueryCondition<'_> {
-    /// Whether any part tests the column against a list (J3).
-    pub fn reads_a_list(&self) -> bool {
+impl<'e> QueryCondition<'e> {
+    /// The list expressions the condition tests columns against (J3).
+    pub fn lists(&self) -> Vec<&'e Expr> {
         match self {
-            Self::InList { .. } => true,
-            Self::And(left, right) | Self::Or(left, right) => left.reads_a_list() || right.reads_a_list(),
-            Self::Not(inner) => inner.reads_a_list(),
-            Self::Const(_) | Self::Column(_) | Self::Compare { .. } | Self::Text { .. } => false,
+            Self::InList { values, .. } => vec![*values],
+            Self::And(left, right) | Self::Or(left, right) => {
+                let mut lists = left.lists();
+                lists.extend(right.lists());
+                lists
+            }
+            Self::Not(inner) => inner.lists(),
+            Self::Const(_) | Self::Column(_) | Self::Compare { .. } | Self::Text { .. } => Vec::new(),
         }
     }
 }

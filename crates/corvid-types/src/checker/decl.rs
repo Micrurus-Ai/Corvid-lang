@@ -265,20 +265,34 @@ impl<'a> Checker<'a> {
         if query.take.is_some() {
             invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
         }
-        // A list computed by the handler may come from another table,
-        // whose commits a live query does not watch yet (J5).
-        let filters_by_list = match query.filter {
-            Some(Expr::Lambda { params, body, .. }) => params.first().is_some_and(|row| {
-                crate::table_ops::query_condition(query.table, &row.name.name, body)
-                    .is_ok_and(|condition| condition.reads_a_list())
-            }),
-            _ => false,
+        // A list may read other tables, which the live query then also
+        // watches (J5). A call by name (an agent, tool, prompt or function)
+        // could read anything, so the feed could not know when to refresh.
+        let lists = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => params
+                .first()
+                .and_then(|row| crate::table_ops::query_condition(query.table, &row.name.name, body).ok())
+                .map(|condition| condition.lists())
+                .unwrap_or_default(),
+            _ => Vec::new(),
         };
-        if filters_by_list {
-            invalid(
-                self,
-                "filters by `values.contains(row.column)`; a live query cannot keep a list it computes current yet, because the list may come from another table".into(),
-            );
+        for list in lists {
+            let mut named_call = None;
+            corvid_ast::visit::walk_expr(list, &mut |expr| {
+                if let Expr::Call { callee, .. } = expr {
+                    if let Expr::Ident { name, .. } = callee.as_ref() {
+                        named_call.get_or_insert_with(|| name.name.clone());
+                    }
+                }
+            });
+            if let Some(callee) = named_call {
+                invalid(
+                    self,
+                    format!(
+                        "filters by a list that calls `{callee}`; a live query keeps its rows current by watching the tables its query reads, and cannot see what a call reads. Build the list from table queries, such as `Board.where(...).keys()`, or from `path` and `actor`"
+                    ),
+                );
+            }
         }
         if let Some((aggregate, _)) = query.aggregate {
             invalid(
