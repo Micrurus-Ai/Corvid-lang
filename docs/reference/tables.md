@@ -157,6 +157,8 @@ borrows a connection for its one statement and returns it, and an
 operation or block waits its turn rather than opening another, so a
 burst of agents queues in the program instead of failing at the
 database. A connection the server closed is replaced on the next borrow.
+[Choosing a Postgres pool size](../guides/performance.md#choosing-a-postgres-pool-size)
+shows what each size buys under concurrent agents.
 
 A SQLite database is a file, so a SQLite block refuses `tls:` and
 `connections:`; Corvid opens the file as needed and queues its writers.

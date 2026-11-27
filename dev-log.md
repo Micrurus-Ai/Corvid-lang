@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### What a Postgres pool size buys
+
+`pool_under_concurrent_agents` is an ignored test in
+`corvid-runtime/src/tables/pool.rs`. It runs 8 or 64 agents against a pool
+of 1 to 32 connections. Each agent edits as the runtime does: a `get`, then
+a revision-checked `update`, each borrowing its own connection, on rows no
+other agent touches. It reports edits per second, the wait at the pool, and
+the time an edit takes.
+
+Results, locally (4-core WSL, PostgreSQL 16, release build):
+- Throughput grows almost in step with connections, up to one connection
+  per busy agent: 64 agents made 473 edits/s on 1 connection, 2,383 on 8
+  and 4,882 on 32.
+- Below that, most of an edit is waiting for a turn: 2 × 11.6 ms of a
+  26.6 ms median edit with 64 agents on 8 connections.
+- A full pool queued rather than failed; no cell had an error.
+
+The table and a sizing rule are in the performance guide, and the tables
+reference links to them.
+
+It measures the pool directly, not a served program. The existing
+sustained-load benchmark is SQLite-only and drives the reading-list
+example, whose Postgres port waits on B10-5b. The served measurement is on
+the roadmap for after it.
+
+Found doing it: a running program cannot show that its pool is full. Only
+this offline test measures the wait. Filed: report each operation's wait at
+the pool in the trace and the OpenTelemetry export.
+
 ### Encryption at rest K1: `DataKey`
 
 `corvid_crypto::DataKey` seals and opens values with XChaCha20-Poly1305.

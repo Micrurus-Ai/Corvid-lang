@@ -209,6 +209,34 @@ A separate 60-second run offered 80 saves and 20 HTTP reads per second. On the q
 
 Run `python scripts/benchmark_reading_arrivals.py PATH_TO_QUEUED_CLI --baseline PATH_TO_PREVIOUS_CLI --output sustained.json`. Use `--rates 80 --seconds 60 --rounds 1` for the one-minute workload. The benchmark includes warm-up edits in restart verification and excludes them from latency summaries.
 
+### Choosing a Postgres pool size
+
+These measurements show what a `connections:` value buys. Agents run concurrently against the pool of a Postgres table database. Each one edits as the runtime does, with a `get` then a revision-checked `update`. That is two statements, each borrowing its own connection. Agents edit disjoint rows, so no edit conflicts and the numbers measure the pool and the database. Each cell ran 3 seconds on a 4-core WSL Ubuntu host with a local PostgreSQL 16, in a release build.
+
+| Agents | Connections | Edits/s | Wait at the pool p50 / p95 / p99, ms | Edit p50 / p95, ms |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 1 | 482 | 7.03 / 12.57 / 19.22 | 15.64 / 23.25 |
+| 8 | 2 | 754 | 3.88 / 5.60 / 7.01 | 10.39 / 12.48 |
+| 8 | 4 | 1,334 | 1.37 / 2.71 / 3.50 | 5.81 / 7.61 |
+| 8 | 8 | 2,481 | 0.00 / 0.00 / 0.00 | 2.95 / 4.68 |
+| 64 | 1 | 473 | 64.05 / 108.20 / 146.20 | 129.25 / 184.66 |
+| 64 | 2 | 631 | 46.61 / 91.04 / 128.42 | 91.72 / 153.05 |
+| 64 | 4 | 1,263 | 22.91 / 35.24 / 56.21 | 47.89 / 62.60 |
+| 64 | 8 | 2,383 | 11.56 / 14.90 / 18.64 | 26.55 / 30.66 |
+| 64 | 16 | 3,687 | 6.27 / 9.09 / 13.93 | 16.68 / 21.52 |
+| 64 | 32 | 4,882 | 3.08 / 5.09 / 7.39 | 12.48 / 17.86 |
+
+Edits per second grow almost in step with connections until there is one connection per busy agent. Beyond that point the pool is no longer what limits throughput. With 8 agents and 8 connections, no agent waited at all. Below that point, most of an edit's time is spent waiting for a connection rather than in the database. With 64 agents on 8 connections, an edit took 26.6 ms at the median, and 2 × 11.6 ms of that was waiting for a turn. A full pool queues work rather than failing: no cell had an error.
+
+To size a pool, take the number of operations a program has in flight at its busiest and choose the smaller of that and the cap your database plan allows. Leave room for other clients of the same database, including migrations. These are local numbers. A database across a network holds each connection longer per statement, which makes each connection worth fewer edits and the queue longer. Measure against your own database the same way:
+
+```sh
+CORVID_TEST_POSTGRES_URL=postgres://... CORVID_POOL_LOAD_SECONDS=10 \
+  cargo test --release -p corvid-runtime --lib pool_under_concurrent_agents -- --ignored --nocapture
+```
+
+The test creates and drops a table named `corvid_pool_load`, so point it at a scratch database. It measures the pool directly. A served program on Postgres under sustained load, as in [Sustained editing and backlog](#sustained-editing-and-backlog), is still to be measured.
+
 ### Cancellable AI stream
 
 On Windows with Chrome 157, Corvid preview 8a0c4161 and Node 25 TypeScript each served 40 measured streaming requests in alternating order. Both served identical HTML and browser code and sent identical JSON requests to the same local model fixture. The fixture waited 30 ms before its first fragment and 10 ms between subsequent fragments. Every measured cancellation closed the upstream connection and ended the fixture's generation loop before its deadline.
