@@ -2,6 +2,17 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One failure envelope for both servers
+
+`corvid serve` answered a failure as `{"error", "detail"}`, through the one
+`corvid_driver::public_failure` mapping. The server `corvid build` generates
+answered the same kinds of stop as `{"request_id", "route", "kind",
+"message", "duration_ms"}`. The generated server's `error_response` now writes
+`{"error", "detail"}`. The request id was already in its `x-corvid-request-id`
+header, and the route and duration are in its traces. No client read `kind`:
+the TypeScript `CorvidError` keeps the body as sent. So the change touched
+only the `build_server` assertions, which now check the exact body.
+
 ### A program's own type wins over a built-in of its name
 
 Every type-name lookup asked `Type::compiler_known` first, so a built-in

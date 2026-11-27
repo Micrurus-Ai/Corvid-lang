@@ -160,14 +160,17 @@ fn build_server_emits_runnable_local_http_binary() {
     );
     assert!(rejected.contains("content-type: application/json"), "{rejected}");
     assert!(rejected.contains("x-corvid-request-id: req-"), "{rejected}");
-    assert!(rejected.contains(r#""request_id":"req-"#), "{rejected}");
-    assert!(rejected.contains(r#""route":"/""#), "{rejected}");
+    // The body is the public failure answer `corvid serve` gives too.
     assert!(
-        rejected.contains(r#""kind":"method_not_allowed""#),
+        rejected.ends_with(r#"{"error":"method_not_allowed","detail":"method not allowed"}"#),
         "{rejected}"
     );
     assert!(
-        rejected.contains(r#""message":"method not allowed""#),
+        rejected.contains(r#""error":"method_not_allowed""#),
+        "{rejected}"
+    );
+    assert!(
+        rejected.contains(r#""detail":"method not allowed""#),
         "{rejected}"
     );
 
@@ -187,7 +190,7 @@ fn build_server_emits_runnable_local_http_binary() {
         "{oversized}"
     );
     assert!(
-        oversized.contains(r#""kind":"body_too_large""#),
+        oversized.contains(r#""error":"body_too_large""#),
         "{oversized}"
     );
 
@@ -225,7 +228,7 @@ fn build_server_emits_runnable_local_http_binary() {
         timeout.contains("HTTP/1.1 504 Gateway Timeout"),
         "{timeout}"
     );
-    assert!(timeout.contains(r#""kind":"handler_timeout""#), "{timeout}");
+    assert!(timeout.contains(r#""error":"handler_timeout""#), "{timeout}");
     assert!(
         timeout.contains(&corvid_driver::public_failure::timeout_detail(0)),
         "the timeout sentence is the one `corvid serve` sends: {timeout}"
@@ -260,7 +263,7 @@ fn build_server_emits_runnable_local_http_binary() {
         "{unauthorized}"
     );
     assert!(
-        unauthorized.contains(r#""kind":"auth_required""#),
+        unauthorized.contains(r#""error":"auth_required""#),
         "{unauthorized}"
     );
     drop(auth_child);
@@ -293,7 +296,7 @@ fn build_server_emits_runnable_local_http_binary() {
         limited.contains("HTTP/1.1 429 Too Many Requests"),
         "{limited}"
     );
-    assert!(limited.contains(r#""kind":"rate_limited""#), "{limited}");
+    assert!(limited.contains(r#""error":"rate_limited""#), "{limited}");
     drop(rate_child);
 
     let hidden_handler = handler.with_extension("missing");
@@ -328,7 +331,7 @@ fn build_server_emits_runnable_local_http_binary() {
         "{failed_handler}"
     );
     assert!(
-        failed_handler.contains(r#""kind":"handler_spawn_failed""#),
+        failed_handler.contains(r#""error":"handler_spawn_failed""#),
         "{failed_handler}"
     );
     assert!(
@@ -368,7 +371,7 @@ fn build_server_emits_runnable_local_http_binary() {
         let leaky_addr = line.trim().strip_prefix("listening: http://").expect("failing-handler listening prefix").to_string();
         let leaked = http_get(&leaky_addr, "/");
         assert!(leaked.contains("HTTP/1.1 500 Internal Server Error"), "{leaked}");
-        assert!(leaked.contains(r#""kind":"handler_failed""#), "{leaked}");
+        assert!(leaked.contains(r#""error":"handler_failed""#), "{leaked}");
         assert!(leaked.contains(&corvid_driver::public_failure::handler_failed().detail), "{leaked}");
         for leak in ["10.0.0.7", "/admin", "/Users", "secrets.toml"] {
             assert!(!leaked.contains(leak), "`{leak}` leaked into the body: {leaked}");
@@ -607,7 +610,7 @@ fn rendered_server_csrf_middleware_refuses_state_change_without_double_submit_to
         "expected 403 on POST without CSRF, got: {bypass}"
     );
     assert!(
-        bypass.contains(r#""kind":"csrf_violation""#),
+        bypass.contains(r#""error":"csrf_violation""#),
         "expected csrf_violation kind: {bypass}"
     );
 
@@ -650,7 +653,7 @@ fn rendered_server_csrf_middleware_refuses_state_change_without_double_submit_to
         "expected 403 on POST with forged CSRF, got: {forged}"
     );
     assert!(
-        forged.contains(r#""kind":"csrf_violation""#),
+        forged.contains(r#""error":"csrf_violation""#),
         "expected csrf_violation kind on forged token: {forged}"
     );
 

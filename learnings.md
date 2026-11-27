@@ -8467,3 +8467,7 @@ A call to a method a type lacks says so plainly and suggests the method you like
 
 A whole-number literal larger than `Int` holds (beyond 9223372036854775807) is read exactly where a `Decimal` is meant: `total: Decimal = 99999999999999999999` keeps every digit, on both tiers. Where an `Int` is meant, the compiler refuses it with `[E0518]`, names the `Int` range and suggests a `Decimal`. It used to stop as an invalid number. Where a `Float` is meant, it is accepted only if a `Float` holds it exactly.
 
+### One failure answer from both servers
+
+The server `corvid build --target server` generates answers a failure with the body `corvid serve` sends: `{"error": "handler_timeout", "detail": "..."}`, a code and a fixed sentence. The request id is in the `x-corvid-request-id` header. Before, the generated server sent `{"request_id", "route", "kind", "message", "duration_ms"}`, so a client had to read two shapes for the same failures.
+
