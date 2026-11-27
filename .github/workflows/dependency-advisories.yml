@@ -1,6 +1,6 @@
 name: dependency advisories
 
-# The one definition of the Rust dependency audit. ci.yml calls it on every
+# The shared definition of the Rust and npm dependency audits. ci.yml calls it on every
 # push and pull request, and it also runs on its own once a day, because a
 # new advisory is published with no code change: on a quiet week nothing
 # else would notice it. The daily run is only this audit, not the whole
@@ -28,3 +28,25 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Audit Cargo.lock
         run: cargo audit --deny warnings
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit every tracked npm lockfile
+        shell: bash
+        run: |
+          lockfiles="$RUNNER_TEMP/corvid-npm-lockfiles"
+          git ls-files -z -- 'package-lock.json' '**/package-lock.json' > "$lockfiles"
+          test -s "$lockfiles"
+          failed=0
+          while IFS= read -r -d '' lockfile; do
+            echo "::group::Audit $lockfile"
+            (cd "$(dirname "$lockfile")" && npm audit --package-lock-only --include=dev --audit-level=high) || failed=1
+            echo "::endgroup::"
+          done < "$lockfiles"
+          exit "$failed"
