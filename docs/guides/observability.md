@@ -18,8 +18,6 @@
 > - `corvid serve` records no trace.
 > - A call from one agent to another is not in the trace, so the steps sit
 >   directly under the run.
-> - A streamed model call shows no token counts or cost, because the
->   runtime does not record a streamed call's usage yet.
 > - A running program exports nothing to OpenTelemetry. The
 >   `CORVID_OTEL_*` variables and a `corvid run --trace-out` flag do not
 >   exist.

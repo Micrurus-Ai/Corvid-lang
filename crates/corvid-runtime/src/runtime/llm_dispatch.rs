@@ -1195,12 +1195,14 @@ impl Runtime {
             });
         }
         let inner = self.llms.stream(&req.as_ref()).await?;
-        let tracer = self.tracer.clone();
+        // The whole runtime, not just its tracer: a stream records its
+        // usage when it ends, through the same path a whole call uses.
+        let runtime = self.clone();
         let prompt_name = req.prompt.clone();
         let model_name = req.model.clone();
         let accumulate = futures::stream::unfold(
-            (inner, String::new(), Vec::<u64>::new(), false, tracer, prompt_name, model_name, trace_model_version),
-            |(mut inner, mut text, mut bounds, mut finished, tracer, prompt_name, model_name, model_version)| async move {
+            (inner, String::new(), Vec::<u64>::new(), false, runtime, prompt_name, model_name, trace_model_version),
+            |(mut inner, mut text, mut bounds, mut finished, runtime, prompt_name, model_name, model_version)| async move {
                 if finished {
                     return None;
                 }
@@ -1210,6 +1212,16 @@ impl Runtime {
                         bounds.push(text.len() as u64);
                         if chunk.done {
                             finished = true;
+                            // The provider reports usage on the last
+                            // chunk; a provider that reports none
+                            // records zero tokens, as a whole call does.
+                            runtime.record_model_usage(
+                                &prompt_name,
+                                &model_name,
+                                runtime.llms.adapter_name_for_model(&model_name),
+                                chunk.usage.unwrap_or_default(),
+                            );
+                            let tracer = &runtime.tracer;
                             if tracer.is_enabled() {
                                 tracer.emit(TraceEvent::LlmResult {
                                     ts_ms: now_ms(),
@@ -1224,20 +1236,27 @@ impl Runtime {
                         }
                         Some((
                             Ok(chunk),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                     Some(Err(e)) => {
                         finished = true;
                         Some((
                             Err(e),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                     None => {
                         // Provider ended without a done marker:
                         // record what we have.
                         finished = true;
+                        runtime.record_model_usage(
+                            &prompt_name,
+                            &model_name,
+                            runtime.llms.adapter_name_for_model(&model_name),
+                            crate::llm::TokenUsage::default(),
+                        );
+                        let tracer = &runtime.tracer;
                         if tracer.is_enabled() {
                             tracer.emit(TraceEvent::LlmResult {
                                 ts_ms: now_ms(),
@@ -1256,7 +1275,7 @@ impl Runtime {
                                 usage: None,
                                 confidence: None,
                             }),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                 }

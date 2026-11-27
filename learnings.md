@@ -8481,7 +8481,6 @@ Every `corvid run` records its trace under the project's `target/trace/`, and `c
 Not yet:
 - `corvid serve` records no trace.
 - Calls between agents are not nested.
-- A streamed model call shows no token counts or cost.
 - Nothing is exported to OpenTelemetry while a program runs.
 
 [Observability](docs/guides/observability.md)

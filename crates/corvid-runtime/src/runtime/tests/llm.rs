@@ -170,6 +170,64 @@ async fn call_llm_records_normalized_usage_by_provider() {
     assert_eq!(prompt.model_id, "gpt");
 }
 
+/// Lineage from real runs (L1d): a streamed call records its usage when
+/// the stream ends, through the same path as a whole call, so the ledger,
+/// the trace and derived lineage count it. Before, a streamed call's
+/// tokens and cost were dropped.
+#[tokio::test]
+async fn a_streamed_call_records_its_usage_when_the_stream_ends() {
+    use futures::StreamExt;
+    let dir = tempfile::tempdir().unwrap();
+    let trace_path = dir.path().join("stream-usage.jsonl");
+    let r = Runtime::builder()
+        .tracer(Tracer::open_path(&trace_path, "stream-usage-run"))
+        .llm(Arc::new(MockAdapter::new("gpt").reply_with_usage(
+            "draft",
+            json!("streamed text"),
+            crate::llm::TokenUsage { prompt_tokens: 12, completion_tokens: 30, total_tokens: 0 },
+        )))
+        .default_model("gpt")
+        .model(RegisteredModel::new("gpt").provider("openai").cost_per_token_in(0.01).cost_per_token_out(0.02))
+        .build();
+
+    let mut stream = r
+        .call_llm_stream(LlmRequest {
+            prompt: "draft".into(),
+            model: String::new(),
+            rendered: "write".into(),
+            args: vec![],
+            output_schema: None,
+            sampling: Default::default(),
+            messages: Vec::new(),
+        })
+        .await
+        .expect("the stream starts");
+    let mut text = String::new();
+    while let Some(chunk) = stream.next().await {
+        text.push_str(&chunk.expect("a chunk").delta);
+    }
+    assert_eq!(text, "streamed text");
+
+    let records = r.llm_usage_records();
+    assert_eq!(records.len(), 1, "a streamed call is in the usage ledger");
+    assert_eq!((records[0].prompt_tokens, records[0].completion_tokens, records[0].total_tokens), (12, 30, 42));
+    assert!((records[0].cost_usd - 0.72).abs() < 1e-12, "priced like a whole call: {}", records[0].cost_usd);
+    assert_eq!(records[0].adapter.as_deref(), Some("gpt"));
+
+    drop(r);
+    let events = corvid_trace_schema::read_events_from_path(&trace_path).unwrap();
+    let usage_at = events
+        .iter()
+        .position(|e| matches!(e, TraceEvent::HostEvent { name, .. } if name == "llm.usage"))
+        .expect("the trace records the streamed call's usage");
+    let result_at = events.iter().position(|e| matches!(e, TraceEvent::LlmResult { .. })).expect("result");
+    assert!(usage_at < result_at, "usage comes just before the result, as for a whole call");
+    let lineage = crate::lineage_from_trace(&events);
+    let prompt = lineage.iter().find(|s| s.kind == crate::LineageKind::Prompt).expect("prompt span");
+    assert_eq!((prompt.tokens_in, prompt.tokens_out), (12, 30));
+    assert!((prompt.cost_usd - 0.72).abs() < 1e-12);
+}
+
 #[tokio::test]
 async fn observation_summary_aggregates_usage_and_provider_health() {
     let dir = tempfile::tempdir().unwrap();

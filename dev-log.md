@@ -2,6 +2,30 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage from real runs L1d: a streamed call's usage counts
+
+A model call streamed by its provider recorded no usage at all: not in the
+usage ledger, not in the trace's `llm.usage`, not in the cost
+observations. The provider's last chunk carries the usage, and the stream
+dropped it. The streamed call's tokens and cost therefore counted as
+nothing in `corvid observe` and the usage totals.
+
+What changed, in two commits:
+- **Refactor.** The whole-call path's recording block (price the call,
+  then record it in the ledger, the trace and the cost observations) moves
+  verbatim into `Runtime::record_model_usage`.
+- **Fix.** The stream now carries a clone of the runtime, not just its
+  tracer, and calls that method when it ends, just before its result is
+  traced. A stream that ends without a done marker records zero tokens,
+  as a whole call with no reported usage does. A test streams a priced
+  call and checks the ledger (12 in, 30 out, $0.72), that `llm.usage`
+  comes before the result, and the derived lineage.
+
+Checked: `@budget` was not affected. The interpreter charges a streamed
+prompt its declared per-call cost on the final chunk, not the ledger's
+measured cost, so the gap was in what was observed, not in what was
+enforced.
+
 ### Fixed: the native cycle collector freed live values
 
 The cause was in `corvid_alloc_typed`. It linked the new block into the live
@@ -35,6 +59,7 @@ block only a local holds, and keeps a cycle with an outside reference.
 Filed: run the parity suite under `CORVID_GC_TRIGGER=10`, so collection
 stays exercised. Also recorded the decimal measurement this was found by:
 about 2.2 µs per native decimal operation.
+
 
 ### The dependency audit also runs daily
 
