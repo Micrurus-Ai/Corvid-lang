@@ -13,18 +13,13 @@ canvas, finish it offline, reopen it and synchronize it. Keep the existing
 two-tab migration and conflict exercise in the same browser run. A temporary
 HTTP fixture supplies conditional reads and writes for this editor.
 
-These trials use the existing typed routes and browser controls. They add no
-assistant actions. The collaborative workspace needs the shared F08/B14
-subscription contract so two clients can observe a committed edit after one
-disconnects and resumes. A polling fixture cannot establish that result.
+## Independent component trial
 
-For the independent trial, start with the [browser views learning guide](../book/19-browser-views.md).
-Choose your own domain type and operation, build a component in a fresh project,
-and decide which state and actions an assistant may access. Use the public
-documentation and standard CLI. In your report, include the component source,
-toolchain version, pages used, commands and results, time to the first useful
-result, remaining blockers and any maintainer help. Record a blocker even if
-it prevents the build from finishing.
+An independent developer can start now. Use the [browser views learning guide](../book/19-browser-views.md), the public documentation and the standard CLI.
+
+1. Choose a new component that you want to use. Pick its domain type and operation yourself.
+2. Build it in a fresh project. Decide which state and actions an assistant may access.
+3. Share your report on [the acceptance pull request](https://github.com/Micrurus-Ai/Corvid-lang/pull/44). Include the component source, CLI version, documentation pages used, commands and results, time to the first useful result, remaining blockers and any maintainer help. If you get stuck, include the last command and its output.
 
 ## Acceptance at `5299b6fd33cc4d820a21284971f6a86583038fde`
 
@@ -45,7 +40,20 @@ python -B scripts/verify_drawing_editor.py --cli $cli --channel msedge
 python -B scripts/verify_storefront.py --cli $cli --channel msedge
 ```
 
-## Open acceptance criteria
+## Collaborative workspace
 
-- **Streaming collaborative workspace.** F08 awaits the shared typed subscription contract from B14. After F08 merges, exercise an ordinary workspace project in empty and large states. Disconnect one client, commit an edit from the other, then reconnect the first client and verify that its resumed subscription delivers both the missed edit and a subsequent live edit. [B14 contract dependency](../backend-ai-roadmap.md)
-- **Independent component.** The public-docs-only trial above still needs an independent developer's component and report of the build outcome and remaining blockers.
+The [board project](../../sdk/typescript/client/test/boards.cor) serves a Corvid page that subscribes to its cards. The [hosted Edge run](https://github.com/Micrurus-Ai/Corvid-lang/actions/runs/45815905898) passed on `0c080ee80f4769e190861677854f914a44319807`.
+
+- The typed client received an empty snapshot for one board. A separate HTTP client then created 1,000 cards through the authenticated write route. Opening the board rendered every title in card order.
+- On another board, the browser went offline. The HTTP client committed an edit while the browser was disconnected and another after it reconnected. Both the Corvid component and the generated TypeScript observer received both edits. The unaffected row kept its identity, input text, focus and selection.
+- Removing the component unsubscribed it. The remaining observer received the next edit. Both clients used the same authenticated test identity against one SQLite-backed server.
+
+Reproduce the [workspace check](../../scripts/verify_generated_live_client.py) from the repository root with the CLI built above.
+
+```powershell
+python -B scripts/verify_generated_live_client.py --cli $cli --channel msedge
+```
+
+## Remaining acceptance criteria
+
+F18 stays open until F08 merges and an independent developer completes the public-docs-only component trial above and submits the outcome. The three automated application trials have passed.
