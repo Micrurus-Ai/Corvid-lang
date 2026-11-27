@@ -248,6 +248,7 @@ fn collect_prompt_pins_in_expr(
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
         | IrExprKind::TrustBoundary { inner: target }
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target))
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..
@@ -272,7 +273,8 @@ fn collect_prompt_pins_in_expr(
         IrExprKind::Literal(_)
         | IrExprKind::Local { .. }
         | IrExprKind::Decl { .. }
-        | IrExprKind::OptionNone => {}
+        | IrExprKind::OptionNone
+        | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => {}
         IrExprKind::Replay {
             trace,
             arms,

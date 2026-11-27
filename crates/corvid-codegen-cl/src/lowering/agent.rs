@@ -133,6 +133,12 @@ pub(super) fn define_extern_c_wrapper(
 
         let inner_ref = module.declare_func_in_func(inner_func_id, builder.func);
         let call = builder.ins().call(inner_ref, &call_args);
+        // An outage nothing in the program caught stops the host's call,
+        // as native code always stopped at the failing call.
+        if runtime.outage_plan.catches {
+            let stop = module.declare_func_in_func(runtime.outage_stop_if_pending, builder.func);
+            builder.ins().call(stop, &[]);
+        }
         let results: Vec<ClValue> = builder.inst_results(call).iter().copied().collect();
         let grounded_handle_ptr =
             grounded_return_inner.map(|_| builder.block_params(entry)[agent.params.len()]);

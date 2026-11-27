@@ -488,8 +488,8 @@ fn visit_expr_types(
         | IrExprKind::TryPropagate { inner } => {
             visit_expr_types(inner, seen, order, visit);
         }
-        IrExprKind::OptionNone => {}
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => {}
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
             visit_expr_types(body, seen, order, visit);
         }
         IrExprKind::Replay {

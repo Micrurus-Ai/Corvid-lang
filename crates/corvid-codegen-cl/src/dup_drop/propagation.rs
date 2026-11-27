@@ -2,9 +2,19 @@ use super::*;
 use corvid_ir::{IrMatchArm, IrPattern};
 use corvid_types::Type;
 
+/// What the expansion needs to know about the agent it expands.
+pub(crate) struct Cx<'a> {
+    pub return_ty: &'a Type,
+    /// Which calls can raise an outage (recoverable failures TE-3).
+    pub outages: &'a crate::outage_plan::OutagePlan,
+    /// Where an outage goes from here: out of the agent, or to the
+    /// enclosing `try`.
+    pub unwind: super::outage::Unwind,
+}
+
 /// Expose early returns to ownership analysis. Hoist only across operands
 /// that are evaluated on the same path, preserving left-to-right evaluation.
-pub(super) fn expand_block(block: &mut IrBlock, return_ty: &Type, next: &mut u32) {
+pub(super) fn expand_block(block: &mut IrBlock, cx: &Cx, next: &mut u32) {
     let mut output = Vec::with_capacity(block.stmts.len());
     for mut stmt in std::mem::take(&mut block.stmts) {
         match &mut stmt {
@@ -14,20 +24,20 @@ pub(super) fn expand_block(block: &mut IrBlock, return_ty: &Type, next: &mut u32
                 else_block,
                 ..
             } => {
-                expand_expr(cond, return_ty, next, &mut output);
-                expand_block(then_block, return_ty, next);
+                expand_expr(cond, cx, next, &mut output);
+                expand_block(then_block, cx, next);
                 if let Some(block) = else_block {
-                    expand_block(block, return_ty, next);
+                    expand_block(block, cx, next);
                 }
             }
             IrStmt::For { iter, body, .. } => {
-                expand_expr(iter, return_ty, next, &mut output);
-                expand_block(body, return_ty, next);
+                expand_expr(iter, cx, next, &mut output);
+                expand_block(body, cx, next);
             }
             IrStmt::While { cond, body, span } => {
-                expand_block(body, return_ty, next);
+                expand_block(body, cx, next);
                 let mut checks = Vec::new();
-                expand_expr(cond, return_ty, next, &mut checks);
+                expand_expr(cond, cx, next, &mut checks);
                 if !checks.is_empty() {
                     // Keep condition effects on every iteration, including after continue.
                     let span = *span;
@@ -57,13 +67,13 @@ pub(super) fn expand_block(block: &mut IrBlock, return_ty: &Type, next: &mut u32
             | IrStmt::Return {
                 value: Some(value), ..
             }
-            | IrStmt::Expr { expr: value, .. } => expand_expr(value, return_ty, next, &mut output),
+            | IrStmt::Expr { expr: value, .. } => expand_expr(value, cx, next, &mut output),
             IrStmt::Assign { value, path, .. } => {
                 let indices = path.iter_mut().filter_map(|part| match part {
                     corvid_ir::IrPathSeg::Index(index) => Some(index),
                     _ => None,
                 });
-                expand_operands(indices.chain(std::iter::once(value)), return_ty, next, &mut output)
+                expand_operands(indices.chain(std::iter::once(value)), cx, next, &mut output)
             }
             _ => {}
         }
@@ -72,12 +82,12 @@ pub(super) fn expand_block(block: &mut IrBlock, return_ty: &Type, next: &mut u32
     block.stmts = output;
 }
 
-fn expand_expr(expr: &mut IrExpr, ret: &Type, next: &mut u32, output: &mut Vec<IrStmt>) {
+pub(super) fn expand_expr(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mut Vec<IrStmt>) {
     use IrExprKind::*;
     match &mut expr.kind {
         TryPropagate { inner } => {
-            expand_expr(inner, ret, next, output);
-            expand_binding(expr, ret, next, output);
+            expand_expr(inner, cx, next, output);
+            expand_binding(expr, cx.return_ty, next, output);
         }
         OptionSome { inner }
         | ResultOk { inner }
@@ -87,15 +97,16 @@ fn expand_expr(expr: &mut IrExpr, ret: &Type, next: &mut u32, output: &mut Vec<I
         | FieldAccess { target: inner, .. }
         | Match {
             scrutinee: inner, ..
-        } => expand_expr(inner, ret, next, output),
+        }
+        | TrustBoundary { inner } => expand_expr(inner, cx, next, output),
         BinOp {
             op: op @ (corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or),
             left,
             right,
         } => {
-            expand_expr(left, ret, next, output);
+            expand_expr(left, cx, next, output);
             let mut selected = Vec::new();
-            expand_expr(right, ret, next, &mut selected);
+            expand_expr(right, cx, next, &mut selected);
             if selected.is_empty() {
                 return;
             }
@@ -150,23 +161,29 @@ fn expand_expr(expr: &mut IrExpr, ret: &Type, next: &mut u32, output: &mut Vec<I
             index: right,
         } => expand_operands(
             [left.as_mut(), right.as_mut()].into_iter(),
-            ret,
+            cx,
             next,
             output,
         ),
-        Call { args, .. } | List { items: args } => {
-            expand_operands(args.iter_mut(), ret, next, output)
+        Call { kind, args, .. } => {
+            let can_fail = cx.outages.call_can_fail(kind);
+            expand_operands(args.iter_mut(), cx, next, output);
+            if can_fail {
+                super::outage::hoist_checked_call(expr, cx, next, output);
+            }
         }
+        List { items: args } => expand_operands(args.iter_mut(), cx, next, output),
         MapLiteral { keys, values } => expand_operands(
             keys.iter_mut().zip(values).flat_map(|(key, value)| [key, value]),
-            ret, next, output,
+            cx, next, output,
         ),
         BuiltinMethod { receiver, args, .. } => expand_operands(
             std::iter::once(receiver.as_mut()).chain(args),
-            ret,
+            cx,
             next,
             output,
         ),
+        TryRetry { .. } => super::outage::expand_try(expr, cx, next, output),
         _ => {}
     }
 }
@@ -175,14 +192,14 @@ fn expand_expr(expr: &mut IrExpr, ret: &Type, next: &mut u32, output: &mut Vec<I
 // before that branch. Otherwise its calls or reads could execute too late.
 fn expand_operands<'a>(
     operands: impl DoubleEndedIterator<Item = &'a mut IrExpr>,
-    ret: &Type,
+    cx: &Cx,
     next: &mut u32,
     output: &mut Vec<IrStmt>,
 ) {
     let mut groups = Vec::new();
     for operand in operands.rev() {
         let mut before = Vec::new();
-        expand_expr(operand, ret, next, &mut before);
+        expand_expr(operand, cx, next, &mut before);
         if !groups.is_empty() {
             let id = LocalId(*next);
             *next += 1;

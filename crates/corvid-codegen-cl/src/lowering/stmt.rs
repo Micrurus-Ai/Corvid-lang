@@ -993,6 +993,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
         | IrExprKind::TrustBoundary { inner }
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(inner))
         | IrExprKind::TryRetry { body: inner, .. }
         | IrExprKind::UnOp { operand: inner, .. }
         | IrExprKind::WrappingUnOp { operand: inner, .. } => expr_mentions_local(inner, target),
@@ -1022,7 +1023,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
                     .any(|arm| expr_mentions_local(&arm.body, target))
                 || expr_mentions_local(else_body, target)
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
     }
 }
 

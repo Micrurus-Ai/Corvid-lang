@@ -46,6 +46,7 @@ use std::path::PathBuf;
 
 mod equality;
 mod number_text;
+pub(crate) mod outage;
 mod secret_object;
 mod response_exports;
 mod approval_exports;

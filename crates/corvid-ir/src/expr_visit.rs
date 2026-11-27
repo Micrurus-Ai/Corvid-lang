@@ -23,7 +23,9 @@ fn walk_block(block: &IrBlock, visit: &mut dyn FnMut(&IrExpr)) {
     }
 }
 
-fn walk_stmt(stmt: &IrStmt, visit: &mut dyn FnMut(&IrExpr)) {
+/// Call `visit` on every expression inside `stmt`, each before its
+/// sub-expressions.
+pub fn walk_stmt(stmt: &IrStmt, visit: &mut dyn FnMut(&IrExpr)) {
     match stmt {
         IrStmt::Let { value, .. } | IrStmt::Yield { value, .. } | IrStmt::Destructure { value, .. } => walk_expr(value, visit),
         IrStmt::Return { value, .. } => {
@@ -67,7 +69,8 @@ fn walk_stmt(stmt: &IrStmt, visit: &mut dyn FnMut(&IrExpr)) {
     }
 }
 
-fn walk_expr(expr: &IrExpr, visit: &mut dyn FnMut(&IrExpr)) {
+/// Call `visit` on `expr` and then on every expression inside it.
+pub fn walk_expr(expr: &IrExpr, visit: &mut dyn FnMut(&IrExpr)) {
     visit(expr);
     match &expr.kind {
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } | IrExprKind::OptionNone => {}
@@ -124,6 +127,11 @@ fn walk_expr(expr: &IrExpr, visit: &mut dyn FnMut(&IrExpr)) {
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
         | IrExprKind::TrustBoundary { inner } => walk_expr(inner, visit),
+        IrExprKind::Outage(outage) => {
+            if let crate::IrOutage::Checked(inner) = outage {
+                walk_expr(inner, visit);
+            }
+        }
         IrExprKind::TryRetry { body, fallback, .. } => {
             walk_expr(body, visit);
             if let Some(fallback) = fallback {

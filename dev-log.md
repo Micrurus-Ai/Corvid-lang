@@ -2,6 +2,75 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native code catches outages: `try ... else` compiled (TE-3a, TE-3b)
+
+Native code could not catch a failure, because every runtime entry point
+that met one printed it and exited. Now `corvid_runtime_call`, which
+carries every native tool and connector call, classifies the error with
+`RuntimeError::is_outage`, the interpreter's rule. When the program has a
+`try` that catches natively, it holds an outage in a pending slot and
+returns zero bits; otherwise it stops as before. So a program with no
+such `try` behaves exactly as it did.
+
+An outage travels as ordinary control flow. The pass that already
+rewrites `?` into statements before ownership analysis
+(`dup_drop/propagation.rs`) now also hoists each call that can fail into
+its own statement, wrapped in `IrOutage::Checked`, followed by a test of
+the slot:
+- outside a `try`, the test returns from the agent with zero bits;
+- inside one, it retries or breaks out to the fallback.
+
+Because the test is a real `return`, `continue` or `break`, the dup/drop
+pass places every release on that path, as it does for `?`. The leak
+detector shows none, including for operands evaluated before the failing
+call. `try X on error retry N ... else Y` becomes a loop that follows the
+interpreter's rule: an outage, an `Err` and a `None` each earn another
+attempt, and a final `Err` or `None` stands. The generated entry point
+stops on an outage nothing caught, with the failing call's message,
+before printing a result.
+
+`outage_plan.rs` decides which agents can fail (those that can reach a
+tool call), and which `try` forms native code catches exactly. A `try`
+that can reach a prompt is refused by name, because prompts still exit
+(TE-3c). So is one that can reach a failing call inside a `match` arm, a
+guard, a lambda, or a `parallel` or `approve` statement, where the IR has
+no statement form to unwind through; such a call is checked by stopping,
+as before. Native lowering and the tier picker both ask the plan, which
+replaced the tier picker's blanket refusal of `try ... else`. A test holds
+the expansion and the plan together.
+
+Alternatives considered:
+- `longjmp` to the `try`: refused, because it skips the drops of every
+  frame in between, and the collector can never free what it leaks.
+- A status return on every native function: refused, because it changes
+  every signature and the C ABI for code that cannot fail.
+- Catching only calls written directly inside the `try`: refused,
+  because `try helper() else ...` is the common case.
+
+Found and strengthened:
+- The errors chapter of the book never described `try ... else`, and
+  still said `retry` needs a `Result` or `Option` body. Both are fixed,
+  with a compiled example.
+- A grounded tool answer was attested even when the call failed; the
+  outage path now skips the attestation of zero bits.
+
+Filed:
+- Rust `#[tool]`s cannot return an error. The tests had to provoke an
+  outage with an answer that does not decode.
+- Widening the narrowed positions above.
+- Corrupted text in nine native-backend files, fixed in the next commit.
+
+Proof: six parity tests in `parity/outages.rs` cover:
+- an outage two calls deep;
+- operands, a nested `try` and a fallback that calls a tool;
+- a body that cannot fail;
+- a grounded answer;
+- an uncaught outage, which stops with the call named;
+- the refusal of a `try` over a `match` arm.
+
+`outage_expansion.rs` checks that the pass and the plan agree, and
+`native_try_else.rs` covers the tier picker.
+
 ### Sign-in tokens: jsonwebtoken 12, and claims checked by type
 
 GitHub's Dependabot reported five moderate alerts on main that `cargo

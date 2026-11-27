@@ -632,6 +632,8 @@ fn collect_expr_imports(
             collect_expr_imports(target, tools, prompts, plan, agent_name)
         }
         IrExprKind::TrustBoundary { inner: body, .. } => collect_expr_imports(body, tools, prompts, plan, agent_name),
+        // Built only by native lowering; the wasm target never sees one.
+        IrExprKind::Outage(_) => Ok(()),
         IrExprKind::TryRetry { body, fallback, .. } => {
             collect_expr_imports(body, tools, prompts, plan, agent_name)?;
             match fallback {
@@ -1273,6 +1275,7 @@ fn emit_expr(
         | IrExprKind::TryPropagate { .. }
         | IrExprKind::TrustBoundary { .. }
         | IrExprKind::TryRetry { .. }
+        | IrExprKind::Outage(_)
         | IrExprKind::Replay { .. } => {
             return Err(WasmCodegenError::unsupported(format!(
                 "wasm target cannot lower expression `{expr:?}` yet"

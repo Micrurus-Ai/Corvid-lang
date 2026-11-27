@@ -26,6 +26,7 @@ pub use currency_methods::is_native_currency_method;
 pub mod decimal_methods;
 pub use decimal_methods::is_native_decimal_method;
 pub mod dup_drop;
+pub mod outage_plan;
 pub mod errors;
 pub mod latency_rc;
 pub mod link;

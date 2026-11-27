@@ -74,6 +74,8 @@ mod text_scalar_maps;
 mod refinements;
 #[path = "parity/comparison_literals.rs"]
 mod comparison_literals;
+#[path = "parity/outages.rs"]
+mod outages;
 
 /// Path to the `corvid-test-tools` staticlib. The parity harness links
 /// this into every compiled Corvid binary so `#[tool]`-declared mocks

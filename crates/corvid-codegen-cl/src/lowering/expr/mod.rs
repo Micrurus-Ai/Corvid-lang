@@ -873,6 +873,7 @@ pub(super) fn lower_expr(
                 ));
             }
             IrCallKind::Agent { def_id } => {
+                let checked = runtime.outage_checked.replace(false);
                 let callee_id = func_ids_by_def.get(def_id).ok_or_else(|| {
                     CodegenError::cranelift(
                         format!("agent `{callee_name}` has no declared function id"),
@@ -971,9 +972,13 @@ pub(super) fn lower_expr(
                         }
                     }
                 }
+                if runtime.outage_plan.fallible.contains(def_id) {
+                    emit_outage_stop_unless_checked(builder, module, runtime, checked);
+                }
                 Ok(result)
             }
             IrCallKind::Tool { def_id, .. } => {
+                let checked = runtime.outage_checked.replace(false);
                 let tool = runtime.ir_tools.get(def_id).cloned().ok_or_else(|| {
                     CodegenError::cranelift(
                         format!(
@@ -1023,10 +1028,31 @@ pub(super) fn lower_expr(
                     builder, &plain, args, expr, current_return_ty, env, scope_stack,
                     func_ids_by_def, module, runtime,
                 )?;
+                emit_outage_stop_unless_checked(builder, module, runtime, checked);
                 if grounded {
-                    return emit_grounded_value_attestation(
+                    if !checked {
+                        return emit_grounded_value_attestation(
+                            builder, module, runtime, value, &tool.return_ty, &tool.name, 1.0, expr.span,
+                        );
+                    }
+                    // A held outage left zero bits, which name no value to
+                    // attest: the unwinding path passes them through.
+                    let pending = module.declare_func_in_func(runtime.outage_pending, builder.func);
+                    let pending = builder.ins().call(pending, &[]);
+                    let pending = builder.inst_results(pending)[0];
+                    let attest = builder.create_block();
+                    let done = builder.create_block();
+                    let result = builder.append_block_param(done, cl_type_for(&tool.return_ty, expr.span)?);
+                    builder.ins().brif(pending, done, &[value.into()], attest, &[]);
+                    builder.switch_to_block(attest);
+                    builder.seal_block(attest);
+                    let attested = emit_grounded_value_attestation(
                         builder, module, runtime, value, &tool.return_ty, &tool.name, 1.0, expr.span,
-                    );
+                    )?;
+                    builder.ins().jump(done, &[attested.into()]);
+                    builder.switch_to_block(done);
+                    builder.seal_block(done);
+                    return Ok(result);
                 }
                 Ok(value)
             }
@@ -1346,6 +1372,9 @@ pub(super) fn lower_expr(
                 runtime,
             ),
         },
+        IrExprKind::Outage(outage) => lower_outage(
+            builder, expr, outage, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime,
+        ),
         IrExprKind::TrustBoundary { inner } => lower_expr(
             builder,
             inner,
@@ -1364,9 +1393,15 @@ pub(super) fn lower_expr(
             fallback,
         } => {
             if fallback.is_some() {
-                // The tier picker routes these to the interpreter first.
+                // The expansion pass turned every `try ... else` native code
+                // catches exactly into a loop; this one it could not. The
+                // tier picker routes these to the interpreter first.
+                let reason = match timeout_ms {
+                    Some(_) => "it has a `timeout`, and native calls have no cancellation point yet".to_string(),
+                    None => runtime.outage_plan.try_refusal(body).unwrap_or_else(|| "it cannot be lowered natively".to_string()),
+                };
                 return Err(CodegenError::not_supported(
-                    "`try ... else` runs on the interpreter until native code can catch outages (recoverable failures TE-3)".to_string(),
+                    format!("this `try ... else` runs on the interpreter: {reason}"),
                     expr.span,
                 ));
             }
@@ -1463,3 +1498,56 @@ fn anchor_tool_entry(
     Ok(())
 }
 
+/// Native outage unwinding (recoverable failures TE-3). See
+/// `docs/proposals/native-recoverable-failures.md`.
+#[allow(clippy::too_many_arguments)]
+fn lower_outage(
+    builder: &mut FunctionBuilder,
+    expr: &IrExpr,
+    outage: &corvid_ir::IrOutage,
+    current_return_ty: &Type,
+    env: &HashMap<LocalId, (Variable, clir::Type)>,
+    scope_stack: &Vec<Vec<(LocalId, Variable)>>,
+    func_ids_by_def: &HashMap<DefId, FuncId>,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+) -> Result<ClValue, CodegenError> {
+    match outage {
+        corvid_ir::IrOutage::Checked(inner) => {
+            // The statement after this one tests the slot.
+            runtime.outage_checked.set(true);
+            lower_expr(builder, inner, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)
+        }
+        corvid_ir::IrOutage::Pending => {
+            let pending = module.declare_func_in_func(runtime.outage_pending, builder.func);
+            let call = builder.ins().call(pending, &[]);
+            let held = builder.inst_results(call)[0];
+            Ok(builder.ins().icmp_imm(IntCC::NotEqual, held, 0))
+        }
+        corvid_ir::IrOutage::Clear => {
+            let clear = module.declare_func_in_func(runtime.outage_clear, builder.func);
+            builder.ins().call(clear, &[]);
+            Ok(builder.ins().iconst(I8, 1))
+        }
+        corvid_ir::IrOutage::Unwind => Ok(match cl_type_for(&expr.ty, expr.span)? {
+            F64 => builder.ins().f64const(0.0),
+            ty => builder.ins().iconst(ty, 0),
+        }),
+    }
+}
+
+/// After a call that can raise an outage: unless the caller tests the
+/// slot itself (`IrOutage::Checked`), stop the program on an outage, as
+/// native code did at the failing call. `checked` is the flag read when
+/// the call's lowering began.
+pub(super) fn emit_outage_stop_unless_checked(
+    builder: &mut FunctionBuilder,
+    module: &mut ObjectModule,
+    runtime: &RuntimeFuncs,
+    checked: bool,
+) {
+    if !checked {
+        let stop = module.declare_func_in_func(runtime.outage_stop_if_pending, builder.func);
+        builder.ins().call(stop, &[]);
+    }
+}

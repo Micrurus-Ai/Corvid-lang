@@ -115,8 +115,10 @@ pub(crate) unsafe fn native_value_from_model_reply(
 /// decode its answer into the plan's root type, writing it to `payload`.
 /// The arguments are public JSON texts the compiled code encoded. A
 /// connector answer that does not decode becomes the operation's
-/// `on failure` variant, as in the interpreter; any other failure stops
-/// the program with the runtime's message, as the interpreter does.
+/// `on failure` variant, as in the interpreter. Any other failure stops
+/// the program with the runtime's message, as the interpreter does,
+/// unless it is an outage the program can catch: then it is held (see
+/// `outage.rs`) and the payload is zero bits.
 ///
 /// # Safety
 /// `name` and the `arg_count` strings at `args` must be live Corvid
@@ -167,8 +169,9 @@ pub unsafe extern "C" fn corvid_runtime_call(
         Err(err) => {
             runtime.record_connector_call(&name, false);
             crate::ffi_bridge::panic_if_replay_runtime_error(&format!("corvid: `{name}`"), &err);
-            eprintln!("corvid: `{name}`: {err}");
-            std::process::exit(1);
+            crate::ffi_bridge::outage::fail(format!("corvid: `{name}`: {err}"), err.is_outage());
+            unsafe { payload.write(0) };
+            return RESULT_TAG_OK;
         }
     };
     let plan = unsafe { cached_plan(plan, plan_len) };
@@ -185,9 +188,15 @@ pub unsafe extern "C" fn corvid_runtime_call(
                     .unwrap_or_else(|e| panic!("internal error: `{name}`'s failure value does not decode: {}", e.message()))
             }
             None => {
+                // An answer that does not fit its type is an unusable
+                // reply, an outage on both tiers.
                 runtime.record_connector_call(&name, false);
-                eprintln!("corvid: `{name}`: the answer does not match the declared type {}", error.message());
-                std::process::exit(1);
+                crate::ffi_bridge::outage::fail(
+                    format!("corvid: `{name}`: the answer does not match the declared type {}", error.message()),
+                    true,
+                );
+                unsafe { payload.write(0) };
+                return RESULT_TAG_OK;
             }
         },
     };

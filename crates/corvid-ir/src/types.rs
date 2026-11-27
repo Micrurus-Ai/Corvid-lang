@@ -977,6 +977,22 @@ pub enum IrPathSeg {
     Index(IrExpr),
 }
 
+/// The parts of native outage unwinding (recoverable failures TE-3).
+/// See `docs/proposals/native-recoverable-failures.md`.
+#[derive(Debug, Clone)]
+pub enum IrOutage {
+    /// A call that can fail, whose caller tests the pending slot right
+    /// after it. Means exactly `inner`.
+    Checked(Box<IrExpr>),
+    /// `Bool`: an outage is unwinding.
+    Pending,
+    /// `Bool`, always `true`: a `try` took the outage, which is forgotten.
+    Clear,
+    /// The value an unwinding function returns, or a `try` starts from:
+    /// zero bits of the expression's type, which nothing reads.
+    Unwind,
+}
+
 #[derive(Debug, Clone)]
 pub struct IrExpr {
     pub kind: IrExprKind,
@@ -1161,6 +1177,11 @@ pub enum IrExprKind {
     TrustBoundary {
         inner: Box<IrExpr>,
     },
+
+    /// How native code unwinds an outage (recoverable failures TE-3).
+    /// Only native lowering's expansion pass builds these, after the
+    /// front end, so the checker and the interpreter never see one.
+    Outage(IrOutage),
 
     /// `replay <trace>: when <pat> -> <body> else <body>` — the
     /// language-level replay primitive. Runtime semantics

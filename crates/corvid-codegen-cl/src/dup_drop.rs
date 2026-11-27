@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 
 use crate::dataflow::{analyze_agent, IrNavStep, IrPath, OwnershipPlan};
 
+mod outage;
 mod propagation;
 
 /// Public entry: clone `agent` and return a new agent with
@@ -60,6 +61,12 @@ mod propagation;
 /// Pure: does not mutate the input. Stable across runs (the plan is
 /// deterministic; insertion order is deterministic within a path).
 pub fn insert_dup_drop(agent: &IrAgent) -> IrAgent {
+    insert_dup_drop_with(agent, &crate::outage_plan::OutagePlan::default())
+}
+
+/// `insert_dup_drop`, with the calls that can raise an outage expanded
+/// into their tests first (recoverable failures TE-3).
+pub fn insert_dup_drop_with(agent: &IrAgent, outages: &crate::outage_plan::OutagePlan) -> IrAgent {
     // Diagnostic: when CORVID_DUP_DROP_DRY_RUN=1 is set, the pass
     // runs as a no-op — useful for bisecting whether a parity
     // failure is caused by pass-inserted Dup/Drop ops or by an
@@ -71,15 +78,16 @@ pub fn insert_dup_drop(agent: &IrAgent) -> IrAgent {
     {
         return agent.clone();
     }
-    let (expanded, next) = expand_propagation(agent);
+    let (expanded, next) = expand_propagation(agent, outages);
     let (_cfg, plan) = analyze_agent(&expanded);
     apply_plan_owned(expanded, &plan, next)
 }
 
-pub(crate) fn expand_propagation(agent: &IrAgent) -> (IrAgent, u32) {
+pub(crate) fn expand_propagation(agent: &IrAgent, outages: &crate::outage_plan::OutagePlan) -> (IrAgent, u32) {
     let mut expanded = agent.clone();
     let mut next = next_local_id(agent);
-    propagation::expand_block(&mut expanded.body, &agent.return_ty, &mut next);
+    let cx = propagation::Cx { return_ty: &agent.return_ty, outages, unwind: outage::Unwind::Return };
+    propagation::expand_block(&mut expanded.body, &cx, &mut next);
     (expanded, next)
 }
 
@@ -461,7 +469,7 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
                 *max_id = local_id.0;
             }
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => {}
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => {}
         IrExprKind::FieldAccess { target, .. } => scan_expr(target, max_id),
         IrExprKind::UnwrapGrounded { value } => scan_expr(value, max_id),
         IrExprKind::Index { target, index } => {
@@ -498,7 +506,7 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => scan_expr(inner, max_id),
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, max_id)
         }
         IrExprKind::Replay {
@@ -560,7 +568,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }
         IrExprKind::Local { local_id, .. } => *local_id == target,
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
         IrExprKind::FieldAccess { target: t, .. } => expr_reads_local(t, target),
         IrExprKind::UnwrapGrounded { value } => expr_reads_local(value, target),
         IrExprKind::Index { target: t, index } => {
@@ -590,7 +598,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_reads_local(inner, target),
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
             expr_reads_local(body, target)
         }
         IrExprKind::Replay {

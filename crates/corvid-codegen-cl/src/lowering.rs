@@ -271,13 +271,17 @@ pub fn lower_file(
     // guards itself on `runtime.dup_drop_enabled` so the two paths
     // don't double-count.
 
+    // Which calls can raise an outage, for the expansion below and the
+    // call lowerings (recoverable failures TE-3).
+    runtime.outage_plan = crate::outage_plan::OutagePlan::for_file(ir);
+
     // Pass 2: define each agent's body.
     for agent in &ir.agents {
         let &func_id = func_ids_by_def
             .get(&agent.id)
             .expect("declared in pass 1");
         if runtime.dup_drop_enabled {
-            let transformed = crate::pair_elim::eliminate_pairs(crate::dup_drop::insert_dup_drop(agent));
+            let transformed = crate::pair_elim::eliminate_pairs(crate::dup_drop::insert_dup_drop_with(agent, &runtime.outage_plan));
             let effect_info = crate::scope_reduce::analyze_effects(&transformed);
             let transformed = crate::scope_reduce::reduce_scope(transformed, &effect_info);
             runtime.prompt_pins = crate::latency_rc::analyze_prompt_pins(&transformed)
@@ -286,7 +290,7 @@ pub fn lower_file(
             define_agent(module, &transformed, func_id, &func_ids_by_def, &runtime)?;
         } else {
             runtime.prompt_pins.clear();
-            let (expanded, _) = crate::dup_drop::expand_propagation(agent);
+            let (expanded, _) = crate::dup_drop::expand_propagation(agent, &runtime.outage_plan);
             define_agent(module, &expanded, func_id, &func_ids_by_def, &runtime)?;
         }
     }

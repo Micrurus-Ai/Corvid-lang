@@ -8502,3 +8502,14 @@ messages are exactly what they were: every value still has at most 38
 digits and 28 decimal places, and nothing is rounded unless a rounding
 mode is named.
 
+### Compiled programs fall back instead of exiting
+
+`try … else` now works the same in a compiled program as in `corvid run`.
+When a tool or a connector call fails, however many calls inside the
+`try` it happens, the expression takes its fallback, and with `retry` the
+body runs again first. Before, a compiled program stopped at the failing
+call. A program without such a `try` behaves exactly as before. A `try`
+that can reach a prompt, carries a `timeout`, or reaches a failing call
+inside a `match` arm or a lambda still runs on the interpreter, and
+`corvid build` says which.
+

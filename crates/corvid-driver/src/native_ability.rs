@@ -59,9 +59,9 @@ pub enum NotNativeReason {
     /// the compositional native `Result<T, E>` subset are the
     /// supported native forms today.
     TaggedUnionRetryNotNative,
-    /// `try ... else` (recoverable failures TE-2) runs on the interpreter
-    /// until native code catches outages (TE-3).
-    TryElseNotNative,
+    /// A `try` native code cannot catch exactly yet (recoverable
+    /// failures TE-3), with the reason from the shared outage plan.
+    TryElseNotNative { reason: String },
     /// An agent takes a `Caller`. The interpreter checks a called
     /// action's `requires` against the actor passed in (B10); native code
     /// does not yet, so it refuses rather than skip the check.
@@ -130,9 +130,9 @@ impl std::fmt::Display for NotNativeReason {
                 f,
                 "`{agent}` takes a `Caller`, whose action policy the interpreter checks on every call; native code does not yet (shared actions B10, on the roadmap)"
             ),
-            Self::TryElseNotNative => write!(
+            Self::TryElseNotNative { reason } => write!(
                 f,
-                "program uses `try ... else`, which runs on the interpreter until native code can catch outages (recoverable failures TE-3, on the roadmap)"
+                "a `try` in this program runs on the interpreter: {reason} (recoverable failures TE-3, on the roadmap)"
             ),
             Self::TaggedUnionRetryNotNative => write!(
                 f,
@@ -224,6 +224,9 @@ pub fn native_ability(ir: &IrFile) -> Result<(), NotNativeReason> {
 
 #[derive(Clone, Copy)]
 struct ScanContext<'a> {
+    /// Which `try` forms native code catches exactly; native lowering
+    /// uses the same plan.
+    outages: &'a corvid_codegen_cl::outage_plan::OutagePlan,
     types: &'a [corvid_ir::IrType],
     has_tools_lib: bool,
     connectors: &'a [corvid_ir::IrConnector],
@@ -272,7 +275,8 @@ fn runtime_tool_is_native(tool_id: corvid_resolve::DefId, context: ScanContext<'
 }
 
 pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Result<(), NotNativeReason> {
-    let context = ScanContext { types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
+    let outages = corvid_codegen_cl::outage_plan::OutagePlan::for_file(ir);
+    let context = ScanContext { outages: &outages, types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {
         return Err(NotNativeReason::PythonImport { module: module.clone() });
     }
@@ -668,7 +672,21 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             }
         }
         IrExprKind::TrustBoundary { inner } => scan_expr(inner, current_return_ty, context),
-        IrExprKind::TryRetry { fallback: Some(_), .. } => Err(NotNativeReason::TryElseNotNative),
+        // Built only by native lowering, after this check runs.
+        IrExprKind::Outage(_) => Ok(()),
+        IrExprKind::TryRetry { body, fallback, .. } if context.outages.catches_natively(expr) => {
+            scan_expr(body, current_return_ty, context)?;
+            match fallback {
+                Some(fallback) => scan_expr(fallback, current_return_ty, context),
+                None => Ok(()),
+            }
+        }
+        IrExprKind::TryRetry { body, timeout_ms, fallback: Some(_), .. } => Err(NotNativeReason::TryElseNotNative {
+            reason: match timeout_ms {
+                Some(_) => "it has a `timeout`, and native calls have no cancellation point yet".to_string(),
+                None => context.outages.try_refusal(body).unwrap_or_else(|| "it cannot be lowered natively".to_string()),
+            },
+        }),
         IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, current_return_ty, context)?;
             if &body.ty == &expr.ty

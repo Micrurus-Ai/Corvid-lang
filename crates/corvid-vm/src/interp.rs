@@ -1406,6 +1406,12 @@ impl<'ir> Interpreter<'ir> {
             // trusted(expr) is a compile-time assertion; at runtime
             // it is the identity.
             IrExprKind::TrustBoundary { inner } => self.eval_expr(inner).await,
+
+            // Built only by native lowering, after the front end.
+            IrExprKind::Outage(_) => Err(InterpError::new(
+                InterpErrorKind::Other("internal error: native outage unwinding reached the interpreter".into()),
+                expr.span,
+            )),
             IrExprKind::TryRetry {
                 body,
                 attempts,

@@ -1,6 +1,6 @@
 # `try ... else` in native code (recoverable failures TE-3)
 
-**Status:** proposal, 2026-11-27. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
+**Status:** TE-3a and TE-3b built 2026-11-27; TE-3c and TE-3d next. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
 **Owner:** backend (Claude Code, Mac session).
 **Roadmap:** `try ... else` TE-3 in [backend-ai-roadmap](../backend-ai-roadmap.md); parent proposal [recoverable failures](recoverable-failures.md).
 
@@ -65,13 +65,17 @@ The interpreter records a caught failure like the failure it replaces, so a repl
 
 ## Slices
 
-- [ ] TE-3a. The pending-outage slot and its status, in `corvid_runtime_call` (tools and connectors without `on failure`), classified by `RuntimeError::is_outage`. A failure that is not an outage keeps today's message and exit.
-- [ ] TE-3b. The compiler emits a test of the slot after each call that can fail, and unwinds through compiled agents by the early-return path. `try X else Y` and `try X retry N else Y` are lowered natively, and the native refusal is removed. Parity tests cover:
+- [x] TE-3a. The pending-outage slot and its status, in `corvid_runtime_call` (tools and connectors without `on failure`), classified by `RuntimeError::is_outage`. A failure that is not an outage keeps today's message and exit. Built 2026-11-27, in `ffi_bridge/outage.rs`. Holding is turned on only by a program with a `try` that catches natively, so every other program stops at the failing call exactly as before.
+- [x] TE-3b. The compiler emits a test of the slot after each call that can fail, and unwinds through compiled agents by the early-return path. `try X else Y` and `try X retry N else Y` are lowered natively, and the native refusal is removed. Parity tests cover:
   - a tool outage two agent calls deep;
   - a fallback that itself calls a tool;
   - a non-outage that still stops the program;
   - no leak under the leak detector;
   - no change to a program without `try`.
+
+  Built 2026-11-27. `outage_plan.rs` decides which calls can fail and which `try` forms native code catches exactly; native lowering and the tier picker both ask it. The expansion that turns each into ordinary `return`, `continue` and `break` is `dup_drop/outage.rs`, in the pass that already exposed `?` to ownership analysis. A test holds the expansion and the plan together.
+
+  Narrowed: a `try` that can reach a failing call inside a `match` arm, a guard, a lambda, or a `parallel` or `approve` statement runs on the interpreter, refused by name, because the IR has no statement form there to unwind through. A call in those positions is checked by stopping the program, as native code always did.
 - [ ] TE-3c. Prompts and table operations report outages through the same slot.
 - [ ] TE-3d. Record and replay, with a cross-tier replay test.
 

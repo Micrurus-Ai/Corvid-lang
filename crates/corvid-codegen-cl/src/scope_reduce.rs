@@ -242,7 +242,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             expr_mentions_local(receiver, local_id)
                 || args.iter().any(|a| expr_mentions_local(a, local_id))
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
         IrExprKind::Local {
             local_id: current, ..
         } => *current == local_id,
@@ -265,6 +265,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
         | IrExprKind::TrustBoundary { inner: target }
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target))
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..
@@ -382,6 +383,8 @@ fn expr_is_effect_free(expr: &IrExpr) -> bool {
         | IrExprKind::TryPropagate { .. }
         | IrExprKind::TrustBoundary { .. }
         | IrExprKind::TryRetry { .. }
+        // Reads or clears the pending outage, or makes a call.
+        | IrExprKind::Outage(_)
         // Replay dispatches over a recorded trace (reads a file)
         // and executes arbitrary arm bodies; treat the whole node
         // as effectful so scope-reduce never hoists it past a

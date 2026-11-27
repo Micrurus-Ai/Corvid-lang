@@ -739,6 +739,10 @@ fn collect_called_agents_from_expr(expr: &IrExpr, stack: &mut Vec<corvid_resolve
         IrExprKind::TrustBoundary { inner: body, .. } => {
             collect_called_agents_from_expr(body, stack)
         }
+        IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) => {
+            collect_called_agents_from_expr(body, stack)
+        }
+        IrExprKind::Outage(_) => {}
         IrExprKind::TryRetry { body, fallback, .. } => {
             collect_called_agents_from_expr(body, stack);
             if let Some(fallback) = fallback {
@@ -914,6 +918,10 @@ fn walk_ir_expr_for_prompt(
         IrExprKind::TrustBoundary { inner: body, .. } => {
             walk_ir_expr_for_prompt(body, prompt_map, found)
         }
+        IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) => {
+            walk_ir_expr_for_prompt(body, prompt_map, found)
+        }
+        IrExprKind::Outage(_) => {}
         IrExprKind::TryRetry { body, fallback, .. } => {
             walk_ir_expr_for_prompt(body, prompt_map, found);
             if let Some(fallback) = fallback {

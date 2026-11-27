@@ -270,7 +270,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
                     .map(|a| count_local_mentions_expr(a, local_id))
                     .sum::<usize>()
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => 0,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => 0,
         IrExprKind::Local {
             local_id: current, ..
         } => usize::from(*current == local_id),
@@ -294,6 +294,7 @@ fn count_local_mentions_expr(expr: &IrExpr, local_id: LocalId) -> usize {
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
         | IrExprKind::TrustBoundary { inner: target }
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target))
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..
@@ -356,7 +357,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
             expr_observes_refcount(receiver, local_id)
                 || args.iter().any(|a| expr_observes_refcount(a, local_id))
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
         IrExprKind::Local { .. } => false,
         IrExprKind::Call { kind, args, .. } => {
             let local_in_args = args.iter().any(|arg| expr_mentions_local(arg, local_id));
@@ -385,6 +386,7 @@ fn expr_observes_refcount(expr: &IrExpr, local_id: LocalId) -> bool {
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
         | IrExprKind::TrustBoundary { inner: target }
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target))
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..

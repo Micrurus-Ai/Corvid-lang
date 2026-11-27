@@ -155,6 +155,19 @@ pub(in crate::lowering) struct RuntimeFuncs {
     pub trace_run_started: FuncId,
     /// `corvid_trace_run_completed_json`: a run's result as public JSON text.
     pub trace_run_completed: FuncId,
+    /// `corvid_outage_pending() -> i64`: 1 while an outage unwinds.
+    pub outage_pending: FuncId,
+    /// `corvid_outage_clear()`: a `try` took the outage.
+    pub outage_clear: FuncId,
+    /// `corvid_outage_stop_if_pending()`: stop on an outage nothing can catch.
+    pub outage_stop_if_pending: FuncId,
+    /// `corvid_outage_catching()`: the program has a `try` that catches.
+    pub outage_catching: FuncId,
+    /// Which calls can raise an outage (recoverable failures TE-3).
+    pub outage_plan: crate::outage_plan::OutagePlan,
+    /// Set while lowering the call inside an `IrOutage::Checked`, whose
+    /// caller tests the slot itself.
+    pub outage_checked: std::cell::Cell<bool>,
     pub literal_counter: std::cell::Cell<u64>,
     /// When true, codegen-level scattered
     /// `emit_retain` / `emit_release` sites are skipped because the

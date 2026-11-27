@@ -103,8 +103,8 @@ fn expr_uses_runtime(expr: &IrExpr) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_uses_runtime(inner),
-        IrExprKind::OptionNone => false,
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
             expr_uses_runtime(body)
         }
         IrExprKind::Replay {
@@ -205,6 +205,10 @@ pub(super) fn emit_entry_main(
         if uses_runtime {
             let rt_init_ref = module.declare_func_in_func(runtime.runtime_init, builder.func);
             builder.ins().call(rt_init_ref, &[]);
+            if runtime.outage_plan.catches {
+                let catching = module.declare_func_in_func(runtime.outage_catching, builder.func);
+                builder.ins().call(catching, &[]);
+            }
 
             // Register corvid_runtime_shutdown via libc atexit. atexit
             // itself isn't in RuntimeFuncs because nothing else needs
@@ -325,6 +329,11 @@ pub(super) fn emit_entry_main(
         builder.switch_to_block(bench_body_b);
         let trial_idx = builder.block_params(bench_body_b)[0];
         let entry_call = builder.ins().call(entry_ref, &decoded_args);
+        // An outage nothing caught stops here, before any result is shown.
+        if runtime.outage_plan.catches {
+            let stop = module.declare_func_in_func(runtime.outage_stop_if_pending, builder.func);
+            builder.ins().call(stop, &[]);
+        }
         builder.ins().call(bench_finish_ref, &[trial_idx]);
         if let Some(result_val) = builder.inst_results(entry_call).first().copied() {
             emit_entry_result_print(
@@ -381,6 +390,11 @@ pub(super) fn emit_entry_main(
             emit_release(&mut builder, module, runtime, entry_name_val);
         }
         let entry_call = builder.ins().call(entry_ref, &decoded_args);
+        // An outage nothing caught stops here, before any result is shown.
+        if runtime.outage_plan.catches {
+            let stop = module.declare_func_in_func(runtime.outage_stop_if_pending, builder.func);
+            builder.ins().call(stop, &[]);
+        }
         let result = builder.inst_results(entry_call).first().copied();
 
         if !runtime.dup_drop_enabled {

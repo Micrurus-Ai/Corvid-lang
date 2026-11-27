@@ -190,6 +190,11 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner }
         | IrExprKind::TrustBoundary { inner } => visit_expr(inner, visit),
+        IrExprKind::Outage(outage) => {
+            if let crate::IrOutage::Checked(inner) = outage {
+                visit_expr(inner, visit);
+            }
+        }
         IrExprKind::TryRetry { body, fallback, .. } => {
             visit_expr(body, visit);
             if let Some(fallback) = fallback {

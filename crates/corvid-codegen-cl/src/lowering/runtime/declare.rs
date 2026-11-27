@@ -739,6 +739,22 @@ pub(in crate::lowering) fn declare_runtime_funcs(
             CodegenError::cranelift(format!("declare trace_run_started: {e}"), Span::new(0, 0))
         })?;
 
+    // Native outage unwinding (recoverable failures TE-3): the pending
+    // slot's test, clear and stop, and the switch that turns holding on.
+    let outage_fn = |module: &mut ObjectModule, symbol: &str, returns: bool| {
+        let mut sig = module.make_signature();
+        if returns {
+            sig.returns.push(AbiParam::new(I64));
+        }
+        module
+            .declare_function(symbol, Linkage::Import, &sig)
+            .map_err(|e| CodegenError::cranelift(format!("declare {symbol}: {e}"), Span::new(0, 0)))
+    };
+    let outage_pending_id = outage_fn(module, "corvid_outage_pending", true)?;
+    let outage_clear_id = outage_fn(module, "corvid_outage_clear", false)?;
+    let outage_stop_if_pending_id = outage_fn(module, "corvid_outage_stop_if_pending", false)?;
+    let outage_catching_id = outage_fn(module, "corvid_outage_catching", false)?;
+
     // A run's result as its public JSON text (one mapping for every type).
     let mut trace_run_completed_sig = module.make_signature();
     trace_run_completed_sig.params.push(AbiParam::new(I64));
@@ -831,6 +847,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         citation_verify_or_panic: citation_verify_or_panic_id,
         trace_run_started: trace_run_started_id,
         trace_run_completed: trace_run_completed_id,
+        outage_pending: outage_pending_id,
+        outage_clear: outage_clear_id,
+        outage_stop_if_pending: outage_stop_if_pending_id,
+        outage_catching: outage_catching_id,
+        outage_plan: Default::default(),
+        outage_checked: Default::default(),
         literal_counter: std::cell::Cell::new(0),
         // The unified ownership pass is the default. It produces
         // refcount-correct code

@@ -40,7 +40,9 @@ crashing (see [Talking to the outside world](./18-talking-to-the-outside-world.m
 The `try … retry` expression wraps any call with bounded retries and
 mandatory backoff (base delay in milliseconds):
 
-`try … retry` applies only to `Result`- or `Option`-typed expressions:
+On its own, `try … retry` applies only to `Result`- or `Option`-typed
+expressions. An `Err`, a `None` and an outage each earn another
+attempt; a final `Err` or `None` is the result:
 
 ```corvid
 effect flaky_effect:
@@ -53,6 +55,41 @@ agent robust(id: String) -> Result<String, String>:
     value = try fetch_remote(id) on error retry 3 times backoff exponential 250
     return value
 ```
+
+## Falling back when the outside world fails
+
+A database that is down, a tool that fails and a model call that
+returns nothing usable are expected events. `try … else` gives the
+expression a value to use instead:
+
+```corvid
+effect catalog_read:
+    cost: $0.001
+    reversible: true
+
+tool find_titles(term: String) -> List<String> uses catalog_read
+tool lookup_cover(isbn: String) -> String uses catalog_read
+
+agent search(term: String) -> List<String>:
+    return try find_titles(term) else ["Search is unavailable, try again"]
+
+agent cover(isbn: String) -> String:
+    return try lookup_cover(isbn) on error retry 2 times backoff linear 100 else "no-cover.png"
+```
+
+The body may be any type, and the fallback must be the same type. Only
+an outage is caught: a tool, a model, a database or a provider that
+failed, an answer that does not fit its declared type, or an expired
+`timeout`. A bug (an overflow, an index out of range) and a decision (a
+denied approval, an exceeded budget) still stop the run, so a fallback
+can never hide one. The failure may happen any number of calls inside
+the body; with `retry`, the body runs again before the fallback is used.
+
+Compiled programs catch outages from tool and connector calls the same
+way. Native code does not yet catch the failures of prompts, so a `try`
+that can reach a prompt, a `try` with a `timeout`, or a `try` that can
+reach a failing call inside a `match` arm, a guard or a lambda runs on
+the interpreter, and `corvid build` names which one.
 
 ## Timeouts
 

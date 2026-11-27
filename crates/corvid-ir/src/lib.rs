@@ -15,7 +15,7 @@ mod type_visit;
 pub mod types;
 
 pub use lower::{lower, lower_with_modules};
-pub use expr_visit::for_each_expr;
+pub use expr_visit::{for_each_expr, walk_expr as for_each_subexpr, walk_stmt as for_each_stmt_expr};
 pub use type_visit::for_each_compiled_type_mut;
 pub use types::*;
 
