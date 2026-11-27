@@ -437,3 +437,80 @@ fn native_replay_warns_when_the_trace_used_another_tz_database() {
     }
     assert!(stderr.contains("recorded with tz database 1999z"), "{stderr}");
 }
+
+/// A caught outage replays to the same fallback (recoverable failures
+/// TE-3d). The tool is declared to answer `Int`; natively the test tools
+/// library answers it with text, which does not decode, and on the
+/// interpreter its handler fails. Either way it is an outage, recorded
+/// with its `outage` flag.
+const CAUGHT_OUTAGE_SRC: &str = r#"
+tool echo_string(s: String) -> Int
+
+agent lookup(name: String) -> Int:
+    return echo_string(name) + 1
+
+agent main() -> Int:
+    return try lookup("a") else 7
+"#;
+
+fn run_caught_outage(bin: &Path, trace_path: &Path, replay_trace: Option<&Path>) -> std::process::Output {
+    let mut cmd = Command::new(bin);
+    cmd.env("CORVID_TRACE_PATH", trace_path);
+    if let Some(replay_trace) = replay_trace {
+        cmd.env("CORVID_REPLAY_TRACE_PATH", replay_trace);
+    }
+    cmd.output().expect("run native binary")
+}
+
+#[test]
+fn a_native_run_that_caught_an_outage_replays_to_the_same_fallback() {
+    let ir = ir_of(CAUGHT_OUTAGE_SRC);
+    let tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(&ir, "corvid_replay_native", &tmp.path().join("caught"), &[test_tools_lib_path().as_path()])
+        .expect("compile native binary");
+    let recorded_trace = tmp.path().join("recorded.jsonl");
+    let recorded = run_caught_outage(&produced, &recorded_trace, None);
+    assert!(recorded.status.success(), "record run: {}", String::from_utf8_lossy(&recorded.stderr));
+    assert_eq!(String::from_utf8_lossy(&recorded.stdout).trim(), "7");
+
+    let replay_trace = tmp.path().join("replayed.jsonl");
+    let replayed = run_caught_outage(&produced, &replay_trace, Some(&recorded_trace));
+    assert!(replayed.status.success(), "replay run: {}", String::from_utf8_lossy(&replayed.stderr));
+    assert_eq!(recorded.stdout, replayed.stdout);
+    assert_eq!(normalize_trace(&recorded_trace), normalize_trace(&replay_trace));
+}
+
+/// The tool succeeds when the binary runs live, so only the recorded
+/// failure can send the replay to the fallback: it is served from the
+/// interpreter's trace, never called.
+const REPLAYED_FAILURE_SRC: &str = r#"
+tool greet_string(name: String) -> String
+
+agent main() -> String:
+    return try greet_string("a") else "fallback"
+"#;
+
+#[tokio::test]
+async fn a_native_replay_of_an_interpreter_run_takes_the_fallback_it_took() {
+    let trace_dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::builder()
+        .tool("greet_string", |_args| async move {
+            Err(corvid_runtime::RuntimeError::ToolFailed { tool: "greet_string".into(), message: "the service is down".into() })
+        })
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .trace_to(trace_dir.path())
+        .build();
+    let ir = ir_of(REPLAYED_FAILURE_SRC);
+    let result = run_agent(&ir, entry_name(&ir), vec![], &runtime).await.expect("interpreter run");
+    assert_eq!(result, Value::String("fallback".into()));
+    let interpreter_trace = runtime.tracer().path().to_path_buf();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let produced = build_native_to_disk(&ir, "corvid_replay_native", &tmp.path().join("replayed"), &[test_tools_lib_path().as_path()])
+        .expect("compile native binary");
+    let live = run_caught_outage(&produced, &tmp.path().join("live.jsonl"), None);
+    assert_eq!(String::from_utf8_lossy(&live.stdout).trim(), "hi a", "live, the tool answers: {}", String::from_utf8_lossy(&live.stderr));
+    let replayed = run_caught_outage(&produced, &tmp.path().join("native-replay.jsonl"), Some(&interpreter_trace));
+    assert!(replayed.status.success(), "native replay: {}", String::from_utf8_lossy(&replayed.stderr));
+    assert_eq!(String::from_utf8_lossy(&replayed.stdout).trim(), "fallback");
+}

@@ -2,6 +2,19 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A caught native outage replays to the same fallback (TE-3d)
+
+There are two tests in `replay_native.rs`:
+- A compiled run that caught an outage is replayed, with the same
+  output and the same normalized trace.
+- An interpreter run whose tool call failed is replayed by the compiled
+  binary. The tool succeeds when that binary runs live (it prints
+  `hi a`), so only the recorded failure, served from the trace, can send
+  the replay to `fallback`, and it does.
+
+No code changed: the runtime's replay returns the recorded failure with
+its `outage` flag, and `corvid_runtime_call` holds it like a live one.
+
 ### Native code catches outages: `try ... else` compiled (TE-3a, TE-3b)
 
 Native code could not catch a failure, because every runtime entry point
