@@ -142,38 +142,7 @@ fn print_summary(trace: &Path, events: &[TraceEvent]) {
 /// across legacy headerless traces and 21-A-schema-era traces with
 /// a `SchemaHeader` up front.
 fn run_id_of(events: &[TraceEvent]) -> Option<&str> {
-    events.iter().find_map(|event| match event {
-        TraceEvent::SchemaHeader { run_id, .. }
-        | TraceEvent::RunStarted { run_id, .. }
-        | TraceEvent::RunCompleted { run_id, .. }
-        | TraceEvent::ToolCall { run_id, .. }
-        | TraceEvent::ToolResult { run_id, .. }
-        | TraceEvent::LlmCall { run_id, .. }
-        | TraceEvent::LlmResult { run_id, .. }
-        | TraceEvent::PromptCache { run_id, .. }
-        | TraceEvent::ApprovalRequest { run_id, .. }
-        | TraceEvent::ApprovalDecision { run_id, .. }
-        | TraceEvent::ApprovalResponse { run_id, .. }
-        | TraceEvent::ApprovalTokenIssued { run_id, .. }
-        | TraceEvent::ApprovalScopeViolation { run_id, .. }
-        | TraceEvent::HumanInputRequest { run_id, .. }
-        | TraceEvent::HumanInputResponse { run_id, .. }
-        | TraceEvent::HumanChoiceRequest { run_id, .. }
-        | TraceEvent::HumanChoiceResponse { run_id, .. }
-        | TraceEvent::HostEvent { run_id, .. }
-        | TraceEvent::HttpExchange { run_id, .. }
-        | TraceEvent::SeedRead { run_id, .. }
-        | TraceEvent::ClockRead { run_id, .. }
-        | TraceEvent::ModelSelected { run_id, .. }
-        | TraceEvent::ProgressiveEscalation { run_id, .. }
-        | TraceEvent::ProgressiveExhausted { run_id, .. }
-        | TraceEvent::StreamUpgrade { run_id, .. }
-        | TraceEvent::AbVariantChosen { run_id, .. }
-        | TraceEvent::EnsembleVote { run_id, .. }
-        | TraceEvent::AdversarialPipelineCompleted { run_id, .. }
-        | TraceEvent::AdversarialContradiction { run_id, .. }
-        | TraceEvent::ProvenanceEdge { run_id, .. } => Some(run_id.as_str()),
-    })
+    events.first().map(TraceEvent::run_id)
 }
 
 #[cfg(test)]

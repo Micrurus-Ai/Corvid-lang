@@ -2,6 +2,16 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### One reader for an event's run and time
+
+Six trace readers each matched all thirty event kinds by hand to read
+`run_id` or `ts_ms`: `corvid trace`, `replay`, the cost frontier, the routing
+report, test-from-traces and the REPL. A new kind had to be added to each.
+`TraceEvent::run_id()` and `ts_ms()` in `corvid-trace-schema` are now the one
+reader, written as exhaustive matches so a new kind fails to compile until
+it is read. The six copies and their wrapper functions are gone. No
+behavior changed: the trace-schema, CLI and REPL suites pass unchanged.
+
 ### One test-tools helper, built once per process
 
 After the last rebase the parity suite failed: the runtime stamp refused a

@@ -444,14 +444,14 @@ fn load_trace_events(trace_dir: &Path, since_ms: Option<u64>) -> Result<Vec<Trac
                 format!("invalid trace event at {}:{}", path.display(), idx + 1)
             })?;
             if since_ms
-                .map(|cutoff| event_ts_ms(&event) >= cutoff)
+                .map(|cutoff| event.ts_ms() >= cutoff)
                 .unwrap_or(true)
             {
                 events.push(event);
             }
         }
     }
-    events.sort_by_key(event_ts_ms);
+    events.sort_by_key(TraceEvent::ts_ms);
     Ok(events)
 }
 
@@ -478,41 +478,6 @@ fn resolve_since_ms(since: Option<&str>, since_commit: Option<&str>) -> Result<O
         cutoffs.push(secs * 1000);
     }
     Ok(cutoffs.into_iter().max())
-}
-
-fn event_ts_ms(event: &TraceEvent) -> u64 {
-    match event {
-        TraceEvent::SchemaHeader { ts_ms, .. }
-        | TraceEvent::RunStarted { ts_ms, .. }
-        | TraceEvent::RunCompleted { ts_ms, .. }
-        | TraceEvent::ToolCall { ts_ms, .. }
-        | TraceEvent::ToolResult { ts_ms, .. }
-        | TraceEvent::LlmCall { ts_ms, .. }
-        | TraceEvent::LlmResult { ts_ms, .. }
-        | TraceEvent::PromptCache { ts_ms, .. }
-        | TraceEvent::ApprovalRequest { ts_ms, .. }
-        | TraceEvent::ApprovalDecision { ts_ms, .. }
-        | TraceEvent::ApprovalResponse { ts_ms, .. }
-        | TraceEvent::ApprovalTokenIssued { ts_ms, .. }
-        | TraceEvent::ApprovalScopeViolation { ts_ms, .. }
-        | TraceEvent::HumanInputRequest { ts_ms, .. }
-        | TraceEvent::HumanInputResponse { ts_ms, .. }
-        | TraceEvent::HumanChoiceRequest { ts_ms, .. }
-        | TraceEvent::HumanChoiceResponse { ts_ms, .. }
-        | TraceEvent::HostEvent { ts_ms, .. }
-        | TraceEvent::HttpExchange { ts_ms, .. }
-        | TraceEvent::SeedRead { ts_ms, .. }
-        | TraceEvent::ClockRead { ts_ms, .. }
-        | TraceEvent::ModelSelected { ts_ms, .. }
-        | TraceEvent::ProgressiveEscalation { ts_ms, .. }
-        | TraceEvent::ProgressiveExhausted { ts_ms, .. }
-        | TraceEvent::StreamUpgrade { ts_ms, .. }
-        | TraceEvent::AbVariantChosen { ts_ms, .. }
-        | TraceEvent::EnsembleVote { ts_ms, .. }
-        | TraceEvent::AdversarialPipelineCompleted { ts_ms, .. }
-        | TraceEvent::AdversarialContradiction { ts_ms, .. }
-        | TraceEvent::ProvenanceEdge { ts_ms, .. } => *ts_ms,
-    }
 }
 
 fn percentile50(values: &mut [u64]) -> Option<u64> {

@@ -65,7 +65,7 @@ fn summarize(path: &Path, events: &[TraceEvent]) -> LoadedTrace {
     let mut approval_requests = 0usize;
     let mut max_ts_ms = 0u64;
     for event in events {
-        let ts = event_ts_ms(event);
+        let ts = event.ts_ms();
         if ts > max_ts_ms {
             max_ts_ms = ts;
         }
@@ -107,40 +107,3 @@ pub(super) fn parse_since(since: Option<&str>) -> Result<Option<u64>> {
     Ok(Some((ts.unix_timestamp_nanos() / 1_000_000) as u64))
 }
 
-/// Event timestamp extractor. Mirrors the same helper in
-/// `trace_cmd.rs` / `routing_report.rs`; refactoring to a shared
-/// crate-level module is out of scope for this slice.
-fn event_ts_ms(event: &TraceEvent) -> u64 {
-    match event {
-        TraceEvent::SchemaHeader { ts_ms, .. }
-        | TraceEvent::RunStarted { ts_ms, .. }
-        | TraceEvent::RunCompleted { ts_ms, .. }
-        | TraceEvent::ToolCall { ts_ms, .. }
-        | TraceEvent::ToolResult { ts_ms, .. }
-        | TraceEvent::LlmCall { ts_ms, .. }
-        | TraceEvent::LlmResult { ts_ms, .. }
-        | TraceEvent::PromptCache { ts_ms, .. }
-        | TraceEvent::ApprovalRequest { ts_ms, .. }
-        | TraceEvent::ApprovalDecision { ts_ms, .. }
-        | TraceEvent::ApprovalResponse { ts_ms, .. }
-        | TraceEvent::ApprovalTokenIssued { ts_ms, .. }
-        | TraceEvent::ApprovalScopeViolation { ts_ms, .. }
-        | TraceEvent::HumanInputRequest { ts_ms, .. }
-        | TraceEvent::HumanInputResponse { ts_ms, .. }
-        | TraceEvent::HumanChoiceRequest { ts_ms, .. }
-        | TraceEvent::HumanChoiceResponse { ts_ms, .. }
-        | TraceEvent::HostEvent { ts_ms, .. }
-        | TraceEvent::HttpExchange { ts_ms, .. }
-        | TraceEvent::SeedRead { ts_ms, .. }
-        | TraceEvent::ClockRead { ts_ms, .. }
-        | TraceEvent::ModelSelected { ts_ms, .. }
-        | TraceEvent::ProgressiveEscalation { ts_ms, .. }
-        | TraceEvent::ProgressiveExhausted { ts_ms, .. }
-        | TraceEvent::StreamUpgrade { ts_ms, .. }
-        | TraceEvent::AbVariantChosen { ts_ms, .. }
-        | TraceEvent::EnsembleVote { ts_ms, .. }
-        | TraceEvent::AdversarialPipelineCompleted { ts_ms, .. }
-        | TraceEvent::AdversarialContradiction { ts_ms, .. }
-        | TraceEvent::ProvenanceEdge { ts_ms, .. } => *ts_ms,
-    }
-}
