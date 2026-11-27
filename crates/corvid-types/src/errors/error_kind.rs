@@ -43,6 +43,8 @@ pub enum TypeErrorKind {
 
     /// Calling something that isn't callable (e.g. a primitive value).
     NotCallable { got: String },
+    /// A qualified approval label that does not name a function declared
+    /// in a Python import block.
     InvalidQualifiedApproval,
 
     /// Field access on a non-struct value.
@@ -178,6 +180,8 @@ pub enum TypeErrorKind {
     /// The return type declared doesn't match what the body returns.
     ReturnTypeMismatch { expected: String, got: String },
 
+    /// A call to a Python function the import block declares no
+    /// signature for.
     DirectPythonCallUnsupported { module: String, member: String },
 
     /// `alias.TypeName` type reference encountered, but the Corvid
@@ -301,7 +305,11 @@ pub enum TypeErrorKind {
     /// `try ... else` around a connector operation that declares
     /// `on failure`: its outages already arrive as a value.
     TryElseAroundOnFailure { operation: String, variant: String },
+    /// A browser form that does not match what it submits to;
+    /// `message` names the mismatch.
     InvalidForm { message: String },
+    /// A browser binding to a `live` route that does not match its
+    /// declaration; `message` names the mismatch.
     InvalidLiveBinding { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
@@ -549,6 +557,8 @@ pub enum TypeErrorKind {
     /// A connector `Response` outside the program that made the call.
     ResponseOutsideCaller { place: String },
 
+    /// A prompt routed to a model whose declared output format cannot
+    /// produce the prompt's return type.
     ModelOutputFormatMismatch {
         prompt: String,
         model: String,
@@ -660,7 +670,9 @@ impl TypeErrorKind {
     /// and the ranges are the [diagnostic codes](../../../../docs/proposals/diagnostic-codes.md)
     /// proposal's: E01 effects and approval, E02 types, E03 names, E04 JSON
     /// and records, E05 scalars, E06 tables, E07 actions and routes, E08
-    /// connectors, E09 streams, prompts, tools and agents.
+    /// connectors, E09 streams, prompts, tools and agents, E52 identity and
+    /// access. A code is never reused: a kind moved to its proper area
+    /// leaves its old number empty, so no code ever named two errors.
     pub fn code(&self) -> &'static str {
         match self {
             Self::NonExhaustiveMatch { .. } => "E0401",
@@ -675,8 +687,8 @@ impl TypeErrorKind {
             Self::InvalidQualifiedApproval { .. } => "E0102",
             Self::NotAStruct { .. } => "E0204",
             Self::TypeAsValue { .. } => "E0205",
-            Self::NoJsonForm { .. } => "E0702",
-            Self::RetiredJsonDecoderTool { .. } => "E0901",
+            Self::NoJsonForm { .. } => "E0407",
+            Self::RetiredJsonDecoderTool { .. } => "E0409",
             Self::RegexPatternNotLiteral { .. } => "E0501",
             Self::InvalidRegexPattern { .. } => "E0502",
             Self::InvalidRegexReplacement { .. } => "E0503",
@@ -692,8 +704,8 @@ impl TypeErrorKind {
             Self::BytesOperatorMismatch { .. } => "E0512",
             Self::SecretOperatorMismatch { .. } => "E0103",
             Self::SecretMethod { .. } => "E0104",
-            Self::SecretKeyPrefixNotLiteral { .. } => "E0513",
-            Self::HmacKeyType { .. } => "E0403",
+            Self::SecretKeyPrefixNotLiteral { .. } => "E0118",
+            Self::HmacKeyType { .. } => "E0517",
             Self::SecretAtBoundary { .. } => "E0105",
             Self::SecretTableColumn { .. } => "E0601",
             Self::SecretShownToPerson { .. } => "E0106",
@@ -720,7 +732,7 @@ impl TypeErrorKind {
             Self::PromptHistoryInvalid { .. } => "E0903",
             Self::ModelFieldInvalid { .. } => "E0904",
             Self::IdentityConfigInvalid { .. } => "E0703",
-            Self::FirstLoginPolicyRequired { .. } => "E0225",
+            Self::FirstLoginPolicyRequired { .. } => "E5210",
             Self::RoutePolicyWithoutIdentity { .. } => "E0704",
             Self::RoutePolicyUndeclaredAuthority { .. } => "E0705",
             Self::ApprovalRequiresAuthentication { .. } => "E0706",
@@ -733,7 +745,7 @@ impl TypeErrorKind {
             Self::AssistantsWithoutIdentity { .. } => "E0712",
             Self::ActionCallerWithoutSignIn { .. } => "E0713",
             Self::ActorFromInput { .. } => "E0226",
-            Self::RouteQueryFieldType { .. } => "E0602",
+            Self::RouteQueryFieldType { .. } => "E0725",
             Self::TryElseFallbackType { .. } => "E0227",
             Self::TryElseAroundOnFailure { .. } => "E0228",
             Self::InvalidForm { .. } => "E0714",
@@ -741,8 +753,8 @@ impl TypeErrorKind {
             Self::ConnectorConfigInvalid { .. } => "E0801",
             Self::AnnotationInvalid { .. } => "E0229",
             Self::UnknownGenericHead { .. } => "E0307",
-            Self::StructLiteralInvalid { .. } => "E0514",
-            Self::YieldRequiresStreamReturn { .. } => "E0716",
+            Self::StructLiteralInvalid { .. } => "E0408",
+            Self::YieldRequiresStreamReturn { .. } => "E0910",
             Self::YieldReturnTypeMismatch { .. } => "E0905",
             Self::UnapprovedDangerousCall { .. } => "E0101",
             Self::UnapprovedHighTrustCall { .. } => "E0109",
@@ -754,7 +766,7 @@ impl TypeErrorKind {
             Self::InvalidConfidence { .. } => "E0231",
             Self::UngroundedReturn { .. } => "E0209",
             Self::PromptCitationUnknownParam { .. } => "E0907",
-            Self::PromptCitationRequiresGrounded { .. } => "E0717",
+            Self::PromptCitationRequiresGrounded { .. } => "E0911",
             Self::NonReplayableCall { .. } => "E0112",
             Self::NonDeterministicCall { .. } => "E0113",
             Self::GroundedPureLaundering { .. } => "E0114",
@@ -779,20 +791,20 @@ impl TypeErrorKind {
             Self::DatabaseSettingRequired { .. } => "E0615",
             Self::DatabaseSettingInvalid { .. } => "E0616",
             Self::DatabaseEngineUnavailable { .. } => "E0617",
-            Self::RouteTargetNotModel { .. } => "E0718",
-            Self::RouteGuardNotBool { .. } => "E0719",
+            Self::RouteTargetNotModel { .. } => "E0912",
+            Self::RouteGuardNotBool { .. } => "E0913",
             Self::DuplicateServerRoute { .. } => "E0720",
             Self::GetRouteBody { .. } => "E0721",
             Self::RouteMethodAnsweredByServer { .. } => "E0722",
-            Self::ResponseOutsideCaller { .. } => "E0723",
-            Self::ModelOutputFormatMismatch { .. } => "E0724",
+            Self::ResponseOutsideCaller { .. } => "E0802",
+            Self::ModelOutputFormatMismatch { .. } => "E0914",
             Self::RolloutPercentOutOfRange { .. } => "E0233",
             Self::EnsembleDuplicateModel { .. } => "E0908",
             Self::AdversarialStageNotPrompt { .. } => "E0909",
             Self::AdversarialStageArity { .. } => "E0234",
             Self::AdversarialStageParamType { .. } => "E0235",
             Self::AdversarialStageReturnType { .. } => "E0236",
-            Self::AdversarialAdjudicatorMissingContradictionField { .. } => "E0406",
+            Self::AdversarialAdjudicatorMissingContradictionField { .. } => "E0915",
             Self::ReplayTraceNotATraceId { .. } => "E0116",
             Self::ReplayArmTypeMismatch { .. } => "E0117",
             Self::NonScalarInExternC { .. } => "E0237",
@@ -1005,7 +1017,7 @@ impl TypeErrorKind {
             }
             Self::FirstLoginPolicyRequired { identity } => {
                 format!(
-                    "E5210 First-login policy required: identity `{identity}` declares OAuth \
+                    "First-login policy required: identity `{identity}` declares OAuth \
                      providers but does not state how an unknown verified subject is \
                      provisioned. Add: provisioning: first_login: open | invited"
                 )

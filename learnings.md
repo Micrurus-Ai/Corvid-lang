@@ -8433,3 +8433,7 @@ Each error the type checker reports prints a code of its own: `[E0516] error: ..
 
 A `pub extern "c"` agent's record parameter and record result travel as the record's public JSON. That is the JSON a route takes and returns, with `@json(key:)` and `@json(case:)` renames applied and keys sorted, and it is exactly what the generated header's schema comment shows. A parameter is decoded strictly: JSON with an unknown key, a missing field or the wrong shape stops the call. Before, records crossed under their Corvid field names in declaration order, even where the header documented renamed keys.
 
+### Looking up an error code
+
+[`docs/reference/errors.md`](docs/reference/errors.md) lists every error and warning code, grouped by area, with the error it names and what it means. The page is generated from the compiler's own diagnostics, so it always matches what `corvid check` prints. The first-login policy error is `[E5210] error: First-login policy required: ...`, with the code printed once, in its bracket.
+

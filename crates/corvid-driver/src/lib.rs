@@ -112,6 +112,7 @@ pub use corvid_types::{Verdict as LawVerdict, DEFAULT_SAMPLES};
 mod build;
 mod config_loader;
 mod diagnostic;
+pub mod error_reference;
 mod law;
 mod pipeline;
 mod replay;
