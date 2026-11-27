@@ -5527,12 +5527,10 @@ agent finalize() -> Receipt:
     );
 }
 
-// Adversarial: a struct whose field is itself a nested struct
-// (or list / option) still trips the rejection — the 20n-C
-// codegen does not yet support these field shapes, so the
-// typechecker stays in lock-step with codegen depth.
+/// A `pub extern "c"` signature takes and returns any type with a JSON
+/// form: nested records, lists, options. They cross as JSON strings.
 #[test]
-fn extern_c_agent_with_struct_param_containing_nested_struct_field_still_errors() {
+fn extern_c_agent_takes_nested_records_and_returns_lists() {
     let checked = check(
         r#"
 type Inner:
@@ -5540,31 +5538,25 @@ type Inner:
 
 type Outer:
     inner: Inner
+    tags: List<String>
+    note: Option<String>
 
 pub extern "c"
-agent refund_bot(outer: Outer @borrowed) -> Bool:
-    return true
+agent labels(outer: Outer @borrowed) -> List<String>:
+    return [outer.inner.label]
 "#,
     );
-    let err = checked
-        .errors
-        .iter()
-        .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
-        .expect("expected NonScalarInExternC error for nested-struct field");
-    let hint = err.hint().unwrap_or_default();
-    assert!(
-        hint.contains("scalars") && hint.contains("Nested structs"),
-        "expected scalar-only hint, got {hint:?}"
-    );
+    assert!(checked.errors.is_empty(), "{:?}", checked.errors);
 }
 
+/// A type with no JSON form still cannot cross, and the hint says what can.
 #[test]
-fn extern_c_agent_with_list_return_errors_with_hint_at_22b() {
+fn extern_c_agent_refuses_a_type_with_no_json_form() {
     let checked = check(
         r#"
 pub extern "c"
-agent ids() -> List<String>:
-    return ["a"]
+agent refund_bot(token: Secret) -> Bool:
+    return true
 "#,
     );
     let err = checked
@@ -5573,10 +5565,7 @@ agent ids() -> List<String>:
         .find(|e| matches!(e.kind, TypeErrorKind::NonScalarInExternC { .. }))
         .expect("expected NonScalarInExternC error");
     let hint = err.hint().unwrap_or_default();
-    assert!(
-        hint.contains("Lists") || hint.contains("rich types") || hint.contains("scalars"),
-        "expected scalar-only hint covering lists, got {hint:?}"
-    );
+    assert!(hint.contains("JSON form"), "expected the JSON-form hint, got {hint:?}");
 }
 
 // -------------------- Phase 21 slice inv-A: @replayable --------------------

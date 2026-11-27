@@ -31,6 +31,25 @@ Tests:
 
 No new diagnostic kind.
 
+### Every public type crosses the C ABI
+
+Since the C ABI moved to the public JSON form, the wire could carry any
+public shape. The checker still accepted only flat records of scalar fields,
+a narrowing filed at the front of its section. Now
+`extern_c_param_type_supported` and `extern_c_return_type_supported` accept
+any record, variant, list, option, result or map with a JSON form. That is
+decided by `json_wire_problem`, the rule `from_json` and `to_json` use, so the
+C boundary takes exactly what a route body takes. The question of what
+crosses as JSON was asked in three places: the checker, the code generator's
+wrapper and the C header. It is now one method, `Type::crosses_c_abi_as_json`,
+which all three call. Ownership inference covers the same types. The old
+scalar-field checks and their imported-struct helper are removed.
+
+A cdylib test sends an order with a list of line records and an optional
+note, and receives a `List<String>` and an `Option<Line>`, including `null`.
+That test found the native list `+` miscompile, fixed in the commit before
+this one.
+
 ### Native list `+`
 
 While testing nested records across the C ABI, a natively built

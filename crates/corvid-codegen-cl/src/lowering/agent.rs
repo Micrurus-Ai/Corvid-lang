@@ -117,7 +117,7 @@ pub(super) fn define_extern_c_wrapper(
                 // embedded plan. A buffer that is not one traps, so the
                 // caller sees an honest abort rather than a later crash.
                 // The contract is in docs/reference/exported-abi.md.
-                ty @ Type::Struct(_) => {
+                ty if ty.crosses_c_abi_as_json() => {
                     let from_cstr_ref =
                         module.declare_func_in_func(runtime.string_from_cstr, builder.func);
                     let from_cstr_call = builder.ins().call(from_cstr_ref, &[raw]);
@@ -219,7 +219,7 @@ pub(super) fn define_extern_c_wrapper(
             // public JSON form, through the embedded plan: the JSON a
             // route returns and `corvid run` prints. The caller frees it
             // with `corvid_free_string`.
-            ty @ Type::Struct(_) => {
+            ty if ty.crosses_c_abi_as_json() => {
                 let result = *results.first().ok_or_else(|| {
                     CodegenError::cranelift(
                         format!(
@@ -308,7 +308,7 @@ fn extern_c_abi_type(ty: &Type, span: Span) -> Result<clir::Type, CodegenError> 
         // buffers, decoded/encoded by the per-DefId routines that
         // 20n-C already shipped for internal sites. Both are I64-
         // shaped on the wire.
-        Type::Struct(_) => Ok(I64),
+        ty if ty.crosses_c_abi_as_json() => Ok(I64),
         Type::Grounded(inner) => extern_c_abi_type(inner, span),
         Type::Tainted(inner) => extern_c_abi_type(inner, span),
         Type::Nothing => Err(CodegenError::cranelift(

@@ -8445,3 +8445,7 @@ Looking up, adding or replacing a key in a `Map` takes about the same time whate
 
 `a + b` on two lists gives a new list of `a`'s entries followed by `b`'s, in native code as on the interpreter, so `out = out + [item]` inside a loop builds a list in a compiled program too. Native code used to stop such a program with a "capacity overflow" crash.
 
+### Any JSON-shaped type crosses the C ABI
+
+A `pub extern "c"` agent takes and returns any record, variant, list, option, result or map that has a JSON form, including nested records and lists of records, as a JSON string in the public form. Before, it took only flat records of `Int`, `Float`, `Bool` and `String` fields. A type with no JSON form, such as a `Secret` or a stream, is still refused, and the error names it.
+

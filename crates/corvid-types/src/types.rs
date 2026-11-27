@@ -545,6 +545,16 @@ impl Type {
         }
     }
 
+    /// Whether a `pub extern "c"` signature passes this type as a
+    /// `const char*` of its public JSON rather than a C scalar: the one
+    /// rule the checker, the code generator and the C header ask.
+    pub fn crosses_c_abi_as_json(&self) -> bool {
+        matches!(
+            self,
+            Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Option(_) | Type::Result(_, _) | Type::Map(_, _)
+        )
+    }
+
     /// Is this type compatible with `other` in a value-assignment position?
     ///
     /// Structurally identical types match and `Unknown` matches anything

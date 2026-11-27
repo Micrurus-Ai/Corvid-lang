@@ -29,8 +29,8 @@ library.
 
 | Position | Accepted types |
 |---|---|
-| **Parameter** | `Int`, `Float`, `Bool`, `String`, **user-declared structs whose fields are all `Int` / `Float` / `Bool` / `String`** |
-| **Return** | `Int`, `Float`, `Bool`, `String`, `Grounded<Int>`, `Grounded<Float>`, `Grounded<Bool>`, `Grounded<String>`, `Nothing`, **user-declared structs whose fields are all `Int` / `Float` / `Bool` / `String`** |
+| **Parameter** | `Int`, `Float`, `Bool`, `String`, and **any record, variant, list, option, result or map with a JSON form** (as a JSON string) |
+| **Return** | `Int`, `Float`, `Bool`, `String`, `Grounded<Int>`, `Grounded<Float>`, `Grounded<Bool>`, `Grounded<String>`, `Nothing`, and **any record, variant, list, option, result or map with a JSON form** (as a JSON string) |
 
 A struct parameter arrives at the cdylib as a **caller-owned
 `const char*` JSON buffer**, and a struct return leaves as a
@@ -60,13 +60,9 @@ When a struct parameter or return uses the JSON wire:
 
 ### What's still NOT accepted at v1.0
 
-- **Struct fields that aren't scalars.** Nested structs, `List<T>`,
-  `Option<T>`, and other rich field shapes are rejected at typecheck
-  time. The wire now uses the public JSON form, which carries all of
-  them, so this narrowing is the checker's alone and widening it is on
-  the roadmap.
-- **Top-level `List<T>`, `Option<T>`, generic parameters**, for the
-  same reason. Wrap them in a one-field struct as a stopgap.
+- **Types with no JSON form**: a `Secret`, a stream, a handle, an
+  upload. The checker refuses them with the rule `from_json` and
+  `to_json` use, and names the type.
 - **Tool calls inside the exported agent's body**. Allowed, but
   the host must supply the tool implementation at runtime via
   the `corvid_register_tool` C-API (the same dispatch path

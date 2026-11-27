@@ -778,3 +778,56 @@ fn a_renamed_record_crosses_the_c_abi_under_the_keys_the_header_documents() {
         assert_eq!(keys, returned_keys, "the keys received are the keys the header documents");
     }
 }
+
+/// Nested records, lists and options cross the C ABI as public JSON in
+/// both directions, through the same plan `from_json` and `to_json` use.
+#[test]
+fn nested_records_lists_and_options_cross_the_c_abi() {
+    let src = r#"
+type Line:
+    sku: String
+    qty: Int
+
+type Order:
+    id: String
+    lines: List<Line>
+    note: Option<String>
+
+pub extern "c"
+agent skus(order: Order @borrowed) -> List<String>:
+    out: List<String> = []
+    for line in order.lines:
+        out = out + [line.sku]
+    return out
+
+pub extern "c"
+agent first_line(order: Order @borrowed) -> Option<Line>:
+    for line in order.lines:
+        return Some(line)
+    return None
+"#;
+    let produced = build_cdylib(src, "nested_order_cdylib");
+    // SAFETY: symbols are loaded from the just-built library and invoked with valid ABI values.
+    unsafe {
+        let lib = load_library_leaked(&produced);
+        type Call = unsafe extern "C" fn(*const c_char, *mut u64) -> *const c_char;
+        let skus: libloading::Symbol<Call> = lib.get(b"skus").expect("resolve skus");
+        let first_line: libloading::Symbol<Call> = lib.get(b"first_line").expect("resolve first_line");
+        let free: libloading::Symbol<unsafe extern "C" fn(*const c_char)> =
+            lib.get(b"corvid_free_string").expect("resolve corvid_free_string");
+        let call = |f: &libloading::Symbol<Call>, json: &str| {
+            let input = CString::new(json).unwrap();
+            let mut observation = 0u64;
+            let out = f(input.as_ptr(), &mut observation as *mut u64);
+            assert!(!out.is_null());
+            let text = CStr::from_ptr(out).to_str().unwrap().to_owned();
+            free(out);
+            text
+        };
+        let order = r#"{"id":"o-1","lines":[{"sku":"a","qty":1},{"sku":"b","qty":2}],"note":null}"#;
+        assert_eq!(call(&skus, order), r#"["a","b"]"#);
+        assert_eq!(call(&first_line, order), r#"{"qty":1,"sku":"a"}"#);
+        assert_eq!(call(&first_line, r#"{"id":"o-2","lines":[],"note":"empty"}"#), "null");
+    }
+}
+
