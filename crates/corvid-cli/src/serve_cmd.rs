@@ -72,6 +72,7 @@ mod assistant_endpoint;
 mod browser_asset;
 mod live_assets;
 mod live;
+mod own_origin;
 mod public_failure;
 mod route_stream;
 use browser_asset::browser_asset;

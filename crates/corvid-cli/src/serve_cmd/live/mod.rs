@@ -47,23 +47,13 @@ pub(super) enum Failure {
     Unavailable,
 }
 
-fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    let mut values = headers.get_all(name).iter();
-    let value = values.next()?.to_str().ok()?;
-    values.next().is_none().then_some(value)
-}
+use super::own_origin::{own_origin, single_header};
 
 fn same_origin(headers: &HeaderMap, public_base: Option<&str>) -> bool {
     let Some(origin) = single_header(headers, "origin") else {
         return false;
     };
-    let expected = match public_base {
-        Some(base) => reqwest::Url::parse(base).ok(),
-        None => single_header(headers, "host")
-            .and_then(|host| host.parse::<axum::http::uri::Authority>().ok())
-            .filter(|authority| !authority.as_str().contains('@'))
-            .and_then(|authority| reqwest::Url::parse(&format!("http://{authority}")).ok()),
-    };
+    let expected = own_origin(headers, public_base);
     expected.is_some_and(|url| {
         matches!(url.scheme(), "https" | "http") && origin == url.origin().ascii_serialization()
     })
