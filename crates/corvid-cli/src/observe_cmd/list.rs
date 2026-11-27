@@ -1,6 +1,6 @@
 //! `corvid observe list` build + render.
 //!
-//! Walks `target/trace/*.lineage.jsonl`, summarizes each run
+//! Walks the run traces and lineage traces in `target/trace`, summarizes each run
 //! into an `ObservedRun` (trace id, root, event/failure/denial
 //! counts, total cost, hot-spot latency), and renders a
 //! pipe-separated table sorted by recency.
@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use corvid_runtime::{LineageEvent, LineageKind, LineageStatus};
 
 use super::{
-    is_lineage_jsonl, kind_name, read_lineage_events, ObserveListReport, ObservedRun,
+    is_trace_jsonl, kind_name, read_lineage_events, ObserveListReport, ObservedRun,
 };
 
 pub fn build_observe_list(trace_dir: &Path) -> Result<ObserveListReport> {
@@ -28,7 +28,7 @@ pub fn build_observe_list(trace_dir: &Path) -> Result<ObserveListReport> {
         {
             let entry = entry?;
             let path = entry.path();
-            if !is_lineage_jsonl(&path) {
+            if !is_trace_jsonl(&path) {
                 continue;
             }
             let events = read_lineage_events(&path)

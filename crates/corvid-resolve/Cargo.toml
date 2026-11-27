@@ -6,6 +6,7 @@ license.workspace = true
 description = "Name resolution for the Corvid language."
 
 [dependencies]
+corvid-hex = { workspace = true }
 corvid-ast = { workspace = true }
 serde = { workspace = true }
 

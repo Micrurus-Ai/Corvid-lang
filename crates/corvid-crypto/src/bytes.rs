@@ -43,6 +43,15 @@ impl Bytes {
     }
 
     /// The raw bytes.
+    /// `a + b`: `a`'s bytes followed by `b`'s, for a signed message with a
+    /// binary part (a DSSE envelope, a length-prefixed format).
+    pub fn concat(&self, other: &Bytes) -> Bytes {
+        let mut joined = Vec::with_capacity(self.as_slice().len() + other.as_slice().len());
+        joined.extend_from_slice(self.as_slice());
+        joined.extend_from_slice(other.as_slice());
+        Bytes::new(&joined)
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }

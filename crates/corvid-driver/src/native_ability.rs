@@ -38,6 +38,9 @@ pub enum NotNativeReason {
     /// `--mode mock` on a program with connectors: a mock payload is a
     /// Corvid expression the interpreter evaluates.
     ConnectorMockMode,
+    /// The entry agent takes or returns a type the native command line
+    /// cannot carry; the reason is the code generator's own.
+    EntryBoundary { reason: String },
     /// A connector operation that native code cannot call yet; the
     /// reason names what (native dispatch N1 covers JSON-shaped calls).
     ConnectorNotNative {
@@ -83,9 +86,9 @@ pub enum NotNativeReason {
     PromptToolsRequireInterpreter,
     UnsupportedMap,
     UnsupportedMatch,
-    /// Builtin methods on built-in receiver types (`String.length()`
-    /// and the 45d/45e/45f batches) are interpreter-only in 45c.
-    BuiltinMethodNotNative,
+    /// A builtin method native code does not run yet; `method` names it
+    /// with its receiver type.
+    BuiltinMethodNotNative { method: String },
     /// A tool of the program's own whose argument or answer type has no
     /// native JSON form.
     ToolTypeNotNative {
@@ -106,6 +109,7 @@ impl std::fmt::Display for NotNativeReason {
                 f,
                 "program imports Python module `{module}` - native Python FFI is not implemented yet"
             ),
+            Self::EntryBoundary { reason } => write!(f, "{reason}"),
             Self::ConnectorMockMode => write!(
                 f,
                 "connectors run in `mock` mode, whose payloads are Corvid expressions the interpreter evaluates"
@@ -155,8 +159,8 @@ impl std::fmt::Display for NotNativeReason {
             Self::HumanBoundaryNotNative => {
                 write!(f, "program uses `ask` or `choose` - human input boundaries are interpreter-only in this slice")
             }
-            Self::BuiltinMethodNotNative => {
-                write!(f, "program uses a builtin method (e.g. `String.length()`) - interpreter-only in 45c; the auto-dispatcher runs the interpreter tier")
+            Self::BuiltinMethodNotNative { method } => {
+                write!(f, "program calls {method}, which native code does not run yet")
             }
             Self::UnsupportedMap => f.write_str(corvid_codegen_cl::NATIVE_MAP_REQUIREMENTS),
             Self::ToolTypeNotNative { name } => write!(
@@ -172,7 +176,7 @@ impl std::fmt::Display for NotNativeReason {
             ),
             Self::CallbackNotNative => write!(f, "this callback signature or body requires the interpreter"),
             Self::PlaceAssignmentNotNative => {
-                write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - interpreter-only in 45b; the auto-dispatcher runs the interpreter tier")
+                write!(f, "program uses place assignment (`x.field = v` / `xs[i] = v` / compound `op=`) - runs on the interpreter only; the auto-dispatcher runs the interpreter tier")
             }
         }
     }
@@ -470,7 +474,13 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
         {
             scan_expr(receiver, current_return_ty, context)
         }
-        IrExprKind::BuiltinMethod { .. } => Err(NotNativeReason::BuiltinMethodNotNative),
+        IrExprKind::BuiltinMethod { kind, receiver, .. } => Err(NotNativeReason::BuiltinMethodNotNative {
+            method: format!(
+                "`{}` on `{}`",
+                corvid_types::builtin_methods::builtin_method_name(&receiver.ty, *kind).unwrap_or("a builtin method"),
+                receiver.ty.display_name()
+            ),
+        }),
         IrExprKind::Literal(_) | IrExprKind::Local { .. } | IrExprKind::Decl { .. } => Ok(()),
         IrExprKind::Call {
             kind,
@@ -695,7 +705,7 @@ agent main() -> Int:
     return words.length()
 "#).expect("valid program using a tool and list sorting");
         assert!(matches!(native_ability(&ir), Err(NotNativeReason::ToolCall { .. })));
-        assert!(matches!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BuiltinMethodNotNative)));
+        assert!(matches!(native_ability_with_tools(&ir, true), Err(NotNativeReason::BuiltinMethodNotNative { .. })));
     }
 
     #[test]

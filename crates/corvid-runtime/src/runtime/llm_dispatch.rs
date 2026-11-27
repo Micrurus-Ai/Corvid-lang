@@ -1068,6 +1068,64 @@ impl Runtime {
         crate::json::object_finish(builder)
     }
 
+    /// Record one model call's usage everywhere it is read: the usage
+    /// ledger, the trace's `llm.usage` event (which derived lineage and
+    /// `corvid observe` read), and the active cost observations. Every
+    /// live model call, whole or streamed, records through here once,
+    /// just before its result is traced. Returns the call's cost.
+    pub(crate) fn record_model_usage(
+        &self,
+        prompt: &str,
+        actual_model: &str,
+        adapter: Option<String>,
+        usage: crate::llm::TokenUsage,
+    ) -> f64 {
+        let cost_usd = if actual_model.is_empty() {
+            0.0
+        } else {
+            self.model_catalog
+                .describe_named_model(actual_model, usage.prompt_tokens as u64, usage.completion_tokens as u64)
+                .cost_estimate
+        };
+        let model_metadata = self.model_catalog.get(actual_model);
+        let provider = model_metadata.and_then(|model| model.provider.clone());
+        let privacy_tier = model_metadata.and_then(|model| model.privacy_tier.clone());
+        let total_tokens = normalized_total_tokens(usage);
+        let usage_record = LlmUsageRecord {
+            ts_ms: now_ms(),
+            prompt: prompt.to_string(),
+            model: actual_model.to_string(),
+            provider: provider.clone(),
+            adapter,
+            privacy_tier: privacy_tier.clone(),
+            prompt_tokens: usage.prompt_tokens as u64,
+            completion_tokens: usage.completion_tokens as u64,
+            total_tokens,
+            cost_usd,
+            local: provider.as_deref() == Some("ollama") || privacy_tier.as_deref() == Some("local"),
+        };
+        self.usage_ledger.record(usage_record.clone());
+        self.emit_host_event(
+            crate::lineage_trace::LLM_USAGE_EVENT,
+            serde_json::json!({
+                "prompt": usage_record.prompt,
+                "model": usage_record.model,
+                "provider": usage_record.provider,
+                "adapter": usage_record.adapter,
+                "privacy_tier": usage_record.privacy_tier,
+                "prompt_tokens": usage_record.prompt_tokens,
+                "completion_tokens": usage_record.completion_tokens,
+                "total_tokens": usage_record.total_tokens,
+                "cost_usd": usage_record.cost_usd,
+                "currency": "USD",
+                "unit": "token",
+                "local": usage_record.local,
+            }),
+        );
+        crate::observation_handles::record_llm_usage(usage, cost_usd);
+        cost_usd
+    }
+
     /// Streamed LLM call (slice 46d). Live mode: dispatches to the
     /// adapter's SSE stream, accumulates the full text, and emits
     /// the LlmCall/LlmResult trace pair with CHUNK BOUNDARIES (byte
@@ -1137,12 +1195,14 @@ impl Runtime {
             });
         }
         let inner = self.llms.stream(&req.as_ref()).await?;
-        let tracer = self.tracer.clone();
+        // The whole runtime, not just its tracer: a stream records its
+        // usage when it ends, through the same path a whole call uses.
+        let runtime = self.clone();
         let prompt_name = req.prompt.clone();
         let model_name = req.model.clone();
         let accumulate = futures::stream::unfold(
-            (inner, String::new(), Vec::<u64>::new(), false, tracer, prompt_name, model_name, trace_model_version),
-            |(mut inner, mut text, mut bounds, mut finished, tracer, prompt_name, model_name, model_version)| async move {
+            (inner, String::new(), Vec::<u64>::new(), false, runtime, prompt_name, model_name, trace_model_version),
+            |(mut inner, mut text, mut bounds, mut finished, runtime, prompt_name, model_name, model_version)| async move {
                 if finished {
                     return None;
                 }
@@ -1152,6 +1212,16 @@ impl Runtime {
                         bounds.push(text.len() as u64);
                         if chunk.done {
                             finished = true;
+                            // The provider reports usage on the last
+                            // chunk; a provider that reports none
+                            // records zero tokens, as a whole call does.
+                            runtime.record_model_usage(
+                                &prompt_name,
+                                &model_name,
+                                runtime.llms.adapter_name_for_model(&model_name),
+                                chunk.usage.unwrap_or_default(),
+                            );
+                            let tracer = &runtime.tracer;
                             if tracer.is_enabled() {
                                 tracer.emit(TraceEvent::LlmResult {
                                     ts_ms: now_ms(),
@@ -1166,20 +1236,27 @@ impl Runtime {
                         }
                         Some((
                             Ok(chunk),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                     Some(Err(e)) => {
                         finished = true;
                         Some((
                             Err(e),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                     None => {
                         // Provider ended without a done marker:
                         // record what we have.
                         finished = true;
+                        runtime.record_model_usage(
+                            &prompt_name,
+                            &model_name,
+                            runtime.llms.adapter_name_for_model(&model_name),
+                            crate::llm::TokenUsage::default(),
+                        );
+                        let tracer = &runtime.tracer;
                         if tracer.is_enabled() {
                             tracer.emit(TraceEvent::LlmResult {
                                 ts_ms: now_ms(),
@@ -1198,7 +1275,7 @@ impl Runtime {
                                 usage: None,
                                 confidence: None,
                             }),
-                            (inner, text, bounds, finished, tracer, prompt_name, model_name, model_version),
+                            (inner, text, bounds, finished, runtime, prompt_name, model_name, model_version),
                         ))
                     }
                 }
@@ -1432,53 +1509,7 @@ impl Runtime {
                 });
             }
         }
-        let cost_usd = if actual_model.is_empty() {
-            0.0
-        } else {
-            self.model_catalog
-                .describe_named_model(
-                    &actual_model,
-                    resp.usage.prompt_tokens as u64,
-                    resp.usage.completion_tokens as u64,
-                )
-                .cost_estimate
-        };
-        let model_metadata = self.model_catalog.get(&actual_model);
-        let provider = model_metadata.and_then(|model| model.provider.clone());
-        let privacy_tier = model_metadata.and_then(|model| model.privacy_tier.clone());
-        let total_tokens = normalized_total_tokens(resp.usage);
-        let usage_record = LlmUsageRecord {
-            ts_ms: now_ms(),
-            prompt: req.prompt.to_string(),
-            model: actual_model.clone(),
-            provider: provider.clone(),
-            adapter: actual_adapter.clone(),
-            privacy_tier: privacy_tier.clone(),
-            prompt_tokens: resp.usage.prompt_tokens as u64,
-            completion_tokens: resp.usage.completion_tokens as u64,
-            total_tokens,
-            cost_usd,
-            local: provider.as_deref() == Some("ollama") || privacy_tier.as_deref() == Some("local"),
-        };
-        self.usage_ledger.record(usage_record.clone());
-        self.emit_host_event(
-            "llm.usage",
-            serde_json::json!({
-                "prompt": usage_record.prompt,
-                "model": usage_record.model,
-                "provider": usage_record.provider,
-                "adapter": usage_record.adapter,
-                "privacy_tier": usage_record.privacy_tier,
-                "prompt_tokens": usage_record.prompt_tokens,
-                "completion_tokens": usage_record.completion_tokens,
-                "total_tokens": usage_record.total_tokens,
-                "cost_usd": usage_record.cost_usd,
-                "currency": "USD",
-                "unit": "token",
-                "local": usage_record.local,
-            }),
-        );
-        crate::observation_handles::record_llm_usage(resp.usage, cost_usd);
+        self.record_model_usage(req.prompt, &actual_model, actual_adapter.clone(), resp.usage);
         if self.tracer.is_enabled() {
             self.tracer.emit(TraceEvent::LlmResult {
                 ts_ms: now_ms(),
@@ -1704,13 +1735,7 @@ fn approval_token_id(
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode(bytes)
 }
 
 /// Slice 33S1a: marshal `IoRuntime::FileSystemEffect` into a JSON

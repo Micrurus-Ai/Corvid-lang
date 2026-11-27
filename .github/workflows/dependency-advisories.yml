@@ -1,0 +1,30 @@
+name: dependency advisories
+
+# The one definition of the Rust dependency audit. ci.yml calls it on every
+# push and pull request, and it also runs on its own once a day, because a
+# new advisory is published with no code change: on a quiet week nothing
+# else would notice it. The daily run is only this audit, not the whole
+# suite (decided by the owner 2026-11-27).
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    # 06:17 UTC daily, off the hour that most scheduled workflows share.
+    - cron: "17 6 * * *"
+
+jobs:
+  cargo-audit:
+    # A new advisory against any Rust dependency fails here when it
+    # appears, instead of surfacing later in a push notice. The known
+    # unmaintained crates, which have no successor release yet, are
+    # listed in .cargo/audit.toml; everything else is denied.
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit Cargo.lock
+        run: cargo audit --deny warnings

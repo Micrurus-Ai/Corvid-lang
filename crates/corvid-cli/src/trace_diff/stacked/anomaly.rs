@@ -106,7 +106,7 @@ pub(in crate::trace_diff) fn build_anomaly(
     }
     hasher.update(b"|");
     hasher.update(detail.as_bytes());
-    let fingerprint = hex::encode(hasher.finalize());
+    let fingerprint = corvid_hex::encode(&hasher.finalize());
 
     Anomaly {
         class,

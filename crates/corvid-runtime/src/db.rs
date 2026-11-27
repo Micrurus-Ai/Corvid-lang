@@ -371,7 +371,32 @@ impl DbHandleRegistry {
         sql: &str,
         params: &[DbValue],
     ) -> Result<DbExecuteResult, RuntimeError> {
-        let _turn = if let Some(writer) = &handle.writer {
+        self.execute_queued_timed(handle, sql, params).await.0
+    }
+
+    /// [`Self::execute_queued`], with how long the write waited for its
+    /// turn in the writer queue, for a table operation's timing.
+    pub(crate) async fn execute_queued_timed(
+        &self,
+        handle: &DbHandleInner,
+        sql: &str,
+        params: &[DbValue],
+    ) -> (Result<DbExecuteResult, RuntimeError>, std::time::Duration) {
+        let asked = std::time::Instant::now();
+        let turn = self.writer_turn(handle).await;
+        let waited = asked.elapsed();
+        let result = match turn {
+            Ok(_turn) => self.execute(handle.handle_id, sql, params),
+            Err(error) => Err(error),
+        };
+        (result, waited)
+    }
+
+    /// The writer queue's turn for an autocommit write, held until it
+    /// drops; none for a read-only handle or inside an explicit
+    /// transaction.
+    async fn writer_turn<'a>(&self, handle: &'a DbHandleInner) -> Result<Option<tokio::sync::MutexGuard<'a, ()>>, RuntimeError> {
+        Ok(if let Some(writer) = &handle.writer {
             let conn = self.lookup(handle.handle_id)?;
             let autocommit = conn
                 .lock()
@@ -386,8 +411,7 @@ impl DbHandleRegistry {
             }
         } else {
             None
-        };
-        self.execute(handle.handle_id, sql, params)
+        })
     }
 
     /// Flip into replay-quarantine mode. Subsequent `execute`

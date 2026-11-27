@@ -72,24 +72,7 @@ fn ir_of(src: &str) -> corvid_ir::IrFile {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // Override the runtime staticlib path so the linker pulls a
-    // single Rust-bundled artifact, matching the precedent set by
-    // `tests/record_native.rs` for MSVC duplicate-`std` avoidance.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 #[test]
@@ -205,15 +188,14 @@ agent run(amount: Int) -> Decision:
         String::from_utf8_lossy(&output.stderr)
     );
 
-    // Stdout should be the JSON object built by the encoder, in
-    // source-declaration field order, plus print_string's trailing
-    // newline.
+    // Stdout is the record's public JSON form, keys sorted as `to_json()`
+    // writes them: what the interpreter prints for the same result.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stdout_trimmed = stdout.trim();
-    let expected = r#"{"code":13,"confidence":0.42,"approved":false,"reason":"declined"}"#;
+    let expected = r#"{"approved":false,"code":13,"confidence":0.42,"reason":"declined"}"#;
     assert_eq!(
         stdout_trimmed, expected,
-        "entry struct print should match the source-order JSON encoding; got: {stdout_trimmed:?}",
+        "entry struct print should be the public JSON form; got: {stdout_trimmed:?}",
     );
 }
 

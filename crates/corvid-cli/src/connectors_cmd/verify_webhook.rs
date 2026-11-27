@@ -85,7 +85,7 @@ pub fn run_verify_webhook(args: WebhookVerifyArgs) -> Result<WebhookVerifyOutput
         .map_err(|e| anyhow!("hmac init: {e}"))?;
     mac.update(&body);
     let computed = mac.finalize().into_bytes();
-    let computed_hex: String = computed.iter().map(|b| format!("{b:02x}")).collect();
+    let computed_hex = corvid_hex::encode(&computed);
     let expected_hex = args
         .signature
         .trim()
@@ -149,12 +149,7 @@ mod tests {
         use hmac::{Hmac, Mac};
         let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(body);
-        let expected: String = mac
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let expected = corvid_hex::encode(&mac.finalize().into_bytes());
 
         std::env::set_var("CORVID_TEST_WEBHOOK_SECRET", secret);
         let output = run_verify_webhook(WebhookVerifyArgs {
@@ -187,12 +182,7 @@ mod tests {
         use hmac::{Hmac, Mac};
         let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(b"{\"event\":\"original\"}");
-        let original_sig: String = mac
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let original_sig = corvid_hex::encode(&mac.finalize().into_bytes());
 
         std::env::set_var("CORVID_TEST_WEBHOOK_SECRET_2", secret);
         let output = run_verify_webhook(WebhookVerifyArgs {
@@ -223,12 +213,7 @@ mod tests {
 
         let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(body);
-        let expected: String = mac
-            .finalize()
-            .into_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let expected = corvid_hex::encode(&mac.finalize().into_bytes());
 
         std::env::set_var("CORVID_TEST_GITHUB_WEBHOOK", secret);
         let output = run_verify_webhook(WebhookVerifyArgs {

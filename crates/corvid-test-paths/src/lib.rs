@@ -147,3 +147,32 @@ mod tests {
         assert!(exe.starts_with(&target), "{} is not under {}", exe.display(), target.display());
     }
 }
+
+/// The `corvid-test-tools` staticlib, built for this checkout, set as the
+/// runtime archive native builds in this process link
+/// (`CORVID_RUNTIME_STATICLIB_OVERRIDE`). It bundles the runtime, so a
+/// native test links the runtime its compiler was built from.
+///
+/// Built at most once per test process, on first use. Before, each test
+/// file carried its own copy of this helper: some built the library and
+/// some did not, so a test could link a stale one (which the runtime stamp
+/// now refuses). And tests in one process each ran `cargo build`, so one
+/// could link while another's build was rewriting the library.
+pub fn linked_test_tools_staticlib() -> PathBuf {
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let status = std::process::Command::new(cargo)
+            .args(["build", "-p", "corvid-test-tools", "--release"])
+            .current_dir(workspace_root())
+            .status()
+            .expect("run cargo build -p corvid-test-tools");
+        assert!(status.success(), "building corvid-test-tools failed");
+    });
+    let path = test_tools_staticlib();
+    // SAFETY: tests set this before linking; every caller sets the same value.
+    unsafe {
+        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
+    }
+    path
+}

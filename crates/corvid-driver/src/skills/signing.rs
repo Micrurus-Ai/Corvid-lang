@@ -52,7 +52,7 @@ pub fn content_manifest(skill_dir: &Path) -> anyhow::Result<SkillContentManifest
                 continue;
             }
             let bytes = std::fs::read(&path)?;
-            files.insert(rel, hex::encode(Sha256::digest(&bytes)));
+            files.insert(rel, corvid_hex::encode(&Sha256::digest(&bytes)));
         }
     }
     Ok(SkillContentManifest {
@@ -66,7 +66,7 @@ pub fn content_manifest(skill_dir: &Path) -> anyhow::Result<SkillContentManifest
 /// hash, used for lock pinning and update diffing.
 pub fn content_hash(manifest: &SkillContentManifest) -> anyhow::Result<String> {
     let canonical = serde_json::to_vec(manifest)?;
-    Ok(hex::encode(Sha256::digest(&canonical)))
+    Ok(corvid_hex::encode(&Sha256::digest(&canonical)))
 }
 
 /// Sign a skill directory: write `skill.sig` (DSSE envelope over the
@@ -79,7 +79,7 @@ pub fn sign_skill(
     let manifest = content_manifest(skill_dir)?;
     let payload = serde_json::to_vec(&manifest)?;
     let key = load_signing_key(key_source).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let verifying_hex = hex::encode(key.verifying_key().to_bytes());
+    let verifying_hex = corvid_hex::encode(&key.verifying_key().to_bytes());
     let key_id = verifying_hex[..16].to_string();
     let envelope = sign_envelope(&payload, SKILL_MANIFEST_PAYLOAD_TYPE, &key, &key_id);
     std::fs::write(
@@ -167,7 +167,7 @@ mod tests {
         std::fs::write(&sk_path, &seed).unwrap();
         let key = load_signing_key(&KeySource::Path(sk_path.clone())).unwrap();
         let vk_path = dir.join("vk.hex");
-        std::fs::write(&vk_path, hex::encode(key.verifying_key().to_bytes())).unwrap();
+        std::fs::write(&vk_path, corvid_hex::encode(&key.verifying_key().to_bytes())).unwrap();
         (sk_path, vk_path)
     }
 

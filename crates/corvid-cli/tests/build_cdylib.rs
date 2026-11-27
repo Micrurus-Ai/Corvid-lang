@@ -62,15 +62,8 @@ agent refund_bot(ticket_id: String, amount: Float) -> Bool:
 // here must be a NESTED struct — still beyond the encoder/decoder
 // depth and still rejected by the checker.
 const NON_SCALAR_SRC: &str = r#"
-type Assignee:
-    name: String
-
-type Ticket:
-    id: String
-    assignee: Assignee
-
 pub extern "c"
-agent refund_bot(ticket: Ticket) -> Bool:
+agent refund_bot(token: Secret) -> Bool:
     return true
 "#;
 
@@ -387,7 +380,7 @@ fn cli_build_cdylib_fails_cleanly_on_non_scalar_signature() {
         "stderr missing the ABI violation message: {stderr}"
     );
     assert!(
-        stderr.contains("extern \"c\" accepts"),
+        stderr.contains("extern \"c\" takes"),
         "stderr missing the supported-ABI-set help text: {stderr}"
     );
 }

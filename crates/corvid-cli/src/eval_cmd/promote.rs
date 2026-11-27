@@ -1,7 +1,7 @@
+use crate::lineage_input::read_lineage_events;
 use anyhow::{Context, Result};
 use corvid_runtime::{
-    promote_lineage_events_to_eval, LineageEvent, LineageRedactionPolicy,
-    LINEAGE_EVAL_FIXTURE_SCHEMA,
+    promote_lineage_events_to_eval, LineageRedactionPolicy, LINEAGE_EVAL_FIXTURE_SCHEMA,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,21 +41,6 @@ pub(super) fn run_promote_lineage(inputs: &[PathBuf], out_dir: Option<&Path>) ->
         );
     }
     Ok(0)
-}
-
-fn read_lineage_events(path: &Path) -> Result<Vec<LineageEvent>> {
-    let text = fs::read_to_string(path)?;
-    let mut events = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let event: LineageEvent = serde_json::from_str(trimmed)
-            .with_context(|| format!("line {} is not a lineage event", index + 1))?;
-        events.push(event);
-    }
-    Ok(events)
 }
 
 fn sanitize_file_stem(value: &str) -> String {

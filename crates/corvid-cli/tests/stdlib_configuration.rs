@@ -46,7 +46,7 @@ agent main() -> Result<Bool, String>:
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "Ok(true)");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), r#"{"ok":true,"tag":"ok"}"#);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(
             &fs::read(project.join("data/café.json")).unwrap()

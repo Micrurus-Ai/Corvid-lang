@@ -16,7 +16,6 @@ use corvid_types::{typecheck, EffectRegistry};
 use libloading::Library;
 use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
@@ -71,25 +70,7 @@ struct BuiltLibrary {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let workspace_root = corvid_test_paths::workspace_root();
-    let path = corvid_test_paths::test_tools_staticlib();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&workspace_root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::cdylib::runtime_staticlib_path`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn build_catalog_library() -> BuiltLibrary {

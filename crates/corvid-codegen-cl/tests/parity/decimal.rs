@@ -294,3 +294,12 @@ fn compound_assignment_on_a_decimal_total_matches_the_interpreter() {
     );
     assert_eq!(out, "7.60");
 }
+
+/// A `Decimal` literal beyond `Int`'s range keeps every digit natively too.
+#[test]
+fn decimal_literals_beyond_int_keep_every_digit() {
+    assert_eq!(
+        assert_parity_text("agent f() -> Decimal:\n    return -123456789012345678901234567890 + 1\n"),
+        "-123456789012345678901234567889"
+    );
+}

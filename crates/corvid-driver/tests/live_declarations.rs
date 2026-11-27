@@ -123,28 +123,43 @@ fn serve_refuses_to_start_a_live_until_the_transport_serves_it() {
 
 #[test]
 fn a_live_body_is_one_query_of_the_table_it_delivers() {
-    let not_a_query = errors("server board_app:\n    live \"/cards\" -> Card:\n        cards = Card.all()\n        return cards\n");
+    let not_a_query = errors("server board_app:\n    live \"/cards\" -> Card requires anyone:\n        cards = Card.all()\n        return cards\n");
     assert!(not_a_query.iter().any(|m| m.contains("must be one `return` of a table query")), "{not_a_query:#?}");
 
     let other_table = errors(
-        "table Note:\n    key id: Int\n    text: String\n\nserver board_app:\n    live \"/cards\" -> Card:\n        return Note.all()\n",
+        "table Note:\n    key id: Int\n    text: String\n\nserver board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Note.all()\n",
     );
     assert!(!other_table.is_empty(), "{other_table:#?}");
 
-    let not_a_table = errors("type Draft:\n    title: String\n\nserver board_app:\n    live \"/drafts\" -> Draft:\n        return []\n");
+    let not_a_table = errors("type Draft:\n    title: String\n\nserver board_app:\n    live \"/drafts\" -> Draft requires anyone:\n        return []\n");
     assert!(not_a_table.iter().any(|m| m.contains("delivers `Draft`, which is not a table")), "{not_a_table:#?}");
 
-    let take = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all().take(10)\n");
+    let take = errors("server board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Card.all().take(10)\n");
     assert!(take.iter().any(|m| m.contains("uses `take`")), "{take:#?}");
+
+    // Who may watch is written, never left to a default.
+    let unguarded = errors("server board_app:\n    live \"/cards\" -> Card:\n        return Card.all()\n");
+    assert!(unguarded.iter().any(|m| m.contains("declares no `requires`") && m.contains("`requires anyone` for a public list")), "{unguarded:#?}");
+    assert!(errors("server board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Card.all()\n").is_empty());
+
+    let count = errors("server board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Card.all().count()\n");
+    assert!(count.iter().any(|m| m.contains("ends in `count`; a live query delivers rows")), "{count:#?}");
+
+    // A list may hold literals and table queries, whose tables the feed
+    // watches; a call by name could read anything, so it is refused.
+    let called = errors("agent chosen() -> List<Int>:\n    return [1, 2]\n\nserver board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Card.where(fn (c) -> chosen().contains(c.card))\n");
+    assert!(called.iter().any(|m| m.contains("filters by a list that calls `chosen`")), "{called:#?}");
+    let literal = errors("server board_app:\n    live \"/cards\" -> Card requires anyone:\n        return Card.where(fn (c) -> [1, 2].contains(c.card))\n");
+    assert!(!literal.iter().any(|m| m.contains("filters by a list")), "a literal list reads no table: {literal:#?}");
 }
 
 #[test]
 fn two_lives_in_a_server_need_different_names() {
     let found = errors(
-        "server board_app:\n    live \"/boards/{board}/cards\" -> Card:\n        return Card.where(fn (c) -> c.board == path.board)\n\n    live \"/archive/cards\" -> Card:\n        return Card.all()\n",
+        "server board_app:\n    live \"/boards/{board}/cards\" -> Card requires anyone:\n        return Card.where(fn (c) -> c.board == path.board)\n\n    live \"/archive/cards\" -> Card requires anyone:\n        return Card.all()\n",
     );
     assert!(found.iter().any(|m| m.contains("is named `cards`, the same as another `live`")), "{found:#?}");
-    let unnamed = errors("server board_app:\n    live \"/{board}\" -> Card:\n        return Card.all()\n");
+    let unnamed = errors("server board_app:\n    live \"/{board}\" -> Card requires anyone:\n        return Card.all()\n");
     assert!(unnamed.iter().any(|m| m.contains("has no fixed path segment")), "{unnamed:#?}");
 }
 

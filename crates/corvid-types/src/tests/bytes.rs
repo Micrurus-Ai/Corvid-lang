@@ -1,6 +1,6 @@
 //! `Bytes` in the checker: the methods and type methods, the operator
-//! rules (constant-time `==`, no ordering, no `+`, no mixing with
-//! text), purity, and the boundaries a byte string may cross.
+//! rules (constant-time `==`, no ordering, `+` between two byte strings,
+//! no mixing with text), purity, and the boundaries a byte string may cross.
 
 use super::check;
 use crate::errors::TypeErrorKind;
@@ -55,10 +55,13 @@ fn byte_strings_have_no_order() {
     }
 }
 
+/// `+` joins two byte strings, for a signed message with a binary part;
+/// other arithmetic on bytes is refused.
 #[test]
-fn byte_strings_do_not_add() {
-    let hint = operator_hint("agent main(a: Bytes, b: Bytes) -> Bytes:\n    return a + b\n");
-    assert!(hint.contains("only `==` and `!=`"), "{hint}");
+fn byte_strings_join_with_plus_and_nothing_else() {
+    assert_clean("agent main(a: Bytes, b: Bytes) -> Bytes:\n    return a + b + \"!\".utf8()\n");
+    let hint = operator_hint("agent main(a: Bytes, b: Bytes) -> Bytes:\n    return a - b\n");
+    assert!(hint.contains("`+`, which joins two byte strings"), "{hint}");
 }
 
 #[test]

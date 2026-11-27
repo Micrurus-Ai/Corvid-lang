@@ -257,7 +257,7 @@ pub(crate) fn scan_migration_files(dir: &Path) -> Result<Vec<MigrationFile>> {
             .and_then(|name| name.to_str())
             .unwrap_or("<invalid>")
             .to_string();
-        let sha256 = hex::encode(Sha256::digest(&bytes));
+        let sha256 = corvid_hex::encode(&Sha256::digest(&bytes));
         files.push(MigrationFile { name, sha256, path });
     }
     files.sort_by(|left, right| left.name.cmp(&right.name));

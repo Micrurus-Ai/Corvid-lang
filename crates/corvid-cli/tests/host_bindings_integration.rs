@@ -78,25 +78,7 @@ fn run_python(script: &Path, cwd: &Path, library: &Path) -> Option<std::process:
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let root = workspace_root();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    let path = corvid_test_paths::test_tools_staticlib();
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::cdylib::runtime_staticlib_path`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn build_demo_cdylib(source: &Path, cwd: &Path, tools_lib: &Path) -> PathBuf {

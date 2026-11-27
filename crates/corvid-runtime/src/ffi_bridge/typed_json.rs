@@ -422,6 +422,29 @@ pub unsafe extern "C" fn corvid_json_encode_typed(
     }
 }
 
+/// A value a trace records (a run's arguments and result, an `approve`'s
+/// arguments), as public JSON with `<redacted>` at every `Secret`. A
+/// record is an observation and never stops the run: a value the public
+/// form cannot write (a `Float` that is NaN) is recorded as `null`, as the
+/// interpreter's own form writes it.
+///
+/// # Safety
+/// As for [`corvid_json_encode_typed`].
+#[no_mangle]
+pub unsafe extern "C" fn corvid_json_encode_recorded(
+    value: i64,
+    plan: *const u8,
+    plan_len: i64,
+    typeinfos: *const *const c_void,
+) -> CorvidString {
+    let plan = unsafe { cached_plan(plan, plan_len) };
+    let types_by_id = plan.types_by_id();
+    let mut reader = NativeValues { plan: &plan, typeinfos, accepts_secrets: false, secret_form: Some(SecretForm::Recorded) };
+    let text = corvid_public_json::encode_text(&Slot::scalar(value), &plan.root, &types_by_id, &mut reader)
+        .unwrap_or_else(|_| "null".to_string());
+    crate::ffi_bridge::string_from_rust(text)
+}
+
 /// One argument of a runtime call whose tool takes a secret (N3c), as
 /// public JSON: with `<redacted>` at every `Secret` position when
 /// `revealed` is 0, the form every record of the call holds, or with the

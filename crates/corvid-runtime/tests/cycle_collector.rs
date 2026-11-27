@@ -5,26 +5,14 @@
 //! the collector we build the cycle directly via FFI and call
 //! `corvid_gc_from_roots` (the deterministic, no-stack-walk variant).
 //!
-//! Why `_from_roots` and not `corvid_gc`:
-//!
-//!   The stack walk in `corvid_gc` depends on frame pointers being
-//!   preserved up the chain. Cranelift-compiled Corvid code does
-//!   (we enabled `preserve_frame_pointers` in module.rs); Rust test
-//!   release builds do NOT by default. Calling `corvid_gc` from
-//!   Rust test code can non-deterministically segfault on stacks
-//!   without proper RBP chains.
-//!
-//!   `corvid_gc_from_roots` sidesteps this: the test names the
-//!   roots explicitly (or passes none), the collector marks from
-//!   those alone, sweep runs the same way. Test correctness is
-//!   independent of Rust's frame-pointer choices.
-//!
-//! Real Corvid programs running natively invoke the full
-//! `corvid_gc` (triggered by the allocation-pressure threshold in
-//! `corvid_alloc_typed`), whose mark phase walks Cranelift-emitted
-//! frames with their preserved RBP chains. That path is exercised
-//! by `crates/corvid-codegen-cl/tests/` fixtures and future slices
-//! that can construct cycles in Corvid source (post-field-mutation).
+//! `corvid_gc`, the collection the allocation threshold triggers, finds
+//! its roots by trial deletion: the references a block holds to another
+//! are subtracted from that block's count, and whatever remains is held
+//! from outside the heap. It does not walk the stack, so it is tested
+//! here from Rust too: a cycle is collected, and a block only a Rust local
+//! holds (as a runtime function holds one mid-call) survives. It used to
+//! mark from compiled frames' stack maps alone, which freed exactly such
+//! blocks, including the one an allocation was about to return.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -54,6 +42,7 @@ extern "C" {
     fn corvid_retain(payload: *mut u8);
     fn corvid_release(payload: *mut u8);
     fn corvid_gc_from_roots(roots: *mut *mut u8, n_roots: usize);
+    fn corvid_gc();
     fn corvid_pool_cached_blocks_for_size(payload_bytes: i64) -> i64;
 
     static corvid_alloc_count: i64;
@@ -284,3 +273,44 @@ fn gc_sweep_returns_cycle_blocks_to_pool() {
         );
     }
 }
+
+/// The collection the allocation threshold runs collects an unreachable
+/// cycle, and leaves alone a block that only a local holds, which is how a
+/// runtime function holds what it is building, and how an allocation holds
+/// the block it is about to return.
+#[test]
+fn the_threshold_collection_frees_cycles_and_keeps_what_a_local_holds() {
+    let _guard = test_lock();
+    unsafe {
+        let start_releases = corvid_release_count;
+        let held = corvid_alloc_typed(16, &CELL_TYPEINFO);
+        (held as *mut *mut u8).write(std::ptr::null_mut());
+        (held as *mut *mut u8).add(1).write(std::ptr::null_mut());
+        let a = corvid_alloc_typed(16, &CELL_TYPEINFO);
+        let b = corvid_alloc_typed(16, &CELL_TYPEINFO);
+        (a as *mut *mut u8).write(b);
+        (a as *mut *mut u8).add(1).write(std::ptr::null_mut());
+        (b as *mut *mut u8).write(a);
+        (b as *mut *mut u8).add(1).write(std::ptr::null_mut());
+
+        corvid_gc();
+        assert_eq!(corvid_release_count - start_releases, 2, "the cycle is freed and the held block is not");
+
+        // A cycle with a reference from outside the heap survives.
+        let c = corvid_alloc_typed(16, &CELL_TYPEINFO);
+        let d = corvid_alloc_typed(16, &CELL_TYPEINFO);
+        (c as *mut *mut u8).write(d);
+        (c as *mut *mut u8).add(1).write(std::ptr::null_mut());
+        (d as *mut *mut u8).write(c);
+        (d as *mut *mut u8).add(1).write(std::ptr::null_mut());
+        corvid_retain(c);
+        corvid_gc();
+        assert_eq!(corvid_release_count - start_releases, 2, "an externally held cycle survives");
+
+        corvid_release(held);
+        corvid_release(c);
+        corvid_gc();
+        assert_eq!(corvid_release_count - start_releases, 5, "released, the held block and the cycle go");
+    }
+}
+

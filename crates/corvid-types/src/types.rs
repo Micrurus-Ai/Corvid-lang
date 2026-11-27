@@ -253,11 +253,7 @@ pub enum Type {
     /// natural conversion path; the JSON `null` / numbers /
     /// strings / arrays / objects all map directly.
     ///
-    /// Codegen backends refuse to lower this type until cdylib
-    /// codegen lands in a follow-up slice (the C-ABI exports
-    /// `corvid_json_parse` / `corvid_json_get_field_*` already
-    /// exist in `corvid-runtime::ffi_bridge::json_exports`, so
-    /// the cdylib bridging is plumbing rather than primitives).
+    /// Native code refuses this type; it has no native form yet.
     JsonValue,
 
     /// Compiler-known `JsonBuilder` — an opaque, mutable builder
@@ -331,6 +327,24 @@ impl Type {
             ("roles".to_string(), Type::List(Box::new(Type::String))),
             ("permissions".to_string(), Type::List(Box::new(Type::String))),
         ])
+    }
+
+    /// The built-in type `name` names in a file, given whether the file
+    /// itself declares or imports a type by that name. The core scalars
+    /// (`Int`, `Float`, `String`, `Bool`, `Nothing`) always mean the
+    /// built-in, and the checker refuses a declaration that reuses one.
+    /// Every other built-in yields to the program's own type, so adding a
+    /// built-in later (as `Caller` and `JsonError` were) never changes the
+    /// meaning of a program that already had a type of that name; the
+    /// checker warns where the program's type hides the built-in.
+    pub fn builtin_named(name: &str, declared_in_file: bool) -> Option<Type> {
+        let known = Self::compiler_known(name)?;
+        (!declared_in_file || Self::is_reserved_name(name)).then_some(known)
+    }
+
+    /// Whether `name` is a core scalar a program can never declare.
+    pub fn is_reserved_name(name: &str) -> bool {
+        matches!(name, "Int" | "Float" | "String" | "Bool" | "Nothing")
     }
 
     pub fn compiler_known(name: &str) -> Option<Type> {
@@ -549,15 +563,25 @@ impl Type {
         }
     }
 
+    /// Whether a `pub extern "c"` signature passes this type as a
+    /// `const char*` of its public JSON rather than a C scalar: the one
+    /// rule the checker, the code generator and the C header ask.
+    pub fn crosses_c_abi_as_json(&self) -> bool {
+        matches!(
+            self,
+            Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_) | Type::Option(_) | Type::Result(_, _) | Type::Map(_, _)
+        )
+    }
+
     /// Is this type compatible with `other` in a value-assignment position?
     ///
-    /// v0.1 is intentionally lenient: structurally identical types match,
-    /// `Unknown` matches anything (to avoid error cascades), and `Int`
-    /// implicitly coerces to `Float` in typing-friendly contexts.
+    /// Structurally identical types match and `Unknown` matches anything
+    /// (to avoid error cascades). An `Int` never widens to a `Float`
+    /// silently: an integer literal in a `Float` slot is typed `Float` by
+    /// the checker, and a value converts with `.to_float()`.
     pub fn is_assignable_to(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
-            (Type::Int, Type::Float) => true, // widening
             (Type::List(a), Type::List(b)) => a.is_assignable_to(b),
             (Type::Map(ka, va), Type::Map(kb, vb)) => {
                 ka.is_assignable_to(kb) && va.is_assignable_to(vb)

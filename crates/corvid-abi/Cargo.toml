@@ -6,6 +6,7 @@ license.workspace = true
 description = "Phase 22 Corvid ABI descriptor emission."
 
 [dependencies]
+corvid-hex = { workspace = true }
 # Ed25519 verification goes through corvid-crypto's strict check.
 corvid-crypto = { workspace = true }
 corvid-ast = { workspace = true }
@@ -24,7 +25,6 @@ libloading = "0.8"
 # primitives live on top of these for receipt signing too.
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 base64 = "0.22"
-hex = "0.4"
 
 [dev-dependencies]
 corvid-test-paths = { workspace = true }

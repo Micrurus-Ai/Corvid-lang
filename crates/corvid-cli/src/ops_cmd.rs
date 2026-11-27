@@ -71,7 +71,7 @@ mod tests {
 
     fn write_pubkey(dir: &Path, key: &SigningKey) -> std::path::PathBuf {
         let path = dir.join("deploy.pub");
-        let hex = hex::encode(key.verifying_key().as_bytes());
+        let hex = corvid_hex::encode(key.verifying_key().as_bytes());
         std::fs::write(&path, hex).unwrap();
         path
     }

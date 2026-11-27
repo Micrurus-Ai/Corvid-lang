@@ -302,19 +302,7 @@ fn review_id(event: &LineageEvent, reason: ReviewReason, created_ms: u64) -> Str
 }
 
 fn hex_prefix(bytes: &[u8], nibbles: usize) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(nibbles);
-    for byte in bytes {
-        if out.len() >= nibbles {
-            break;
-        }
-        out.push(HEX[(byte >> 4) as usize] as char);
-        if out.len() >= nibbles {
-            break;
-        }
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode_prefix(bytes, nibbles)
 }
 
 #[cfg(test)]

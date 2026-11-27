@@ -14,6 +14,7 @@ typedef struct {
 
 corvid_list* corvid_list_new(int64_t capacity, const struct corvid_typeinfo* info);
 void corvid_list_append(corvid_list* list, int64_t slot);
+corvid_list* corvid_list_concat(corvid_list* left, corvid_list* right, const struct corvid_typeinfo* info);
 void corvid_list_free_storage(void* payload);
 
 #endif

@@ -200,17 +200,7 @@ fn build_rfc2822_message(to: &str, subject: &str, body: &str) -> String {
 }
 
 fn url_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 8);
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            b' ' => out.push_str("%20"),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    corvid_text::encode_url_component(value)
 }
 
 /// Convenience: build a Gmail real client backed by the shared
@@ -302,32 +292,7 @@ mod tests {
     }
 
     fn percent_decode(value: &str) -> String {
-        let bytes = value.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                if let (Some(h), Some(l)) =
-                    (hex_value(bytes[i + 1]), hex_value(bytes[i + 2]))
-                {
-                    out.push(h * 16 + l);
-                    i += 3;
-                    continue;
-                }
-            }
-            out.push(bytes[i]);
-            i += 1;
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    }
-
-    fn hex_value(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            _ => None,
-        }
+        corvid_text::decode_url_component(value).expect("test URLs are percent-encoded")
     }
 
     /// Slice 41K-C: search builds a GET to

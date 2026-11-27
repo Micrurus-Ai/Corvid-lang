@@ -75,6 +75,46 @@ async fn a_table_keyed_by_two_columns_reads_and_writes_by_both() {
     }
 }
 
+/// Live L2: a query told which rows were written reads only those, by
+/// both key columns, under its own condition.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_query_reading_written_rows_matches_both_key_columns() {
+    for database in TestDatabase::every_engine().await {
+        let source = program(&database.settings())
+            + "\nagent of_proposal(proposal: String) -> List<Edit>:\n    return Edit.where(fn (e) -> e.proposal == proposal)\n";
+        database.create_tables(&source).await;
+        let ir = compile_to_ir(&source).unwrap_or_else(|errors| panic!("must compile: {errors:#?}"));
+        let runtime = Runtime::builder().build();
+        run_ir_with_runtime(&ir, Some("main"), vec![], &runtime).await.expect("program runs");
+        // `p1/2` matches; `p1/9` does not exist; `p2/1` was deleted. `p1/1`
+        // matches the condition but was not written, so it is not read.
+        let written = corvid_vm::WrittenKeys {
+            table: "Edit".into(),
+            keys: vec![r#"["p1",2]"#.into(), r#"["p1",9]"#.into(), r#"["p2",1]"#.into()],
+        };
+        let rows = corvid_vm::run_agent_reading_written_rows(
+            &ir,
+            "of_proposal",
+            vec![Value::String("p1".into())],
+            &runtime,
+            written,
+        )
+        .await
+        .expect("query runs");
+        let Value::List(rows) = rows else { panic!("a list: {rows:?}") };
+        let titles: Vec<String> = rows
+            .iter_cloned()
+            .into_iter()
+            .map(|row| match row {
+                Value::Struct(row) => format!("{:?}", row.get_field("title").unwrap()),
+                other => panic!("a row: {other:?}"),
+            })
+            .collect();
+        assert_eq!(titles, vec![format!("{:?}", Value::String("Persuasion".into()))], "on {}", database.label());
+        database.finish().await;
+    }
+}
+
 #[test]
 fn a_key_of_two_columns_is_created_as_one_primary_key() {
     let schemas = corvid_driver::table_schemas(&program("    engine: sqlite\n    location: \"reviews.sqlite\""), std::path::Path::new("program.cor")).expect("compiles");

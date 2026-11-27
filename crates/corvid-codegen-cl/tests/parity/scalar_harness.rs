@@ -24,27 +24,16 @@ fn compile(ir: &corvid_ir::IrFile, dir: &tempfile::TempDir) -> std::path::PathBu
         .expect("compile + link")
 }
 
-/// Run `src`, whose entry agent returns a String, an Int or a text-held
-/// scalar, on both tiers and return the text both produced.
+/// Run `src` on both tiers and return the text both printed, which must
+/// be what `corvid run` prints on the interpreter (`printed_result`).
 #[track_caller]
 pub(super) fn assert_parity_text(src: &str) -> String {
     let ir = ir_of(src);
-    let interpreted = match interpret(&ir).expect("interpreter run") {
-        Value::String(text) => text.to_string(),
-        Value::Decimal(decimal) => decimal.to_string(),
-        Value::Duration(duration) => duration.to_string(),
-        Value::Instant(instant) => instant.to_string(),
-        Value::ZonedTime(zoned) => zoned.to_string(),
-        Value::TimeZone(zone) => zone.to_string(),
-        Value::Currency(currency) => currency.to_string(),
-        Value::Locale(locale) => locale.to_string(),
-        // The interpreter prints a byte string as `Bytes(<hex>)`.
-        Value::Bytes(bytes) => format!("{bytes:?}"),
-        Value::Int(n) => n.to_string(),
-        // `corvid run` prints a Float result in this form.
-        Value::Float(x) => corvid_runtime::number_text::float_display(x),
-        other => panic!("interpreter returned {other:?}, not a String, Int or text-held scalar; src=\n{src}"),
-    };
+    // What `corvid run` prints for the interpreter's result: the one
+    // printed form both tiers share.
+    let value = interpret(&ir).expect("interpreter run");
+    let agent = ir.agents.iter().find(|agent| agent.name == entry_name(&ir)).expect("entry agent");
+    let interpreted = corvid_vm::printed_result(&ir, agent, &value);
     let tmp = tempfile::tempdir().expect("tempdir");
     let (stdout, stderr, status) = run_with_leak_detector(&compile(&ir, &tmp));
     assert!(status.success(), "compiled binary failed: {status:?} stderr={stderr} src=\n{src}");

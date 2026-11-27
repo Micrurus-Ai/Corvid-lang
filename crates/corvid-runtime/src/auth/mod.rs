@@ -8,6 +8,10 @@ mod api_keys;
 mod approvals;
 mod audit;
 pub mod csrf;
+mod delegations;
+pub use delegations::{
+    hash_delegation_secret, DelegatedAction, DelegationCreate, DelegationMode, DelegationRecord,
+};
 mod invitations;
 mod oauth;
 mod observation;
@@ -236,7 +240,9 @@ impl SessionAuthRuntime {
                 create index if not exists auth_audit_session on auth_audit_events(session_id);",
             )
             .map_err(|err| RuntimeError::Other(format!("failed to initialize auth schema: {err}")))?;
-        observation::initialize(&self.conn.lock().unwrap())
+        let conn = self.conn.lock().unwrap();
+        observation::initialize(&conn)?;
+        delegations::initialize(&conn)
     }
 }
 

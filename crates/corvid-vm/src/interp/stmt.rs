@@ -4,7 +4,6 @@ use crate::errors::{InterpError, InterpErrorKind};
 use super::expr::eval_binop;
 use crate::step::{StepAction, StepEvent, StmtKind};
 use crate::value::{StreamChunk, StreamValue, Value};
-use crate::value_to_json;
 use async_recursion::async_recursion;
 use corvid_ast::{BackpressurePolicy, Span};
 use corvid_ir::{IrAgent, IrBlock, IrExpr, IrExprKind, IrPathSeg, IrStmt};
@@ -672,7 +671,9 @@ impl<'ir> Interpreter<'ir> {
                         Ok(v) => v,
                         Err(v) => return Ok(Flow::Return(v)),
                     };
-                    json_args.push(value_to_json(&v));
+                    // Recorded and shown to the approver in the public form,
+                    // by the argument's type, a `Secret` as `<redacted>`.
+                    json_args.push(super::tool_json::recorded_value_json(&v, &a.ty, &self.types_by_id));
                 }
 
                 if self.should_yield_boundary() {

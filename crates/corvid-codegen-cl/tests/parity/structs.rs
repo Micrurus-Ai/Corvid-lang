@@ -1,3 +1,4 @@
+use super::scalar_harness::assert_parity_text;
 use super::{assert_parity, assert_parity_bool, ir_of, test_tools_lib_path};
 
 /// Phase 20n-C commit 5 enabled struct returns at the native
@@ -52,40 +53,11 @@ fn struct_entry_return_builds_and_prints_json_encoded_struct() {
     );
 }
 
-/// `Type::List(_)` returns are still blocked at the native
-/// command-line boundary — they need their own dedicated encoder
-/// primitives (per the comment in `build_native_to_disk` at
-/// `crates/corvid-codegen-cl/src/lib.rs:131`). Preserve the
-/// shape of the previous struct-blocked test as a regression
-/// guard against the same wrong-spec drift happening on the
-/// list-return arm.
+/// A `List` result crosses the native command line and prints its public
+/// JSON form, as the interpreter prints it (it used to be refused).
 #[test]
-fn list_entry_return_is_blocked_with_clear_error() {
-    use corvid_codegen_cl::{build_native_to_disk, CodegenErrorKind};
-
-    let ir = ir_of("agent f() -> List<Int>:\n    return [1, 2, 3]\n");
-    let tmp = tempfile::tempdir().unwrap();
-    let bin_path = tmp.path().join("prog");
-    let err = build_native_to_disk(
-        &ir,
-        "corvid_parity_test",
-        &bin_path,
-        &[test_tools_lib_path().as_path()],
-    )
-    .unwrap_err();
-    match err.kind {
-        CodegenErrorKind::NotSupported(ref msg) => {
-            assert!(
-                msg.contains("List") || msg.contains("list"),
-                "expected message to mention list: {msg}"
-            );
-            assert!(
-                msg.contains("encoder") || msg.contains("encoder primitives"),
-                "expected message to point at missing encoder primitives: {msg}"
-            );
-        }
-        other => panic!("expected NotSupported, got {other:?}"),
-    }
+fn list_entry_return_prints_its_json_on_both_tiers() {
+    assert_eq!(assert_parity_text("agent f() -> List<Int>:\n    return [1, 2, 3]\n"), "[1,2,3]");
 }
 
 #[test]
@@ -204,4 +176,22 @@ agent main() -> Int:
 ",
         17,
     );
+}
+
+/// `left + right` on lists gives a new list of both operands' entries on
+/// both tiers, releasing everything it allocates. Native code used to add
+/// the two list pointers as integers, which crashed the program.
+#[test]
+fn list_concatenation_matches_the_interpreter() {
+    for (src, printed) in [
+        ("agent f() -> List<Int>:\n    a: List<Int> = [1]\n    return a + [2, 3]\n", "[1,2,3]"),
+        ("agent f() -> List<String>:\n    out: List<String> = [\"x\"]\n    out = out + [\"y\"]\n    return out\n", r#"["x","y"]"#),
+        (
+            "type Line:\n    sku: String\n\nagent f() -> List<String>:\n    lines = [Line(\"a\"), Line(\"b\")] + [Line(\"c\")]\n    out: List<String> = []\n    for line in lines:\n        out = out + [line.sku]\n    return out\n",
+            r#"["a","b","c"]"#,
+        ),
+        ("agent f() -> List<Int>:\n    empty: List<Int> = []\n    return empty + empty\n", "[]"),
+    ] {
+        assert_eq!(assert_parity_text(src), printed, "{src}");
+    }
 }

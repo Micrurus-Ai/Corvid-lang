@@ -521,7 +521,143 @@ impl<'a> Checker<'a> {
             }
         }
         let _ = span;
-        Some(Type::List(Box::new(row)))
+        match query.aggregate {
+            None => Some(Type::List(Box::new(row))),
+            Some((aggregate, args)) => Some(self.check_query_aggregate(&query, &row, aggregate, args, method.span)),
+        }
+    }
+
+    /// An aggregate stage (J1, J2): `count() -> Int`; `sum` of an `Int`,
+    /// `Decimal` or `Duration` column to that type; `min` or `max` of an
+    /// orderable column to an `Option`; `count_by` and `sum_by` to a `Map`
+    /// from a grouping column. `order_by` and `take` cannot change an
+    /// aggregate, so the chain may not hold them.
+    fn check_query_aggregate(
+        &mut self,
+        query: &crate::table_ops::TableQuery<'_, '_>,
+        row: &Type,
+        aggregate: crate::table_ops::QueryAggregate,
+        args: &[Expr],
+        span: Span,
+    ) -> Type {
+        use crate::table_ops::QueryAggregate;
+        let name = aggregate.name();
+        if query.order.is_some() || query.take.is_some() {
+            self.query_error(
+                span,
+                &format!("`{name}` reads every matching row, so `order_by`, `descending` and `take` cannot change it; remove them"),
+            );
+        }
+        let columns: Vec<Option<(String, Type, Span)>> =
+            args.iter().map(|of| self.aggregate_column(query, row, name, of)).collect();
+        let Some(columns) = columns.into_iter().collect::<Option<Vec<_>>>() else { return Type::Unknown };
+        match (aggregate, columns.as_slice()) {
+            (QueryAggregate::Count, []) => Type::Int,
+            (QueryAggregate::Keys, []) => match self.single_key_type(query, name, span) {
+                Some(key) => Type::List(Box::new(key)),
+                None => Type::Unknown,
+            },
+            (QueryAggregate::ByKey, []) => match self.single_key_type(query, name, span) {
+                Some(key) => Type::Map(Box::new(key), Box::new(row.clone())),
+                None => Type::Unknown,
+            },
+            (QueryAggregate::Sum, [(column, ty, at)]) => self.summed(name, column, ty, *at),
+            (QueryAggregate::Min | QueryAggregate::Max, [(column, ty, at)]) => {
+                self.check_column_is_orderable(query.table, column, *at);
+                match ty {
+                    // A missing value is never the least or greatest.
+                    Type::Option(_) => ty.clone(),
+                    other => Type::Option(Box::new(other.clone())),
+                }
+            }
+            (QueryAggregate::CountBy, [(key, key_ty, at)]) => {
+                self.check_grouping_column(name, key, key_ty, *at);
+                Type::Map(Box::new(key_ty.clone()), Box::new(Type::Int))
+            }
+            (QueryAggregate::SumBy, [(key, key_ty, key_at), (column, ty, at)]) => {
+                self.check_grouping_column(name, key, key_ty, *key_at);
+                let total = self.summed(name, column, ty, *at);
+                Type::Map(Box::new(key_ty.clone()), Box::new(total))
+            }
+            _ => Type::Unknown,
+        }
+    }
+
+    /// The type of the query's table's key, for `keys` and `by_key`, which
+    /// give one value per row and so need a key of one column; reported
+    /// and `None` otherwise.
+    fn single_key_type(&mut self, query: &crate::table_ops::TableQuery<'_, '_>, name: &str, span: Span) -> Option<Type> {
+        let [key] = query.table.keys.as_slice() else {
+            self.query_error(
+                span,
+                &format!(
+                    "`{name}` gives one value per row, so it needs a table keyed by one column; `{}` is keyed by {} columns",
+                    query.table.name().name,
+                    query.table.keys.len()
+                ),
+            );
+            return None;
+        };
+        let field = query.table.record.fields.iter().find(|f| f.name.name == key.name)?;
+        Some(self.type_ref_to_type(&field.ty))
+    }
+
+    /// The column an aggregate's function reads, with its declared type,
+    /// or `None` (reported) when the function does not read one column.
+    fn aggregate_column(
+        &mut self,
+        query: &crate::table_ops::TableQuery<'_, '_>,
+        row: &Type,
+        name: &str,
+        of: &Expr,
+    ) -> Option<(String, Type, Span)> {
+        let ty = self.check_expr_as(
+            of,
+            Some(&Type::Function { params: vec![row.clone()], ret: Box::new(Type::Unknown), effect: corvid_ast::Effect::Safe }),
+        );
+        self.require_function_of_row(of, &ty, row, name);
+        let column = match of {
+            Expr::Lambda { params, body, .. } => params.first().and_then(|p| column_read(query.table, p, body)),
+            _ => None,
+        };
+        let Some(column) = column else {
+            self.query_error(of.span(), &format!("`{name}` takes a function that reads one column, such as `fn (s) -> s.points`"));
+            return None;
+        };
+        let field = query.table.record.fields.iter().find(|f| f.name.name == column)?;
+        let column_ty = self.type_ref_to_type(&field.ty);
+        Some((column, column_ty, of.span()))
+    }
+
+    /// The type a `sum` of `column` has: its own, when it is an `Int`,
+    /// `Decimal` or `Duration`.
+    fn summed(&mut self, name: &str, column: &str, ty: &Type, at: Span) -> Type {
+        match crate::table_columns::untainted(ty) {
+            Type::Int | Type::Decimal | Type::Duration => ty.clone(),
+            Type::Float => {
+                self.query_error(at, &format!("`{name}` of the `Float` column `{column}` would depend on the order rows are added; store it as a `Decimal` for an exact total"));
+                Type::Unknown
+            }
+            other => {
+                self.query_error(
+                    at,
+                    &format!("`{name}` adds an `Int`, `Decimal` or `Duration` column; `{column}` is a `{}`", other.display_name()),
+                );
+                Type::Unknown
+            }
+        }
+    }
+
+    /// A column rows are grouped by: one the database compares as Corvid
+    /// compares it, so each group is one key of the `Map`. Not JSON, and
+    /// not a `Float`, whose equality is not exact (`0.1 + 0.2`).
+    fn check_grouping_column(&mut self, name: &str, column: &str, ty: &Type, at: Span) {
+        use crate::table_columns::{column_kind, ColumnKind};
+        match column_kind(ty).0 {
+            ColumnKind::Json => self.query_error(at, &format!("`{name}` groups by a column the database compares; `{column}` is stored as JSON")),
+            ColumnKind::Real => self.query_error(at, &format!("`{name}` cannot group by the `Float` column `{column}`, whose values do not compare exactly")),
+            _ => {}
+        }
     }
 
     fn require_function_of_row(&mut self, expr: &Expr, ty: &Type, row: &Type, stage: &str) {
@@ -559,6 +695,21 @@ impl<'a> Checker<'a> {
             QueryCondition::Compare { column, value, .. } | QueryCondition::Text { column, value, .. } => {
                 self.check_column_is_queryable(table, column, value.span());
                 self.check_agent_value(row, value);
+            }
+            // The body type-checks as ordinary code, so `contains` already
+            // requires the list's items to be the column's type.
+            QueryCondition::InList { column, values } => {
+                // `text.contains(row.title)` has the same shape and tests
+                // text, which the database does not run.
+                if !matches!(self.types.get(&values.span()), Some(Type::List(_))) {
+                    self.query_error(
+                        values.span(),
+                        "only `values.contains(row.column)` on a `List` can run in the database; testing whether text contains a column cannot",
+                    );
+                    return;
+                }
+                self.check_column_is_queryable(table, column, values.span());
+                self.check_agent_value(row, values);
             }
         }
     }
@@ -728,6 +879,11 @@ fn mentions_ident(expr: &Expr, name: &str) -> bool {
         Expr::UnOp { operand, .. } => mentions_ident(operand, name),
         Expr::Index { target, index, .. } => mentions_ident(target, name) || mentions_ident(index, name),
         Expr::List { items, .. } => items.iter().any(|i| mentions_ident(i, name)),
+        // An inner query's function (J3b) reads its own row; it reads the
+        // outer one only by naming it, unless its parameter shadows it.
+        Expr::Lambda { params, body, .. } => {
+            !params.iter().any(|param| param.name.name == name) && mentions_ident(body, name)
+        }
         // Anything richer is not a plain agent value; treat it as reading the row.
         _ => true,
     }

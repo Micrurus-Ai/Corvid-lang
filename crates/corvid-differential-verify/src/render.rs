@@ -908,6 +908,10 @@ fn render_connector(connector: &corvid_ast::ConnectorDecl, indent: usize, out: &
             push_indent(indent + 2, out);
             out.push_str(&format!("on failure -> {}\n", variant.name));
         }
+        if let Some(corvid_ast::OperationAuth::Bearer(param)) = &op.auth {
+            push_indent(indent + 2, out);
+            out.push_str(&format!("auth: bearer({})\n", param.name));
+        }
         for header in &op.headers {
             push_indent(indent + 2, out);
             let value = match &header.value {

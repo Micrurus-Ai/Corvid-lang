@@ -153,7 +153,7 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
             let bytes = fs::read(path).with_context(|| {
                 format!("read cdylib for attestation chain `{}`", path.display())
             })?;
-            Some(hex::encode(Sha256::digest(&bytes)))
+            Some(corvid_hex::encode(&Sha256::digest(&bytes)))
         }
         None => None,
     };
@@ -185,7 +185,7 @@ pub fn run_package(app: &Path, out: &Path, cdylib: Option<&Path>) -> Result<()> 
     fs::write(stage_path.join("Dockerfile"), render_dockerfile_with_plan(plan, app))
         .context("write Dockerfile")?;
 
-    let source_sha256 = hex::encode(Sha256::digest(&source_bytes));
+    let source_sha256 = corvid_hex::encode(&Sha256::digest(&source_bytes));
     // Slice 33Q12b (maintainer-as-reviewer-2026-06-05 P3.3) — OCI
     // metadata uses POSIX-style forward-slash paths. On Windows,
     // `Path::display()` produces a mix of `/` and `\` depending on

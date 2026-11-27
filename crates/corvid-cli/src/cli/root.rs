@@ -182,6 +182,28 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Call a declared `action` from the command line, as in
+    /// `corvid act move_card --card 3 --to Done --position 0`. Flags are
+    /// read like form fields: one per field of the record the action
+    /// takes, otherwise one per parameter; repeat a flag for a `List`.
+    /// The result prints as JSON.
+    Act {
+        /// The action to call.
+        action: String,
+        /// Source file. Defaults to `src/main.cor` in a Corvid project.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// The whole input as JSON, instead of flags.
+        #[arg(long, value_name = "JSON")]
+        json: Option<String>,
+        /// Connector execution mode: `mock`, `replay`, or `real`, as for
+        /// `corvid run`.
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
+        /// `--name value` for each input field or parameter.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        fields: Vec<String>,
+    },
     /// Serve a Corvid app's `server` block over HTTP. Loads the app,
     /// builds the same interpreter runtime `corvid run` uses, and
     /// dispatches each route to its handler agent. GET routes whose

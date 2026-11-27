@@ -63,6 +63,18 @@ pub(super) fn connector_arguments(
         let (record, send) = if payload_param == Some(param.name.as_str()) {
             payload_forms(value, &param.ty, types_by_id)
                 .map_err(|e| format!("argument `{}` cannot be sent: {e}", param.name))?
+        } else if param.ty == Type::Secret {
+            // An operation's `auth: bearer(token)` credential, the only
+            // `Secret` the checker lets an operation take: every record of
+            // the call holds `<redacted>`, and only the request gets the text.
+            let form = |secrets| {
+                crate::public_json::encode_tool_argument(value, &param.ty, types_by_id, secrets)
+                    .map_err(|e| format!("argument `{}` cannot be sent: {e}", param.name))
+            };
+            (
+                form(crate::public_json::SecretArgument::Recorded)?,
+                form(crate::public_json::SecretArgument::Revealed)?,
+            )
         } else {
             let json = encode_public_json(value, &param.ty, types_by_id)
                 .map_err(|e| format!("argument `{}` cannot be sent as JSON: {e}", param.name))?;
@@ -82,18 +94,10 @@ fn payload_forms(value: &Value, ty: &Type, types_by_id: &HashMap<DefId, &IrType>
                 Some(Value::String(s)) => s.to_string(),
                 _ => String::new(),
             };
-            let bytes = match upload.get_field("bytes") {
-                Some(Value::List(items)) => items
-                    .iter_cloned()
-                    .into_iter()
-                    .map(|item| match item {
-                        Value::Int(b) => u8::try_from(b).map_err(|_| "an upload byte is out of range".to_string()),
-                        other => Err(format!("an upload byte is {}", other.type_name())),
-                    })
-                    .collect::<Result<Vec<u8>, String>>()?,
-                _ => return Err("the upload has no bytes".to_string()),
+            let Some(Value::Bytes(bytes)) = upload.get_field("bytes") else {
+                return Err("the upload has no bytes".to_string());
             };
-            Ok(file_forms(Some(text("filename")), Some(text("content_type")), &bytes))
+            Ok(file_forms(Some(text("filename")), Some(text("content_type")), bytes.as_slice()))
         }
         (Type::Bytes, Value::Bytes(bytes)) => Ok(file_forms(None, None, bytes.as_slice())),
         (Type::Struct(_), Value::Struct(record)) => {

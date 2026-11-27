@@ -198,85 +198,15 @@ pub(crate) fn resolve_trace_path(id_or_path: &str, trace_dir: Option<&Path>) -> 
 }
 
 fn run_id_of(events: &[TraceEvent]) -> Option<&str> {
-    events.iter().find_map(event_run_id)
-}
-
-fn event_run_id(event: &TraceEvent) -> Option<&str> {
-    match event {
-        TraceEvent::SchemaHeader { run_id, .. }
-        | TraceEvent::RunStarted { run_id, .. }
-        | TraceEvent::RunCompleted { run_id, .. }
-        | TraceEvent::ToolCall { run_id, .. }
-        | TraceEvent::ToolResult { run_id, .. }
-        | TraceEvent::LlmCall { run_id, .. }
-        | TraceEvent::LlmResult { run_id, .. }
-        | TraceEvent::PromptCache { run_id, .. }
-        | TraceEvent::ApprovalRequest { run_id, .. }
-        | TraceEvent::ApprovalDecision { run_id, .. }
-        | TraceEvent::ApprovalResponse { run_id, .. }
-        | TraceEvent::ApprovalTokenIssued { run_id, .. }
-        | TraceEvent::ApprovalScopeViolation { run_id, .. }
-        | TraceEvent::HumanInputRequest { run_id, .. }
-        | TraceEvent::HumanInputResponse { run_id, .. }
-        | TraceEvent::HumanChoiceRequest { run_id, .. }
-        | TraceEvent::HumanChoiceResponse { run_id, .. }
-        | TraceEvent::HostEvent { run_id, .. }
-        | TraceEvent::HttpExchange { run_id, .. }
-        | TraceEvent::SeedRead { run_id, .. }
-        | TraceEvent::ClockRead { run_id, .. }
-        | TraceEvent::ModelSelected { run_id, .. }
-        | TraceEvent::ProgressiveEscalation { run_id, .. }
-        | TraceEvent::ProgressiveExhausted { run_id, .. }
-        | TraceEvent::StreamUpgrade { run_id, .. }
-        | TraceEvent::AbVariantChosen { run_id, .. }
-        | TraceEvent::EnsembleVote { run_id, .. }
-        | TraceEvent::AdversarialPipelineCompleted { run_id, .. }
-        | TraceEvent::AdversarialContradiction { run_id, .. }
-        | TraceEvent::ProvenanceEdge { run_id, .. } => Some(run_id.as_str()),
-    }
-}
-
-fn event_ts_ms(event: &TraceEvent) -> u64 {
-    match event {
-        TraceEvent::SchemaHeader { ts_ms, .. }
-        | TraceEvent::RunStarted { ts_ms, .. }
-        | TraceEvent::RunCompleted { ts_ms, .. }
-        | TraceEvent::ToolCall { ts_ms, .. }
-        | TraceEvent::ToolResult { ts_ms, .. }
-        | TraceEvent::LlmCall { ts_ms, .. }
-        | TraceEvent::LlmResult { ts_ms, .. }
-        | TraceEvent::PromptCache { ts_ms, .. }
-        | TraceEvent::ApprovalRequest { ts_ms, .. }
-        | TraceEvent::ApprovalDecision { ts_ms, .. }
-        | TraceEvent::ApprovalResponse { ts_ms, .. }
-        | TraceEvent::ApprovalTokenIssued { ts_ms, .. }
-        | TraceEvent::ApprovalScopeViolation { ts_ms, .. }
-        | TraceEvent::HumanInputRequest { ts_ms, .. }
-        | TraceEvent::HumanInputResponse { ts_ms, .. }
-        | TraceEvent::HumanChoiceRequest { ts_ms, .. }
-        | TraceEvent::HumanChoiceResponse { ts_ms, .. }
-        | TraceEvent::HostEvent { ts_ms, .. }
-        | TraceEvent::HttpExchange { ts_ms, .. }
-        | TraceEvent::SeedRead { ts_ms, .. }
-        | TraceEvent::ClockRead { ts_ms, .. }
-        | TraceEvent::ModelSelected { ts_ms, .. }
-        | TraceEvent::ProgressiveEscalation { ts_ms, .. }
-        | TraceEvent::ProgressiveExhausted { ts_ms, .. }
-        | TraceEvent::StreamUpgrade { ts_ms, .. }
-        | TraceEvent::AbVariantChosen { ts_ms, .. }
-        | TraceEvent::EnsembleVote { ts_ms, .. }
-        | TraceEvent::AdversarialPipelineCompleted { ts_ms, .. }
-        | TraceEvent::AdversarialContradiction { ts_ms, .. }
-        | TraceEvent::ProvenanceEdge { ts_ms, .. } => *ts_ms,
-    }
+    events.first().map(TraceEvent::run_id)
 }
 
 fn first_ts(events: &[TraceEvent]) -> Option<u64> {
-    events.first().map(event_ts_ms)
+    events.first().map(TraceEvent::ts_ms)
 }
 
 fn last_ts(events: &[TraceEvent]) -> Option<u64> {
-    events.last().map(event_ts_ms)
+    events.last().map(TraceEvent::ts_ms)
 }
 
 #[cfg(test)]

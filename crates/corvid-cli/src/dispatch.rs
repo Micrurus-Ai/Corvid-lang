@@ -144,6 +144,10 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             let file = resolve_project_source(file)?;
             cmd_run(&file, &target, with_tools_lib.as_deref(), mode.as_deref(), &args)
         }
+        Some(Command::Act { action, file, json, mode, fields }) => {
+            let file = resolve_project_source(file)?;
+            crate::act_cmd::cmd_act(&file, &action, json.as_deref(), mode.as_deref(), &fields)
+        }
         Some(Command::Serve {
             access_log,
             file,
@@ -613,6 +617,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 replay_key,
                 idempotency_key,
                 delay_ms,
+                source,
             } => cmd_jobs_enqueue(
                 &state,
                 &task,
@@ -624,6 +629,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
                 replay_key,
                 idempotency_key,
                 delay_ms,
+                source.as_deref(),
             ),
             JobsCommand::RunOne {
                 state,
@@ -865,7 +871,13 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             ContractCommand::List { json, class, kind } => {
                 contract_cmd::run_list(json, class.as_deref(), kind.as_deref())
             }
-            ContractCommand::App { file, out } => {
+            ContractCommand::App { file, out, diff: Some(base) } if out.is_none() => {
+                contract_cmd::run_app_contract_diff(file.as_deref(), &base)
+            }
+            ContractCommand::App { diff: Some(_), .. } => {
+                anyhow::bail!("`--diff` reports changes and writes no contract; leave out `--out`")
+            }
+            ContractCommand::App { file, out, diff: None } => {
                 contract_cmd::run_app_contract(file.as_deref(), out.as_deref())
             }
             ContractCommand::Openapi { file, out } => {

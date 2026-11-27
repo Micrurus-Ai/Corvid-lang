@@ -1,47 +1,13 @@
-//! Identify the native backend that produced a cached executable.
+//! Identify the native backend that produced a cached executable: a stamp
+//! of the code generator's sources and of every workspace crate it builds
+//! from, the runtime included (see `corvid-source-stamp`). An edit to any
+//! of them changes the id, so the native cache never reuses a binary
+//! built by other code.
 
-use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
-
-fn collect_sources(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_sources(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
+use std::path::PathBuf;
 
 fn main() -> std::io::Result<()> {
-    // Watching the directory also covers files added or removed after a build.
-    println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=build.rs");
-    let mut files = vec![PathBuf::from("Cargo.toml"), PathBuf::from("build.rs")];
-    collect_sources(Path::new("src"), &mut files)?;
-    files.sort();
-
-    let mut hash = Sha256::new();
-    hash.update(std::env::var("TARGET").expect("Cargo target triple"));
-    for file in files {
-        // Only crate-relative paths enter the digest.
-        let path = file
-            .to_str()
-            .expect("UTF-8 backend source path")
-            .replace('\\', "/");
-        let bytes = std::fs::read(file)?;
-        hash.update((path.len() as u64).to_le_bytes());
-        hash.update(path.as_bytes());
-        hash.update((bytes.len() as u64).to_le_bytes());
-        hash.update(bytes);
-    }
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"));
-    std::fs::write(
-        out_dir.join("native-backend-id.txt"),
-        format!("{:x}", hash.finalize()),
-    )
+    std::fs::write(out_dir.join("native-backend-id.txt"), corvid_source_stamp::closure_stamp())
 }

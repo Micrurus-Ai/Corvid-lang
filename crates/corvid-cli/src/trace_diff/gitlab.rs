@@ -82,7 +82,7 @@ const CHECK_NAME: &str = "corvid.trace-diff";
 fn fingerprint_for(delta_key: &str) -> String {
     let mut h = Sha256::new();
     h.update(delta_key.as_bytes());
-    hex::encode(h.finalize())
+    corvid_hex::encode(&h.finalize())
 }
 
 /// Is this delta a policy regression that would fail the gate?

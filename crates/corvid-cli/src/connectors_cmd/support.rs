@@ -75,17 +75,7 @@ pub(crate) fn map_runtime_error(err: ConnectorRuntimeError) -> anyhow::Error {
 }
 
 pub(crate) fn url_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 8);
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            b' ' => out.push_str("%20"),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    corvid_text::encode_url_component(value)
 }
 
 pub(crate) fn random_b64url_bytes(n: usize) -> String {

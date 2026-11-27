@@ -88,3 +88,52 @@ pub(crate) fn debugger_view(value: &Value, ty: &Type, types: &HashMap<DefId, &Ir
         .unwrap_or_else(|problem| serde_json::json!({ "unencodable": problem }))
 }
 
+/// A value a trace records (a run's arguments and result, an `approve`'s
+/// arguments): the public form by its declared type, a `Secret` as
+/// `<redacted>`, as native code records it. A record is an observation and
+/// never stops the run, so a type with no public form (a stream, a handle)
+/// or a value the form cannot write (a malformed record, a NaN) is
+/// recorded in the interpreter's own form, which writes a NaN as `null`, as
+/// native code does.
+pub(crate) fn recorded_value_json(value: &Value, ty: &Type, types: &HashMap<DefId, &IrType>) -> J {
+    let value = without_file_contents(value);
+    tool_value_json(&value, ty, types, SecretArgument::Recorded).unwrap_or_else(|_| value_to_json(&value))
+}
+
+/// `value` with each uploaded file replaced by what a trace may hold of
+/// it: its name, type, size and SHA-256 digest, the form a connector
+/// records an upload in, so a file never reaches a trace however deep in
+/// an argument it sits.
+fn without_file_contents(value: &Value) -> Value {
+    use crate::value::{BoxedValue, ListValue, StructValue};
+    match value {
+        Value::Struct(record) if record.type_name() == "Upload" => {
+            let field = |name: &str| record.get_field(name).unwrap_or(Value::Nothing);
+            let digest = match record.get_field("bytes") {
+                Some(Value::Bytes(bytes)) => corvid_crypto::sha256(&bytes).to_hex(),
+                _ => String::new(),
+            };
+            Value::Struct(StructValue::new(
+                record.type_id(),
+                "Upload",
+                vec![
+                    ("filename".to_string(), field("filename")),
+                    ("content_type".to_string(), field("content_type")),
+                    ("size".to_string(), field("size")),
+                    ("sha256".to_string(), Value::String(digest.into())),
+                ],
+            ))
+        }
+        Value::Struct(record) => {
+            let fields: Vec<(String, Value)> =
+                record.with_fields(|fields| fields.iter().map(|(name, field)| (name.clone(), without_file_contents(field))).collect());
+            Value::Struct(StructValue::new(record.type_id(), record.type_name(), fields))
+        }
+        Value::List(items) => Value::List(ListValue::new(items.iter_cloned().iter().map(without_file_contents))),
+        Value::OptionSome(inner) => Value::OptionSome(BoxedValue::new(without_file_contents(&inner.get()))),
+        Value::ResultOk(inner) => Value::ResultOk(BoxedValue::new(without_file_contents(&inner.get()))),
+        Value::ResultErr(inner) => Value::ResultErr(BoxedValue::new(without_file_contents(&inner.get()))),
+        other => other.clone(),
+    }
+}
+

@@ -6,6 +6,1229 @@ Weekly journal. Non-negotiable. Every entry is one commit.
 
 The GET item loop and generated route call had competing implementations of `routeStream`, which prevented the SDK from compiling. Both call forms now read the existing server protocol through one decoder. The orders check exercises partial delivery followed by truncation, a failed frame or malformed JSON.
 
+### Lineage from real runs L1d: a streamed call's usage counts
+
+A model call streamed by its provider recorded no usage at all: not in the
+usage ledger, not in the trace's `llm.usage`, not in the cost
+observations. The provider's last chunk carries the usage, and the stream
+dropped it. The streamed call's tokens and cost therefore counted as
+nothing in `corvid observe` and the usage totals.
+
+What changed, in two commits:
+- **Refactor.** The whole-call path's recording block (price the call,
+  then record it in the ledger, the trace and the cost observations) moves
+  verbatim into `Runtime::record_model_usage`.
+- **Fix.** The stream now carries a clone of the runtime, not just its
+  tracer, and calls that method when it ends, just before its result is
+  traced. A stream that ends without a done marker records zero tokens,
+  as a whole call with no reported usage does. A test streams a priced
+  call and checks the ledger (12 in, 30 out, $0.72), that `llm.usage`
+  comes before the result, and the derived lineage.
+
+Checked: `@budget` was not affected. The interpreter charges a streamed
+prompt its declared per-call cost on the final chunk, not the ledger's
+measured cost, so the gap was in what was observed, not in what was
+enforced.
+
+### Fixed: the native cycle collector freed live values
+
+The cause was in `corvid_alloc_typed`. It linked the new block into the live
+list, then ran the collector when the allocation count crossed the
+threshold, before returning the block. The collector took its roots only
+from compiled frames' stack maps. The new block was held by nothing but a
+local in the allocator, so it was swept, and the allocation that triggered a
+collection returned freed memory. The same blind spot covered anything a
+runtime function held in its own frame, like a list or JSON value it was
+building. That is why every failure fired exactly at the threshold and
+nowhere else, and why the stack maps and frame walk checked out.
+
+`corvid_gc` now finds its roots by trial deletion. It copies each block's
+reference count into a scratch field, subtracts every reference another
+heap block holds to it (through the same `trace_fn`s the sweep uses), and
+treats whatever remains as held from outside the heap. It marks from those
+roots and sweeps the rest, which are only unreachable cycles. No stack walk
+is needed, so runtime locals and the block being returned count. The
+reference counts are already exact, since every failing program ran
+correctly with the collector off. The verifier receives each root repeated
+by its outside count. `corvid_gc_from_roots`, which tests drive with explicit
+roots, is unchanged. The tracking node gains the scratch field plus padding,
+which keeps it a multiple of 16 bytes.
+
+Proof: the earlier failures (a `Decimal` total over 300 000 iterations, a
+string or list built in a loop, a chain of concatenations) are all correct
+at the default threshold and at `CORVID_GC_TRIGGER=10`. The reproducing
+`verifier_audit` test runs un-ignored. A new `cycle_collector` test drives
+the threshold collection from Rust: it frees an unreachable cycle, keeps a
+block only a local holds, and keeps a cycle with an outside reference.
+Filed: run the parity suite under `CORVID_GC_TRIGGER=10`, so collection
+stays exercised. Also recorded the decimal measurement this was found by:
+about 2.2 µs per native decimal operation.
+
+
+### The dependency audit also runs daily
+
+A new RustSec advisory is published with no code change, so the audit,
+which ran only on push and pull request, missed it on a quiet week. The
+Mac session pointed out the gap. A daily run costs Actions minutes, so the
+owner decided it (2026-11-27): daily, audit only.
+
+The audit is now defined once, in
+`.github/workflows/dependency-advisories.yml`:
+- it runs daily on its own (`schedule`, 06:17 UTC), and can be started by
+  hand;
+- `ci.yml`'s `dependency-advisories` job calls it (`workflow_call`) on
+  every push and pull request.
+
+A second copy of the steps for the daily run was rejected, because the
+two would drift. Both runs use `.cargo/audit.toml`.
+
+### Lineage from real runs L1c: what a run's model calls cost
+
+A run's `prompt` steps now carry their tokens, cost and the model actually
+used, so `corvid observe list` totals what a run spent and `corvid trace
+lineage` prints `cost=$…` on each model call.
+
+No runtime change was needed. Every non-streamed model call already
+records an `llm.usage` host event in the trace, the same record the usage
+ledger and the cost observations get, just before its result:
+- **The projection.** It reads that event and gives the call's span its
+  tokens and cost. One record, so lineage, the ledger and `observe` cannot
+  disagree. A test runs a priced call through the real dispatch path and
+  checks that the lineage cost equals the ledger's.
+- **One constant.** The event's name is now `LLM_USAGE_EVENT`, used by
+  both the emitter and the reader.
+- **Bad costs.** A cost that is missing or not a finite number counts as
+  none, never as a negative or `NaN` total.
+
+Found and filed (L1d): **a streamed model call records no usage at all.**
+It is missing from the ledger, from `llm.usage` and from the cost
+observations, although the provider's last chunk carries it. Its tokens
+and cost count as nothing in `observe` and the usage totals. Whether
+run-time `@budget` accounting has the same hole is part of the filed
+item.
+
+### Found: the native cycle collector frees live values
+
+Timing a decimal-heavy native loop (the roadmap's compact-`Decimal`
+measurement) crashed it with `corvid_release on already-freed allocation`.
+It fails from about 10 000 iterations, the collector's default trigger. A
+string built in a loop, a list grown in a loop and a plain chain of
+concatenations fail the same way when the collector runs (`CORVID_GC_TRIGGER=10`),
+and every one is correct with it off, on `main` too. So this predates today's
+work. The collector's own fixtures allocate too little for it to run. What I
+checked and ruled out is in the roadmap item, now at the front of the order.
+An ignored test reproduces it. The decimal measurement waits on the fix,
+since the benchmark cannot finish natively.
+
+
+### Lineage from real runs L2: a run shows where its database time went
+
+Just before each recorded table operation's `ToolResult`, the trace now
+gets a `DbTiming` event. It records, in microseconds, how long the
+operation waited for a turn and how long its statements ran, and how many
+statements it ran:
+- **The turn.** On Postgres it is a connection from the pool; on SQLite
+  it is the writer queue (`execute_queued_timed`). A SQLite read takes no
+  turn.
+- **Adding up.** A task-local (`tables/timing.rs`) scoped around the live
+  operation sums every statement it runs. A `std.db` query outside an
+  operation records nothing.
+- **Replay.** `DbTiming` is evidence like `HttpExchange`, so replay skips
+  it through the same `is_dispatch_metadata` list. A test deletes the
+  database and replays the trace.
+- **Where it shows.** Lineage gives the `Db` span `db_wait_us` and
+  `db_statement_us`, left out when zero so existing lineage serializes
+  byte-identically. The tree prints `waited=0.031ms ran=0.241ms`, and both
+  OTLP exporters send `corvid.db.wait_us` and `corvid.db.statement_us`
+  through one helper, `otel_schema::db_timing_attributes`.
+- **Why not a field on `ToolResult`.** 24 places build a `ToolResult`, and
+  an evidence event beside it changes nothing they rely on.
+
+Found and fixed, each in its own commit:
+- **Failed calls showed as `Ok`.** L1 marked every tool result `Ok`. A
+  call that failed records its failure as its result, so its span is now
+  `Failed`. The projection decides through replay's own reader
+  (`replayed_failure`), and a typed conflict stays `Ok`, because it is an
+  answer.
+- **Steps printed out of order.** The lineage tree broke ties between
+  steps starting in the same millisecond by kind, then name. Steps under a
+  millisecond apart are common, so a run's steps printed out of the order
+  they ran (`Shelf.get` before an earlier `Shelf.insert`). It now keeps
+  recorded order within a millisecond. L1's test had passed only because
+  its timestamps happened to differ.
+
+Found and filed:
+- **Two exporters, two key sets.** The two OTLP attribute builders name
+  and include attributes differently (`corvid.effects` and
+  `corvid.duration_ms` from the SDK exporter, `corvid.effect_ids` and
+  `corvid.latency_ms` from the JSON one, and no tenant, actor or data
+  classes from the SDK). A collector sees different keys depending on the
+  exporter.
+- **The REPL copies the accessors.** The REPL replay re-derives each
+  event's run id and timestamp in its own matches instead of calling
+  `TraceEvent::run_id()` and `ts_ms()`, so every new event kind must be
+  added there too.
+
+### Lineage from real runs L1: `observe` reads what a run records
+
+`corvid_runtime::lineage_from_trace` turns a run's trace into its
+lineage, one tree per run:
+- the run is the root;
+- `table:<Table>.<op>` calls become `Db` spans;
+- other tools become `Tool` spans, model calls `Prompt` spans, and
+  approvals `Approval` spans (`Denied` when refused);
+- an HTTP exchange sits under its tool, and a retried attempt is a
+  `Retry` span;
+- a failed run gets an `Error` child, and a call cut off mid-trace stays
+  as a `Failed` span.
+
+A call pairs with the next result of the same name. Span ids come from
+`lineage_span_id`, so the same trace always gives the same ids.
+
+`corvid-cli`'s `lineage_input` is now the one reader for `observe`,
+`trace lineage`, `eval promote` and the observe helpers. It judges a file
+by its first line:
+- a run trace (`kind` and `run_id`) is projected;
+- a lineage trace (the lineage `schema`) is read as written;
+- anything else is skipped in a directory and refused by name.
+
+A bare run id finds `<id>.lineage.jsonl`, or else `<id>.jsonl`.
+
+The tests run a program, not a fixture. `corvid run` records a table
+program's trace, `corvid trace lineage` prints the run with its three `db`
+steps in order, and `observe list | show` find it.
+
+Found and fixed:
+- **Four copies of the lineage reader.** Before this slice they lived in
+  three command files and the observe helpers. The identical three moved
+  in a refactor commit first. The helpers' copy had drifted: it read every
+  `.jsonl` in a directory as lineage, so a run trace beside lineage files
+  failed. It now calls the shared reader.
+
+Found and filed (the real trace showed both):
+- **L1b.** An agent's call to another agent is not in the trace, so
+  lineage is flat under the run.
+- **L1c.** Model calls record no token counts or cost, so derived lineage
+  shows zero cost.
+
+Told the Mac session that the cargo-audit CI job it planned already exists
+(`dependency-advisories` in `ci.yml`), so it can extend that job instead of
+adding a second one.
+
+### Lineage from real runs: the gap, and the plan
+
+I started on the roadmap item to show pool wait in production, and found
+that a running program feeds no part of the observability stack:
+- `corvid observe`, `corvid trace lineage`, `corvid eval promote` and the
+  OTLP export read `<run_id>.lineage.jsonl`. Nothing writes that file;
+  only checked-in fixtures exist.
+- `corvid serve` builds its runtime with the null tracer, so a served
+  program records no trace.
+- The observability guide documented `CORVID_OTEL_ENDPOINT`,
+  `CORVID_OTEL_SERVICE_NAME`, `CORVID_OTEL_SAMPLE_RATE` and
+  `corvid run --trace-out`. No code reads any of them.
+- A compiled binary writes traces into `./target/trace` by default, and
+  so records arguments without the source saying so.
+
+What I did:
+- The guide now says plainly what runs today and links the plan, in its
+  own commit.
+- [Lineage from real runs](docs/proposals/lineage-from-runs.md) makes the
+  trace every run already writes the one record, and lineage a projection
+  of it (`lineage_from_trace`). Writing a second record beside the trace
+  was rejected, because two records of one run can drift.
+- L1 (the projection) and L2 (connection-wait and statement time on table
+  spans) add no syntax, so they come next.
+- L3 and L4, a `traces:` block a served program must declare (location,
+  retention, export, or `none`), are item 9 of the review brief. Tracing
+  served traffic on an environment variable alone would be a hidden
+  default for a privacy decision.
+- The slices are brought forward on the roadmap, because the docs misled.
+
+### What a Postgres pool size buys
+
+`pool_under_concurrent_agents` is an ignored test in
+`corvid-runtime/src/tables/pool.rs`. It runs 8 or 64 agents against a pool
+of 1 to 32 connections. Each agent edits as the runtime does: a `get`, then
+a revision-checked `update`, each borrowing its own connection, on rows no
+other agent touches. It reports edits per second, the wait at the pool, and
+the time an edit takes.
+
+Results, locally (4-core WSL, PostgreSQL 16, release build):
+- Throughput grows almost in step with connections, up to one connection
+  per busy agent: 64 agents made 473 edits/s on 1 connection, 2,383 on 8
+  and 4,882 on 32.
+- Below that, most of an edit is waiting for a turn: 2 × 11.6 ms of a
+  26.6 ms median edit with 64 agents on 8 connections.
+- A full pool queued rather than failed; no cell had an error.
+
+The table and a sizing rule are in the performance guide, and the tables
+reference links to them.
+
+It measures the pool directly, not a served program. The existing
+sustained-load benchmark is SQLite-only and drives the reading-list
+example, whose Postgres port waits on B10-5b. The served measurement is on
+the roadmap for after it.
+
+Found doing it: a running program cannot show that its pool is full. Only
+this offline test measures the wait. Filed: report each operation's wait at
+the pool in the trace and the OpenTelemetry export.
+
+### Encryption at rest K1: `DataKey`
+
+`corvid_crypto::DataKey` seals and opens values with XChaCha20-Poly1305.
+- Each value gets a fresh random 24-byte nonce, so one key takes any number
+  of writes.
+- The value is bound to its place through associated data. A sealed
+  `Customer.stripe_key` for row 1 does not open as row 2's, or as another
+  column's.
+- The sealed form is `corvid:v1:<key id>:<base64url(nonce + ciphertext)>`.
+- The key id is the first 8 bytes of an HMAC-SHA256 of a fixed label under
+  the key. It names the key without revealing it, so a store mid-rotation
+  can pick the key, or name the one it lacks.
+- The key's bytes live in `Zeroizing`, and `Debug` prints only the id.
+
+The id's HMAC calls the `hmac` crate directly rather than
+`crate::hmac_sha256`. That function takes its key as `Bytes`, which would
+copy the data key into a buffer that is not wiped; the comment says so.
+
+Tests:
+- the published XChaCha20-Poly1305 vector of draft-irtf-cfrg-xchacha
+  (A.3.1), byte for byte;
+- a value moved to another row or column is refused as `Tampered`;
+- sealing twice differs;
+- a changed value, another key (named by id) and plain text are refused;
+- a key must be 32 bytes of base64 and never appears in `Debug`.
+
+`cargo audit` passes with the new `chacha20poly1305` dependency, and
+Cargo.lock is committed with it. No grammar is involved; K2 onward follow
+the review window.
+
+### `cargo audit` in CI
+
+The SQLite advisory (RUSTSEC-2026-0459) was found in a push notice, after
+the vulnerable version had been on `main` for a while. CI now has a
+`dependency-advisories` job that runs `cargo audit --deny warnings`, so a
+new vulnerability, yanked release or unmaintained crate fails the build
+when it appears.
+
+`.cargo/audit.toml` lists the only known findings by advisory ID: `chrono`,
+`chrono-tz`, `instant` and `ttf-parser`, all unmaintained with no successor
+release, none a vulnerability. Its comment says never to add a
+vulnerability there.
+
+Checked both ways locally with the same command: it exits 0 with the list,
+and 1 when one entry is removed. No vulnerability is open now that
+rusqlite is 0.43.
+
+Not done, and filed: `npm audit` for the npm packages, which are frontend
+development's, to be agreed with them.
+
+### A `live` without `requires` is a compile error
+
+Who may watch a live query is a consequential choice. A `live` could be
+written without `requires`, and only `corvid serve` refused it, at start
+time. `check_live` now reports the omission at the declaration, and names
+`requires anyone` for a public list, which already parses as "open to
+anyone" and stays allowed. So the rule catches a forgotten clause, never a
+deliberate one.
+
+No program, example, book page or frontend verification script declared a
+`live` without `requires`. Ten compiler tests did; they now say `requires
+anyone`. A new test checks the error and that `requires anyone` passes.
+The serve refusal stays as a second line of defence.
+
+### B10-4b: actions as background jobs, and a forged-caller path closed
+
+`jobs enqueue --task <action>` now takes `--source`. With it, the payload
+is checked against the action's input before the job is stored: one
+public JSON value, through `action_calls::decode_json_input`, the decoder
+the HTTP endpoint, MCP and `corvid act` use. An action that requires a
+signed-in caller is refused by name.
+
+`jobs run` uses a new `ActionJobExecutor`. A job whose task names an action
+is checked and decoded again on the worker, traced as `surface: "worker"`
+with its job id, and run through `DefaultJobRuntimeExecutor::run_job_agent`.
+That is the default executor's run half, split out so per-job traces,
+durable-job binding and outcome fingerprints stay in one place. Any other
+task goes to the default executor.
+
+The weakness found on the way: the default executor ran any agent named by
+a job's task, decoding a positional payload with the interpreter's
+internal JSON form. An action's body is an agent, so a job naming it could
+pass a `Caller` record with any permissions, and the action's `requires`
+would pass against that forged caller. The default executor now refuses
+an action's body (`ActionNotRunAsAgent`), so actions run only through the
+action path, where a `Caller` is never input.
+
+Tests:
+- VM: a forged admin `Caller` in a payload is refused;
+- CLI unit: a worker runs an action from public JSON and the trace holds
+  `"surface":"worker"` and the job id; a signed-in action and a bad input
+  fail with named kinds; the enqueue check leaves other tasks alone;
+- end to end through the binary: enqueue accepts a good payload and refuses
+  a bad one and a signed-in action, and a worker pool run succeeds once
+  and refuses the unchecked signed-in job.
+
+Narrowed, and scheduled as B11-5: signed-in actions on workers.
+
+### One failure envelope for both servers
+
+`corvid serve` answered a failure as `{"error", "detail"}`, through the one
+`corvid_driver::public_failure` mapping. The server `corvid build` generates
+answered the same kinds of stop as `{"request_id", "route", "kind",
+"message", "duration_ms"}`. The generated server's `error_response` now writes
+`{"error", "detail"}`. The request id was already in its `x-corvid-request-id`
+header, and the route and duration are in its traces. No client read `kind`:
+the TypeScript `CorvidError` keeps the body as sent. So the change touched
+only the `build_server` assertions, which now check the exact body.
+
+
+### A program's own type wins over a built-in of its name
+
+Every type-name lookup asked `Type::compiler_known` first, so a built-in
+always beat a type the program declared or imported. That is how adding
+`Actor` broke every reference app. Three resolvers did it: the checker's
+`named_type_to_type`, `named_type_in_module` and the read-only resolver
+in `expr.rs`. Lowering reads the checker's results, so fixing those three
+fixes every layer.
+
+They now share `Type::builtin_named(name, declared_in_file)`:
+- the core scalars (`Int`, `Float`, `String`, `Bool`, `Nothing`) always
+  mean the built-in;
+- every other built-in yields to a type or imported `use` of that name in
+  the file. A `use` that names something other than a type leaves the
+  built-in in place.
+
+`check_builtin_type_names` refuses a core scalar declared as a type, table
+or imported name (E0308), and warns where a program's type hides a
+built-in (W0301). The warning's hint says why: a value a built-in gives
+you, such as `from_json`'s `JsonError`, is still the built-in type.
+
+Tests:
+- a program declaring its own `Caller` and `JsonError` reads their fields
+  and gets one warning for each;
+- a program using the built-in `JsonError` is unchanged and silent;
+- each core scalar is refused;
+- a rule test asserts that every current built-in except the core scalars
+  yields, so a new built-in yields by default;
+- a driver test imports a `Caller` record from another module, the shape
+  that broke the reference apps, and gets the record.
+
+The error reference is regenerated, with a new "Warnings: names" area for
+W03.
+
+### Integer literals beyond `Int`'s range
+
+`price: Decimal = 99999999999999999999` failed in the lexer
+("invalid number literal") before the checker could see that a `Decimal` was
+meant. Now an integer beyond `Int`'s range keeps its exact digits, as the
+lexer already keeps a float literal's (`Literal::Float { value, text }`). The
+checker reads it by its slot. A `Decimal` slot reads the text exactly
+through the existing decimal path, natively too. A `Float` slot takes it only
+when a `Float` holds it exactly. Anywhere else the new `IntLiteralOutOfRange`
+(`E0518`) names the range and suggests a `Decimal`. Nothing is rounded
+silently. `Literal::Int(i64)` and the grammar's INT token are unchanged,
+rather than carrying text on every integer literal through the compiler.
+Tests cover the checker and native parity, and the error reference is
+regenerated.
+
+
+### rusqlite 0.43 for the bundled SQLite CVE
+
+RUSTSEC-2026-0459 is in the C SQLite that `rusqlite`'s `bundled` feature
+compiles in, fixed in libsqlite3-sys 0.39. All three crates that use it
+(runtime, driver, CLI) move from rusqlite 0.31 to 0.43, which brings
+libsqlite3-sys 0.40.
+
+The one API change that reached our code is `Connection::authorizer`,
+which now takes the connection mutably. A `Transaction` gives only shared
+access, so the migration runner could no longer install its guard inside
+the transaction. That guard refuses a `BEGIN`, `COMMIT` or `ROLLBACK` in a
+migration's own SQL, so only the runner ends the transaction that records
+history. The guard is now installed in `open_database` and armed by a
+thread-local flag, which `execute_migration_sql` holds for exactly the
+migration's SQL through a drop guard. SQLite calls the authorizer on the
+thread that prepares the statement, so parallel migrations in one process
+never see each other's flag.
+
+`migrate.rs`'s test still proves the refusal: a migration that ends in
+`COMMIT` fails and leaves no half-made table. The migration suites pass on
+SQLite and the local Postgres, and the full gate runs over the change.
+Cargo.lock is committed, because the slice changes a dependency.
+
+Also ticked a stale roadmap box: `Upload.bytes()` has returned `Bytes`
+since the one-buffer upload change.
+
+### Native refusals name the method and drop slice numbers
+
+A native refusal of a builtin method read "builtin methods (String.length()
+and the 45d/45e/45f batches) are interpreter-only in 45c", whatever the
+method. It now names it: "program calls `unwrap_or` on `Result<Bytes,
+String>`, which native code does not run yet". The new
+`builtin_method_name` finds the source name of a `BuiltinMethodKind` on its
+receiver through the builtin method list. Fifteen other native and wasm
+refusals cited internal slice numbers ("lambdas are interpreter-only in
+45j", "match is interpreter-only in 45i"). They now say the construct runs
+on the interpreter only. No test pinned the old wording.
+
+### Joining byte strings
+
+B04 left `+` off `Bytes`: no slice needed it, and `+` must not quietly join
+bytes and text. A DSSE envelope over a binary payload needs it, so the first
+reason no longer holds. `a + b` between two `Bytes` now joins them through
+one `corvid_crypto::Bytes::concat`, which the interpreter calls and native
+code reaches through `corvid_bytes_concat`. The second reason is kept:
+mixing bytes with text stays a compile error, and so does any other
+arithmetic. Tests cover the checker, a DSSE-style join on the interpreter, and
+native parity under the leak detector. The reference's operator table
+says so.
+
+
+### Query J5: live queries that filter by another table
+
+`live` refused every list filter, because a list may come from a table the
+feed did not watch. Now:
+- `read_tables` walks the handler's IR for every table a query reads,
+  including inner `keys()` queries. It is used by `watched_tables` and by
+  `share_commits`, so the commit listeners cover the same databases.
+- `wait_for_commit` takes the `Watched` set. A commit to another watched
+  table makes the batch incomplete. The query then re-runs in full, and a
+  row that left without being written arrives in a snapshot, since it has
+  no removal revision.
+- A write to the delivered table alone still re-checks only its rows (L2).
+
+The checker now refuses only a list that calls something by name. An
+agent, tool, prompt or function could read any table, so the feed could not
+know when to refresh. Literals, `path`, `actor`, table queries and methods
+are allowed.
+
+Test (`a_live_query_follows_writes_to_the_table_its_filter_reads`): ada's
+live list of cards on her boards.
+- Giving her a board, which writes only `Board`, delivers that board's card
+  as `added`.
+- Taking a board away delivers a snapshot without its card.
+- A new card on her board still arrives as a change.
+
+The live declaration tests now check that a list calling an agent is
+refused and a literal list is not.
+
+### A secret's memory is wiped when it drops
+
+`corvid_crypto::Secret` held its bytes in an `Arc<[u8]>`, freed but not
+overwritten, so a password, token or signing key could linger in freed
+memory that a later allocation or a core dump could read. The bytes now sit
+in `Arc<zeroize::Zeroizing<Vec<u8>>>`, wiped when the last clone drops. A
+decoded key moves into it without a copy. Reading freed memory to prove the
+wipe is undefined behavior, so the test asserts at compile time that both
+kinds of secret store their bytes in a `ZeroizeOnDrop` type. Filed: copies
+of a secret's text made outside `Secret` (a tool's argument string, the
+environment value) are not wiped.
+
+### One URL component decoder
+
+The Windows session pointed at the decoding side of the URL encoder
+merge. `corvid serve` read query strings and form bodies with its own
+`urldecode` in `request_text.rs` (`+` as a space), and the GitHub and Gmail
+adapter tests each carried a lenient `percent_decode`. `corvid-text` now
+has `decode_form_component`, for `application/x-www-form-urlencoded`:
+`decode_url_component` with `+` as a space, sharing one implementation
+(`decode_percent`). `request_text` calls it, and the adapter tests call
+`decode_url_component`. A malformed escape in a request now reports its
+position (`` `%` at position 2 must be followed by two hex digits ``) rather
+than "invalid percent escape in query". The existing `urldecode` test
+passes unchanged.
+
+### One URL component encoder
+
+Four hand-written percent-encoders (the runtime's connector path builder,
+`corvid connectors`, and the GitHub and Gmail adapters) all copied
+`corvid_text::encode_url_component`, the function `text.encode_url_component()`
+uses: RFC 3986 unreserved bytes kept, every other byte as uppercase `%XX`.
+They now call it, so a connector's URL and a Corvid program's encode the
+same bytes the same way. The hex guard also refuses `:02X}`, the
+uppercase format a new hand-written percent-encoder would use, and names
+the function to call instead.
+
+### A clear error for a method a type lacks
+
+The error for `x.to_string()` on an `Option<Int>` reused `NotCallable` with a
+hand-built message, "cannot call a value of type `method `to_string` on
+receiver of type …` — no builtin method with this name (String.length()
+shipped in 45c; method batches land in 45d/45e/45f/45l)". It cited
+internal slice numbers, was wrapped in the wrong sentence, and pointed at
+the whole call. `UnknownMethod` (`E0240`) now says "`Option<Int>` has no
+method `to_string`" and points at the method name. Its hint suggests the
+nearest builtin the receiver actually has (`lenght` → `length`, at most two
+edits away). On an `Option` or `Result` it says to take the value out first.
+
+The suggestion searches `BUILTIN_METHOD_NAMES`. `builtin_method` is one match
+on (receiver, name) pairs and can't be enumerated, so a test holds the list
+to the names the match contains. The error reference is regenerated.
+
+
+### Map keys are snapshots
+
+[Proposal](docs/proposals/map-key-snapshots.md). Testing why compound map
+keys couldn't be hashed showed a correctness problem behind the speed one.
+Records are shared by reference, so `p = P(1)`, `m = {p: 10}`, `p.x = 2` left
+`m.get(P(1))` empty and `m.get(P(2))` at 10: the key changed inside the map.
+A map now stores a detached snapshot of every compound key (`snapshot_key`,
+which keeps cycles intact) and hands out another snapshot from `keys()` and
+entry iteration. No part of the program ever holds the map's own copy.
+
+With stored keys that cannot change, records, lists, maps, options, results
+and variants hash structurally, by exactly the parts their `==` compares:
+type and fields for a record (by field name, since the fields are a hash
+map), elements in order for a list, and entries in any order for a map.
+Measured: 80,000 record keys build in 90 ms with a 2.5× ratio for 4× the
+keys. Before, compound keys shared one hash and were scanned. Unit tests
+cover the snapshot both on the way in and the way out. The probe program now
+prints `10 0 2`. Native maps take only immutable scalar keys, so native
+behavior is unchanged.
+
+Noted for later: the error for a missing builtin method wraps its text in
+"cannot call a value of type `method …`" and cites old slice numbers
+(`45c`, `45d`).
+
+
+### Query J4: `by_key()`
+
+`by_key()` is a zero-argument stage typed `Map<K, Row>` for a table keyed
+by one column. The single-column check is shared with `keys()` through
+`single_key_type`. It adds no SQL: the interpreter runs the ordinary
+query, whose rows come in key order, and puts each decoded row under its
+key's value. With the Mac session's hashed `MapValue` (1066e5b5),
+building and reading the map is linear.
+
+Test, on every engine the harness runs: each card shown with its board's
+owner from `Board.all().by_key()` and a `contains` over its keys answers
+exactly what one `Board.get` per card answers. That includes a card whose
+board does not exist, which the filter leaves out. A filtered `by_key`
+holds only its rows.
+
+### One hex encoder
+
+Lowercase hex was written by hand about forty times across thirteen crates:
+`{:02x}` loops, nibble tables, five copies of `hex_prefix`, three
+hand-written decoders, and the external `hex` crate in the driver, CLI and
+ABI crates. Those copies write content hashes, signatures, cache keys, CSRF
+tokens, webhook signatures and trace ids, so one that drifted in case, or in
+how a decoder treats odd lengths, would make the same bytes read
+differently. The Windows session agreed before I touched its files.
+
+`corvid-hex` is a new crate with no dependencies, so `corvid-ast` and
+`corvid-resolve` can use it without pulling in `corvid-text`'s regex. It holds
+corvid-text's codec, moved verbatim, so the language's `encode_hex` and
+`Bytes.from_hex` errors are unchanged. It also gains `encode_prefix(bytes,
+digits)` for the short ids. Every copy calls it. Each decoder keeps its own
+contract (an anyhow error, an exact 32-byte key, an `Option`) and only
+the digit parsing moved. `format_uuid` builds on it too. The `hex` crate is
+now only a dev-dependency.
+
+`tests/no_hand_written_hex.rs` scans every crate's source and fails on a new
+`{:02x}`, nibble table or `hex::encode`/`decode` call. Its first version
+matched `hex::encode(` inside `corvid_hex::encode(`. My fix for that then let
+`{x:02x}` through, which a probe caught, so the name-boundary rule now applies
+only to the `hex::` patterns. Excluded: percent-encoding (`%XX`, a
+different encoding) and the `corvid-bind` template, which is Rust text
+written into a user's bindings.
+
+### One reader for an event's run and time
+
+Six trace readers each matched all thirty event kinds by hand to read
+`run_id` or `ts_ms`: `corvid trace`, `replay`, the cost frontier, the routing
+report, test-from-traces and the REPL. A new kind had to be added to each.
+`TraceEvent::run_id()` and `ts_ms()` in `corvid-trace-schema` are now the one
+reader, written as exhaustive matches so a new kind fails to compile until
+it is read. The six copies and their wrapper functions are gone. No
+behavior changed: the trace-schema, CLI and REPL suites pass unchanged.
+
+### One test-tools helper, built once per process
+
+After the last rebase the parity suite failed: the runtime stamp refused a
+`libcorvid_test_tools.a` built before the rebase brought in runtime changes.
+The cause was sixteen copies of `fn test_tools_lib_path` across the test
+files. Five never built the library (parity, stack maps, the verifier audit
+and two ownership suites), so they linked whatever was on disk. The others
+each ran `cargo build` per call, so tests in one process could link while
+another's build rewrote the library, the race filed on the roadmap.
+`corvid_test_paths::linked_test_tools_staticlib` now builds it once per test
+process and sets the override, and fifteen files call it. A probe edit to a
+runtime source made the library stale, and the parity suite rebuilt it and
+passed. `ffi_capsule` keeps its own helper because it builds into a separate
+target directory.
+
+A slip of mine on the way: that rebase's verification and its push ran in
+one chained command, so `main` received the push before the verification
+reported. The code was sound: the failure was the stale library, and 255
+parity and 13 cdylib tests pass on what was pushed. From now on the push is
+always a separate step after the checks pass.
+
+### Query J3b: another table's keys in one statement
+
+`keys()` is a new zero-argument stage: `List<K>` of the key column alone,
+in key order, refused by name for a table keyed by several columns.
+
+Inside a `where`, `Other.where(...).keys().contains(row.col)` first reads
+as J3a's `InList`. When the list expression is such a query on a table in
+the same database, lowering turns it into `IrTableFilter::InQuery`. Its
+inner condition's values join the outer query's operands in order. The
+runtime writes the inner query into the same statement,
+`"Card"."board" IN (SELECT "Board"."board" FROM "Board" WHERE ...)`,
+binding the inner values in the one parameter sequence through a
+`TableRef` for the inner table. So both tables are read in one snapshot,
+and the keys never cross to the program. A table in another database
+stays a J3a list.
+
+Fixed in the checker: `mentions_ident` treated every lambda as reading
+the row, so any inner query was refused as reading the outer one. A lambda
+now reads a name only through its body, unless its parameter shadows it.
+A correlated inner query that names the outer row is still refused.
+
+Tests:
+- `keys()` lists ada's boards in order;
+- the inner-query filter keeps exactly what the same test keeps in Corvid;
+- the recorded trace holds one `Card` query with `IN (SELECT`;
+- the correlated form is refused.
+
+No new diagnostic kind.
+
+### Every public type crosses the C ABI
+
+Since the C ABI moved to the public JSON form, the wire could carry any
+public shape. The checker still accepted only flat records of scalar fields,
+a narrowing filed at the front of its section. Now
+`extern_c_param_type_supported` and `extern_c_return_type_supported` accept
+any record, variant, list, option, result or map with a JSON form. That is
+decided by `json_wire_problem`, the rule `from_json` and `to_json` use, so the
+C boundary takes exactly what a route body takes. The question of what
+crosses as JSON was asked in three places: the checker, the code generator's
+wrapper and the C header. It is now one method, `Type::crosses_c_abi_as_json`,
+which all three call. Ownership inference covers the same types. The old
+scalar-field checks and their imported-struct helper are removed.
+
+A cdylib test sends an order with a list of line records and an optional
+note, and receives a `List<String>` and an `Option<Line>`, including `null`.
+That test found the native list `+` miscompile, fixed in the commit before
+this one.
+
+### Native list `+`
+
+While testing nested records across the C ABI, a natively built
+`out = out + [line.sku]` crashed with "capacity overflow". So did the
+simplest list `+` in any native program, and `main` had the same fault.
+Native binop lowering had no list arm, so `a + b` on lists fell through to
+integer addition of the two list pointers. The resulting garbage pointer
+crashed the first runtime call that read it. Nothing refused it; the
+interpreter, which handles list `+`, never ran it.
+
+Fixed by `corvid_list_concat(left, right, typeinfo)` in `lists.c`, a fresh
+growable list holding both operands' entries with each retained, beside
+`corvid_list_snapshot`, and a lowering arm that calls it and consumes both
+operands. Made stronger at the cause: the generic arithmetic path now refuses
+an operand that is neither `Int` nor `Float`, naming its type, instead of
+doing integer arithmetic on whatever it is. A future type without its own
+arm stops the build rather than miscompiling. A parity test under the leak
+detector covers strings, integers, records, an empty list and a list built in
+a loop.
+
+### Maps index their keys by a hash that agrees with `==`
+
+The Windows session filed it and handed it over: `MapValue` was a vector
+searched by `==`, so building a map of n keys took n² comparisons. A
+`count_by` over many groups, a large map literal or repeated `m[k] = v` all
+paid it. It is now an insertion-ordered `IndexMap` keyed by `MapKey`, whose
+hash agrees with `==`. An `Int` hashes as the `Decimal` of its value, and a
+whole-number `Float` as that number, because `==` equates them. `Decimal`
+hashes its normalized form. Text and the B06 scalars use their own `Hash`. A
+removal keeps the other entries in order (`shift_remove`).
+
+Some keys keep a fixed hash and are found by `==` alone, as before: records,
+lists, options, results, variants, maps and grounded values, whose contents
+can change in place after insertion. So do `Bytes` and `Secret`, whose `==`
+is constant-time, and identity-compared values. Measured with
+`tests/map_scaling.rs`: 20,000 and 80,000 text keys took 1.23 s and 24.1 s
+before, a 19.6× ratio for 4× the keys, and take 4.5 ms and 19.1 ms now, a 4.3×
+ratio. The test refuses a ratio above 8. A unit test holds every pair of
+values `==` equates to one hash. The Windows session's grouped-aggregates
+test still passes. Filed: freezing compound keys so they can be hashed too.
+
+### Query J3a: `values.contains(row.column)` inside `where`
+
+`query_condition` now reads `list.contains(row.col)` as
+`QueryCondition::InList`, the list being an agent value computed before
+the query, as a compared value is. The same shape on text,
+`word.contains(row.owner)`, is refused by the checker: the expression type
+map shows the receiver is not a `List`. The lambda body type-checks as
+ordinary code, so `contains` already requires the list's items to have the
+column's type.
+
+The runtime's `TableFilter::In` binds each value as a parameter typed by
+the column, exactly as a compared value is bound. Because `IN` never
+matches `NULL` while `==` matches a missing value, a `None` in the list
+adds `OR column IS NULL`. An empty list is `false`.
+
+Tests, on every engine the harness runs:
+- each filter keeps exactly the rows the same test keeps when written in
+  Corvid over every row;
+- a list of board keys, an empty list and a list holding `None`;
+- `10.00` matching a stored `10` by value, combined with `not`;
+- the refusal for text, and the refusal in `live`.
+
+Narrowed, and filed at the front of the section as J3b: at most 10,000
+values per list, which both engines' parameter limits allow. The
+single-statement `IN (SELECT ...)` form removes the cap and reads both
+tables in one snapshot. `live` refuses a list filter until J5, because a
+list may come from a table it does not watch.
+
+### Diagnostic codes DC-3: the generated error reference
+
+`docs/reference/errors.md` lists every code: 179 of them, each with its kind
+and doc comment, grouped by area. It is generated by
+`corvid-driver/src/error_reference.rs` from the kind enums' `code()` matches
+and doc comments, and a drift test fails when the committed page differs
+(`CORVID_UPDATE_SNAPSHOTS=1` rewrites it). Codes the driver writes itself,
+and the `E52xx` startup refusals, come from a table that a second test holds
+to the codes the source actually writes. A third test requires every kind to
+have a doc comment. The five that lacked one now have one, written from
+their messages.
+
+Building the reference showed that DC-1's area heuristic, which keyed on
+words in kind names, had misfiled fourteen kinds. `NoJsonForm` and
+`ModelOutputFormatMismatch` matched "Form", the model-routing kinds matched
+"Route" and "Requires", `StructLiteralInvalid` matched "Literal". They moved
+to their areas before any published reference named them, and freed numbers
+stay unused. `FirstLoginPolicyRequired`'s message began with its code
+(`E5210`), so the kind now declares `E5210` and the message no longer repeats
+it.
+
+### Aggregates J2: `count_by` and `sum_by`
+
+The aggregate stage now holds its argument list, so `sum_by` can take
+its key function and its column function. The checker reads each with one
+shared `aggregate_column` and types the result `Map<K, Int>` or `Map<K, T>`.
+The key column must be one the database compares as Corvid does: not JSON,
+and not `Float`, whose equality is inexact.
+
+The runtime's `TableAggregate` gains `CountBy`, `SumIntegerBy` and
+`ValuesBy`. `table_aggregate` now returns rows, the key first, through the
+same recorded select:
+- the first two are `GROUP BY` the key, ordered by it, so the map's order
+  is the same on every run and engine;
+- `ValuesBy` reads each row's key and value in key order, and the
+  interpreter adds per key with `eval_binop(Add)`.
+
+`Decimal` keys group by value on both engines, and `MapValue`'s `==` agrees.
+
+Test: on each engine, every group of `count_by` and `sum_by` (an `Int`,
+`Decimal` and `Duration` total, and one over a filtered query) equals the
+same J1 aggregate over that key's rows alone, and the keys come in order.
+
+Filed: `MapValue` is a vector searched by `==`. Building a map of n keys
+is n² comparisons and each lookup is linear, which a `count_by` over many
+groups exposes. The roadmap item asks for hashing that agrees with `==`,
+with insertion order kept. It touches the core value both sessions use.
+
+### Aggregates J1: `count`, `sum`, `min`, `max`
+
+A query chain may now end in an aggregate stage, read by the same
+`table_query_target` the checker, effects and lowering share. It becomes
+`IrExprKind::TableQuery { aggregate: Some(..) }`, so every IR walker that
+matches with `..` keeps working.
+
+How each stage runs:
+- `count` and an `Int` `sum` are one statement whose single aliased column
+  comes back through the existing recorded select. A narrowed `TableRef`
+  gives that one column, so recording and replay are the query's own.
+  SQLite's `sum` refuses an overflow, and on Postgres the `::bigint` cast
+  does.
+- `Decimal` and `Duration` sums read the column alone and add with the
+  interpreter's `eval_binop(Add)`. That is Corvid's checked `+`, so the
+  total has no second meaning.
+- `min` and `max` add no SQL. They run as the ordinary query ordered by
+  the column, without missing values, with `take(1)`. The database's
+  collations decide the order, and the row decodes as any row does.
+
+Refused, by name:
+- `order_by` or `take` before an aggregate;
+- a `Float` sum;
+- a non-column function;
+- an unorderable `min` or `max`;
+- an aggregate in `live`, which delivers rows.
+
+Tests: on every engine the harness runs, each aggregate equals the same
+computation written in Corvid over the rows, for a list with values and
+an empty one. `max` of decimals is `10.0` over `9.50`. An `Int` total
+past 64 bits fails the run. A recorded run replays. The refusals are
+tested too. This machine has no Postgres URL, so those runs covered SQLite.
+
+### User credentials C1: an operation's own `auth: bearer(token)`
+
+A connector had one credential, the application's. Calls made as the
+signed-in person had no form, because B04 keeps every `Secret` out of an
+operation's signature and B05 decided against `Secret` header lines. Now
+`auth: bearer(token)`, written after the request line, names a `Secret`
+parameter that is sent as the bearer credential in place of the
+connector's `auth:`.
+
+The checker exempts exactly that parameter from the boundary rule, and
+only when its type is exactly `Secret`. It refuses:
+- a missing parameter;
+- a parameter of another type;
+- the same parameter sent as the path, query, URL, body or a header;
+- the form on an `async:` operation, whose arguments are persisted.
+
+The interpreter already passes a connector call two forms of its arguments,
+the recorded form and the form the request is built from. It now gives
+the credential `<redacted>` in the first and its text in the second. The
+runtime's new `ConnectorAuthSpec::BearerArgument` reads the second and
+refuses `<redacted>`, an empty token or a line break. The header is
+marked as the credential, so the existing redirect handling drops it on
+another origin.
+
+Tests:
+- an end-to-end real run whose provider matches only the person's token
+  (the connector's own key is unset);
+- a trace holding neither the token nor its prefix, with `"args":["<redacted>"]`;
+- a replay with a different token and no provider;
+- checker tests for each refusal and for a second, unnamed `Secret`;
+- runtime tests for the header, its credential marking and the refused values.
+
+The grammar reference holds the new item, and the differential verifier
+renders it.
+
+### Live re-checks for decimal, duration and instant orders
+
+L2 placed re-checked rows only under an `Int`, `Bool` or SQLite text
+order. Decimals, durations and instants re-ran the full query, though both
+engines compare them by value: SQLite through the `corvid_decimal` and
+`corvid_duration` collations and the time-ordered text of an instant,
+Postgres as `numeric` and `COLLATE "C"` text. `RowOrder` now compares those
+three by parsing the row's public JSON text with the same parsers the
+decoder uses, so `9.50` sorts before `10.0` and `1.00` ties `1.0`, with the
+key breaking the tie as `query_sql` does. A parity test runs a `Decimal`
+order against the full query through adds, a tie, and moves up, out and
+down. Zoned times, time zones, currencies, locales, optional columns and
+Postgres text still re-run the full query; the roadmap item names how each
+widens.
+
+### Live L2: re-check only the written rows
+
+After L1 one evaluation served all watchers of a query, but each commit
+still re-ran the whole query, so a write to a 10,000-row list read 10,000
+rows. A commit already names the rows it wrote and their revisions. Now
+the query agent runs through `corvid_vm::run_agent_reading_written_rows`,
+which adds an `OR` of key equalities to the query's own condition on the
+entry agent's interpreter only, never on the agents it calls. So the
+database still decides which written rows match, as the proposal requires.
+`corvid_runtime::tables::merge_rechecked` drops every written row from the
+previous result and inserts each that still matches where the query's
+total order (`order_by`, then the key, as `query_sql` writes it) puts it.
+
+The order is compared in Rust only where that equals the database's order
+exactly: whole numbers, `Bool`s, and text on SQLite, which compares bytes.
+Text on Postgres sorts by the database's locale, missing values sort first
+on SQLite and last on Postgres, and decimals and times have their own
+collations, so those kinds re-run the full query. That is correct, only
+slower. Widening it is on the roadmap. So is a commit naming no rows or
+more than 64. A row the database returns that the commit did not write,
+or one that cannot be compared, also falls back.
+
+Tests: a commit adding one row to a 10,000-row board reads one row, and a
+move out of the board reads none; a parity test runs the re-check and the
+full query side by side over adds, an unrelated list, a tie broken by key,
+moves to the top, out, in and down, and a delete, and requires equal rows
+and frames at every step with fewer rows read. `live_order` holds unit tests
+for placement and for which orders are refused.
+
+Alternatives: evaluating the `where` lambda per written row in memory
+(rejected in the proposal: a second meaning beside SQL) and asking the
+database for each row's position (a count query per row, as costly as the
+read it replaces on an unindexed order). No grammar change.
+
+### Live L1: one evaluation per distinct live query
+
+Every open subscription used to re-run its whole query on each relevant
+commit, so fifty people watching one board ran fifty identical queries per
+write. `serve_cmd/live/shared.rs` now keeps one evaluation per distinct
+query and broadcasts its frames. Two subscriptions share when they name the
+same handler and path, and, only when the handler's body reads its `actor`
+local (found from the IR with `for_each_expr`), the same caller. A path or
+caller is keyed by each field's public JSON form, because the
+compiler-built records have no JSON form of their own and a field map has
+no order.
+
+A joiner takes the receiver and the current rows under one lock, so no
+frame falls between its snapshot and its first change. A subscriber more
+than 64 frames behind starts again from the current snapshot, as a lagged
+commit receiver already did. The last subscriber to leave removes the
+entry and stops the evaluation. A failed evaluation is sent to every
+subscriber and removed, so the next subscriber starts a fresh one.
+Authority is still checked per subscriber before it joins.
+
+Tests: fifty subscribers to one board take two evaluations for a snapshot
+and one commit, receive the same frames, and leave nothing running; a query
+that reads its caller is shared by two subscriptions of one caller and not
+with another.
+
+Simpler alternatives considered: keying on `Debug` text of the values
+(depends on a hash map's order), and sharing by path only (wrong for a query
+that filters by caller). No grammar change.
+
+Filed: lowercase hex is hand-written in about forty places, three of them
+identical `encode_hex` functions in `corvid-cli`; the roadmap item asks for
+one encoder every copy calls.
+
+### Records cross the C ABI in the public JSON form
+
+The last place a record crossed in a second shape. A `pub extern "c"`
+agent's record parameter was decoded by `struct_decode.rs`, and its record
+result encoded by `struct_encode.rs`. Both used Corvid field names in source
+order, took scalar fields only, and ran through a JSON handle store of
+their own in the runtime (`ffi_bridge/json_exports.rs`). Meanwhile the
+generated header's schema comment came from `schema_for`, which already
+uses `IrField::key()`. So for a renamed record the header documented keys the
+wire did not use.
+
+Both directions now go through the embedded public plan
+(`lower_json_encode`, and a new `lower_json_decode_or_trap` for an argument
+that has no `Result` to fail into). The decode is strict, matching the
+header's `additionalProperties: false`. The two struct modules, fifteen
+runtime declarations and the runtime's JSON handle exports are deleted.
+Agreed with the Windows session first. Nothing it owns reads this JSON, and
+at its request a test holds the header's keys, the keys a host sends and
+the keys it receives to one set, for a record renamed by `@json(case:)` and
+`@json(key:)`.
+
+Filed: the checker still accepts only flat scalar records at the C
+boundary, although the wire now carries any public shape.
+
+### Diagnostic codes DC-2: every diagnostic declares its code
+
+Lexer, parser, resolver and warning kinds now declare codes, keeping every
+code the phrase matcher gave them. `UnclosedBracket`, which shared `E0052`
+with `UnclosedParen` through the word "unclosed", now has its own. The
+diagnostics the driver builds itself also carry codes: module-load errors
+(`E0330`–`E0338`), table schema (`E0650`, `E0651`) and the native build refusal
+(`E1001`, a new builds-and-targets range in the proposal). With every source
+covered, `Diagnostic::code` is required rather than optional, so a new
+diagnostic cannot be built without one, and `detect_error_code` is deleted.
+One test reads every `code()` match and every code the driver writes, and
+refuses a malformed or shared code across all of them.
+
+### Tests the printed-result slice missed
+
+The printed-result slice (`4193f4e5`) reached `main` with four test files
+still pinning the old forms: quoted strings in `retrieval`, `Ok(true)` in
+`stdlib_configuration`, a source-order record in `struct_prompt_return`, and a
+`List` fallback in `run_entry_boundary` that no longer happens. They were
+missed because `cargo test -p <crate>` stops at the first failing test binary.
+That gate run stopped at `demo_project_defaults` and never ran the rest. The
+gate now runs `cargo test --no-fail-fast`. The four tests expect the shared
+printed form, `run_entry_boundary` uses a `Weak` result that still falls back,
+and the boundary's refusal message no longer claims lists, options and results
+are unsupported.
+
+### Diagnostic codes DC-1: type errors declare their codes
+
+[Proposal](docs/proposals/diagnostic-codes.md). A diagnostic's code was
+found by matching phrases in its message, so most of the 135 checker
+errors printed `E0000`, and `YieldTypeMismatch` printed `E0208` only because
+its message contains "type mismatch". `TypeErrorKind::code()` is now an
+exhaustive match. It was generated once from the existing phrase table, so
+the eleven kinds that had codes keep them, and every other kind got a code in
+its area's range, in declaration order. The codes are written literally, so
+inserting a kind renumbers nothing. `Diagnostic` carries the code from the
+source, and the renderer prints it. Only sources without declared codes
+(lexer, parser, resolver) still fall back to the phrase matcher, which DC-2
+removes. A test reads the `code()` match and refuses a duplicate or a
+malformed code.
+
+### One printed form for a program's result
+
+The same program printed different output depending on its tier. The
+interpreter quoted a `String` and showed records in its `Display` form.
+Native code printed a bare `String` and a record as JSON under Corvid names,
+through a scalar-only encoder, and refused lists, options and results. Both
+now print through the public JSON form by declared type, the JSON a route
+returns, with a `String` as its text and other scalars as `to_string()`. The
+interpreter uses `corvid_vm::printed_result`. Native code uses the embedded
+plan (`lower_json_encode`), and its boundary accepts any structured result
+with a native public form. The [proposal](docs/proposals/printed-results.md)
+records why the `Display` form, JSON for a top-level `String`, and pretty JSON
+lost.
+
+Filed: an `extern "c"` agent's record return still reaches its host
+through `struct_encode.rs` under Corvid names. That is a host ABI, so it moves
+in its own slice with the descriptor and the examples.
+
+### `corvid run` routes an entry agent native code cannot carry
+
+While measuring how the tiers print results, `corvid run` on
+`agent main() -> List<Int>` failed with a native build error. `auto` is meant
+to fall back to the interpreter for anything native code cannot do, but
+the run's native scan never asked about the command-line boundary. That
+boundary's rule had two copies: `check_entry_boundary_type` in the emitted
+`main`, and a stricter guard in `build_native_to_disk` that alone refused a
+record parameter. Now `check_entry_boundary` is the one rule. It includes the
+record-parameter refusal and is exposed as `native_entry_refusal`, which
+`corvid run` asks before choosing a tier. A CLI test runs a list-returning
+program through `corvid run` and `--target=native`.
+
+Still open: what the two tiers print for the same result (the command-line
+printing item).
+
+### Skill capability groups read from the std modules
+
+The skill audit mapped a std tool to its capability group with a hand-kept
+list of names and prefixes. It missed `secret`, `uuid_v4`, `uuid_v7`, the
+`path_*` tools and the browser tools, so a skill using them was labeled
+without those groups. A label is what the user consents to, so the audit
+under-reported. The list is gone: the groups are read once from the bundled
+std sources (`scaffold::BUNDLED_STD`), each tool in the group of the module
+that declares it. Matching by exact name replaces the prefixes, which also
+counted a skill's own `io_*` names. Every std tool still reaches a skill by
+name, so nothing is missed. A test covers each module's tools.
+
+Left alone: `serve_auth/pkce.rs` drawing its own tokens is in the area the
+main line owns.
+
+### Integer literals in `Float` slots, and no silent widening
+
+The roadmap said an `Int` in a `Float` slot was not converted at run time.
+Reproducing it showed three faults. The interpreter kept an `Int`, which
+`to_string()` refused. Native code stopped with a Cranelift verifier error
+(`i64` where `f64` was expected). And the checker's widening rule recursed, so
+a `List<Int>` passed as a `List<Float>`.
+
+The roadmap suggested inserting a conversion at slot sites. That would make
+`x: Float = n` round silently for an `n` above 2^53, against the rule that
+nothing rounds without being written, so it was rejected. The widening is
+removed instead. An integer literal in a `Float` slot is typed `Float` by the
+checker, the way number literals already become `Decimal`s, and lowered as a
+`Float` literal. One beyond a `Float`'s exact range is a compile error
+(`FloatLiteralInexact`). A value converts with `.to_float()`, which the type
+mismatch's hint names. Nothing in the corpus, the examples or `std` relied on
+the widening. Arithmetic mixing an `Int` and a `Float` keeps giving a `Float`.
+
+Found and filed: diagnostics get their codes by matching message text, so
+new errors print `E0000`. The interpreter prints a `String` result quoted and
+native code prints it bare; that is added to the command-line printing item.
+
+### A printed `Float` reads as one
+
+`to_string()` writes `2.0` for a whole-number `Float`, the language's rule
+that a `Float` always reads as one. A printed result wrote `2` on both tiers,
+through a separate `number_text::float_display`. That function is gone. A
+printed result, interpolation and `to_string()` now share `float_to_string`, so
+`number_text` has one form for people and one for JSON. This changes program
+output, as the learnings entry says. Considered and rejected: keeping two
+forms, one for printing, because then `print(x)` and `x.to_string()` would
+disagree about the same value.
+
+Found on the way: native `corvid_print_f64` formatted into a 64-byte buffer
+through a copy helper that truncates silently, so a native program printing
+a large `Float` (`1e300`, 301 digits) cut the number short. It now prints the
+string `corvid_float_to_string` returns, at any length. A parity test prints
+`2.0`, `0.1` and `1e300` on both tiers. Its first run was refused by the new
+runtime stamp, because the test tools library still held the old runtime.
+Before the stamp, it would have linked the old runtime and failed on a `2` with no hint why.
+
+### Host test binaries out of the source tree
+
+The shared-library tests compiled their C hosts into
+`examples/shared_library_catalog/host_c/`, beside the sources and outside
+`.gitignore`, so `git add -A` picked the binaries up. They now build into the
+example's ignored `target/release`, beside the library each host loads. The
+roadmap item to move a program's own tools onto the runtime call is closed;
+B2b did that.
+
+### Approvers loaded from source are checked when they load
+
+The roadmap asked for a duration value in the approver simulator. Reading
+it showed a larger weakness: the "simulator" is also the evaluator real
+approvals run on (`evaluate_registered_approver`). It needs to exist because a
+native host registers approvers from source without an interpreter linked in.
+An approver using a construct the evaluator lacks, a duration or a method
+call, compiled and loaded, then failed its first real approval. The message
+even advised running the approver itself. Its `+` and `-` on `Int` were also
+unchecked, and a negative list index wrapped to a huge one.
+
+Now the approver is walked when it is loaded, by registration and by
+simulation, and refused with a message naming the first unsupported construct
+and what is supported. Arithmetic is checked, and a negative index is an
+error. A duration value was considered and not added. Approval arguments
+reach the evaluator as JSON text, so a duration could only be compared with
+another literal. Filed: one evaluator for approvers, with typed arguments and
+every value type.
+
+### Native `llm.usage` confirmed and held by the trace comparison
+
+The roadmap said native runs record no `llm.usage` host event. That stopped
+being true with B1b: every native prompt calls the runtime's
+`call_llm_ref_with_trace_rendered`, the path that records usage. The N5 trace
+comparison still filtered the event out, so nothing would catch it going
+missing again. The comparison now covers the whole trace, host events
+included. Only the mock adapter's name is normalized, because the fixture
+gives each tier its own mock.
+
+### Native builds check the runtime they link
+
+A native build linked whatever `libcorvid_runtime.a` was on disk. After a
+runtime change, a test failed to link a new export until someone rebuilt the
+archive by hand. This happened four times in native dispatch, last in the
+previous slice. Worse, a build could link an old runtime with no error. The
+native cache had the same weakness: its key hashed the C runtime and the code
+generator's own sources, so an edit to the Rust runtime or to `corvid-ir`
+reused a binary built from the old code. And linking a binary and linking a
+library each had their own lookup; only the library build rebuilt a missing
+archive.
+
+A new build-dependency crate, `corvid-source-stamp`, hashes a crate's
+sources and those of every workspace crate it depends on. Paths are
+relative to the workspace root, and tests are left out. `corvid-runtime`
+exports a symbol named after its stamp. One lookup, `runtime_staticlib.rs`,
+serves both links. It reads the archive's symbol index, about 33 MB of the
+333 MB debug archive, and caches the result per process. A stale development
+archive is rebuilt, and any other stale archive is refused. `NATIVE_BACKEND_ID`
+is the code generator's closure stamp now. Comparing file times, hashing the
+archive's bytes, checking only the declared export list, and referencing
+the stamp from generated code were considered; the
+[proposal](docs/proposals/native-runtime-stamp.md) says why each loses.
+
+Proof: unit tests read indexed, unindexed and non-archive files; a native
+test refuses an archive stamped by other sources and links the current one.
+Appending a comment to a runtime source and then running the trace test that
+had failed on a stale archive rebuilt the archive and passed. The
+concurrent-rebuild race in tests stays filed.
+
+### Native run and approval traces in the public JSON form
+
+Native traces recorded a run's arguments and an `approve`'s arguments with a
+separate hand-written JSON mapping, and recorded a run's result only for
+scalars. The interpreter recorded all three in its own form. Both tiers now
+record them the same way: in the public JSON form, by declared type, with a
+`Secret` shown as `<redacted>`. Native code encodes through the embedded plan
+with `corvid_json_encode_recorded`; the interpreter uses `recorded_value_json`.
+A field renamed by `@json(key:)` is recorded under its JSON name, which both
+tiers got wrong before. Recording never stops a run: a stream, a NaN or a
+malformed record falls back to the interpreter's form, or `null` natively,
+because three existing tests showed a strict encoder would fail them.
+
+The hand-written mapping, the per-type `corvid_trace_run_completed_*` exports
+and the C JSON buffer behind them (`json.c`) are gone. `runtime/trace.rs` held
+both collector trace functions and trace payloads, so the payloads moved to
+`runtime/trace_payload.rs` first, in a separate pure-move commit. A new test runs a
+record-returning program with a renamed key on both tiers and compares the
+recorded approval, start and result.
+
+Found and filed: the native command-line boundary prints a record through its
+own scalar-only encoder that ignores renamed keys, refuses `List`, `Option` and
+`Result` returns, and differs from the interpreter's `Display` output. Fixed
+too: the cryptography reference still said native code calls a program's own
+tool directly without redaction, which stopped being true with B2b.
+
 ### RT-4 live subscriptions verified over RT-3
 
 Both hosted Edge suites passed on `edb9a8f5561ea9e6b52072c57a51b6643a61661b`.
@@ -1630,6 +2853,148 @@ receives an unexpected 500 had nothing to show. The test now prints the
 server's log when its first request fails, which an intermittent
 failure under parallel load needed. Filed: the two servers still use
 two different failure envelopes for the same stops.
+
+## 2026-11-26 - An upload is one buffer, and never reaches a trace
+
+`corvid serve` built an upload's content as a `List<Int>`, one value per
+byte, so a 10 MB file took hundreds of megabytes. It is now one shared
+`Bytes` buffer, and `upload.bytes()` returns `Bytes` (with `length`,
+`sha256`, `to_hex` and `to_utf8`) instead of a list; no program in the
+repository called it.
+
+Found by the change: a connector test checks that an uploaded file's
+content never reaches the trace, and with `Bytes` it failed, showing the
+content base64-encoded in `run_started`. A run's recorded arguments had
+always held the whole file; as a list of numbers the text check could
+not see it. Every recorded value (a run's arguments and result, an
+`approve`'s arguments) now replaces an upload, however deeply nested,
+with its name, type, size and SHA-256, the form connectors already
+record. Uploads are still whole in memory up to `max_bytes`; spilling
+large ones to disk is on the roadmap.
+
+---
+
+## 2026-11-26 - `verify_password` off the interpreter's thread (limits row 13)
+
+`password.verify_password(hash)` ran Argon2id, tens of milliseconds at
+the OWASP cost, on the thread the interpreter shares with other work,
+so under `corvid serve` a login stalled the other requests on that
+thread. The interpreter's async method dispatch now runs it with
+`spawn_blocking`, as `hash_password` already did, and the synchronous
+arm stays for other callers. A test runs a check on a single-threaded
+runtime beside a task that ticks every millisecond: with the change it
+keeps ticking, and with the change set aside it ticked zero times. The
+API-key store's Argon2id check has no request-path caller yet, so it is
+unchanged.
+
+---
+
+## 2026-11-26 - The delegation grant store (B11-2a)
+
+B11's grammar is in its review window, so the part that does not depend
+on it went first: grants in the auth store beside sessions. A grant
+names its person, tenant, label, actions (each `confirm` or `allow`)
+and expiry; its token is stored as a hash under a prefix of its own, so
+a session token can never pass as a grant. Creation refuses an empty
+grant, an action named twice, a lifetime past the cap it is given, and
+a person or tenant the store does not hold. Resolution refuses an
+unknown, expired or revoked token and one whose person is gone or in
+another tenant; only the granting person revokes. The store authorizes
+nothing on its own: B11-3 intersects a grant with the source's offer
+and the person's current authority on every call.
+
+---
+
+## 2026-11-26 - The change report looks inside nested types
+
+The action change report now walks every declared type an action's
+input and result reach, through fields and variant payloads, and
+compares each with the same type in the new contract. Direction
+decides the verdict, because each surface fails differently: a sender
+of a record breaks on a new required field and on a removed variant
+(the server refuses it), but not on a new variant; a reader breaks on a
+new variant (a TypeScript `switch` over the union stops being
+exhaustive) but not on a new field or a removed variant. A type renamed
+or removed is already reported where it is named. This widens the
+narrowing B10-5a recorded.
+
+---
+
+## 2026-11-26 - What an action change breaks (B10-5a)
+
+`corvid contract app --diff base.json` compares the program's contract
+with a saved one and reports each action change with every outside
+surface it reaches: the HTTP endpoint, the TypeScript client method,
+`corvid act`, and the assistant tool when offered. A Corvid caller of a
+changed action is already a compile error; this is the half the
+compiler cannot see, an app already shipped or an assistant already
+connected. The rules follow from how each surface decodes: undeclared
+fields are refused, so a removed or renamed field breaks a caller that
+still sends it; a new required field breaks one that does not; a new
+optional one is additive; changed bounds, result type, requirements, a
+new `@approval` (a `202` where a result came) or a removed `assistants:`
+line break. The command exits 1 on a breaking change so CI can stop the
+release. The comparison lives in `corvid_abi::action_changes`.
+
+Narrowed, on the roadmap: a change inside a record an input holds is not
+reported yet. B10-5b (the board example, the reading list on actions)
+waits for the form binding.
+
+---
+
+## 2026-11-26 - `corvid act` (B10-4a)
+
+`corvid act move_card --card 3 --to Done --position 7` calls an action
+from the command line. Flags are text values, the same as form fields,
+so they read through the same decoder: two refactor commits first moved
+the request-text readers out of `serve_cmd.rs` (`request_text.rs`) and
+the action table and decoders out of the HTTP endpoint
+(`action_calls.rs`, with `decode_text_input` now shared by forms and
+flags), and a driver refactor made `interpreter_runtime` the one place
+the command-line runtime is built. `--json` takes the whole input, the
+result prints as public JSON (a stream one value per line), an unknown
+flag is refused, and an action that requires a signed-in caller is
+refused by name: the command line has no sign-in yet, and running it as
+no one would skip its `requires`. Filed for B11: command-line sign-in.
+B10-4b (workers) waits for B11 for signed-in actions and is split out.
+
+Found and fixed: `corvid run` parsed its positional arguments with its
+own copy of a text reader that knew only Int, Float, Bool and String, so
+`agent main(price: Decimal)` could not be run with an argument. It now
+reads through `decode_request_text`, the rule paths, queries, forms and
+flags use, with a test passing `2.50`.
+
+---
+
+## 2026-11-26 - Assistants call actions, and their person confirms (B10-3b)
+
+`corvid serve` answers `POST /mcp` (MCP over HTTP: `initialize`,
+`ping`, `tools/list`, `tools/call`) for actions with an `assistants:`
+line, as the proposal's B10-3b design decided. The endpoint
+authenticates as an action call does, so an assistant acts only inside
+its person's session. `tools/list` filters by the person's fresh roles
+without recording a decision; `tools/call` answers an unknown tool for
+anything not offered or not allowed, validates the input through the
+same `decode_json_input` the HTTP endpoint uses, and records a pending
+confirmation bound to the actor and tenant. `POST
+/__confirmations/<id>/confirm` from that person re-checks the action's
+`requires` and runs it through the same `execute` path, traced with
+`surface: "assistant"`; anyone else gets `403` and the confirmation
+stays. A serve test walks the whole flow.
+
+To share one path, `actions.rs` was split into the endpoint table
+(`catalog`), the decoders and `execute`, and `decode_json_input` now
+returns the refusal body so the assistant endpoint can return it as a
+tool error. OpenAPI's input schema is one public `action_input_schema`
+both use. Contract closure's `assistant_tools` is now `true`; an
+offered action needs an identity block (a compile error otherwise),
+since no one could sign in to confirm.
+
+Filed: pending confirmations are in memory and a restart drops them.
+Frontend roadmap: WebMCP registration and the confirmation prompt in
+the page, reading `tools/list`.
+
+---
 
 ## 2026-11-26 - The `assistants:` line (B10-3a)
 

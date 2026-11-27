@@ -20,8 +20,11 @@ crate-type = ["lib", "staticlib"]
 # `corvid_release`, `corvid_string_from_bytes`, etc.) the ABI and FFI
 # bridge layers use.
 cc = "1"
+# The runtime stamp a native build checks the linked archive against.
+corvid-source-stamp = { workspace = true }
 
 [dependencies]
+corvid-hex = { workspace = true }
 async-stream = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,7 +32,7 @@ toml = { workspace = true }
 tokio = { workspace = true }
 futures = "0.3"
 # `collation` registers the comparisons exact table columns use (B09 P8a).
-rusqlite = { version = "0.31", features = ["bundled", "collation"] }
+rusqlite = { version = "0.43", features = ["bundled", "collation"] }
 postgres = "0.19"
 # B09 P4: tables on Postgres use the async client (the blocking one cannot
 # run inside the interpreter's runtime) with rustls on the ring provider,

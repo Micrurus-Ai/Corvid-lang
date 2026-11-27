@@ -257,3 +257,12 @@ agent main() -> Bool:
 ";
     assert_eq!(run_main(src).await, Value::Bool(true));
 }
+
+/// `a + b` joins two byte strings: a DSSE-style message with a binary
+/// part, built and hashed as bytes.
+#[tokio::test]
+async fn byte_strings_join_with_plus() {
+    let src = "agent main() -> String:\n    header = \"DSSEv1 \".utf8()\n    payload = Bytes.from_hex(\"00ff\").unwrap_or(\"\".utf8())\n    return (header + payload).to_hex()\n";
+    assert_eq!(run_main(src).await, text("4453534576312000ff"));
+}
+

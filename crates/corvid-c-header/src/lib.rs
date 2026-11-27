@@ -115,21 +115,19 @@ fn param_c_type(
     schema_lines: &mut String,
     param_name: &str,
 ) -> &'static str {
-    if matches!(ty, Type::Struct(_) | Type::ImportedStruct(_)) {
+    if ty.crosses_c_abi_as_json() {
         schema_lines.push_str(&schema_comment(
             param_name,
             "parameter",
             ty,
             types_by_id,
         ));
-        // Slice 33Q8: struct extern-c parameters cross the boundary
-        // as caller-owned `const char*` JSON buffers. The cdylib's
-        // generated wrapper decodes them on entry via the per-DefId
-        // routine 20n-C already ships.
+        // A record, variant, list, option, result or map crosses as a
+        // caller-owned `const char*` of its public JSON, decoded on entry.
         "const char*"
     } else {
         ScalarAbiType::from_param_type(ty)
-            .expect("extern-c checker guarantees param is scalar or struct")
+            .expect("the extern-c checker accepts only C scalars and types that cross as JSON")
             .c_param_type()
     }
 }
@@ -139,21 +137,19 @@ fn return_c_type(
     types_by_id: &HashMap<DefId, &IrType>,
     schema_lines: &mut String,
 ) -> (&'static str, bool) {
-    if matches!(ty, Type::Struct(_) | Type::ImportedStruct(_)) {
+    if ty.crosses_c_abi_as_json() {
         schema_lines.push_str(&schema_comment(
             "return",
             "return value",
             ty,
             types_by_id,
         ));
-        // Slice 33Q8: struct extern-c returns leave the cdylib as
-        // owned `const char*` JSON buffers. Free with the existing
-        // `corvid_free_string(...)` runtime helper documented at the
-        // top of this header.
+        // A structured result leaves as an owned `const char*` of its
+        // public JSON. Free it with `corvid_free_string(...)`.
         ("const char*", false)
     } else {
         let return_abi = ScalarAbiType::from_return_type(ty)
-            .expect("extern-c checker guarantees return is scalar/grounded-scalar/struct");
+            .expect("the extern-c checker accepts only C scalars, grounded scalars, Nothing and types that cross as JSON");
         (return_abi.c_return_type(), return_abi.is_grounded_return())
     }
 }

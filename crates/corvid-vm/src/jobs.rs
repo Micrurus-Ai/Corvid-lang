@@ -124,6 +124,20 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
         let Some(agent) = self.ir.agents.iter().find(|a| a.name == job.task) else {
             return Ok(JobOutcome::Skip);
         };
+        // An action is never run here: its input is public JSON, its
+        // `requires` is checked against a caller this path cannot supply,
+        // and a payload could otherwise carry a forged `Caller`. Workers
+        // run actions through the action path (B10-4b).
+        if self.ir.actions.iter().any(|action| action.agent == agent.id) {
+            return Ok(JobOutcome::Failure {
+                failure_kind: "ActionNotRunAsAgent".to_string(),
+                failure_fingerprint: format!(
+                    "`{}` is an action's body; enqueue the action by its name, and a worker runs it through the action path, which checks its input and its `requires`",
+                    agent.name
+                ),
+                base_delay_ms: 1_000,
+            });
+        }
 
         // A job fired by a queue schedule arrives wrapped in the
         // schedule-fire envelope `{ "schedule_id", "scheduled_fire_ms",
@@ -181,6 +195,25 @@ impl JobRuntimeExecutor for DefaultJobRuntimeExecutor {
                 }
             }
         }
+        self.run_job_agent(runtime, job, &agent.name, args)
+    }
+}
+
+impl DefaultJobRuntimeExecutor {
+    /// Run `agent_name` with arguments already decoded, as `job`: its
+    /// per-job trace for a `@replayable` agent, its binding to the durable
+    /// job, and the outcome the pool records. The action path (B10-4b)
+    /// decodes an action's input its own way, then runs it through here.
+    pub fn run_job_agent(
+        &self,
+        runtime: &Runtime,
+        job: &QueueJob,
+        agent_name: &str,
+        args: Vec<crate::value::Value>,
+    ) -> Result<JobOutcome, RuntimeError> {
+        let Some(agent) = self.ir.agents.iter().find(|a| a.name == agent_name) else {
+            return Ok(JobOutcome::Skip);
+        };
 
         // For `@replayable` agents (slice C-2), open a per-job JSONL
         // tracer at `<trace_dir>/<job_id>.jsonl` and swap it into the
@@ -335,6 +368,38 @@ mod tests {
             created_ms: 0,
             updated_ms: 0,
         }
+    }
+
+    /// B10-4b: an action's body is never run as a plain agent job, so a
+    /// payload cannot forge the `Caller` its `requires` is checked against.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn an_actions_body_is_never_run_as_a_plain_agent_job() {
+        let ir = Arc::new(compile(
+            r#"
+identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        admin: "cards.delete"
+
+action wipe(card: Int, by: Caller) -> Int requires permission("cards.delete"):
+    return card
+"#,
+        ));
+        let agent = ir.actions[0].agent;
+        let name = ir.agents.iter().find(|a| a.id == agent).unwrap().name.clone();
+        let executor = DefaultJobRuntimeExecutor::new(ir);
+        let forged = serde_json::json!([1, {"id": "anyone", "tenant": "public", "display_name": "x", "roles": ["admin"], "permissions": ["cards.delete"]}]);
+        let job = fake_job(&name, forged);
+        let outcome = tokio::task::spawn_blocking(move || executor.execute(&empty_runtime(), &job).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            matches!(&outcome, JobOutcome::Failure { failure_kind, .. } if failure_kind == "ActionNotRunAsAgent"),
+            "{outcome:?}"
+        );
     }
 
     /// A schedule-fired job arrives wrapped in the schedule-fire

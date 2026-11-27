@@ -195,7 +195,7 @@ fn has_corvid_imports(file: &corvid_ast::File) -> bool {
 }
 
 pub fn hex_hash(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    corvid_hex::encode(bytes)
 }
 
 #[cfg(test)]

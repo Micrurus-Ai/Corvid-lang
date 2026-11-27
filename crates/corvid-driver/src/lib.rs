@@ -101,7 +101,7 @@ pub use corvid_runtime::{
     RedactionSet, Runtime, RuntimeBuilder, RuntimeError, StdinApprover, ToolHandler, ToolRegistry,
     Tracer,
 };
-pub use corvid_vm::{build_struct, InterpError, InterpErrorKind, ListValue, StructValue, Value};
+pub use corvid_vm::{build_struct, run_agent_reading_written_rows, WrittenKeys, InterpError, InterpErrorKind, ListValue, StructValue, Value};
 
 use std::path::Path;
 
@@ -112,6 +112,7 @@ pub use corvid_types::{Verdict as LawVerdict, DEFAULT_SAMPLES};
 mod build;
 mod config_loader;
 mod diagnostic;
+pub mod error_reference;
 mod law;
 mod pipeline;
 mod replay;
@@ -148,7 +149,7 @@ pub use law::{
 };
 pub use proof_replay::{replay_dimension_proof, ProofReplayResult, ProofReplayStatus};
 pub use run::{
-    apply_env_llm_wiring, build_or_get_cached_native, load_http_egress_policy, load_io_tool_policy, load_rag_embedder, load_mcp_servers, run_native, run_with_target,
+    apply_env_llm_wiring, build_or_get_cached_native, interpreter_runtime, load_http_egress_policy, load_io_tool_policy, load_rag_embedder, load_mcp_servers, run_native, run_with_target,
     CachedNativeBinary, RunError, RunTarget,
 };
 pub use scaffold::{

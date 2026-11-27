@@ -481,7 +481,7 @@ fn collect_block_imports(
             }
             IrStmt::Destructure { .. } => {
                 return Err(WasmCodegenError::unsupported(
-                    "destructuring is interpreter-only in 45n".to_string(),
+                    "destructuring runs on the interpreter only".to_string(),
                 ));
             }
             IrStmt::Parallel { .. } => {
@@ -574,10 +574,10 @@ fn collect_expr_imports(
             }
             match kind {
                 IrCallKind::EnumConstructor { .. } => Err(WasmCodegenError::unsupported(
-                    "sum-type variants are interpreter-only in 45h".to_string(),
+                    "sum-type variants run on the interpreter only".to_string(),
                 )),
                 IrCallKind::ClosureLocal { .. } => Err(WasmCodegenError::unsupported(
-                    "closure calls are interpreter-only in 45j".to_string(),
+                    "closure calls run on the interpreter only".to_string(),
                 )),
                 IrCallKind::Agent { .. } => Ok(()),
                 IrCallKind::Fixture { .. } => Err(WasmCodegenError::unsupported(format!(
@@ -804,7 +804,7 @@ fn collect_block_locals(block: &IrBlock, locals: &mut LocalLayout) -> Result<(),
             }
             IrStmt::Destructure { .. } => {
                 return Err(WasmCodegenError::unsupported(
-                    "destructuring is interpreter-only in 45n",
+                    "destructuring runs on the interpreter only",
                 ));
             }
             IrStmt::Parallel { .. } => {
@@ -974,7 +974,7 @@ fn emit_block(
             }
             IrStmt::Assign { span, .. } => {
                 return Err(WasmCodegenError::unsupported(format!(
-                    "place assignment (x.field = v / xs[i] = v / compound ops) is                      interpreter-only in 45b (at {span:?})"
+                    "place assignment (x.field = v / xs[i] = v / compound ops) runs on the interpreter only (at {span:?})"
                 )));
             }
             IrStmt::Return { value, .. } => {
@@ -1088,17 +1088,17 @@ fn emit_expr(
         }
         IrExprKind::Match { .. } => {
             return Err(WasmCodegenError::unsupported(
-                "match is interpreter-only in 45i".to_string(),
+                "match runs on the interpreter only".to_string(),
             ));
         }
         IrExprKind::Lambda { .. } => {
             return Err(WasmCodegenError::unsupported(
-                "lambdas are interpreter-only in 45j".to_string(),
+                "lambdas run on the interpreter only".to_string(),
             ));
         }
         IrExprKind::StructLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
-                "named struct literals are interpreter-only in 45n".to_string(),
+                "named struct literals run on the interpreter only".to_string(),
             ));
         }
         IrExprKind::PageNew { .. } => {
@@ -1113,13 +1113,12 @@ fn emit_expr(
         }
         IrExprKind::MapLiteral { .. } => {
             return Err(WasmCodegenError::unsupported(
-                "Map<K, V> is interpreter-only in 45g".to_string(),
+                "Map<K, V> runs on the interpreter only".to_string(),
             ));
         }
         IrExprKind::BuiltinMethod { .. } => {
             return Err(WasmCodegenError::unsupported(
-                "builtin methods (String.length() and the 45d/45e/45f batches) are \
-                 interpreter-only in 45c"
+                "this builtin method runs on the interpreter only"
                     .to_string(),
             ));
         }
@@ -1183,12 +1182,12 @@ fn emit_expr(
         } => match kind {
             IrCallKind::EnumConstructor { .. } => {
                 return Err(WasmCodegenError::unsupported(
-                    "sum-type variants are interpreter-only in 45h".to_string(),
+                    "sum-type variants run on the interpreter only".to_string(),
                 ));
             }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(WasmCodegenError::unsupported(
-                    "closure calls are interpreter-only in 45j".to_string(),
+                    "closure calls run on the interpreter only".to_string(),
                 ));
             }
             IrCallKind::Agent { def_id } => {

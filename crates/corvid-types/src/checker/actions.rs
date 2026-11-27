@@ -11,6 +11,16 @@ impl<'a> Checker<'a> {
     /// An action's caller policy names authorities the identity block
     /// declares. `requires anyone` names none, and needs no identity.
     pub(super) fn check_action_policy(&mut self, agent: &AgentDecl, spec: &ActionSpec) {
+        // An assistant acts for a signed-in person, who confirms its calls,
+        // so offering one needs a way to sign in.
+        if let Some(line) = &spec.assistants {
+            if !self.has_identity {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::AssistantsWithoutIdentity { action: agent.name.name.clone() },
+                    line.span,
+                ));
+            }
+        }
         let policy = &spec.policy;
         if !policy.requires_auth() {
             return;

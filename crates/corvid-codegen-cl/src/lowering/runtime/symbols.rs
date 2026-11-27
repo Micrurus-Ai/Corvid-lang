@@ -73,24 +73,6 @@ pub(in crate::lowering) const BENCH_FINISH_TRIAL_SYMBOL: &str = "corvid_bench_fi
 // load via `corvid_register_tool` (or a linked `#[tool]` lib
 // self-registers at `corvid_runtime_init`).
 
-// JSON encoder primitives backing the trace-payload `'j'` slot. The
-// Cranelift codegen walks each non-scalar tool/prompt/approve argument
-// type, appends its JSON representation to a buffer via these calls,
-// and finalizes the buffer into a refcounted Corvid String descriptor
-// stored in the trace slot. Implementations live in `runtime/json.c`.
-pub(in crate::lowering) const JSON_BUFFER_NEW_SYMBOL: &str = "corvid_json_buffer_new";
-pub(in crate::lowering) const JSON_BUFFER_FINISH_SYMBOL: &str = "corvid_json_buffer_finish";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_RAW_SYMBOL: &str = "corvid_json_buffer_append_raw";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_INT_SYMBOL: &str = "corvid_json_buffer_append_int";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_FLOAT_SYMBOL: &str =
-    "corvid_json_buffer_append_float";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_BOOL_SYMBOL: &str =
-    "corvid_json_buffer_append_bool";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_NULL_SYMBOL: &str =
-    "corvid_json_buffer_append_null";
-pub(in crate::lowering) const JSON_BUFFER_APPEND_STRING_SYMBOL: &str =
-    "corvid_json_buffer_append_string";
-
 // Scalar-to-String stringification helpers. Used by the
 // Cranelift codegen for `IrCallKind::Prompt` lowering when a
 // non-String argument is interpolated into a prompt template. Each
@@ -114,39 +96,11 @@ pub(in crate::lowering) const STRING_FROM_FLOAT_SYMBOL: &str = "corvid_string_fr
 /// the bridge panics on max-retries-exhausted.
 pub(in crate::lowering) const PROMPT_CALL_TYPED_SYMBOL: &str = "corvid_prompt_call_typed";
 
-// Generic JSON parse / build primitives used by codegen-emitted
-// per-struct decoders and encoders. Type-agnostic at the C ABI
-// boundary — runtime never learns the language's `Type::Struct`.
-pub(in crate::lowering) const JSON_PARSE_SYMBOL: &str = "corvid_json_parse";
-pub(in crate::lowering) const JSON_RELEASE_SYMBOL: &str = "corvid_json_release";
-pub(in crate::lowering) const JSON_FIELD_PRESENT_SYMBOL: &str = "corvid_json_field_present";
-pub(in crate::lowering) const JSON_GET_FIELD_INT_SYMBOL: &str = "corvid_json_get_field_int";
-pub(in crate::lowering) const JSON_GET_FIELD_BOOL_SYMBOL: &str = "corvid_json_get_field_bool";
-pub(in crate::lowering) const JSON_GET_FIELD_FLOAT_SYMBOL: &str = "corvid_json_get_field_float";
-pub(in crate::lowering) const JSON_GET_FIELD_STR_SYMBOL: &str = "corvid_json_get_field_str";
-
-// JSON-object build-side primitives. Codegen-emitted per-struct
-// `to_json` encoders use these to assemble a JSON object from a
-// heap-allocated struct's field bytes, preserving source-order
-// field iteration.
-pub(in crate::lowering) const JSON_OBJECT_NEW_SYMBOL: &str = "corvid_json_object_new";
-pub(in crate::lowering) const JSON_OBJECT_SET_INT_SYMBOL: &str = "corvid_json_object_set_int";
-pub(in crate::lowering) const JSON_OBJECT_SET_BOOL_SYMBOL: &str = "corvid_json_object_set_bool";
-pub(in crate::lowering) const JSON_OBJECT_SET_FLOAT_SYMBOL: &str = "corvid_json_object_set_float";
-pub(in crate::lowering) const JSON_OBJECT_SET_STR_SYMBOL: &str = "corvid_json_object_set_str";
-pub(in crate::lowering) const JSON_OBJECT_FINISH_SYMBOL: &str = "corvid_json_object_finish";
 pub(in crate::lowering) const CITATION_VERIFY_OR_PANIC_SYMBOL: &str =
     "corvid_citation_verify_or_panic";
 pub(in crate::lowering) const APPROVE_SYNC_SYMBOL: &str = "corvid_approve_sync";
 pub(in crate::lowering) const TRACE_RUN_STARTED_SYMBOL: &str = "corvid_trace_run_started";
-pub(in crate::lowering) const TRACE_RUN_COMPLETED_INT_SYMBOL: &str =
-    "corvid_trace_run_completed_int";
-pub(in crate::lowering) const TRACE_RUN_COMPLETED_BOOL_SYMBOL: &str =
-    "corvid_trace_run_completed_bool";
-pub(in crate::lowering) const TRACE_RUN_COMPLETED_FLOAT_SYMBOL: &str =
-    "corvid_trace_run_completed_float";
-pub(in crate::lowering) const TRACE_RUN_COMPLETED_STRING_SYMBOL: &str =
-    "corvid_trace_run_completed_string";
+pub(in crate::lowering) const TRACE_RUN_COMPLETED_JSON_SYMBOL: &str = "corvid_trace_run_completed_json";
 
 // Runtime bridge init/shutdown called from `corvid_init`
 // at the start of codegen-emitted `main` when the program uses any

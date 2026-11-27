@@ -120,14 +120,28 @@ impl<'a> Checker<'a> {
         // (Phase 33R5b-a) are opaque primitives produced ONLY by the
         // executing stdlib tools, so user code holding one cannot have
         // fabricated it.
-        if let Some(known) = Type::compiler_known(name) {
+        let declared = self.symbols.lookup_def(name).filter(|id| {
+            matches!(
+                self.symbols.get(*id).kind,
+                corvid_resolve::DeclKind::Type | corvid_resolve::DeclKind::ImportedUse
+            )
+        });
+        if let Some(known) = Type::builtin_named(name, declared.is_some()) {
             return known;
         }
         match self.symbols.lookup_def(name) {
             Some(id) => {
                 let entry = self.symbols.get(id);
                 if entry.kind == corvid_resolve::DeclKind::ImportedUse {
-                    return self.imported_use_type_to_type(name, span);
+                    let imported = self.imported_use_type_to_type(name, span);
+                    // A `use` of something that is not a type leaves the
+                    // built-in in place.
+                    if imported == Type::Unknown {
+                        if let Some(known) = Type::compiler_known(name) {
+                            return known;
+                        }
+                    }
+                    return imported;
                 }
                 self.expand_possible_alias(id, span)
             }
@@ -281,7 +295,12 @@ impl<'a> Checker<'a> {
     }
 
     fn named_type_in_module(&mut self, name: &str, module: &corvid_resolve::ResolvedModule) -> Type {
-        if let Some(known) = Type::compiler_known(name) {
+        let declared = module
+            .resolved
+            .symbols
+            .lookup_def(name)
+            .is_some_and(|id| module.resolved.symbols.get(id).kind == corvid_resolve::DeclKind::Type);
+        if let Some(known) = Type::builtin_named(name, declared) {
             return known;
         }
         match module.resolved.symbols.lookup_def(name) {

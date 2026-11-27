@@ -123,6 +123,72 @@ pub struct TableQuery<'a, 'e> {
     pub order: Option<&'e Expr>,
     pub descending: bool,
     pub take: Option<&'e Expr>,
+    /// A last stage that reduces the rows to one value (aggregates J1,
+    /// J2), with its arguments: none for `count()`, the function that
+    /// reads the column for `sum`, `min`, `max` and `count_by`, and the
+    /// key's function then the column's for `sum_by`.
+    pub aggregate: Option<(QueryAggregate, &'e [Expr])>,
+}
+
+/// A stage that turns a query's rows into one value, run by the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryAggregate {
+    /// `count() -> Int`.
+    Count,
+    /// `sum(fn (r) -> r.col)`, of the column's type.
+    Sum,
+    /// `min(fn (r) -> r.col) -> Option<T>`.
+    Min,
+    /// `max(fn (r) -> r.col) -> Option<T>`.
+    Max,
+    /// `count_by(fn (r) -> r.key) -> Map<K, Int>` (J2).
+    CountBy,
+    /// `sum_by(fn (r) -> r.key, fn (r) -> r.col) -> Map<K, T>` (J2).
+    SumBy,
+    /// `keys() -> List<K>` (J3b): the matching rows' keys alone, in key
+    /// order, for a table keyed by one column.
+    Keys,
+    /// `by_key() -> Map<K, Row>` (J4): each matching row under its key, in
+    /// key order, for a table keyed by one column.
+    ByKey,
+}
+
+impl QueryAggregate {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "count" => Self::Count,
+            "sum" => Self::Sum,
+            "min" => Self::Min,
+            "max" => Self::Max,
+            "count_by" => Self::CountBy,
+            "sum_by" => Self::SumBy,
+            "keys" => Self::Keys,
+            "by_key" => Self::ByKey,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Sum => "sum",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::CountBy => "count_by",
+            Self::SumBy => "sum_by",
+            Self::Keys => "keys",
+            Self::ByKey => "by_key",
+        }
+    }
+
+    /// How many functions the stage takes.
+    pub fn arity(self) -> usize {
+        match self {
+            Self::Count | Self::Keys | Self::ByKey => 0,
+            Self::Sum | Self::Min | Self::Max | Self::CountBy => 1,
+            Self::SumBy => 2,
+        }
+    }
 }
 
 /// The query a method call names, when the call ends a query chain:
@@ -162,9 +228,19 @@ pub fn table_query_target<'a, 'e>(
         ("all", []) => None,
         _ => return None,
     };
-    let mut query = TableQuery { table, filter, order: None, descending: false, take: None };
+    let mut query = TableQuery { table, filter, order: None, descending: false, take: None, aggregate: None };
     let mut rank = 0;
     for (stage, stage_args, _) in stages.iter().rev() {
+        // An aggregate ends the chain. The checker refuses one after
+        // `order_by` or `take`, which cannot change it, by name.
+        if let Some(aggregate) = QueryAggregate::from_name(stage) {
+            if rank >= 4 || stage_args.len() != aggregate.arity() {
+                return None;
+            }
+            query.aggregate = Some((aggregate, *stage_args));
+            rank = 4;
+            continue;
+        }
         let next = match (*stage, *stage_args) {
             ("order_by", [key]) if rank < 1 => {
                 query.order = Some(key);
@@ -274,6 +350,25 @@ pub enum QueryCondition<'e> {
     Not(Box<QueryCondition<'e>>),
     Compare { column: String, op: QueryCompare, value: &'e Expr },
     Text { column: String, test: QueryTextTest, value: &'e Expr },
+    /// `values.contains(row.column)` (J3): the column holds one of a
+    /// list the agent computes before the query runs.
+    InList { column: String, values: &'e Expr },
+}
+
+impl<'e> QueryCondition<'e> {
+    /// The list expressions the condition tests columns against (J3).
+    pub fn lists(&self) -> Vec<&'e Expr> {
+        match self {
+            Self::InList { values, .. } => vec![*values],
+            Self::And(left, right) | Self::Or(left, right) => {
+                let mut lists = left.lists();
+                lists.extend(right.lists());
+                lists
+            }
+            Self::Not(inner) => inner.lists(),
+            Self::Const(_) | Self::Column(_) | Self::Compare { .. } | Self::Text { .. } => Vec::new(),
+        }
+    }
 }
 
 /// Why part of a `where` condition cannot run in the database.
@@ -314,10 +409,16 @@ pub fn query_condition<'e>(
             }
         }
         Expr::Call { callee, args, span } => {
-            const ONLY: &str = "only `contains`, `starts_with` and `ends_with` calls on a column can run in the database";
+            const ONLY: &str = "only `contains`, `starts_with` and `ends_with` calls on a column, and `values.contains(row.column)` on a list, can run in the database";
             let Expr::FieldAccess { target, field, .. } = callee.as_ref() else { return refuse(*span, ONLY) };
             match (QueryTextTest::from_name(&field.name), query_column(table, row, target), args.as_slice()) {
                 (Some(test), Some(column), [value]) => Ok(QueryCondition::Text { column, test, value }),
+                // `values.contains(row.column)`: the list is the agent's,
+                // the column the argument.
+                (Some(QueryTextTest::Contains), None, [argument]) => match query_column(table, row, argument) {
+                    Some(column) => Ok(QueryCondition::InList { column, values: target }),
+                    None => refuse(*span, ONLY),
+                },
                 _ => refuse(*span, ONLY),
             }
         }

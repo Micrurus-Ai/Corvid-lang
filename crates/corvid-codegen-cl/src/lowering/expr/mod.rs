@@ -127,11 +127,11 @@ pub(super) fn lower_expr(
         IrExprKind::Lambda { .. } | IrExprKind::Decl { .. } if crate::native_callback_type(&expr.ty) =>
             callback::create(builder, expr, env, func_ids_by_def, module, runtime),
         IrExprKind::Lambda { .. } => Err(CodegenError::not_supported(
-            "lambdas are interpreter-only in 45j",
+            "lambdas run on the interpreter only",
             expr.span,
         )),
         IrExprKind::StructLiteral { .. } => Err(CodegenError::not_supported(
-            "named struct literals are interpreter-only in 45n (positional construction compiles natively)",
+            "named struct literals run on the interpreter only (positional construction compiles natively)",
             expr.span,
         )),
         IrExprKind::PageNew { .. } => Err(CodegenError::not_supported(
@@ -586,8 +586,12 @@ pub(super) fn lower_expr(
                 lower_json_encode(builder, module, runtime, &receiver.ty, value, expr.span)
             }
         }
-        IrExprKind::BuiltinMethod { .. } => Err(CodegenError::not_supported(
-            "builtin methods (String.length() and the 45d/45e/45f batches) are interpreter-only in 45c",
+        IrExprKind::BuiltinMethod { kind, receiver, .. } => Err(CodegenError::not_supported(
+            format!(
+                "`{}` on `{}` in native code",
+                corvid_types::builtin_methods::builtin_method_name(&receiver.ty, *kind).unwrap_or("this builtin method"),
+                receiver.ty.display_name()
+            ),
             expr.span,
         )),
         IrExprKind::Literal(IrLiteral::Int(n)) => Ok(builder.ins().iconst(I64, *n)),
@@ -677,6 +681,32 @@ pub(super) fn lower_expr(
                 builder.ins().trapz(result, clir::TrapCode::unwrap_user(3));
                 Ok(result)
             }
+        // `left + right` on lists: a new list of left's entries, then
+        // right's. Without this arm a list `+` fell through to integer
+        // addition of the two pointers.
+        IrExprKind::BinOp { op: BinaryOp::Add, left, right } | IrExprKind::WrappingBinOp { op: BinaryOp::Add, left, right }
+            if matches!(&expr.ty, Type::List(_)) =>
+        {
+            let Type::List(elem_ty) = &expr.ty else { unreachable!() };
+            let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            runtime.return_temporaries.borrow_mut().push(l);
+            let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            runtime.return_temporaries.borrow_mut().pop();
+            let info = runtime
+                .list_typeinfos
+                .get(elem_ty.as_ref())
+                .ok_or_else(|| CodegenError::cranelift("missing list typeinfo for `+`", expr.span))?;
+            let data = module.declare_data_in_func(*info, builder.func);
+            let info = builder.ins().symbol_value(I64, data);
+            let concat = module.declare_func_in_func(runtime.list_concat, builder.func);
+            let call = builder.ins().call(concat, &[l, r, info]);
+            let result = builder.inst_results(call)[0];
+            // The operands are consumed, as every binop consumes its
+            // refcounted operands; the result holds its own references.
+            emit_release(builder, module, runtime, l);
+            emit_release(builder, module, runtime, r);
+            Ok(result)
+        }
         // Native dispatch N3 — `==` and `!=` on secrets are the runtime's
         // constant-time comparison; the checker refuses every other
         // operator on a secret.
@@ -755,6 +785,24 @@ pub(super) fn lower_expr(
                     builder, *op, l, r, l_borrowed, r_borrowed, expr.span, module, runtime,
                 );
             }
+            // Integer and float arithmetic is all that reaches here; any
+            // other operand type has its own arm above. Refuse one that
+            // does not, rather than doing integer arithmetic on its
+            // representation (a list `+` once added two pointers).
+            if matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
+                for operand in [left, right] {
+                    let plain = match &operand.ty {
+                        Type::Tainted(inner) | Type::Grounded(inner) => inner.as_ref(),
+                        other => other,
+                    };
+                    if !matches!(plain, Type::Int | Type::Float | Type::Unknown) {
+                        return Err(CodegenError::not_supported(
+                            format!("the `{op:?}` operator on `{}` in native code", operand.ty.display_name()),
+                            expr.span,
+                        ));
+                    }
+                }
+            }
             let l = lower_expr(builder, left, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let r = lower_expr(builder, right, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
             let result = lower_binop_strict(builder, *op, l, r, expr.span, module, runtime)?;
@@ -820,7 +868,7 @@ pub(super) fn lower_expr(
             }
             IrCallKind::ClosureLocal { .. } => {
                 return Err(CodegenError::not_supported(
-                    "closure calls are interpreter-only in 45j",
+                    "closure calls run on the interpreter only",
                     expr.span,
                 ));
             }

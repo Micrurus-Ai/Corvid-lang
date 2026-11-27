@@ -230,6 +230,15 @@ impl<'a> Checker<'a> {
             }
             Some(_) => {}
         }
+        // Who may watch a live query is a consequential choice, so it is
+        // written, never left to a default (RT-1 follow-up). A public list
+        // says `requires anyone`.
+        if route.policy.is_none() {
+            invalid(
+                self,
+                "declares no `requires`; say who may watch it: `requires anyone` for a public list, or `requires authenticated`, `role(\"...\")` or `permission(\"...\")`".into(),
+            );
+        }
         let row_name = match route.response.live_row() {
             Some(corvid_ast::TypeRef::Named { name, .. }) => name.name.clone(),
             _ => {
@@ -264,6 +273,44 @@ impl<'a> Checker<'a> {
         }
         if query.take.is_some() {
             invalid(self, "uses `take`; a live query keeps every matching row current, so a moving top-N is not supported yet".into());
+        }
+        // A list may read other tables, which the live query then also
+        // watches (J5). A call by name (an agent, tool, prompt or function)
+        // could read anything, so the feed could not know when to refresh.
+        let lists = match query.filter {
+            Some(Expr::Lambda { params, body, .. }) => params
+                .first()
+                .and_then(|row| crate::table_ops::query_condition(query.table, &row.name.name, body).ok())
+                .map(|condition| condition.lists())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for list in lists {
+            let mut named_call = None;
+            corvid_ast::visit::walk_expr(list, &mut |expr| {
+                if let Expr::Call { callee, .. } = expr {
+                    if let Expr::Ident { name, .. } = callee.as_ref() {
+                        named_call.get_or_insert_with(|| name.name.clone());
+                    }
+                }
+            });
+            if let Some(callee) = named_call {
+                invalid(
+                    self,
+                    format!(
+                        "filters by a list that calls `{callee}`; a live query keeps its rows current by watching the tables its query reads, and cannot see what a call reads. Build the list from table queries, such as `Board.where(...).keys()`, or from `path` and `actor`"
+                    ),
+                );
+            }
+        }
+        if let Some((aggregate, _)) = query.aggregate {
+            invalid(
+                self,
+                format!(
+                    "ends in `{}`; a live query delivers rows, and a live count or total, which needs its own message to the browser, is not supported yet",
+                    aggregate.name()
+                ),
+            );
         }
     }
 
@@ -684,6 +731,7 @@ impl<'a> Checker<'a> {
             self.check_operation_query_and_headers(decl, op, &param_names);
             self.check_operation_response_shape(decl, op);
             self.check_operation_on_failure(decl, op);
+            self.check_operation_auth(decl, op);
             self.check_operation_stream(decl, op);
             self.check_operation_body(decl, op);
 
@@ -1947,6 +1995,65 @@ impl<'a> Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// `auth: bearer(token)` on an operation: `token` is one of its
+    /// parameters, exactly a `Secret`, and sent only as the credential.
+    /// Refused on an `async:` operation, whose arguments are kept so it
+    /// can be polled later: a person's token is never stored.
+    fn check_operation_auth(&mut self, connector: &ConnectorDecl, op: &corvid_ast::OperationDecl) {
+        let Some(auth) = &op.auth else { return };
+        let credential = auth.param();
+        let invalid = |message: String| {
+            TypeError::new(
+                TypeErrorKind::ConnectorConfigInvalid { connector: connector.name.name.clone(), message },
+                credential.span,
+            )
+        };
+        let operation = &op.name.name;
+        let name = &credential.name;
+        let Some(param) = op.params.iter().find(|p| p.name.name == *name) else {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `auth: bearer({name})`, but it declares no parameter named `{name}`; add `{name}: Secret` to its parameters"
+            )));
+            return;
+        };
+        let ty = self.type_ref_to_type(&param.ty);
+        if ty != Type::Secret {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` sends `{name}` as its credential, so `{name}` must be a `Secret`, which never reaches a trace or a log; it is a `{}`",
+                ty.display_name()
+            )));
+        }
+        if op.protocol.is_some() {
+            self.errors.push(invalid(format!(
+                "operation `{operation}` has an `async:` protocol, whose arguments are kept so it can be polled later; a person's token is never stored, so it cannot take `auth: bearer({name})`"
+            )));
+        }
+        let mut uses = Vec::new();
+        if op.body.as_ref().is_some_and(|body| body.param.name == *name) {
+            uses.push("the body".to_string());
+        }
+        if op.query.as_ref().is_some_and(|query| query.name == *name) {
+            uses.push("the query".to_string());
+        }
+        if op.url_param.as_ref().is_some_and(|url| url.name == *name) {
+            uses.push("the URL".to_string());
+        }
+        if path_placeholders(&op.path).iter().any(|placeholder| placeholder == name) {
+            uses.push("a path segment".to_string());
+        }
+        for header in &op.headers {
+            if matches!(&header.value, corvid_ast::OperationHeaderValue::Param(p) if p.name == *name) {
+                uses.push(format!("header `{}`", header.name));
+            }
+        }
+        if !uses.is_empty() {
+            self.errors.push(invalid(format!(
+                "`{name}` is operation `{operation}`'s credential, so only `auth:` may send it; it is also sent as {}",
+                uses.join(" and ")
+            )));
+        }
+    }
+
     /// `on failure -> Variant` turns every failure into a typed error, so
     /// the operation returns a `Result` whose error type declares the
     /// variant, with no fields or one `String` field for the reason.

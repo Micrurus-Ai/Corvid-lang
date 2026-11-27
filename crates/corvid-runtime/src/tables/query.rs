@@ -29,7 +29,31 @@ pub enum TableFilter {
     Not(Box<TableFilter>),
     Compare { column: String, op: QueryCompare, value: DbValue },
     Text { column: String, test: QueryTextTest, value: DbValue },
+    /// The column holds one of `values` (J3), each matched as `==`
+    /// matches it, a missing value included.
+    In { column: String, values: Vec<DbValue> },
+    /// The column holds one of another table's keys (J3b), read by an
+    /// inner query in the same statement, so both tables are read in one
+    /// snapshot and the keys never leave the database.
+    InQuery { column: String, inner: Box<InnerQuery> },
 }
+
+/// The inner query of a [`TableFilter::InQuery`]: a table in the same
+/// database, keyed by one column, and its condition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InnerQuery {
+    pub table: String,
+    pub key: String,
+    /// Its columns and how each is stored, so its condition binds values
+    /// as its own queries do.
+    pub columns: Vec<String>,
+    pub kinds: Vec<ColumnKind>,
+    pub filter: Option<TableFilter>,
+}
+
+/// The most values one `contains` list sends to the database. Each is a
+/// bound parameter, and both engines cap a statement's parameters.
+pub const MOST_LIST_VALUES: usize = 10_000;
 
 /// A whole query chain, ready to run.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -40,6 +64,114 @@ pub struct TableQuery {
     pub order: Option<String>,
     pub descending: bool,
     pub take: Option<i64>,
+}
+
+/// What an aggregate stage asks the database (aggregates J1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TableAggregate {
+    /// `count()`.
+    Count,
+    /// `sum` of an `Int` column, added by the database, which refuses a
+    /// total that leaves 64 bits on both engines.
+    SumInteger(String),
+    /// The column's stored values alone, for a sum the interpreter adds
+    /// exactly with its own `+` (`Decimal` and `Duration`: SQLite stores
+    /// both as text, so its `sum` would add floats).
+    Values(String),
+    /// `count_by` (J2): each value of the key column with its row count.
+    CountBy(String),
+    /// `sum_by` of an `Int` column: each key with its total, added by the
+    /// database as [`Self::SumInteger`] adds one.
+    SumIntegerBy { key: String, column: String },
+    /// `sum_by` of a `Decimal` or `Duration` column: each row's key and
+    /// value, for the interpreter to add exactly per key.
+    ValuesBy { key: String, column: String },
+    /// `keys()` (J3b): the key column alone, in key order.
+    Keys(String),
+}
+
+impl TableAggregate {
+    /// The grouping column, for the stages that group.
+    fn key(&self) -> Option<&String> {
+        match self {
+            Self::CountBy(key) | Self::SumIntegerBy { key, .. } | Self::ValuesBy { key, .. } => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The columns each result row holds, as the statement names them.
+    fn result_columns(&self, table: &TableRef<'_>) -> (Vec<String>, Vec<ColumnKind>) {
+        let mut columns = Vec::new();
+        let mut kinds = Vec::new();
+        if let Some(key) = self.key() {
+            columns.push(key.clone());
+            kinds.push(column_kind_of(table, key));
+        }
+        match self {
+            Self::Values(column) | Self::ValuesBy { column, .. } | Self::Keys(column) => {
+                columns.push(column.clone());
+                kinds.push(column_kind_of(table, column));
+            }
+            _ => {
+                columns.push(AGGREGATE_COLUMN.to_string());
+                kinds.push(ColumnKind::Integer);
+            }
+        }
+        (columns, kinds)
+    }
+}
+
+/// The statement for an aggregate over the rows `filter` keeps and its
+/// parameters. Grouped results come in the key's order, so the `Map`
+/// they build is the same on every run and every engine.
+pub fn aggregate_sql(
+    table: &TableRef<'_>,
+    filter: Option<&TableFilter>,
+    aggregate: &TableAggregate,
+) -> (String, Vec<DbValue>) {
+    let mut params = Vec::new();
+    let read = |column: &String| {
+        let kind = column_kind_of(table, column);
+        table.engine.select_list(&TableRef { columns: std::slice::from_ref(column), kinds: std::slice::from_ref(&kind), ..*table })
+    };
+    // `sum` of no rows is `NULL`; an empty total is 0. Postgres sums a
+    // `bigint` as `numeric`, and the cast back refuses one past 64 bits.
+    let integer_sum = |column: &String| match table.engine.is_postgres() {
+        true => format!("coalesce(sum({}), 0)::bigint AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+        false => format!("coalesce(sum({}), 0) AS {}", quote(column), quote(AGGREGATE_COLUMN)),
+    };
+    let count = format!("count(*) AS {}", quote(AGGREGATE_COLUMN));
+    let selected = match aggregate {
+        TableAggregate::Count => count,
+        TableAggregate::SumInteger(column) => integer_sum(column),
+        TableAggregate::Values(column) | TableAggregate::Keys(column) => read(column),
+        TableAggregate::CountBy(key) => format!("{}, {count}", read(key)),
+        TableAggregate::SumIntegerBy { key, column } => format!("{}, {}", read(key), integer_sum(column)),
+        TableAggregate::ValuesBy { key, column } => format!("{}, {}", read(key), read(column)),
+    };
+    let mut sql = format!("SELECT {selected} FROM {}", quote(table.name));
+    if let Some(filter) = filter {
+        sql.push_str(" WHERE ");
+        sql.push_str(&filter_sql(table, filter, &mut params));
+    }
+    let table_name = quote(table.name);
+    match aggregate {
+        TableAggregate::CountBy(key) | TableAggregate::SumIntegerBy { key, .. } => {
+            sql.push_str(&format!(" GROUP BY {table_name}.{key} ORDER BY {table_name}.{key} ASC", key = quote(key)));
+        }
+        TableAggregate::ValuesBy { key, .. } | TableAggregate::Keys(key) => {
+            sql.push_str(&format!(" ORDER BY {table_name}.{} ASC", quote(key)));
+        }
+        _ => {}
+    }
+    (sql, params)
+}
+
+/// The name an aggregate's single result column is read back by.
+const AGGREGATE_COLUMN: &str = "corvid_aggregate";
+
+fn column_kind_of(table: &TableRef<'_>, column: &str) -> ColumnKind {
+    table.columns.iter().position(|c| c == column).map(|i| table.kinds[i]).unwrap_or(ColumnKind::Text)
 }
 
 /// The `SELECT` statement for `query` and its parameters.
@@ -122,6 +254,50 @@ fn filter_sql(table: &TableRef<'_>, filter: &TableFilter, params: &mut Vec<DbVal
                 QueryTextTest::EndsWith => engine.ends_with(&column, &mark),
             }
         }
+        TableFilter::In { column, values } => {
+            // `IN` never matches `NULL`, while `==` matches a missing value
+            // with `None`, so a `None` in the list is its own test.
+            let present: Vec<&DbValue> = values.iter().filter(|v| **v != DbValue::Null).collect();
+            let missing = values.len() != present.len();
+            let marks: Vec<String> = present.iter().map(|value| bind(column, value)).collect();
+            let quoted = quote(column);
+            let mut tests = Vec::new();
+            if !marks.is_empty() {
+                tests.push(format!("{quoted} IN ({})", marks.join(", ")));
+            }
+            if missing {
+                tests.push(format!("{quoted} IS NULL"));
+            }
+            match tests.len() {
+                // An empty list holds nothing.
+                0 => engine.literal_bool(false).into(),
+                1 => tests.remove(0),
+                _ => format!("({})", tests.join(" OR ")),
+            }
+        }
+        TableFilter::InQuery { column, inner } => {
+            // A key is never missing, so `IN` agrees with `==` here.
+            let inner_table = TableRef {
+                name: &inner.table,
+                keys: std::slice::from_ref(&inner.key),
+                columns: &inner.columns,
+                kinds: &inner.kinds,
+                ..*table
+            };
+            let inner_name = quote(&inner.table);
+            let mut sql = format!(
+                "{}.{} IN (SELECT {inner_name}.{} FROM {inner_name}",
+                quote(table.name),
+                quote(column),
+                quote(&inner.key)
+            );
+            if let Some(condition) = &inner.filter {
+                sql.push_str(" WHERE ");
+                sql.push_str(&filter_sql(&inner_table, condition, params));
+            }
+            sql.push(')');
+            sql
+        }
     }
 }
 
@@ -143,6 +319,36 @@ impl Runtime {
             .iter()
             .map(json_row)
             .collect()
+    }
+
+    /// Run an aggregate (aggregates J1, J2), recorded as
+    /// `table:<Table>.aggregate` with its SQL and parameters; a replay
+    /// serves the recorded rows. Each row holds the grouping key first,
+    /// for the grouped stages, then the count, the total or the column's
+    /// value.
+    pub async fn table_aggregate(
+        &self,
+        table: &TableRef<'_>,
+        filter: Option<&TableFilter>,
+        aggregate: &TableAggregate,
+    ) -> Result<Vec<Row>, RuntimeError> {
+        let (sql, params) = aggregate_sql(table, filter, aggregate);
+        // The statement's columns, read back by their names.
+        let (columns, kinds) = aggregate.result_columns(table);
+        let selected = TableRef { columns: &columns, kinds: &kinds, ..*table };
+        let args = vec![J::String(sql.clone()), J::Array(params.iter().map(value_json).collect())];
+        let outcome = self
+            .recorded_table_call(&call_name(table, "aggregate"), args, || async {
+                let rows = self.table_select(&selected, &sql, &params).await?;
+                Ok(J::Array(rows.iter().map(row_json).collect()))
+            })
+            .await?;
+        let malformed = || RuntimeError::Other(format!("the recorded outcome of `{}.aggregate` is malformed", table.name));
+        let rows = outcome.as_array().ok_or_else(malformed)?.iter().map(json_row).collect::<Result<Vec<_>, _>>()?;
+        if rows.iter().any(|row| row.len() != columns.len()) {
+            return Err(malformed());
+        }
+        Ok(rows)
     }
 }
 

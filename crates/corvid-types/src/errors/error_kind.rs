@@ -43,6 +43,8 @@ pub enum TypeErrorKind {
 
     /// Calling something that isn't callable (e.g. a primitive value).
     NotCallable { got: String },
+    /// A qualified approval label that does not name a function declared
+    /// in a Python import block.
     InvalidQualifiedApproval,
 
     /// Field access on a non-struct value.
@@ -136,6 +138,11 @@ pub enum TypeErrorKind {
     /// A table column that holds a `Secret`.
     SecretTableColumn { column: String, at: String },
 
+    /// A declaration reuses the name of a core scalar (`Int`, `Float`,
+    /// `String`, `Bool`, `Nothing`), which always means the built-in, so
+    /// the program's type could never be named.
+    ReservedTypeName { name: String },
+
     /// `ask` answering with, or `choose` offering, a `Secret`.
     SecretShownToPerson { builtin: String, at: String },
 
@@ -178,6 +185,8 @@ pub enum TypeErrorKind {
     /// The return type declared doesn't match what the body returns.
     ReturnTypeMismatch { expected: String, got: String },
 
+    /// A call to a Python function the import block declares no
+    /// signature for.
     DirectPythonCallUnsupported { module: String, member: String },
 
     /// `alias.TypeName` type reference encountered, but the Corvid
@@ -283,6 +292,9 @@ pub enum TypeErrorKind {
     ActionPolicyUndeclaredAuthority { kind: &'static str, name: String, action: String },
     /// A route declared at the path an action is served at.
     ActionPathTaken { action: String, path: String },
+    /// An action offered to assistants in a program with no identity
+    /// block: no person could sign in to confirm its calls.
+    AssistantsWithoutIdentity { action: String },
     /// An action reads its caller (a `Caller` parameter) but requires no
     /// sign-in, so no caller is ever verified.
     ActionCallerWithoutSignIn { action: String, param: String },
@@ -298,7 +310,11 @@ pub enum TypeErrorKind {
     /// `try ... else` around a connector operation that declares
     /// `on failure`: its outages already arrive as a value.
     TryElseAroundOnFailure { operation: String, variant: String },
+    /// A browser form that does not match what it submits to;
+    /// `message` names the mismatch.
     InvalidForm { message: String },
+    /// A browser binding to a `live` route that does not match its
+    /// declaration; `message` names the mismatch.
     InvalidLiveBinding { message: String },
 
     /// A `connector Name:` block with an invalid configuration (slice
@@ -478,6 +494,15 @@ pub enum TypeErrorKind {
     /// B06 — a duration literal that names no exact length: a calendar
     /// unit, a fraction of a nanosecond, or a value out of range.
     DurationLiteralInvalid { message: String },
+    /// A method call on a type that has no method of that name: neither a
+    /// builtin method nor, for a record, one added with `extend`.
+    UnknownMethod { receiver: String, method: String, suggestion: Option<String> },
+    /// An integer literal where a `Float` is meant that no `Float` holds
+    /// exactly (beyond 2^53), so reading it as one would round it.
+    FloatLiteralInexact { literal: i64 },
+    /// A whole-number literal beyond `Int`'s range where no `Decimal`, or
+    /// `Float` that holds it exactly, is meant.
+    IntLiteralOutOfRange { literal: String },
     /// B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are
     /// empty or name one key twice.
     JsonKeyInvalid { type_name: String, message: String },
@@ -543,6 +568,8 @@ pub enum TypeErrorKind {
     /// A connector `Response` outside the program that made the call.
     ResponseOutsideCaller { place: String },
 
+    /// A prompt routed to a model whose declared output format cannot
+    /// produce the prompt's return type.
     ModelOutputFormatMismatch {
         prompt: String,
         model: String,
@@ -648,6 +675,158 @@ pub enum TypeErrorKind {
 }
 
 impl TypeErrorKind {
+    /// This error's code (`E0208`), declared here rather than inferred
+    /// from the message, so rewording a message never changes it. Every
+    /// kind has one, no two share one (`no_two_error_kinds_share_a_code`),
+    /// and the ranges are the [diagnostic codes](../../../../docs/proposals/diagnostic-codes.md)
+    /// proposal's: E01 effects and approval, E02 types, E03 names, E04 JSON
+    /// and records, E05 scalars, E06 tables, E07 actions and routes, E08
+    /// connectors, E09 streams, prompts, tools and agents, E52 identity and
+    /// access. A code is never reused: a kind moved to its proper area
+    /// leaves its old number empty, so no code ever named two errors.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::IntLiteralOutOfRange { .. } => "E0518",
+            Self::NonExhaustiveMatch { .. } => "E0401",
+            Self::LiveDeclarationInvalid { .. } => "E0701",
+            Self::RefinementOutOfRange { .. } => "E0402",
+            Self::ImpossibleConflictCase { .. } => "E0210",
+            Self::InvalidAssignTarget { .. } => "E0211",
+            Self::ArityMismatch { .. } => "E0201",
+            Self::TypeMismatch { .. } => "E0208",
+            Self::UnknownField { .. } => "E0202",
+            Self::NotCallable { .. } => "E0203",
+            Self::InvalidQualifiedApproval { .. } => "E0102",
+            Self::NotAStruct { .. } => "E0204",
+            Self::TypeAsValue { .. } => "E0205",
+            Self::NoJsonForm { .. } => "E0407",
+            Self::RetiredJsonDecoderTool { .. } => "E0409",
+            Self::RegexPatternNotLiteral { .. } => "E0501",
+            Self::InvalidRegexPattern { .. } => "E0502",
+            Self::InvalidRegexReplacement { .. } => "E0503",
+            Self::RegexSplitMatchesEmpty { .. } => "E0504",
+            Self::InvalidDecimalLiteral { .. } => "E0505",
+            Self::DecimalFloatMix { .. } => "E0506",
+            Self::DecimalDivisionNeedsRounding { .. } => "E0507",
+            Self::DecimalPlacesOutOfRange { .. } => "E0508",
+            Self::DecimalDivisionByZero { .. } => "E0509",
+            Self::UnknownTimeZone { .. } => "E0510",
+            Self::UnknownCurrencyOrLocale { .. } => "E0511",
+            Self::TimeOperatorMismatch { .. } => "E0212",
+            Self::BytesOperatorMismatch { .. } => "E0512",
+            Self::SecretOperatorMismatch { .. } => "E0103",
+            Self::SecretMethod { .. } => "E0104",
+            Self::SecretKeyPrefixNotLiteral { .. } => "E0118",
+            Self::HmacKeyType { .. } => "E0517",
+            Self::SecretAtBoundary { .. } => "E0105",
+            Self::SecretTableColumn { .. } => "E0601",
+            Self::ReservedTypeName { .. } => "E0308",
+            Self::SecretShownToPerson { .. } => "E0106",
+            Self::BareFunctionReference { .. } => "E0206",
+            Self::InvalidTryPropagate { .. } => "E0213",
+            Self::TryPropagateReturnMismatch { .. } => "E0214",
+            Self::InvalidRetryTarget { .. } => "E0215",
+            Self::GenericArityMismatch { .. } => "E0216",
+            Self::InvalidWeakTargetType { .. } => "E0217",
+            Self::InvalidWeakNewTarget { .. } => "E0218",
+            Self::InvalidWeakUpgradeTarget { .. } => "E0219",
+            Self::WeakUpgradeAcrossEffects { .. } => "E0107",
+            Self::ReturnTypeMismatch { .. } => "E0207",
+            Self::DirectPythonCallUnsupported { .. } => "E0220",
+            Self::CorvidImportNotYetResolved { .. } => "E0303",
+            Self::UnknownImportAlias { .. } => "E0304",
+            Self::ImportedDeclIsPrivate { .. } => "E0305",
+            Self::UnknownImportMember { .. } => "E0306",
+            Self::YieldOutsideAgent { .. } => "E0902",
+            Self::LoopFlowOutsideLoop { .. } => "E0221",
+            Self::AliasCycle { .. } => "E0222",
+            Self::FnBodyNotPure { .. } => "E0223",
+            Self::ParallelArmInvalid { .. } => "E0224",
+            Self::PromptHistoryInvalid { .. } => "E0903",
+            Self::ModelFieldInvalid { .. } => "E0904",
+            Self::IdentityConfigInvalid { .. } => "E0703",
+            Self::FirstLoginPolicyRequired { .. } => "E5210",
+            Self::RoutePolicyWithoutIdentity { .. } => "E0704",
+            Self::RoutePolicyUndeclaredAuthority { .. } => "E0705",
+            Self::ApprovalRequiresAuthentication { .. } => "E0706",
+            Self::ApprovalPolicyInvalid { .. } => "E0108",
+            Self::RouteUploadPolicyInvalid { .. } => "E0707",
+            Self::RoutePathParamType { .. } => "E0708",
+            Self::ActionPolicyWithoutIdentity { .. } => "E0709",
+            Self::ActionPolicyUndeclaredAuthority { .. } => "E0710",
+            Self::ActionPathTaken { .. } => "E0711",
+            Self::AssistantsWithoutIdentity { .. } => "E0712",
+            Self::ActionCallerWithoutSignIn { .. } => "E0713",
+            Self::ActorFromInput { .. } => "E0226",
+            Self::RouteQueryFieldType { .. } => "E0725",
+            Self::TryElseFallbackType { .. } => "E0227",
+            Self::TryElseAroundOnFailure { .. } => "E0228",
+            Self::InvalidForm { .. } => "E0714",
+            Self::InvalidLiveBinding { .. } => "E0715",
+            Self::ConnectorConfigInvalid { .. } => "E0801",
+            Self::AnnotationInvalid { .. } => "E0229",
+            Self::UnknownGenericHead { .. } => "E0307",
+            Self::StructLiteralInvalid { .. } => "E0408",
+            Self::YieldRequiresStreamReturn { .. } => "E0910",
+            Self::YieldReturnTypeMismatch { .. } => "E0905",
+            Self::UnapprovedDangerousCall { .. } => "E0101",
+            Self::UnapprovedHighTrustCall { .. } => "E0109",
+            Self::ApprovalReachabilityViolation { .. } => "E0110",
+            Self::EffectConstraintViolation { .. } => "E0250",
+            Self::AssertNotBool { .. } => "E0230",
+            Self::EvalUnknownTool { .. } => "E0906",
+            Self::EvalUnknownApproval { .. } => "E0111",
+            Self::InvalidConfidence { .. } => "E0231",
+            Self::UngroundedReturn { .. } => "E0209",
+            Self::PromptCitationUnknownParam { .. } => "E0907",
+            Self::PromptCitationRequiresGrounded { .. } => "E0911",
+            Self::NonReplayableCall { .. } => "E0112",
+            Self::NonDeterministicCall { .. } => "E0113",
+            Self::GroundedPureLaundering { .. } => "E0114",
+            Self::InvalidCustomDimension { .. } => "E0232",
+            Self::TaintedDangerousArgument { .. } => "E0115",
+            Self::RefinementInvalid { .. } => "E0404",
+            Self::DurationLiteralInvalid { .. } => "E0515",
+            Self::FloatLiteralInexact { .. } => "E0516",
+            Self::UnknownMethod { .. } => "E0240",
+            Self::JsonKeyInvalid { .. } => "E0405",
+            Self::TableQueryNotTranslatable { .. } => "E0603",
+            Self::TableColumnHistoryConflict { .. } => "E0604",
+            Self::AtomicBlockRefused { .. } => "E0605",
+            Self::TableKeyRequired { .. } => "E0606",
+            Self::TableKeyType { .. } => "E0607",
+            Self::TableFieldReserved { .. } => "E0608",
+            Self::TableNotPublic { .. } => "E0609",
+            Self::TableOutsideDatabase { .. } => "E0610",
+            Self::TableDatabaseAmbiguous { .. } => "E0611",
+            Self::TableDatabaseUnknown { .. } => "E0612",
+            Self::TableUniqueRule { .. } => "E0613",
+            Self::TableOrderUnordered { .. } => "E0614",
+            Self::DatabaseSettingRequired { .. } => "E0615",
+            Self::DatabaseSettingInvalid { .. } => "E0616",
+            Self::DatabaseEngineUnavailable { .. } => "E0617",
+            Self::RouteTargetNotModel { .. } => "E0912",
+            Self::RouteGuardNotBool { .. } => "E0913",
+            Self::DuplicateServerRoute { .. } => "E0720",
+            Self::GetRouteBody { .. } => "E0721",
+            Self::RouteMethodAnsweredByServer { .. } => "E0722",
+            Self::ResponseOutsideCaller { .. } => "E0802",
+            Self::ModelOutputFormatMismatch { .. } => "E0914",
+            Self::RolloutPercentOutOfRange { .. } => "E0233",
+            Self::EnsembleDuplicateModel { .. } => "E0908",
+            Self::AdversarialStageNotPrompt { .. } => "E0909",
+            Self::AdversarialStageArity { .. } => "E0234",
+            Self::AdversarialStageParamType { .. } => "E0235",
+            Self::AdversarialStageReturnType { .. } => "E0236",
+            Self::AdversarialAdjudicatorMissingContradictionField { .. } => "E0915",
+            Self::ReplayTraceNotATraceId { .. } => "E0116",
+            Self::ReplayArmTypeMismatch { .. } => "E0117",
+            Self::NonScalarInExternC { .. } => "E0237",
+            Self::AmbiguousExternOwnership { .. } => "E0238",
+            Self::ExternOwnershipMismatch { .. } => "E0239",
+        }
+    }
+
     pub fn message(&self) -> String {
         match self {
             Self::NonExhaustiveMatch { missing } => {
@@ -755,6 +934,9 @@ impl TypeErrorKind {
             Self::SecretTableColumn { column, at } => {
                 format!("table column `{column}` cannot hold a `Secret`{at}: a stored secret could be read back and shown")
             }
+            Self::ReservedTypeName { name } => {
+                format!("`{name}` is a built-in type, so a program cannot declare its own `{name}`")
+            }
             Self::SecretShownToPerson { builtin, at } => match builtin.as_str() {
                 "ask" => format!("`ask` cannot answer with a `Secret`{at}: a person's answer is recorded in the trace"),
                 _ => format!("`{builtin}` cannot offer a `Secret`{at}: its options are shown to a person"),
@@ -852,7 +1034,7 @@ impl TypeErrorKind {
             }
             Self::FirstLoginPolicyRequired { identity } => {
                 format!(
-                    "E5210 First-login policy required: identity `{identity}` declares OAuth \
+                    "First-login policy required: identity `{identity}` declares OAuth \
                      providers but does not state how an unknown verified subject is \
                      provisioned. Add: provisioning: first_login: open | invited"
                 )
@@ -887,6 +1069,9 @@ impl TypeErrorKind {
             Self::ActionPathTaken { action, path } => {
                 format!("route `{path}` takes the path action `{action}` is served at")
             }
+            Self::AssistantsWithoutIdentity { action } => format!(
+                "action `{action}` is offered to assistants, but no one can sign in to confirm an assistant's call"
+            ),
             Self::ActionCallerWithoutSignIn { action, param } => format!(
                 "action `{action}` reads its caller as `{param}`, but `requires anyone` verifies no caller"
             ),
@@ -1034,6 +1219,13 @@ impl TypeErrorKind {
             }
             Self::JsonKeyInvalid { type_name, message } => format!("type `{type_name}`: {message}"),
             Self::DurationLiteralInvalid { message } => message.clone(),
+            Self::UnknownMethod { receiver, method, .. } => format!("`{receiver}` has no method `{method}`"),
+            Self::IntLiteralOutOfRange { literal } => {
+                format!("`{literal}` is beyond `Int`'s range, -9223372036854775808 to 9223372036854775807")
+            }
+            Self::FloatLiteralInexact { literal } => {
+                format!("`{literal}` has no exact `Float` value, so reading it as one would round it")
+            }
             Self::TableQueryNotTranslatable { message } => message.clone(),
             Self::TableColumnHistoryConflict { table, message } => format!("table `{table}`: {message}"),
             Self::AtomicBlockRefused { message } => message.clone(),
@@ -1243,6 +1435,7 @@ impl TypeErrorKind {
                 ("Decimal", "Int") => "convert with `.to_decimal()`, which is exact".into(),
                 ("Decimal", "Float") => "convert with `.to_decimal()`, which keeps the digits the Float shows, or declare the value as a `Decimal` from the start".into(),
                 ("Float", "Decimal") => "convert with `.to_float()`, which gives the nearest Float".into(),
+                ("Float", "Int") => "write the number as a `Float` literal (`3.0`), or convert a value with `.to_float()`, which gives the nearest Float; an `Int` is never widened silently".into(),
                 _ => format!("change the value to produce a `{expected}`, or update the signature"),
             }),
             Self::InvalidDecimalLiteral { .. } => Some(
@@ -1275,6 +1468,7 @@ impl TypeErrorKind {
                 "read a signing key with `secret(name)` from std/secrets, so it never reaches a trace; a key the program holds as bytes, such as `Bytes.from_hex(text)?`, works too".into(),
             ),
             Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
+            Self::ReservedTypeName { name } => Some(format!("give your type another name, such as `{name}Value`")),
             Self::SecretTableColumn { .. } => Some(
                 "never store a secret's text. To check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
             ),
@@ -1531,6 +1725,22 @@ impl TypeErrorKind {
             Self::DatabaseEngineUnavailable { .. } => Some(
                 "use `engine: sqlite`; Postgres and MySQL are on the roadmap (B09 P4 and P5)".into(),
             ),
+            Self::IntLiteralOutOfRange { .. } => Some(
+                "a `Decimal` holds a whole number of up to 38 digits exactly: declare the value as a `Decimal` (`total: Decimal = ...`)".into(),
+            ),
+            Self::FloatLiteralInexact { .. } => Some(
+                "a `Float` holds every whole number up to 9007199254740992 (2^53) exactly; write the nearest value you mean as a `Float` literal, or keep it an `Int`".into(),
+            ),
+            Self::UnknownMethod { receiver, method, suggestion } => Some(match suggestion {
+                Some(suggestion) => format!("did you mean `{suggestion}`?"),
+                None if receiver.starts_with("Option<") => format!(
+                    "an `Option` may hold nothing: take the value out first, with `value.unwrap_or(default).{method}()` or a `match`"
+                ),
+                None if receiver.starts_with("Result<") => format!(
+                    "a `Result` may hold an error: take the value out first, with `?`, `value.unwrap_or(default).{method}()` or a `match`"
+                ),
+                None => "a record type gets methods with `extend`; the reference lists each type's builtin methods".into(),
+            }),
             Self::DurationLiteralInvalid { .. } => Some(
                 "a duration is a number and one of nanoseconds, microseconds, milliseconds, seconds, minutes or hours, such as `30 seconds` or `1.5 hours`".into(),
             ),
@@ -1617,7 +1827,7 @@ impl TypeErrorKind {
                 "every arm (including `else`) of a replay block must produce the same type; adjust the arm body to return `{expected}`"
             )),
             Self::NonScalarInExternC { .. } => Some(
-                "extern \"c\" accepts Int/Float/Bool/String parameters, scalar / `Grounded<scalar>` / `Nothing` returns, and user-declared structs whose fields are themselves all scalars (Int/Float/Bool/String). Nested structs, Lists, Options, and other rich types still wait for follow-up FFI slices. Boundary structs travel the C ABI as JSON-encoded strings; see docs/reference/exported-abi.md".into(),
+                "extern \"c\" takes `Int`, `Float`, `Bool` and `String` as C scalars, returns those, `Grounded<scalar>` or `Nothing`, and passes any record, variant, list, option, result or map that has a JSON form as a JSON string; a type with no JSON form (a stream, a handle, a secret) cannot cross. See docs/reference/exported-abi.md".into(),
             ),
             Self::AmbiguousExternOwnership { .. } => Some(
                 "add an explicit ownership annotation such as `@owned`, `@borrowed`, `@shared`, or `@static` after the boundary type".into(),
@@ -1661,6 +1871,9 @@ impl TypeErrorKind {
             ),
             Self::ActorFromInput { .. } => Some(
                 "a `Caller` comes only from the verified session: give an action a `Caller` parameter of its own, or read `actor` in a route that requires a sign-in".into(),
+            ),
+            Self::AssistantsWithoutIdentity { .. } => Some(
+                "an assistant acts for a signed-in person, who confirms each call; add an `identity <name>:` block, or remove the `assistants:` line".into(),
             ),
             Self::ActionPathTaken { .. } => Some(
                 "every action is served at `POST /actions/<name>`; give the route another path, or call the action from it".into(),

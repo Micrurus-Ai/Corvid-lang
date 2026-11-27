@@ -16,6 +16,7 @@
 //! MD5 and SHA-1 are deliberately absent: they are broken for the uses
 //! people reach for them in.
 
+mod aead;
 mod bytes;
 mod constant_time;
 mod digest;
@@ -26,6 +27,7 @@ mod secret;
 mod signature;
 mod token;
 
+pub use aead::{DataKey, SealError, DATA_KEY_BYTES};
 pub use bytes::Bytes;
 pub use constant_time::constant_time_eq;
 pub use digest::{sha256, sha384, sha512};

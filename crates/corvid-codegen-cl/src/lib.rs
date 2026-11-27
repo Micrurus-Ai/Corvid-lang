@@ -34,6 +34,7 @@ pub mod module;
 pub mod ownership;
 pub mod pair_elim;
 pub mod result_match;
+pub(crate) mod runtime_staticlib;
 pub mod text_scalar;
 pub mod time_methods;
 pub use time_methods::is_native_time_method;
@@ -145,43 +146,7 @@ pub fn build_native_to_disk(
     extra_tool_libs: &[&Path],
 ) -> Result<PathBuf, CodegenError> {
     let entry = pick_entry_agent(ir)?;
-    // The native command-line boundary currently supports the four
-    // scalar types. Structs and lists at the entry boundary remain
-    // blocked until a dedicated serialization layer exists. The
-    // codegen-emitted main itself enforces the same boundary; this
-    // guard surfaces the error earlier with the agent name.
-    for p in &entry.params {
-        if matches!(
-            &p.ty,
-            corvid_types::Type::Struct(_) | corvid_types::Type::List(_)
-        ) {
-            return Err(CodegenError::not_supported(
-                format!(
-                    "entry agent `{}` parameter `{}` is `{}` — the native command-line boundary currently supports only Int/Bool/Float/String; structured input needs a dedicated serialization layer (use a wrapper agent that takes a String and parses internally)",
-                    entry.name,
-                    p.name,
-                    p.ty.display_name()
-                ),
-                p.span,
-            ));
-        }
-    }
-    // `Type::Struct(_)` is now accepted at the entry-return
-    // boundary as of Phase 20n-C commit 5; the codegen-emitted main
-    // calls a per-struct JSON encoder (`crate::lowering::struct_encode`)
-    // and prints the result via `print_string`. `Type::List(_)`
-    // returns still need their own encoder primitives and are filed
-    // as a follow-up slice.
-    if matches!(&entry.return_ty, corvid_types::Type::List(_)) {
-        return Err(CodegenError::not_supported(
-            format!(
-                "entry agent `{}` returns `{}` - the native command-line boundary supports `Int` / `Bool` / `Float` / `String` / `Struct` returns; `List` returns need their own dedicated encoder primitives and are tracked as a follow-up slice",
-                entry.name,
-                entry.return_ty.display_name()
-            ),
-            entry.span,
-        ));
-    }
+    lowering::check_entry_boundary(entry, &ir.types)?;
     let out_bin = link::binary_path_for(
         bin_path.parent().unwrap_or(Path::new(".")),
         bin_path
@@ -265,6 +230,18 @@ fn define_embedded_descriptor(
     })
 }
 
+/// Why `ir`'s entry agent cannot run as a native command-line program
+/// (a parameter or result the boundary cannot carry), or `None`. The
+/// rule the emitted `main` enforces, so `corvid run` can run such a
+/// program on the interpreter instead of failing its native build.
+pub fn native_entry_refusal(ir: &IrFile) -> Option<String> {
+    let entry = pick_entry_agent(ir).ok()?;
+    lowering::check_entry_boundary(entry, &ir.types).err().map(|err| match err.kind {
+        errors::CodegenErrorKind::NotSupported(reason) => reason,
+        other => other.to_string(),
+    })
+}
+
 fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
     if ir.agents.is_empty() {
         return Err(CodegenError::not_supported(
@@ -291,7 +268,9 @@ fn pick_entry_agent(ir: &IrFile) -> Result<&corvid_ir::IrAgent, CodegenError> {
     ))
 }
 
-/// Build-time fingerprint of this native backend's source and target triple.
+/// Build-time fingerprint of the sources this native backend is built
+/// from (its own, the runtime's and every workspace crate they depend
+/// on) and its target triple; see `corvid-source-stamp`.
 pub const NATIVE_BACKEND_ID: &str = include_str!(concat!(env!("OUT_DIR"), "/native-backend-id.txt"));
 
 fn span_zero() -> corvid_ast::Span {

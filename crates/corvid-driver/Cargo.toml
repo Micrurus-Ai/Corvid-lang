@@ -9,6 +9,7 @@ description = "Pipeline orchestrator for the Corvid compiler."
 python = ["corvid-runtime/python"]
 
 [dependencies]
+corvid-hex = { workspace = true }
 # Ed25519 verification goes through corvid-crypto's strict check.
 corvid-crypto = { workspace = true }
 fd-lock = "4.0.4"
@@ -33,7 +34,6 @@ serde = { workspace = true }
 toml = { workspace = true }
 time = { workspace = true }
 sha2 = "0.10"
-hex = "0.4"
 tempfile = { workspace = true }
 ureq = "2"
 url = "2"
@@ -41,6 +41,8 @@ semver = "1"
 ed25519-dalek = { version = "2", features = ["std"] }
 
 [dev-dependencies]
+# Test fixtures that sign releases write keys as hex.
+hex = "0.4"
 tempfile = "3"
 # Native dispatch N1: the native connector tests link against the
 # release corvid-test-tools staticlib, as the codegen native tests do.
@@ -52,7 +54,7 @@ corvid-crypto = { workspace = true }
 corvid-time = { workspace = true }
 # B09 P4: the table tests create tables on SQLite and, when
 # CORVID_TEST_POSTGRES_URL is set, on Postgres.
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tokio-postgres = "0.7"
 serde_json = { workspace = true }
 # Slice 33S2b — `executing_http_through_driver.rs` boots a

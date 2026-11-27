@@ -172,12 +172,14 @@ Signing is not offered: a private key is a long-lived credential whose storage n
 
 `==` and `!=` on `Bytes` are constant-time: comparing two byte strings of the same length takes the same time whichever bytes differ, so comparing a computed signature with a received one cannot leak the signature byte by byte. Byte strings of different lengths are unequal at once, which reveals only their lengths. The comparison is the same wherever it happens: between two values, between records or lists that hold bytes, and in `list.contains(bytes)`.
 
+`a + b` joins two byte strings: `a`'s bytes, then `b`'s. Use it for a signed message with a binary part, such as `"DSSEv1 ".utf8() + payload`.
+
 Every other operator is a compile error that says why:
 
 | Expression | Error hint |
 | --- | --- |
 | `a < b`, `<=`, `>`, `>=` | byte strings have no order, because an ordered comparison stops at the first differing byte |
-| `a + b` | `Bytes` supports only `==` and `!=` |
+| `a - b`, other arithmetic | `Bytes` supports `==`, `!=` and `+` |
 | `a == "text"`, `"digest: " + a` | bytes and text do not mix; convert with `utf8()` or a named encoding |
 
 ## JSON
@@ -192,7 +194,7 @@ A compiled program holds a `Bytes` value as its unpadded base64url text, the tex
 
 These run on the interpreter, chosen automatically by `corvid run` and refused by name in a native build:
 
-- **A secret passed to or returned by a tool of the program's own.** Native code holds a secret as the runtime's opaque object: `secret(name)` and `random_token(bytes)` run through the runtime, which records their results as `<redacted>`; a secret can sit in a local, a record, a list, an option or a result; `==` and `!=` compare secrets in constant time; and an HMAC keyed by a secret, `verify_password` and `decode_base64_after` run natively, so the webhook programs above build into a native binary; and `hash_password(password, cost)` runs through the runtime, which records the password as `<redacted>` and reveals it only to the implementation, so the sign-up and log-in programs below do too. Each is one call into the runtime, which uses the same `corvid_crypto::Secret` the interpreter does, so both tiers give the same tags, verdicts, records and messages. Native code calls a tool of the program's own directly and records its arguments without redaction, so a program that passes a secret to one, or gets one from one, runs on the interpreter.
+- **A secret passed to or returned by a tool of the program's own.** Native code holds a secret as the runtime's opaque object: `secret(name)` and `random_token(bytes)` run through the runtime, which records their results as `<redacted>`; a secret can sit in a local, a record, a list, an option or a result; `==` and `!=` compare secrets in constant time; and an HMAC keyed by a secret, `verify_password` and `decode_base64_after` run natively, so the webhook programs above build into a native binary; and `hash_password(password, cost)` runs through the runtime, which records the password as `<redacted>` and reveals it only to the implementation, so the sign-up and log-in programs below do too. Each is one call into the runtime, which uses the same `corvid_crypto::Secret` the interpreter does, so both tiers give the same tags, verdicts, records and messages. Native code calls a tool of the program's own through the runtime too, which reveals a secret argument only to the implementation and records it as `<redacted>`, as the interpreter does. A run's arguments and result and an `approve`'s arguments are recorded the same way on both tiers, with a secret as `<redacted>`.
 - **A tool or prompt whose signature holds `Bytes`**, as for the B06 types: native tool and prompt bridges have no `Bytes` form.
 - **`Bytes` as a map value**, since native maps hold `String`, `Int` and record values, and **`list.contains(bytes)`**, since native code compiles `contains` on no list yet.
 
@@ -397,4 +399,4 @@ A table can hold the hash in a `String` column, never the password. Both agents 
 
 The driver test `crates/corvid-driver/tests/tokens_and_passwords.rs` runs these steps from Corvid source: a password read with `secret(name)` is hashed, the right password verifies and a wrong one does not, the trace holds neither the password nor an issued key, a replayed issuance returns the recorded hash with one re-drawn-token warning, and a replay whose result depends on the token reports the divergence.
 
-`verify_password` runs Argon2id on the interpreter's own thread, tens of milliseconds at the OWASP cost; `hash_password` runs on a blocking worker. Moving verification off the request thread under heavy concurrent load is a roadmap item.
+Both `verify_password` and `hash_password` run Argon2id, tens of milliseconds at the OWASP cost, on a blocking worker, so a login check does not hold up the other requests a server is handling on the same thread.

@@ -264,8 +264,8 @@ pub enum BuiltinMethodKind {
     /// `Upload<Format>.text() -> String` — the upload bytes decoded
     /// as UTF-8 (lossy for non-UTF-8 content).
     UploadText,
-    /// `Upload<Format>.bytes() -> List<Int>` — the raw upload bytes,
-    /// each 0–255.
+    /// `Upload<Format>.bytes() -> Bytes` — the raw upload bytes, one
+    /// shared buffer.
     UploadBytes,
     /// `Upload<Format>.filename() -> String` — the client-supplied
     /// file name (may be empty).
@@ -887,6 +887,151 @@ fn text_result() -> Type {
     Type::Result(Box::new(Type::String), Box::new(Type::String))
 }
 
+/// Every builtin method name, for suggesting the one a misspelled call
+/// meant. `builtin_method_names_match_the_table` holds it to the names in
+/// `builtin_method`'s match.
+pub const BUILTIN_METHOD_NAMES: &[&str] = &[
+    "abs",
+    "add_days",
+    "add_months",
+    "add_years",
+    "all",
+    "any",
+    "append",
+    "body",
+    "bytes",
+    "ceil",
+    "contains",
+    "contains_key",
+    "contains_regex",
+    "content_type",
+    "decode_base64",
+    "decode_base64_after",
+    "decode_base64_url",
+    "decode_hex",
+    "decode_url_component",
+    "encode_base64",
+    "encode_base64_url",
+    "encode_hex",
+    "encode_url_component",
+    "ends_with",
+    "epoch_milliseconds",
+    "filename",
+    "filter",
+    "find_all_regex",
+    "find_regex",
+    "first",
+    "floor",
+    "fold",
+    "format_currency",
+    "get",
+    "header",
+    "hmac_sha256",
+    "hmac_sha512",
+    "in_zone",
+    "instant",
+    "is_err",
+    "is_none",
+    "is_ok",
+    "is_some",
+    "join",
+    "keys",
+    "last",
+    "length",
+    "map",
+    "map_err",
+    "max",
+    "min",
+    "minor_digits",
+    "ok_or",
+    "parse_currency",
+    "parse_decimal",
+    "parse_duration",
+    "parse_float",
+    "parse_instant",
+    "parse_int",
+    "parse_local_time",
+    "parse_locale",
+    "parse_time_zone",
+    "parse_uuid",
+    "parse_zoned_time",
+    "pow",
+    "remove",
+    "replace",
+    "replace_regex",
+    "reverse",
+    "round",
+    "scale",
+    "sha256",
+    "sha384",
+    "sha512",
+    "size",
+    "slice",
+    "sort",
+    "split",
+    "split_regex",
+    "sqrt",
+    "starts_with",
+    "status",
+    "substring",
+    "text",
+    "time_zone",
+    "to_base64",
+    "to_base64_url",
+    "to_decimal",
+    "to_float",
+    "to_hex",
+    "to_int_truncated",
+    "to_json",
+    "to_lower",
+    "to_string",
+    "to_upper",
+    "to_utf8",
+    "trim",
+    "unwrap_or",
+    "utf8",
+    "values",
+    "verify_ed25519",
+    "verify_password",
+    "with_zone",
+];
+
+/// The builtin method on `receiver` closest to `name` (at most two edits
+/// away), for a call to a method the receiver does not have.
+pub fn closest_builtin_method(receiver: &Type, name: &str) -> Option<&'static str> {
+    BUILTIN_METHOD_NAMES
+        .iter()
+        .filter(|candidate| builtin_method(receiver, candidate).is_some())
+        .map(|candidate| (edit_distance(candidate, name), *candidate))
+        .filter(|(distance, _)| *distance <= 2)
+        .min()
+        .map(|(_, candidate)| candidate)
+}
+
+/// The source name of the builtin method `kind` on `receiver`, such as
+/// `unwrap_or`, for a message about the call. IR keeps only the kind.
+pub fn builtin_method_name(receiver: &Type, kind: BuiltinMethodKind) -> Option<&'static str> {
+    BUILTIN_METHOD_NAMES
+        .iter()
+        .copied()
+        .find(|name| builtin_method(receiver, name).is_some_and(|sig| sig.kind == kind))
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut previous = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let current = row[j + 1];
+            row[j + 1] = (previous + usize::from(ca != *cb)).min(row[j] + 1).min(current + 1);
+            previous = current;
+        }
+    }
+    row[b.len()]
+}
+
 /// Look up `receiver.name(...)` in the builtin-method table.
 /// Returns `None` when no builtin method matches — the caller falls
 /// through to extend-method dispatch or its existing diagnostics.
@@ -1161,9 +1306,7 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
 
         // ----- Upload<Format> accessors (slice 52c-2) -------------
         (Type::Upload(_), "text") => sig(UploadText, vec![], Type::String),
-        (Type::Upload(_), "bytes") => {
-            sig(UploadBytes, vec![], Type::List(Box::new(Type::Int)))
-        }
+        (Type::Upload(_), "bytes") => sig(UploadBytes, vec![], Type::Bytes),
         (Type::Upload(_), "filename") => sig(UploadFilename, vec![], Type::String),
         (Type::Upload(_), "content_type") => sig(UploadContentType, vec![], Type::String),
         (Type::Upload(_), "size") => sig(UploadSize, vec![], Type::Int),

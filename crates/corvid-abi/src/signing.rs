@@ -182,7 +182,7 @@ fn decode_ed25519_seed(raw: &[u8], source_label: &str) -> Result<[u8; 32], SignE
         .collect::<Vec<u8>>();
     if trimmed.iter().all(|b| b.is_ascii_hexdigit()) && trimmed.len() == 64 {
         let mut out = [0u8; 32];
-        hex::decode_to_slice(&trimmed, &mut out).map_err(|e| SignError::KeyFormat {
+        corvid_hex::decode(std::str::from_utf8(&trimmed).unwrap_or_default()).map(|bytes| out.copy_from_slice(&bytes)).map_err(|e| SignError::KeyFormat {
             path_or_source: source_label.to_string(),
             reason: format!("hex decode failed: {e}"),
         })?;
@@ -284,7 +284,7 @@ pub fn load_verifying_key(path: &std::path::Path) -> Result<VerifyingKey, Verify
         .collect::<Vec<u8>>();
     let bytes: [u8; 32] = if trimmed.iter().all(|b| b.is_ascii_hexdigit()) && trimmed.len() == 64 {
         let mut out = [0u8; 32];
-        hex::decode_to_slice(&trimmed, &mut out).map_err(|e| VerifyError::VerifyKeyFormat {
+        corvid_hex::decode(std::str::from_utf8(&trimmed).unwrap_or_default()).map(|bytes| out.copy_from_slice(&bytes)).map_err(|e| VerifyError::VerifyKeyFormat {
             reason: format!("hex decode failed: {e}"),
         })?;
         out

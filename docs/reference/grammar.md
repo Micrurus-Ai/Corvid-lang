@@ -288,7 +288,7 @@ agent_decl        ::= annotation* extern_abi? 'agent' IDENT params '->' type_ref
 # an agent's annotations, and an `@approval(...)` in any position among
 # them, required when the body can reach an `approve`.
 action_decl       ::= (annotation NEWLINE | approval_annotation NEWLINE)* 'action' IDENT params '->' type_ref uses_clause? action_policy ':' INDENT assistants_line? block DEDENT
-action_policy     ::= 'requires' 'anyone' | route_policy
+action_policy     ::= route_policy
 
 # Only as an action's first line, so `assistants` is an ordinary name
 # elsewhere. Without it no assistant is offered the action. `allow`
@@ -362,7 +362,9 @@ path_placeholder  ::= '{' IDENT (':' ('Int' | 'String'))? '}'
 
 route_query       ::= 'query' type_ref
 route_payload     ::= ('body' | 'form') type_ref
-route_policy      ::= 'requires' route_requirement ('and' route_requirement)*
+# `requires anyone` stands alone: an open caller policy is written, never
+# an omission. A `live` must have a `route_policy`; a route may leave it out.
+route_policy      ::= 'requires' 'anyone' | 'requires' route_requirement ('and' route_requirement)*
 route_requirement ::= 'authenticated' | ('role' | 'permission') '(' STRING_LITERAL ')'
 
 upload_annotation ::= '@' 'upload' '(' (upload_arg (',' upload_arg)* ','?)? ')'
@@ -454,6 +456,16 @@ operation cannot set `Authorization`, `Proxy-Authorization`, `Cookie`,
 header its connector's `auth:` uses, or its protocol's idempotency
 header, and sets each header at most once.
 
+`auth: bearer(token)` on an operation makes the call with a credential the
+program passes, such as the signed-in person's own token, in place of the
+connector's `auth:`. `token` names one of the operation's parameters, which
+must be a `Secret`: the only `Secret` an operation may take. Only `auth:`
+sends it, never the path, query, body or a header. The trace records it as
+`<redacted>`, replay matches the call without it, and a redirect to another
+origin drops it. An operation with an `async:` protocol cannot take one,
+because a protocol's arguments are kept so it can be polled later, and a
+person's token is never stored. [User credentials](../proposals/user-credentials.md)
+
 A connector declares exactly one of `base_url` (one API, each operation
 a path) and `hosts: allowed_hosts` (each operation's request line names a
 `String` URL parameter, as in `GET url`, and any host `[http] allow`
@@ -537,6 +549,7 @@ operation_item    ::= 'on' 'status' INT '->' IDENT NEWLINE | 'mock' ':' expr NEW
                     | 'response' ':' 'text' NEWLINE
                     | 'streams' ':' stream_format ('until' STRING_LITERAL)? NEWLINE
                     | 'on' 'failure' '->' IDENT NEWLINE
+                    | 'auth' ':' 'bearer' '(' IDENT ')' NEWLINE
                     | 'async' ':' INDENT protocol_item+ DEDENT
 protocol_item     ::= ('statuses' | 'terminal') ':' protocol_names NEWLINE
                     | ('initial' | 'deadline_target') ':' IDENT NEWLINE

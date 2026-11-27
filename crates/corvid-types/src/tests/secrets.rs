@@ -317,3 +317,81 @@ connector github:
     );
     assert!(hint.contains("`auth`"), "{hint}");
 }
+
+fn errors_of(src: &str) -> Vec<TypeError> {
+    check(src).errors
+}
+
+/// User credentials C1: an operation's own `auth: bearer(token)`.
+fn credential_connector(operation: &str) -> String {
+    format!(
+        "type Repo:
+    name: String
+
+connector github:
+    timeout: 10s
+    redirects: never
+    published: no
+    base_url: \"https://api.github.com\"
+    modes: [real]
+{operation}"
+    )
+}
+
+#[test]
+fn an_operation_takes_a_persons_token_for_its_own_auth() {
+    let errors = errors_of(&credential_connector(
+        "    operation my_repos(token: Secret, owner: String) -> Repo:
+        GET \"/users/{owner}/repos\"
+        auth: bearer(token)
+",
+    ));
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn an_operation_credential_must_be_one_secret_parameter_sent_only_by_auth() {
+    let refusal = |operation: &str| {
+        errors_of(&credential_connector(operation))
+            .into_iter()
+            .map(|e| e.kind.message())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let missing = refusal("    operation my_repos() -> Repo:\n        GET \"/user/repos\"\n        auth: bearer(token)\n");
+    assert!(missing.contains("declares no parameter named `token`"), "{missing}");
+    let text = refusal("    operation my_repos(token: String) -> Repo:\n        GET \"/user/repos\"\n        auth: bearer(token)\n");
+    assert!(text.contains("`token` must be a `Secret`") && text.contains("it is a `String`"), "{text}");
+    let twice = refusal("    operation my_repos(token: Secret) -> Repo:\n        GET \"/users/{token}/repos\"\n        auth: bearer(token)\n");
+    assert!(twice.contains("only `auth:` may send it; it is also sent as a path segment"), "{twice}");
+    // A second `Secret` that `auth:` does not name is still refused.
+    let other = refusal("    operation my_repos(token: Secret, extra: Secret) -> Repo:\n        GET \"/user/repos\"\n        auth: bearer(token)\n");
+    assert!(other.contains("a connector operation's signature cannot hold a `Secret`"), "{other}");
+    assert!(!other.contains("`token`"), "the credential itself is allowed: {other}");
+}
+
+#[test]
+fn an_operation_credential_is_refused_on_an_async_operation() {
+    let errors = errors_of(&credential_connector(
+        "    operation start(token: Secret) -> String dangerous:
+        POST \"/generations\"
+        auth: bearer(token)
+        async:
+            statuses: [queued, completed, failed]
+            initial: queued
+            terminal: [completed, failed]
+            deadline: 600s
+            deadline_target: failed
+            idempotency: intent via header \"Idempotency-Key\"
+            poll GET \"/generations\"
+            every: adaptive
+            on_protocol_change: refuse
+            state queued:
+                on queued -> queued
+                on completed -> completed
+                on failed -> failed
+",
+    ));
+    let text = errors.iter().map(|e| e.kind.message()).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("a person's token is never stored"), "{text}");
+}

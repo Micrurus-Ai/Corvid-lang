@@ -439,6 +439,10 @@ impl ReplaySession {
                     run_id: event_run_id,
                     ..
                 }
+                | TraceEvent::DbTiming {
+                    run_id: event_run_id,
+                    ..
+                }
                 | TraceEvent::PromptCache {
                     run_id: event_run_id,
                     ..
@@ -729,36 +733,7 @@ fn matching_after_approval(
 
 fn first_run_id(events: &[TraceEvent]) -> Result<&str, ReplayLoadError> {
     match events.first() {
-        Some(TraceEvent::SchemaHeader { run_id, .. })
-        | Some(TraceEvent::RunStarted { run_id, .. })
-        | Some(TraceEvent::RunCompleted { run_id, .. })
-        | Some(TraceEvent::ToolCall { run_id, .. })
-        | Some(TraceEvent::ToolResult { run_id, .. })
-        | Some(TraceEvent::LlmCall { run_id, .. })
-        | Some(TraceEvent::LlmResult { run_id, .. })
-        | Some(TraceEvent::PromptCache { run_id, .. })
-        | Some(TraceEvent::ApprovalRequest { run_id, .. })
-        | Some(TraceEvent::ApprovalDecision { run_id, .. })
-        | Some(TraceEvent::ApprovalResponse { run_id, .. })
-        | Some(TraceEvent::ApprovalTokenIssued { run_id, .. })
-        | Some(TraceEvent::ApprovalScopeViolation { run_id, .. })
-        | Some(TraceEvent::HumanInputRequest { run_id, .. })
-        | Some(TraceEvent::HumanInputResponse { run_id, .. })
-        | Some(TraceEvent::HumanChoiceRequest { run_id, .. })
-        | Some(TraceEvent::HumanChoiceResponse { run_id, .. })
-        | Some(TraceEvent::HostEvent { run_id, .. })
-        | Some(TraceEvent::HttpExchange { run_id, .. })
-        | Some(TraceEvent::SeedRead { run_id, .. })
-        | Some(TraceEvent::ClockRead { run_id, .. })
-        | Some(TraceEvent::ModelSelected { run_id, .. })
-        | Some(TraceEvent::ProgressiveEscalation { run_id, .. })
-        | Some(TraceEvent::ProgressiveExhausted { run_id, .. })
-        | Some(TraceEvent::AbVariantChosen { run_id, .. })
-        | Some(TraceEvent::EnsembleVote { run_id, .. })
-        | Some(TraceEvent::AdversarialPipelineCompleted { run_id, .. })
-        | Some(TraceEvent::AdversarialContradiction { run_id, .. })
-        | Some(TraceEvent::StreamUpgrade { run_id, .. })
-        | Some(TraceEvent::ProvenanceEdge { run_id, .. }) => Ok(run_id),
+        Some(event) => Ok(event.run_id()),
         None => unreachable!("empty event list handled earlier"),
     }
 }
@@ -795,6 +770,7 @@ fn first_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
         | Some(TraceEvent::HostEvent { ts_ms, .. })
         | Some(TraceEvent::HttpExchange { ts_ms, .. })
+        | Some(TraceEvent::DbTiming { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })
@@ -831,6 +807,7 @@ fn last_ts(events: &[TraceEvent]) -> u64 {
         | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
         | Some(TraceEvent::HostEvent { ts_ms, .. })
         | Some(TraceEvent::HttpExchange { ts_ms, .. })
+        | Some(TraceEvent::DbTiming { ts_ms, .. })
         | Some(TraceEvent::SeedRead { ts_ms, .. })
         | Some(TraceEvent::ClockRead { ts_ms, .. })
         | Some(TraceEvent::ModelSelected { ts_ms, .. })

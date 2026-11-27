@@ -29,13 +29,13 @@ Ordered by what blocks a real backend and AI application most. Items marked *gra
 | 4 | ~~JSON key renaming for camelCase APIs.~~ Done 2026-11-26: `@json(key:)` and `@json(case:)`, one key rule read by every public JSON surface on both tiers. [Proposal](json-field-keys.md) | Mac session | grammar |
 | 5 | ~~Variant payload fields take refinements, as record fields do.~~ Done 2026-11-26. | Mac session | grammar |
 | 6 | ~~The duration literal, `30 seconds`.~~ Done 2026-11-26, with the calendar-unit compile error. | Mac session | grammar |
-| 7 | A connector call with the signed-in user's own credential (per-call bearer token). | Windows session | needs a proposal |
-| 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). | Windows session | needs a proposal |
-| 9 | Joins and aggregates in table queries and `live`. | Windows session | needs a proposal |
+| 7 | A connector call with the signed-in user's own credential (per-call bearer token). [Proposal](user-credentials.md), 2026-11-26: C1 (an operation's own `auth:`) built 2026-11-26; C2 (keeping the provider token) is posted for frontend review. | Windows session | grammar |
+| 8 | Raw request bodies and a reusable webhook verifier, so payment and SaaS webhooks verify over HTTP (B16). [Proposal](verified-webhooks.md), posted for review 2026-11-26. | Windows session | grammar |
+| 9 | Joins and aggregates in table queries and `live`. [Proposal](query-aggregates-and-joins.md), 2026-11-26: `count`, `sum`, `min`, `max`, `count_by`, `sum_by`, filtering by another table with `keys().contains(...)`, and `by_key()`, all as method calls with no grammar change. | Windows session | no grammar |
 | 10 | ~~The TS client reads served streams, and serve's stream `error` event sends a typed failure, not Rust debug text.~~ Done 2026-11-26 ([stream failures S2](stream-failures.md)): `chunk`, `completed` and a sanitized `failed`, read by the generated client's `api.route(...)`. | Mac session | frontend |
 | 11 | `corvid serve` refuses `live` until RT-3 lands. Unblocked on 2026-11-26 (session watching, removal revisions). | Codex | frontend |
 | 12 | Native gaps: streams, tables, `llm.usage` events in native runs. B06 types at tool, prompt and map boundaries are done (2026-11-26, [native scalar boundaries](native-scalar-boundaries.md) B1 to B3): prompts and tools exchange the public JSON form on both tiers, native prompts and the program's own tools take and return records, lists, `Option`, variants and text-held scalars, and native maps take text-held keys and values. | Mac session | native |
-| 13 | Scale: incremental live matching, uploads held in memory, `verify_password` on the agent's thread. | Windows session | scale |
+| 13 | Scale: incremental live matching ([proposal](live-at-scale.md), 2026-11-26: one evaluation per distinct query, then re-checking only written rows, both done 2026-11-26); uploads still held whole in memory (now one buffer, not one value per byte), to spill to disk past a size. (`verify_password` on the agent's thread: done 2026-11-26, it runs on the blocking pool.) | Windows session | scale |
 
 Items 1 to 6 come before the rest of the roadmap order, because each is a hole or a block a first real application hits. The roadmap records that amendment.
 

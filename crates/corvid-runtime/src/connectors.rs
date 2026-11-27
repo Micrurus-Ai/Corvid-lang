@@ -63,6 +63,12 @@ pub enum ConnectorAuthSpec {
         username_secret: String,
         password_secret: String,
     },
+    /// An operation's `auth: bearer(token)`: the token is the revealed
+    /// text of the call's `Secret` argument named `param`. Every record
+    /// of the call holds `<redacted>` in its place.
+    BearerArgument {
+        param: String,
+    },
 }
 
 /// One connector operation's real-mode HTTP dispatch spec, derived from
@@ -284,7 +290,12 @@ pub fn connector_calls_from_ir(
                             (h.name.clone(), value)
                         })
                         .collect(),
-                    auth: connector.auth.as_ref().map(auth_from_ir),
+                    // An operation's own `auth: bearer(token)` replaces the
+                    // connector's credential for that call.
+                    auth: match &op.bearer_param {
+                        Some(param) => Some(ConnectorAuthSpec::BearerArgument { param: param.clone() }),
+                        None => connector.auth.as_ref().map(auth_from_ir),
+                    },
                     error_map: op
                         .error_map
                         .iter()
@@ -468,7 +479,7 @@ pub fn build_connector_request(
     // secret value appears. It is marked as the credential, so it is
     // never sent to another origin and never enters a fingerprint.
     if let Some(auth) = &spec.auth {
-        let header = build_auth_header(auth, &spec.operation, resolve_secret)?;
+        let header = build_auth_header(auth, &spec.operation, &by_name, resolve_secret)?;
         request = request.credential_header(header.0, header.1);
     }
 
@@ -723,22 +734,13 @@ fn encode_form(value: &serde_json::Value) -> String {
 /// characters that must not appear unescaped in a path segment or form
 /// value. Deterministic (no allocation surprises) so replay stays stable.
 fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            b' ' => out.push_str("%20"),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
+    corvid_text::encode_url_component(s)
 }
 
 fn build_auth_header(
     auth: &ConnectorAuthSpec,
     operation: &str,
+    args: &BTreeMap<&str, &serde_json::Value>,
     resolve_secret: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(String, String), ConnectorRequestError> {
     let resolve = |name: &str| -> Result<String, ConnectorRequestError> {
@@ -765,6 +767,25 @@ fn build_auth_header(
             let encoded =
                 base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
             Ok(("authorization".to_string(), format!("Basic {encoded}")))
+        }
+        ConnectorAuthSpec::BearerArgument { param } => {
+            // Only the revealed arguments hold the token. The recorded
+            // form holds `<redacted>`, which must never be sent as one.
+            let token = args
+                .get(param.as_str())
+                .and_then(|value| value.as_str())
+                .filter(|text| *text != crate::REDACTED_SECRET && !text.is_empty())
+                .ok_or_else(|| ConnectorRequestError::BadArgument {
+                    operation: operation.to_string(),
+                    param: param.clone(),
+                })?;
+            if token.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+                return Err(ConnectorRequestError::BadArgument {
+                    operation: operation.to_string(),
+                    param: param.clone(),
+                });
+            }
+            Ok(("authorization".to_string(), format!("Bearer {token}")))
         }
     }
 }
@@ -884,6 +905,33 @@ mod tests {
         })
         .expect("build");
         assert_eq!(req.credential_headers, vec!["x-api-key".to_string()]);
+    }
+
+    /// An operation's `auth: bearer(token)` sends the call's revealed
+    /// `Secret` argument as the credential, marked as the credential so a
+    /// cross-origin redirect drops it, and never the recorded
+    /// `<redacted>` form.
+    #[test]
+    fn an_operation_credential_comes_from_its_secret_argument() {
+        let mut personal = spec();
+        personal.param_names.push("token".to_string());
+        personal.auth = Some(ConnectorAuthSpec::BearerArgument { param: "token".to_string() });
+        let req = build_connector_request(&personal, &[json!("o"), json!("r"), json!("gho_person")], &|_| {
+            panic!("the connector's own secret is not read")
+        })
+        .expect("build");
+        assert_eq!(
+            req.headers.iter().find(|h| h.name == "authorization").map(|h| h.value.as_str()),
+            Some("Bearer gho_person")
+        );
+        assert_eq!(req.credential_headers, vec!["authorization".to_string()]);
+        assert!(!req.url.contains("gho_person"));
+
+        for refused in [json!(crate::REDACTED_SECRET), json!(""), json!("a\r\nX-Evil: 1")] {
+            let err = build_connector_request(&personal, &[json!("o"), json!("r"), refused], &|_| None)
+                .expect_err("never sent as a credential");
+            assert!(matches!(err, ConnectorRequestError::BadArgument { .. }));
+        }
     }
 
     /// IR from unchecked source could lack a declared policy; the request

@@ -225,18 +225,24 @@ fn an_action_takes_annotations_as_an_agent_does() {
 
 #[test]
 fn an_action_offered_to_assistants_says_how_and_why() {
-    let source = "action ping() -> String requires anyone:\n    assistants: confirm \"Check that the board answers.\"\n    return \"pong\"\n";
-    let contract = compile_to_application_contract_with_config(source, "app.cor", "test", None)
+    let source = format!("{IDENTITY}action ping() -> String requires anyone:\n    assistants: confirm \"Check that the board answers.\"\n    return \"pong\"\n");
+    let contract = compile_to_application_contract_with_config(&source, "app.cor", "test", None)
         .unwrap_or_else(|errors| panic!("{errors:#?}"));
     let line = contract.actions[0].assistants.as_ref().expect("the contract carries the assistants line");
     assert_eq!((line.mode.as_str(), line.description.as_str()), ("confirm", "Check that the board answers."));
 
-    let ir = compile_to_ir(source).unwrap_or_else(|e| panic!("{e:#?}"));
-    let gaps = corvid_driver::check_contract_closure(&ir, corvid_driver::RuntimeCapabilities::interpreter_tier());
+    let ir = compile_to_ir(&source).unwrap_or_else(|e| panic!("{e:#?}"));
+    let interpreter = corvid_driver::RuntimeCapabilities::interpreter_tier();
+    assert!(corvid_driver::check_contract_closure(&ir, interpreter).is_empty(), "serve answers assistant calls");
+    let without = corvid_driver::RuntimeCapabilities { assistant_tools: false, ..interpreter };
+    let gaps = corvid_driver::check_contract_closure(&ir, without);
     assert!(
-        gaps.iter().any(|gap| gap.message().contains("action ping") && gap.message().contains("B10-3b")),
-        "serve refuses to start until an assistant can actually call it: {gaps:?}"
+        gaps.iter().any(|gap| gap.message().contains("action ping")),
+        "a runtime without the assistant endpoint refuses to start: {gaps:?}"
     );
+
+    let found = errors("action ping() -> String requires anyone:\n    assistants: confirm \"Ping.\"\n    return \"pong\"\n");
+    assert!(found.iter().any(|m| m.contains("no one can sign in to confirm")), "{found:#?}");
 
     let unoffered = compile_to_application_contract_with_config(&format!("{IDENTITY}{BOARD}"), "app.cor", "test", None).unwrap();
     assert!(unoffered.actions.iter().all(|a| a.assistants.is_none()), "no line, no assistant");
@@ -252,6 +258,115 @@ fn the_assistants_line_offers_only_what_runs_today() {
     assert!(found.iter().any(|m| m.contains("a description an assistant reads")), "{found:#?}");
     let found = errors("agent run(assistants: String) -> String:\n    return assistants\n");
     assert!(found.is_empty(), "`assistants` stays an ordinary name: {found:#?}");
+}
+
+fn contract(source: &str) -> corvid_abi::app_contract::ApplicationContract {
+    compile_to_application_contract_with_config(source, "app.cor", "test", None).unwrap_or_else(|e| panic!("{e:#?}"))
+}
+
+const REPORTED: &str = r#"
+type MoveCard:
+    card: Int
+    to: String
+
+action move_card(move: MoveCard) -> Int requires anyone:
+    assistants: confirm "Move a card."
+    return move.card
+
+action ping() -> String requires anyone:
+    return "pong"
+"#;
+
+#[test]
+fn renaming_an_input_reports_every_outside_caller_as_breaking() {
+    use corvid_abi::action_changes::{action_changes, ChangeSeverity};
+    let base = contract(&format!("{IDENTITY}{REPORTED}"));
+    let renamed = contract(&format!("{IDENTITY}{}", REPORTED.replace("    to: String", "    column: String").replace("move.card", "move.card")));
+    let changes = action_changes(&base, &renamed);
+    let removed = changes.iter().find(|c| c.detail.contains("no longer has `to`")).expect("the old name is reported");
+    let added = changes.iter().find(|c| c.detail.contains("required `column`")).expect("the new name is reported");
+    for change in [removed, added] {
+        assert_eq!(change.severity, ChangeSeverity::Breaking);
+        assert_eq!(
+            change.surfaces,
+            [
+                "POST /actions/move_card",
+                "TypeScript client `api.move_card`",
+                "`corvid act move_card`",
+                "assistant tool `move_card` (MCP)",
+            ],
+            "every outside caller the compiler cannot see"
+        );
+    }
+    assert!(changes.iter().all(|c| c.action == "move_card"), "an unchanged action is not reported: {changes:#?}");
+}
+
+#[test]
+fn the_report_tells_breaking_from_additive() {
+    use corvid_abi::action_changes::{action_changes, ChangeSeverity};
+    let base = contract(&format!("{IDENTITY}{REPORTED}"));
+    let report = |source: String| action_changes(&base, &contract(&source));
+    let severity_of = |changes: &[corvid_abi::action_changes::ActionChange], text: &str| {
+        changes.iter().find(|c| c.detail.contains(text)).map(|c| c.severity).unwrap_or_else(|| panic!("no `{text}` in {changes:#?}"))
+    };
+
+    let optional = report(format!("{IDENTITY}{}", REPORTED.replace("    to: String", "    to: String\n    note: Option<String>")));
+    assert_eq!(severity_of(&optional, "optional `note`"), ChangeSeverity::Additive);
+
+    let guarded = report(format!("{IDENTITY}{}", REPORTED.replace("action ping() -> String requires anyone:", "action ping() -> String requires permission(\"board.edit\"):")));
+    assert_eq!(severity_of(&guarded, "now requires a signed-in caller"), ChangeSeverity::Breaking);
+
+    let retyped = report(format!("{IDENTITY}{}", REPORTED.replace("-> Int requires anyone", "-> String requires anyone").replace("return move.card", "return move.to")));
+    assert_eq!(severity_of(&retyped, "result changed"), ChangeSeverity::Breaking);
+
+    let unoffered = report(format!("{IDENTITY}{}", REPORTED.replace("    assistants: confirm \"Move a card.\"\n", "")));
+    assert_eq!(severity_of(&unoffered, "no longer offered to assistants"), ChangeSeverity::Breaking);
+
+    let removed = report(format!("{IDENTITY}{}", REPORTED.replace("action ping() -> String requires anyone:\n    return \"pong\"\n", "")));
+    assert_eq!(severity_of(&removed, "`ping` was removed"), ChangeSeverity::Breaking);
+
+    assert!(report(format!("{IDENTITY}{REPORTED}")).is_empty(), "the same program reports nothing");
+}
+
+const NESTED: &str = r#"
+type Column:
+    | Todo
+    | Done
+
+type Place:
+    column: Column
+    position: Int
+
+type MoveCard:
+    card: Int
+    place: Place
+
+type Moved:
+    card: Int
+    column: Column
+
+action move_card(move: MoveCard) -> Moved requires anyone:
+    return Moved(move.card, move.place.column)
+"#;
+
+#[test]
+fn a_change_inside_a_record_the_input_or_result_holds_is_reported_by_direction() {
+    use corvid_abi::action_changes::{action_changes, ChangeSeverity};
+    let base = contract(&format!("{IDENTITY}{NESTED}"));
+    let report = |source: &str| action_changes(&base, &contract(&format!("{IDENTITY}{source}")));
+    let find = |changes: &[corvid_abi::action_changes::ActionChange], text: &str| {
+        changes.iter().find(|c| c.detail.contains(text)).map(|c| c.severity).unwrap_or_else(|| panic!("no `{text}` in {changes:#?}"))
+    };
+
+    let new_field = report(&NESTED.replace("    position: Int\n", "    position: Int\n    lane: Int\n"));
+    assert_eq!(find(&new_field, "`Place` in its input gained the field `lane`"), ChangeSeverity::Breaking, "a caller does not send it");
+
+    let new_variant = report(&NESTED.replace("    | Done\n", "    | Done\n    | Archived\n"));
+    assert_eq!(find(&new_variant, "`Column` in its result gained the variant `Archived`"), ChangeSeverity::Breaking, "a reader handling every case meets a new one");
+    assert_eq!(find(&new_variant, "`Column` in its input gained the variant `Archived`"), ChangeSeverity::Additive, "a sender is not affected");
+
+    let dropped = report(&NESTED.replace("    | Done\n", "").replace("return Moved(move.card, move.place.column)", "return Moved(move.card, Todo)"));
+    assert_eq!(find(&dropped, "`Column` in its input no longer has the variant `Done`"), ChangeSeverity::Breaking, "a caller that sends it is refused");
 }
 
 #[test]

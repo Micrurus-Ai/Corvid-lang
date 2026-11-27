@@ -84,6 +84,18 @@ pub struct LineageEvent {
     pub input_fingerprint: String,
     pub output_fingerprint: String,
     pub redaction_policy_hash: String,
+    /// For a `Db` span: microseconds the operation waited for a
+    /// connection or a turn to write. Left out when zero, so lineage
+    /// written before it reads and serializes unchanged.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub db_wait_us: u64,
+    /// For a `Db` span: microseconds the operation's statements ran.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub db_statement_us: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +180,8 @@ impl LineageEvent {
             input_fingerprint: String::new(),
             output_fingerprint: String::new(),
             redaction_policy_hash: String::new(),
+            db_wait_us: 0,
+            db_statement_us: 0,
         }
     }
 
@@ -252,19 +266,7 @@ pub fn validate_lineage(events: &[LineageEvent]) -> LineageValidation {
 }
 
 fn hex_prefix(bytes: &[u8], nibbles: usize) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(nibbles);
-    for byte in bytes {
-        if out.len() >= nibbles {
-            break;
-        }
-        out.push(HEX[(byte >> 4) as usize] as char);
-        if out.len() >= nibbles {
-            break;
-        }
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    corvid_hex::encode_prefix(bytes, nibbles)
 }
 
 #[cfg(test)]

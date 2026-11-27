@@ -37,15 +37,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn test_tools_lib_path() -> PathBuf {
-    let path = corvid_test_paths::test_tools_staticlib();
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::link::link_binary`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn ir_of(src: &str) -> corvid_ir::IrFile {

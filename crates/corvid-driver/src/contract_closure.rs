@@ -112,10 +112,9 @@ impl RuntimeCapabilities {
             // program that declares one refuses to start rather than
             // advertise a subscription no socket answers.
             live_subscriptions: false,
-            // B10-3a declares assistant exposure; the endpoint an assistant
-            // calls arrives in B10-3b, so until then a program offering an
-            // action to assistants refuses to start.
-            assistant_tools: false,
+            // B10-3b: `corvid serve` answers `POST /mcp` for actions with an
+            // `assistants:` line, and the person confirms each call.
+            assistant_tools: true,
         }
     }
 }

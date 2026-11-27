@@ -66,53 +66,12 @@ pub use observe_explain::*;
 #[cfg(test)]
 mod test_support;
 
-use anyhow::{Context, Result};
 use corvid_runtime::lineage::LineageEvent;
 use serde_json::{json, Value};
-use std::fs;
-use std::path::Path;
 
-/// Read a lineage JSONL file or a directory of them. Mirrors the
-/// existing `observe_cmd::read_lineage_input` shape.
-pub fn read_lineage_input(path: &Path) -> Result<Vec<LineageEvent>> {
-    if path.is_dir() {
-        let mut events = Vec::new();
-        let mut entries = fs::read_dir(path)
-            .with_context(|| format!("read_dir `{}`", path.display()))?
-            .map(|e| e.map(|e| e.path()))
-            .collect::<std::io::Result<Vec<_>>>()?;
-        entries.sort();
-        for entry in entries {
-            if entry.extension().and_then(|s| s.to_str()) == Some("jsonl")
-                || entry
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.ends_with(".lineage.jsonl"))
-                    .unwrap_or(false)
-            {
-                events.extend(read_lineage_file(&entry)?);
-            }
-        }
-        return Ok(events);
-    }
-    read_lineage_file(path)
-}
-
-fn read_lineage_file(path: &Path) -> Result<Vec<LineageEvent>> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("reading lineage from `{}`", path.display()))?;
-    let mut events = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let event: LineageEvent = serde_json::from_str(trimmed)
-            .with_context(|| format!("line {} is not a lineage event", i + 1))?;
-        events.push(event);
-    }
-    Ok(events)
-}
+/// The shared lineage reader: a run trace or a lineage trace, or a
+/// directory of them.
+pub(crate) use crate::lineage_input::read_lineage_input;
 
 pub(crate) fn source_descriptor(event: &LineageEvent) -> Value {
     json!({

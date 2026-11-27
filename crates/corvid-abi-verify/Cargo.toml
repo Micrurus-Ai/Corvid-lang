@@ -12,6 +12,7 @@ name = "corvid-abi-verify"
 path = "src/main.rs"
 
 [dependencies]
+corvid-hex = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 corvid-abi = { workspace = true }

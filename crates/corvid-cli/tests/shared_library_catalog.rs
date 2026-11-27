@@ -59,25 +59,7 @@ fn shared_library_name(stem: &str) -> String {
 }
 
 fn test_tools_lib_path() -> PathBuf {
-    let root = workspace_root();
-    let status = Command::new("cargo")
-        .arg("build")
-        .arg("-p")
-        .arg("corvid-test-tools")
-        .arg("--release")
-        .current_dir(&root)
-        .status()
-        .expect("build corvid-test-tools");
-    assert!(status.success(), "building corvid-test-tools failed");
-    let path = corvid_test_paths::test_tools_staticlib();
-    // Route the linker through `corvid_test_tools.lib` (which already
-    // bundles `corvid-runtime` transitively) instead of pairing it
-    // with the standalone `corvid_runtime.lib`. See
-    // `corvid-codegen-cl::cdylib::runtime_staticlib_path`.
-    unsafe {
-        std::env::set_var("CORVID_RUNTIME_STATICLIB_OVERRIDE", &path);
-    }
-    path
+    corvid_test_paths::linked_test_tools_staticlib()
 }
 
 fn try_compiler() -> Option<cc::Tool> {
@@ -184,7 +166,7 @@ fn shared_library_catalog_c_host_shows_accept_reject_and_fail_closed() {
     let host_source = demo_dir.join("host_c").join("approver_host.c");
     let trace_dir = demo_dir.join("trace_output");
     let trace_path = trace_dir.join("approval_demo.jsonl");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };
@@ -266,7 +248,7 @@ fn shared_library_catalog_filter_host_narrows_catalog() {
     let release_dir = demo_dir.join("target").join("release");
     let library = release_dir.join(shared_library_name("classify"));
     let host_source = demo_dir.join("host_c").join("host.c");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };
@@ -347,7 +329,7 @@ fn shared_library_catalog_capsule_create_and_replay_work() {
     let release_dir = demo_dir.join("target").join("release");
     let library = release_dir.join(shared_library_name("classify"));
     let host_source = demo_dir.join("host_c").join("capsule_host.c");
-    let host_bin = match compile_host(&host_source, &release_dir, &demo_dir.join("host_c")) {
+    let host_bin = match compile_host(&host_source, &release_dir, &release_dir) {
         Some(path) => path,
         None => return,
     };

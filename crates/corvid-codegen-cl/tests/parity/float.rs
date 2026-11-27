@@ -86,13 +86,14 @@ agent f() -> Bool:
     );
 }
 
-/// A Float result prints as `corvid run` prints it on the interpreter.
-/// Native code used `%.17g`, which printed `0.1` as `0.10000000000000001`.
+/// A Float result prints as `corvid run` prints it on the interpreter,
+/// always with its decimal point. Native code used `%.17g`, which printed
+/// `0.1` as `0.10000000000000001`; both tiers once printed `2.0` as `2`.
 #[test]
 fn float_results_print_alike() {
     for (src, expected) in [
         ("agent f() -> Float:\n    return 0.1\n", "0.1"),
-        ("agent f() -> Float:\n    return 2.0\n", "2"),
+        ("agent f() -> Float:\n    return 2.0\n", "2.0"),
         ("agent f() -> Float:\n    return 0.1 + 0.2\n", "0.30000000000000004"),
         ("agent f() -> Float:\n    return 1.0 / 3.0\n", "0.3333333333333333"),
     ] {
@@ -108,4 +109,14 @@ fn scalars_to_string_alike() {
         "agent f() -> String:\n    return 0.1.to_string() + \" \" + 2.0.to_string() + \" \" + (0 - 7).to_string() + \" \" + true.to_string() + \" \" + (1 < 0).to_string() + \" \" + (1.0 / 0.0).to_string()\n",
     );
     assert_eq!(text, "0.1 2.0 -7 true false inf");
+}
+
+/// An integer literal where a `Float` is meant is a `Float` on both
+/// tiers: as a binding, an argument, a field and a list element. Native
+/// code used to stop with a Cranelift verifier error, and the interpreter
+/// kept an `Int` that `to_string()` then refused.
+#[test]
+fn integer_literals_in_float_slots_are_floats_on_both_tiers() {
+    let src = "type Point:\n    x: Float\n    y: Float\n\nagent half(x: Float) -> Float:\n    return x / 2.0\n\nagent main() -> Float:\n    ratio: Float = 3\n    p = Point(1, -2)\n    xs: List<Float> = [1, 2.5]\n    return ratio + half(3) + p.y + xs[0]\n";
+    assert_eq!(assert_parity_text(src), "3.5");
 }

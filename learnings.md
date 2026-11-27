@@ -2,6 +2,16 @@
 
 Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
 
+`upload.bytes()` now returns `Bytes`, one shared buffer, instead of a `List<Int>` with one value per byte; use `bytes.length()`, `bytes.sha256()`, `bytes.to_hex()` or `bytes.to_utf8()`. An uploaded file no longer reaches the trace: a run's recorded arguments hold its name, type, size and SHA-256, never its content.
+
+`password.verify_password(hash)` now runs on a blocking worker, as `hash_password` does, so a login check no longer holds up the other requests a server is handling on the same thread. Nothing changes in your code. [Cryptography: passwords](docs/reference/cryptography.md#passwords)
+
+See what a change to your actions breaks for callers outside the program: save the contract with a release (`corvid contract app --out base.json`), then run `corvid contract app --diff base.json`. Each change is reported as breaking or additive, with every place it reaches (the HTTP endpoint, the TypeScript client, `corvid act`, assistants), and the command exits 1 when something breaks, so CI can stop the release. Renaming `MoveCard.to` to `column` is reported as breaking twice: `to` is gone and `column` is required. [CLI: seeing what an action change breaks](docs/reference/cli.md#seeing-what-an-action-change-breaks)
+
+Call an action from the command line: `corvid act move_card --card 3 --to Done --position 7`, or `corvid act --json '{"card": 3, ...}' move_card`. Flags are read like form fields (repeat one for a `List`, leave an `Option` out), the result prints as JSON, and a bad value names its field without running anything. An action that requires a signed-in caller is refused until the command line can sign in. `corvid run` now also accepts any text type as an argument, such as `corvid run main.cor 2.50` for a `Decimal`. [CLI: actions](docs/reference/cli.md#calling-an-action-from-the-command-line)
+
+An assistant can now call your actions. `corvid serve` answers `POST /mcp`, the Model Context Protocol, for every action with an `assistants: confirm "..."` line. The assistant works inside its person's signed-in session and sees only the offered actions that person may call. Its call does not run the action: it waits until the same person confirms it at `/__confirmations/<id>/confirm`, and then runs with that person as the `Caller`. An action offered to assistants needs an `identity` block. [CLI: assistants](docs/reference/cli.md#assistants)
+
 A native prompt now asks the model exactly what the interpreter asks: the prompt text and the reply's JSON schema, with no extra instructions, and it retries a reply that does not fit only as `with repair N` says, never on its own. A prompt without `with repair` stops with "unusable reply" after one unusable answer on both tiers, and a recording of a repaired call replays on either.
 
 Offer an action to assistants with one line, first in its body: `assistants: confirm "Move a card to another column."`. Without the line no assistant is offered the action. The description is required, `allow` waits for on-behalf-of authority (B11), and there is no `never`: leave the line out. The contract and OpenAPI carry it. Until assistants can call actions (B10-3b), `corvid serve` refuses to start a program with the line and names what is missing. [Shared actions](docs/proposals/shared-actions.md)
@@ -93,6 +103,18 @@ Hashing and checking passwords now runs as native code: `hash_password(password,
 Verifying a webhook with a key read as a `Secret` now runs as native code: `hmac_sha256` and `hmac_sha512` keyed by a secret, `verify_password` and `decode_base64_after("whsec_")` give the same answers in a native binary as on the interpreter. Passing a secret to a tool of your own or to `hash_password` still runs on the interpreter. [Native code](docs/reference/cryptography.md#native-code)
 
 A program that holds a `Secret` now runs as native code: it can read one with `secret(name)`, draw one with `random_token(bytes)`, keep it in records, lists and options, and compare secrets with `==` in constant time, and the trace holds `<redacted>` as on the interpreter. Passing a secret to a tool of your own, `hash_password`, and HMAC, `verify_password` or `decode_base64_after` keyed by a secret still run on the interpreter, and `corvid run` says so. [Native code](docs/reference/cryptography.md#native-code)
+
+An action can now run as a background job: `corvid jobs enqueue --task add_label --payload '{"card": 7, "label": "urgent"}' --source app.cor` checks the payload against the action's input before storing it, and the workers of `corvid jobs run --source app.cor` run it, traced as `surface: "worker"`. An action that requires a signed-in caller is refused until assistant authority (B11) can carry the person's authority with the job. [Running an action as a background job](docs/reference/cli.md#running-an-action-as-a-background-job)
+
+A type your file declares or imports now wins over a built-in type of the same name, so a built-in Corvid adds later (as it added `Caller` and `JsonError`) never changes what your program means. Warning W0301 names the built-in your type hides, because a value a built-in gives you, such as the error `from_json` returns, is still the built-in type. The core scalars `Int`, `Float`, `String`, `Bool` and `Nothing` cannot be declared (E0308). [Errors](docs/reference/errors.md)
+
+A `where` can now test a column against a list: `Card.where(fn (c) -> boards.contains(c.board))` runs as `board IN (...)` in the database and keeps exactly the rows the same test keeps in Corvid, a `None` in the list matching a missing value. The list is computed before the query, up to 10,000 values for now; a `live` query cannot use one yet. To filter by another table, `Card.where(fn (c) -> Board.where(fn (b) -> b.owner == owner).keys().contains(c.board))` runs as one statement with an inner query, with no limit, and `Board.where(...).keys()` alone lists the keys. `Board.all().by_key()` is a `Map` from each board's key to the board, so showing each card with its board takes two queries, not one per card. A `live` query can now filter by another table's keys too, and follows that table's writes: giving a board to a person brings its cards into their live list. [Tables reference](docs/reference/tables.md#queries)
+
+A table query can now end in `.count()`, `.sum(fn (s) -> s.column)`, `.min(...)` or `.max(...)`, run by the database instead of reading every row. `count` is an `Int`. `sum` keeps the column's type (`Int`, `Decimal` or `Duration`): an `Int` total past 64 bits stops the run, a `Decimal` or `Duration` total is exact, and a `Float` sum is refused. `min` and `max` are an `Option`, compared as `order_by` compares and skipping missing values. There is no `average`; divide with the rounding you choose. `.count_by(fn (s) -> s.key)` and `.sum_by(fn (s) -> s.key, fn (s) -> s.column)` group in the database and return a `Map` in the key's order, with no entry for a key that has no rows. [Tables reference](docs/reference/tables.md#counts-totals-and-extremes)
+
+A connector operation can now make its call with a credential your program passes, such as the signed-in person's own token: give it a `Secret` parameter and write `auth: bearer(token)` after its request line. The operation's credential replaces the connector's `auth:` for that call. The trace records the token as `<redacted>`, replay matches without it, and a redirect to another origin drops it. It is the only `Secret` an operation may take, only `auth:` may send it, and an `async:` operation cannot take one, because its arguments are kept. [Connector grammar](docs/reference/grammar.md)
+
+Many people watching the same live list now cost the server one query per write, not one per watcher: `corvid serve` runs each distinct live query once and sends its changes to every subscriber. Subscriptions share when they name the same `live` declaration with the same path, and, if the query reads `actor`, the same caller. Each subscriber's permission is still checked on its own. A write now costs a live list the rows it wrote, not the whole list: the query reads back only those rows under its own condition and puts them in order. This applies to queries ordered by an `Int`, `Bool`, `Decimal`, `Duration` or `Instant` column, by text on SQLite, or by key alone. A query ordered by another kind, or a commit of more than 64 rows, still re-runs the whole query. [Live queries at scale](docs/proposals/live-at-scale.md)
 
 A page can share one authenticated WebSocket across its live lists. Subscribe again after reconnecting to read a fresh snapshot, including commits made while offline. When a role changes, serve checks each list's permission again. Logout and expiry close even an idle connection. A removed row carries the revision of the write that removed it from the filter. For Rust hosts inside Tokio, `watch_session_cookie` returns a durable observation and a receiver that wakes on local authority changes. For synchronous hosts, `observe_session_cookie` captures the session's authority, `remaining_ms` schedules the expiry check, `is_current` detects changes, and `while_current` guards the final enqueue. [Live transport reference](docs/reference/cli.md#live-subscriptions)
 
@@ -8341,7 +8363,7 @@ Add `unique email` (or `unique tenant, slug` for a pair) to a table so no two ro
 
 A `match` is complete when its arms cover every value at any depth: `Err(Some(reason))` and `Err(None)` together cover `Err(_)`, and `Saved(Some(n))` with `Saved(None)` covers `Saved`, so you never need a second nested `match` to satisfy the checker. Literal patterns such as `Some(0)` never cover a number; add `Some(_)` or a binding.
 
-A Postgres `database` block declares `connections: 10`, how many connections the program may open. Operations and `atomic:` blocks share that pool and wait their turn when it is full, so a burst of agents queues instead of exhausting the database. Leaving it out is a compile error, because the right number depends on your database plan.
+A Postgres `database` block declares `connections: 10`, how many connections the program may open. Operations and `atomic:` blocks share that pool and wait their turn when it is full, so a burst of agents queues instead of exhausting the database. Leaving it out is a compile error, because the right number depends on your database plan. Throughput grows with connections until there is about one per operation in flight. Locally, 64 agents made 2,383 edits/s on 8 connections and 4,882 on 32. [Choosing a Postgres pool size](docs/guides/performance.md#choosing-a-postgres-pool-size)
 
 A `@budget` agent may loop over a query that ends in `take(n)` with a literal `n`: the loop is charged `n` times its body, so `for m in Member.all().take(3):` has a checked cost. Without `take` the budget check warns that the cost cannot be proven.
 
@@ -8376,3 +8398,96 @@ To create a UUID, `import "std:uuid" use uuid_v4, uuid_v7`. `uuid_v4()` is rando
 ### Regular expressions
 
 `text.contains_regex(pattern)`, `find_regex`, `find_all_regex`, `replace_regex` and `split_regex` match regular expressions with no import. The pattern must be a string literal, and the compiler checks it: `text.contains_regex("(ab")` fails to compile with `unclosed group at position 0`, and a pattern in a variable is refused because it could not be checked. Double backslashes inside Corvid strings, as in `"\\d+"`. `find_regex` returns `Option<RegexMatch>` and `find_all_regex` returns `List<RegexMatch>`; a match has `text`, `start` and `end` counted in characters, so `text.substring(m.start, m.end) == m.text`, and `groups`, where `groups[0]` is the whole match and a group that did not take part is `None`. In a literal replacement, `$1`, `${name}` and `$$` are checked against the pattern, and `$1a` is refused with a suggestion to write `${1}a`. A replacement computed at run time is inserted as written, so user data is never read as a template. `split_regex` refuses a pattern that can match empty text. Matching time is linear in the text for every pattern, because the syntax has no backreferences or lookaround. `contains_regex`, `replace_regex` and `split_regex` compile to native code with the same results; a program using `find_regex` or `find_all_regex` runs on the interpreter for now. [Regular expressions](docs/reference/text-and-encoding.md#regular-expressions)
+
+### What a trace records for a run and an approval
+
+A trace records a run's arguments, its result and each `approve`'s arguments in the public JSON form, by their declared types: the same JSON a route returns, with a field renamed by `@json(key:)` under its JSON name and a `Secret` as `<redacted>`. Both tiers record the same values, and a native run now records any result, not only a number, a `Bool` or a `String`. A value with no JSON form, such as a stream, is still recorded, in the interpreter's own form, so recording never stops a run.
+
+### A native build checks the runtime it links
+
+A native build links the `corvid-runtime` staticlib only if it holds the runtime the compiler was built from. Every archive holding the runtime exports a symbol named after a stamp of the runtime's sources, and the build checks the archive's symbol index for the compiler's stamp before linking. In a source checkout, a stale archive is rebuilt automatically. Any other stale archive, such as one set by `CORVID_RUNTIME_STATICLIB_OVERRIDE` or shipped with an install, is refused with an error that names it and the command that rebuilds it. Cached native binaries are keyed by the same kind of stamp, so `corvid run` rebuilds after any change to the compiler or runtime sources.
+
+### An approver loaded from source is checked when it loads
+
+A host that loads an `approve_site` approver from source runs it on Corvid's approval evaluator, which takes `if`, `return`, bindings, constructor calls, field and list access, and arithmetic and comparisons on `Int`, `Float`, `Bool` and `String` values. An approver that uses anything else, such as a duration literal or a method call, is refused when it is loaded or simulated, with an error that names the construct, rather than failing its first approval. Its arithmetic is checked: an overflow is an error, not a wrapped number.
+
+### A printed `Float` always shows its decimal point
+
+`corvid run` prints a `Float` result the way `to_string()` writes it, on the interpreter and in native code alike: an agent returning `2.0` prints `2.0`, where it used to print `2`. A `Float` inside a printed list or record, and one interpolated into text, reads the same way. A whole number printed with a point is a `Float`, and one without is an `Int`. A very large `Float` prints every digit in native code too, where it used to be cut off.
+
+### An `Int` never becomes a `Float` silently
+
+An integer literal where a `Float` is meant is a `Float`: `ratio: Float = 3`, `half(3)` for a `Float` parameter, `Point(1, -2)` for `Float` fields and `[1, 2.5]` as a `List<Float>` all work on both tiers. A literal a `Float` cannot hold exactly, beyond 9007199254740992, is a compile error. An `Int` value is never widened silently, because large values would round: `x: Float = n` is a compile error whose hint names `n.to_float()`, and a `List<Int>` is not a `List<Float>`. Arithmetic that mixes an `Int` and a `Float` still gives a `Float`.
+
+### A skill's capability groups come from the std modules
+
+A skill's computed label puts each std tool it uses in the group named after the std module that declares it: `random_token` and `hash_password` are `crypto`, `secret` and `secret_read` are `secrets`, `uuid_v4` is `uuid`, `path_join` is `path`. A skill that used `secret`, a UUID, a path helper or the browser tools was not labeled with those groups before, so its label could claim less than the code did. A tool of the skill's own is in no group, even if its name starts like a std tool's.
+
+### `corvid run` falls back when native code cannot carry the entry agent
+
+A program whose entry agent returns a `List`, `Option` or `Result`, or takes a record, runs on the interpreter under `corvid run`. It prints `↻ running via interpreter:` with the reason first, where it used to stop with a native build error. `--target=native` refuses it with the same reason.
+
+### What `corvid run` prints
+
+`corvid run` prints the entry agent's result the same way on both tiers. A `String` prints as its text, without quotes. Another scalar prints its `to_string()` text (`42`, `2.0`, `true`). A record, variant, list, option, result or map prints its JSON, compact and with sorted keys: the JSON a route returns for the same value, so a renamed key shows its JSON name. `Refund(amount: 42, order_id: "o-1")` became `{"amount":42,"order-id":"o-1"}`. Pipe it into `jq` to read it, or decode it with the generated client. A program returning a list, an option or a result now runs natively.
+
+### Every type error has its own code
+
+Each error the type checker reports prints a code of its own: `[E0516] error: ... has no exact Float value`, where most used to print `E0000`. Codes are grouped by area. `E01` covers effects and approval, `E02` types, `E03` names, `E04` JSON and records, `E05` scalars such as `Decimal` and time, `E06` tables, `E07` actions and routes, `E08` connectors and `E09` streams, prompts, tools and agents. Codes that existed before are unchanged (`E0101`, `E0201` to `E0209`, `E0250`), and a code stays the same when an error's message is reworded. Lexer, parser and name errors, warnings (`W0251`), import errors (`E033x`) and build refusals (`E1001`) carry declared codes too, so no diagnostic prints `E0000` any more.
+
+### A record crossing the C ABI is its public JSON
+
+A `pub extern "c"` agent's record parameter and record result travel as the record's public JSON. That is the JSON a route takes and returns, with `@json(key:)` and `@json(case:)` renames applied and keys sorted, and it is exactly what the generated header's schema comment shows. A parameter is decoded strictly: JSON with an unknown key, a missing field or the wrong shape stops the call. Before, records crossed under their Corvid field names in declaration order, even where the header documented renamed keys.
+
+### Looking up an error code
+
+[`docs/reference/errors.md`](docs/reference/errors.md) lists every error and warning code, grouped by area, with the error it names and what it means. The page is generated from the compiler's own diagnostics, so it always matches what `corvid check` prints. The first-login policy error is `[E5210] error: First-login policy required: ...`, with the code printed once, in its bracket.
+
+### Maps stay fast at any size
+
+Looking up, adding or replacing a key in a `Map` takes about the same time whatever the map's size. A map of 80,000 text keys now builds in about 20 ms, where it took 24 seconds before. That speeds up `count_by` and `sum_by` over many groups too. Keys still match exactly as `==` decides: `1`, `1.0` and a `Decimal` `1.00` are one key where those types meet, and a map keeps the order its keys were first added. A key that is a record, list, option or result is still found by comparing it with each key in turn.
+
+### Joining lists with `+` in native code
+
+`a + b` on two lists gives a new list of `a`'s entries followed by `b`'s, in native code as on the interpreter, so `out = out + [item]` inside a loop builds a list in a compiled program too. Native code used to stop such a program with a "capacity overflow" crash.
+
+### Any JSON-shaped type crosses the C ABI
+
+A `pub extern "c"` agent takes and returns any record, variant, list, option, result or map that has a JSON form, including nested records and lists of records, as a JSON string in the public form. Before, it took only flat records of `Int`, `Float`, `Bool` and `String` fields. A type with no JSON form, such as a `Secret` or a stream, is still refused, and the error names it.
+
+### A map keeps its own copy of a record key
+
+Using a record, list or other compound value as a map key stores a copy of it, so changing the original afterwards does not change the key. After `m: Map<P, Int> = {p: 10}` and then `p.x = 2`, `m.get(P(1))` still finds 10. Before, the key inside the map changed along with `p`. A key read back with `keys()` is a copy too, so changing it leaves the map as it was. Maps with record keys are now as fast at large sizes as maps with text keys.
+
+### Calling a method a type does not have
+
+A call to a method a type lacks says so plainly and suggests the method you likely meant: `"corvid".lenght()` gives `[E0240] error: `String` has no method `lenght`` with `help: did you mean `length`?`. On an `Option` or `Result` the help says to take the value out first, for example `value.unwrap_or(default).to_string()`. Before, the message read "cannot call a value of type `method …`" and cited internal slice numbers.
+
+### Joining byte strings
+
+`a + b` on two `Bytes` values gives their bytes one after the other, on both tiers, so a signed message with a binary part can be built as bytes: `"DSSEv1 ".utf8() + payload`. Bytes and text still never mix: `"digest: " + bytes` is a compile error whose help names `utf8()` and the encodings.
+
+### Whole numbers too large for `Int`
+
+A whole-number literal larger than `Int` holds (beyond 9223372036854775807) is read exactly where a `Decimal` is meant: `total: Decimal = 99999999999999999999` keeps every digit, on both tiers. Where an `Int` is meant, the compiler refuses it with `[E0518]`, names the `Int` range and suggests a `Decimal`. It used to stop as an invalid number. Where a `Float` is meant, it is accepted only if a `Float` holds it exactly.
+
+### One failure answer from both servers
+
+The server `corvid build --target server` generates answers a failure with the body `corvid serve` sends: `{"error": "handler_timeout", "detail": "..."}`, a code and a fixed sentence. The request id is in the `x-corvid-request-id` header. Before, the generated server sent `{"request_id", "route", "kind", "message", "duration_ms"}`, so a client had to read two shapes for the same failures.
+
+
+### See what a run did with `corvid observe`
+
+Every `corvid run` records its trace under the project's `target/trace/`, and `corvid observe list`, `corvid observe show <run-id>` and `corvid trace lineage <run-id>` read that trace directly. The run is the root. Each table operation is a `db` step that shows how long it waited for a connection or a turn to write, and how long it ran (`- db Shelf.insert [ok] latency=2ms waited=0.031ms ran=1.940ms`). A wait that grows while running time stays flat means a Postgres database needs more `connections:`. Each other tool is a `tool` step, each model call a `prompt` step with its model, tokens and cost (`- prompt draft [ok] latency=840ms cost=$0.0042`), so `corvid observe list` totals what a run spent, each approval an `approval` step, and each HTTP attempt sits under its tool. `corvid eval promote target/trace/<run-id>.jsonl` turns a run into an eval fixture.
+
+Not yet:
+- `corvid serve` records no trace.
+- Calls between agents are not nested.
+- Nothing is exported to OpenTelemetry while a program runs.
+
+[Observability](docs/guides/observability.md)
+
+### Native programs that allocate a lot no longer crash
+
+A compiled program that built a string, a list or a `Decimal` total in a loop, or otherwise allocated more than about ten thousand values, could stop with `corvid_release on already-freed allocation` or crash outright. The native memory collector freed values the program still held. It now keeps every value something still references, and frees only unreachable cycles, so these programs run to completion with the same results as the interpreter.
+
