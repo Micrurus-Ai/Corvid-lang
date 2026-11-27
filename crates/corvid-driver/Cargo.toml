@@ -54,7 +54,7 @@ corvid-crypto = { workspace = true }
 corvid-time = { workspace = true }
 # B09 P4: the table tests create tables on SQLite and, when
 # CORVID_TEST_POSTGRES_URL is set, on Postgres.
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tokio-postgres = "0.7"
 serde_json = { workspace = true }
 # Slice 33S2b — `executing_http_through_driver.rs` boots a

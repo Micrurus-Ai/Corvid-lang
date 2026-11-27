@@ -56,7 +56,7 @@ ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 base64 = "0.22"
 wasmparser = "0.244.0"
 dirs = "5"
-rusqlite = { version = "0.31", features = ["bundled", "hooks"] }
+rusqlite = { version = "0.43", features = ["bundled", "hooks"] }
 # B09 P4b: `corvid migrate` applies and plans migrations on Postgres.
 postgres = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }

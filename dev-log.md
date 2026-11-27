@@ -2,6 +2,32 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### rusqlite 0.43 for the bundled SQLite CVE
+
+RUSTSEC-2026-0459 is in the C SQLite that `rusqlite`'s `bundled` feature
+compiles in, fixed in libsqlite3-sys 0.39. All three crates that use it
+(runtime, driver, CLI) move from rusqlite 0.31 to 0.43, which brings
+libsqlite3-sys 0.40.
+
+The one API change that reached our code is `Connection::authorizer`,
+which now takes the connection mutably. A `Transaction` gives only shared
+access, so the migration runner could no longer install its guard inside
+the transaction. That guard refuses a `BEGIN`, `COMMIT` or `ROLLBACK` in a
+migration's own SQL, so only the runner ends the transaction that records
+history. The guard is now installed in `open_database` and armed by a
+thread-local flag, which `execute_migration_sql` holds for exactly the
+migration's SQL through a drop guard. SQLite calls the authorizer on the
+thread that prepares the statement, so parallel migrations in one process
+never see each other's flag.
+
+`migrate.rs`'s test still proves the refusal: a migration that ends in
+`COMMIT` fails and leaves no half-made table. The migration suites pass on
+SQLite and the local Postgres, and the full gate runs over the change.
+Cargo.lock is committed, because the slice changes a dependency.
+
+Also ticked a stale roadmap box: `Upload.bytes()` has returned `Bytes`
+since the one-buffer upload change.
+
 ### Native refusals name the method and drop slice numbers
 
 A native refusal of a builtin method read "builtin methods (String.length()
@@ -25,6 +51,7 @@ mixing bytes with text stays a compile error, and so does any other
 arithmetic. Tests cover the checker, a DSSE-style join on the interpreter, and
 native parity under the leak detector. The reference's operator table
 says so.
+
 
 ### Query J5: live queries that filter by another table
 

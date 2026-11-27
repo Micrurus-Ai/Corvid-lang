@@ -32,7 +32,7 @@ toml = { workspace = true }
 tokio = { workspace = true }
 futures = "0.3"
 # `collation` registers the comparisons exact table columns use (B09 P8a).
-rusqlite = { version = "0.31", features = ["bundled", "collation"] }
+rusqlite = { version = "0.43", features = ["bundled", "collation"] }
 postgres = "0.19"
 # B09 P4: tables on Postgres use the async client (the blocking one cannot
 # run inside the interpreter's runtime) with rustls on the ring provider,
