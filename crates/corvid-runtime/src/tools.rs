@@ -95,9 +95,46 @@ impl ToolRegistry {
 /// on the task that awaits it.
 async fn call_host_tool(name: &str, args: Vec<serde_json::Value>) -> Result<serde_json::Value, RuntimeError> {
     let tool = name.to_string();
-    tokio::task::spawn_blocking(move || crate::catalog_c_api::call_registered_host_tool(&tool, &args))
+    let in_flight = HostToolInFlight::start();
+    tokio::task::spawn_blocking(move || {
+        let _in_flight = in_flight;
+        crate::catalog_c_api::call_registered_host_tool(&tool, &args)
+    })
         .await
         .map_err(|e| RuntimeError::ToolFailed { tool: name.to_string(), message: format!("the implementation stopped: {e}") })?
+}
+
+/// Host tool calls still running. A call a `try ... timeout` gave up on
+/// keeps running on its blocking thread, as a dropped future's blocking
+/// task does on the interpreter; its work may have side effects, so it
+/// is never cut off midway, and the runtime waits for it before shutting
+/// down rather than tearing the tokio runtime out from under it.
+static HOST_TOOLS_IN_FLIGHT: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+struct HostToolInFlight;
+
+impl HostToolInFlight {
+    fn start() -> Self {
+        *HOST_TOOLS_IN_FLIGHT.0.lock().unwrap_or_else(|p| p.into_inner()) += 1;
+        HostToolInFlight
+    }
+}
+
+impl Drop for HostToolInFlight {
+    fn drop(&mut self) {
+        let mut count = HOST_TOOLS_IN_FLIGHT.0.lock().unwrap_or_else(|p| p.into_inner());
+        *count -= 1;
+        HOST_TOOLS_IN_FLIGHT.1.notify_all();
+    }
+}
+
+/// Wait until every host tool call still running has finished.
+pub(crate) fn wait_for_host_tools() {
+    let mut count = HOST_TOOLS_IN_FLIGHT.0.lock().unwrap_or_else(|p| p.into_inner());
+    while *count > 0 {
+        count = HOST_TOOLS_IN_FLIGHT.1.wait(count).unwrap_or_else(|p| p.into_inner());
+    }
 }
 
 #[cfg(test)]

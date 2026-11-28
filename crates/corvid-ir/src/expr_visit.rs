@@ -17,6 +17,11 @@ pub fn for_each_expr(file: &IrFile, visit: &mut dyn FnMut(&str, &IrExpr)) {
     }
 }
 
+/// Call `visit` with every expression in `agent`'s body.
+pub fn for_each_agent_expr(agent: &crate::types::IrAgent, visit: &mut dyn FnMut(&IrExpr)) {
+    walk_block(&agent.body, visit);
+}
+
 fn walk_block(block: &IrBlock, visit: &mut dyn FnMut(&IrExpr)) {
     for stmt in &block.stmts {
         walk_stmt(stmt, visit);

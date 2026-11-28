@@ -54,11 +54,25 @@ agent main() -> String:
 }
 
 #[test]
-fn a_try_with_a_timeout_names_the_timeout() {
+fn a_try_with_a_timeout_runs_natively() {
     let src = r#"
 agent main() -> Int:
     return try 1 + 1 timeout 50 else 0
 "#;
-    let reason = ability(src).expect_err("native calls have no cancellation point");
-    assert!(reason.contains("timeout"), "{reason}");
+    assert_eq!(ability(src), Ok(()));
+}
+
+#[test]
+fn a_timed_try_whose_body_uses_question_mark_names_it() {
+    let src = r#"
+agent half(n: Int) -> Option<Int>:
+    if n > 0:
+        return Some(n)
+    return None
+
+agent main() -> Option<Int>:
+    return Some(try half(4)? timeout 50 else 0)
+"#;
+    let reason = ability(src).expect_err("`?` would leave the attempt with its deadline set");
+    assert!(reason.contains("`?`"), "{reason}");
 }

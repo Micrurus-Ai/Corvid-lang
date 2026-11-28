@@ -34,6 +34,9 @@ pub struct OutagePlan {
     /// Whether some `try` in the program catches outages natively, so
     /// the runtime must hold them instead of stopping at the call.
     pub catches: bool,
+    /// Why each `try ... timeout` that native code does not lower is
+    /// refused, keyed by the span of its body (TE-3e).
+    nested_timeouts: HashMap<corvid_ast::Span, String>,
 }
 
 impl OutagePlan {
@@ -60,6 +63,7 @@ impl OutagePlan {
                 }
             }
             if !changed {
+                plan.nested_timeouts = nested_timeouts(ir, &plan);
                 let mut catches = false;
                 corvid_ir::for_each_expr(ir, &mut |_, e| catches |= plan.catches_natively(e));
                 plan.catches = catches;
@@ -92,8 +96,9 @@ impl OutagePlan {
     /// outage handling.
     pub fn catches_natively(&self, expr: &IrExpr) -> bool {
         match &expr.kind {
-            IrExprKind::TryRetry { body, timeout_ms: None, fallback, .. } => {
-                (fallback.is_some() || self.can_fail(body)) && self.try_refusal(body).is_none()
+            IrExprKind::TryRetry { body, timeout_ms, fallback, .. } => {
+                (fallback.is_some() || timeout_ms.is_some() || self.can_fail(body))
+                    && self.try_refusal_with(body, *timeout_ms).is_none()
             }
             _ => false,
         }
@@ -102,6 +107,23 @@ impl OutagePlan {
     /// Why a `try` around `body` cannot be lowered natively, if it cannot.
     pub fn try_refusal(&self, body: &IrExpr) -> Option<String> {
         self.expr_reason(body, true)
+    }
+
+    /// [`Self::try_refusal`] for a `try` that may carry a `timeout`. A
+    /// timed body containing `?` is refused: `?` returns from the agent
+    /// from inside the attempt, past the end of its deadline.
+    pub fn try_refusal_with(&self, body: &IrExpr, timeout_ms: Option<u64>) -> Option<String> {
+        if timeout_ms.is_some() {
+            if let Some(reason) = self.nested_timeouts.get(&body.span) {
+                return Some(reason.clone());
+            }
+            let mut propagates = false;
+            corvid_ir::for_each_subexpr(body, &mut |e| propagates |= matches!(e.kind, IrExprKind::TryPropagate { .. }));
+            if propagates {
+                return Some("its body uses `?`, which would leave the attempt with its deadline still set".to_string());
+            }
+        }
+        self.try_refusal(body)
     }
 
     fn block_can_fail(&self, block: &IrBlock) -> bool {
@@ -242,3 +264,111 @@ pub(crate) fn hoisted_children(expr: &IrExpr) -> Option<Vec<(&IrExpr, bool)>> {
         _ => return None,
     })
 }
+
+/// A `try` that catches outages, whatever its clauses.
+fn is_catching_try(plan: &OutagePlan, expr: &IrExpr) -> bool {
+    matches!(&expr.kind, IrExprKind::TryRetry { body, timeout_ms, fallback, .. }
+        if fallback.is_some() || timeout_ms.is_some() || plan.can_fail(body))
+}
+
+/// The timed `try`s native code refuses, by the span of their body.
+///
+/// Nested tries' timeouts are told apart on the interpreter: an outer
+/// try's timeout fires as the outer try's, whatever is inside it. Native
+/// code keeps one deadline stack and cannot yet say whose deadline a
+/// failed call met, so a timed `try` is lowered only where no other
+/// `try` can be around it or inside it: its agent is never called from
+/// inside a `try`, no `try` encloses it in its agent, and its body
+/// reaches no `try`.
+fn nested_timeouts(ir: &IrFile, plan: &OutagePlan) -> HashMap<corvid_ast::Span, String> {
+    let calls = |expr: &IrExpr, out: &mut HashSet<DefId>| {
+        corvid_ir::for_each_subexpr(expr, &mut |e| {
+            if let IrExprKind::Call { kind: IrCallKind::Agent { def_id }, .. } = &e.kind {
+                out.insert(*def_id);
+            }
+        });
+    };
+    let callees: HashMap<DefId, HashSet<DefId>> = ir
+        .agents
+        .iter()
+        .map(|agent| {
+            let mut out = HashSet::new();
+            corvid_ir::for_each_agent_expr(agent, &mut |e| calls(e, &mut out));
+            (agent.id, out)
+        })
+        .collect();
+    let close = |mut set: HashSet<DefId>| {
+        loop {
+            let more: HashSet<DefId> = set.iter().flat_map(|id| callees.get(id).into_iter().flatten().copied()).collect();
+            if more.is_subset(&set) {
+                return set;
+            }
+            set.extend(more);
+        }
+    };
+    // Agents that can run inside some `try`'s body.
+    let mut inside = HashSet::new();
+    corvid_ir::for_each_expr(ir, &mut |_, e| {
+        if is_catching_try(plan, e) {
+            // A fallback runs after its `try` is done, so only the body
+            // counts as inside it.
+            if let IrExprKind::TryRetry { body, .. } = &e.kind {
+                calls(body, &mut inside);
+            }
+        }
+    });
+    let inside = close(inside);
+    // Agents whose body holds a catching `try`, and those that reach one.
+    let holds_try: HashSet<DefId> = ir
+        .agents
+        .iter()
+        .filter(|agent| {
+            let mut found = false;
+            corvid_ir::for_each_agent_expr(agent, &mut |e| found |= is_catching_try(plan, e));
+            found
+        })
+        .map(|agent| agent.id)
+        .collect();
+    let reaches_try = |body: &IrExpr| {
+        let mut called = HashSet::new();
+        calls(body, &mut called);
+        close(called).iter().any(|id| holds_try.contains(id))
+    };
+    let mut refused = HashMap::new();
+    for agent in &ir.agents {
+        corvid_ir::for_each_agent_expr(agent, &mut |e| {
+            if let IrExprKind::TryRetry { body, timeout_ms: Some(_), .. } = &e.kind {
+                let mut nested_inside = false;
+                corvid_ir::for_each_subexpr(body, &mut |inner| {
+                    nested_inside |= !std::ptr::eq(inner, body.as_ref()) && is_catching_try(plan, inner)
+                });
+                let reason = if inside.contains(&agent.id) {
+                    Some(format!("agent `{}` can run inside another `try`", agent.name))
+                } else if nested_inside || reaches_try(body) {
+                    Some("its body can reach another `try`".to_string())
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    refused.insert(body.span, format!("{reason}, and native code cannot yet tell nested timeouts apart"));
+                }
+            }
+        });
+    }
+    // A timed `try` inside another `try`'s body in the same agent.
+    corvid_ir::for_each_expr(ir, &mut |_, e| {
+        if let IrExprKind::TryRetry { body: outer, .. } = &e.kind {
+            if is_catching_try(plan, e) {
+                corvid_ir::for_each_subexpr(outer, &mut |inner| {
+                    if let IrExprKind::TryRetry { body, timeout_ms: Some(_), .. } = &inner.kind {
+                        refused.entry(body.span).or_insert_with(|| {
+                            "it sits inside another `try`, and native code cannot yet tell nested timeouts apart".to_string()
+                        });
+                    }
+                });
+            }
+        }
+    });
+    refused
+}
+

@@ -86,13 +86,14 @@ can never hide one. The failure may happen any number of calls inside
 the body; with `retry`, the body runs again before the fallback is used.
 
 Compiled programs catch outages from tool, connector and prompt calls
-the same way, `match` arms and guards included. A `try` with a
-`timeout`, or one that can reach a failing call inside a lambda, runs on
-the interpreter for now, and `corvid build` names which one.
+the same way, `match` arms and guards included. A `try` that can reach
+a failing call inside a lambda runs on the interpreter for now, as does
+a timed `try` that can nest with another, and `corvid build` names which
+one.
 
 ## Timeouts
 
-Any call can hang; `timeout` bounds it (interpreter tier):
+Any call can hang; `timeout` bounds it:
 
 ```corvid-fragment
 data = try slow_fetch(id) timeout 2000
@@ -105,7 +106,16 @@ attempt half a second and retries up to three times. A timeout
 clause also lifts the Result/Option restriction: any expression can
 carry one, since any call can hang. Expiry without a retry clause
 propagates as a runtime error naming the bound
-(`timed out after 500ms`).
+(`timed out after 500ms`). A timeout fires where the attempt waits, at a
+tool, connector or prompt call, and never in the middle of computation
+between calls, in `corvid run` and in compiled programs alike. A call
+given up on is not stopped midway: it finishes in the background, and
+its answer is discarded.
+
+A compiled program does not yet lower a timed `try` that can run inside
+another `try`, or has another `try` inside it, or whose body uses `?`;
+such a program runs on the interpreter, and `corvid build` names the
+reason.
 
 ## Circuit breakers
 

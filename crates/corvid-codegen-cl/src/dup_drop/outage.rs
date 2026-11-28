@@ -41,8 +41,9 @@ use corvid_types::Type;
 pub(crate) enum Unwind {
     /// Out of the agent, by `return`.
     Return,
-    /// To the enclosing `try`'s loop.
-    Try { left: LocalId, failed: LocalId },
+    /// To the enclosing `try`'s loop; `timed` when its attempts run
+    /// under a deadline, which every way out of an attempt ends.
+    Try { left: LocalId, failed: LocalId, timed: bool },
 }
 
 fn local(id: LocalId, name: &str, ty: Type, span: Span) -> IrExpr {
@@ -101,7 +102,7 @@ fn test(cx: &Cx, span: Span) -> IrStmt {
             };
             vec![IrStmt::Return { value, span }]
         }
-        Unwind::Try { left, failed } => {
+        Unwind::Try { left, failed, timed } => {
             let more = binop(
                 BinaryOp::Gt,
                 local(left, "__corvid_try_left", Type::Int, span),
@@ -109,14 +110,31 @@ fn test(cx: &Cx, span: Span) -> IrStmt {
                 Type::Bool,
                 span,
             );
-            vec![
-                if_(more, vec![clear(span), IrStmt::Continue { span }], None, span),
-                assign(failed, "__corvid_try_failed", Type::Bool, literal(IrLiteral::Bool(true), Type::Bool, span), span),
-                IrStmt::Break { span },
-            ]
+            // Retry: forget the outage and start the next attempt.
+            // Give up: note it for after the loop and leave.
+            let retry = leave_attempt(timed, IrStmt::Continue { span }, vec![clear(span)], span);
+            let failed = assign(failed, "__corvid_try_failed", Type::Bool, literal(IrLiteral::Bool(true), Type::Bool, span), span);
+            let mut leave = vec![if_(more, retry, None, span)];
+            leave.extend(leave_attempt(timed, IrStmt::Break { span }, vec![failed], span));
+            leave
         }
     };
     if_(pending, leave, None, span)
+}
+
+/// End the innermost attempt's deadline.
+fn end_deadline(span: Span) -> IrStmt {
+    IrStmt::Expr { expr: outage(IrOutage::DeadlineEnd, Type::Nothing, span), span }
+}
+
+/// `before`, then the attempt's deadline ended when it has one, then
+/// `exit` (a `continue` or `break` out of the attempt).
+fn leave_attempt(timed: bool, exit: IrStmt, mut before: Vec<IrStmt>, span: Span) -> Vec<IrStmt> {
+    if timed {
+        before.push(end_deadline(span));
+    }
+    before.push(exit);
+    before
 }
 
 /// Hoist the call `expr`, whose arguments are already expanded, into its
@@ -218,11 +236,12 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
     let IrExprKind::TryRetry { body, attempts, timeout_ms, fallback, .. } = &expr.kind else {
         return;
     };
-    let catches = fallback.is_some() || cx.outages.can_fail(body);
-    if !catches || timeout_ms.is_some() || cx.outages.try_refusal(body).is_some() {
+    let catches = fallback.is_some() || timeout_ms.is_some() || cx.outages.can_fail(body);
+    if !catches || cx.outages.try_refusal_with(body, *timeout_ms).is_some() {
         // Retry without outages keeps its own lowering; the rest is refused.
         return;
     }
+    let timeout_ms = *timeout_ms;
     let span = expr.span;
     let ty = expr.ty.clone();
     let attempts = (*attempts).max(1);
@@ -240,7 +259,8 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
     output.push(let_(failed, "__corvid_try_failed", Type::Bool, bool_lit(false), span));
     output.push(let_(value_failed, "__corvid_try_value_failed", Type::Bool, bool_lit(false), span));
 
-    let inner = Cx { return_ty: cx.return_ty, outages: cx.outages, unwind: Unwind::Try { left, failed } };
+    let timed = timeout_ms.is_some();
+    let inner = Cx { return_ty: cx.return_ty, outages: cx.outages, unwind: Unwind::Try { left, failed, timed } };
     let left_local = || local(left, "__corvid_try_left", Type::Int, span);
     let mut attempt = vec![assign(
         left,
@@ -249,6 +269,11 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
         binop(BinaryOp::Sub, left_local(), literal(IrLiteral::Int(1), Type::Int, span), Type::Int, span),
         span,
     )];
+    // Each attempt has its own deadline, as each attempt on the
+    // interpreter has its own `tokio::time::timeout`.
+    if let Some(milliseconds) = timeout_ms {
+        attempt.push(IrStmt::Expr { expr: outage(IrOutage::DeadlineBegin(milliseconds), Type::Nothing, span), span });
+    }
     expand_expr(&mut body, &inner, next, &mut attempt);
     attempt.push(assign(value, "__corvid_try_value", ty.clone(), body, span));
     if retries_values {
@@ -274,13 +299,18 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
         let more = binop(BinaryOp::Gt, left_local(), literal(IrLiteral::Int(0), Type::Int, span), Type::Bool, span);
         attempt.push(if_(
             binop(BinaryOp::And, more, unsuccessful, Type::Bool, span),
-            vec![
-                assign(value_failed, "__corvid_try_value_failed", Type::Bool, bool_lit(true), span),
+            leave_attempt(
+                timed,
                 IrStmt::Continue { span },
-            ],
+                vec![assign(value_failed, "__corvid_try_value_failed", Type::Bool, bool_lit(true), span)],
+                span,
+            ),
             None,
             span,
         ));
+    }
+    if timed {
+        attempt.push(end_deadline(span));
     }
     attempt.push(IrStmt::Break { span });
     output.push(IrStmt::While { cond: bool_lit(true), body: IrBlock { stmts: attempt, span }, span });

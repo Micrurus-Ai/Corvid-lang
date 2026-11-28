@@ -136,6 +136,14 @@ async fn secret_length(key: corvid_runtime::corvid_crypto::Secret) -> i64 {
     key.expose_text().map(|text| text.chars().count() as i64).unwrap_or(-1)
 }
 
+/// Answers `ms` after waiting `ms` milliseconds: a call slow enough for
+/// a `try ... timeout` to cut off.
+#[tool("slow_answer")]
+async fn slow_answer(ms: i64) -> i64 {
+    tokio::time::sleep(std::time::Duration::from_millis(ms.max(0) as u64)).await;
+    ms
+}
+
 #[tool("lookup_or_fail")]
 async fn lookup_or_fail(name: String) -> Result<i64, String> {
     if name.is_empty() {

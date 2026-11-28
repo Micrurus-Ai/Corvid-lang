@@ -754,6 +754,12 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let outage_clear_id = outage_fn(module, "corvid_outage_clear", false)?;
     let outage_stop_if_pending_id = outage_fn(module, "corvid_outage_stop_if_pending", false)?;
     let outage_catching_id = outage_fn(module, "corvid_outage_catching", false)?;
+    let deadline_end_id = outage_fn(module, "corvid_deadline_end", false)?;
+    let mut deadline_begin_sig = module.make_signature();
+    deadline_begin_sig.params.push(AbiParam::new(I64));
+    let deadline_begin_id = module
+        .declare_function("corvid_deadline_begin", Linkage::Import, &deadline_begin_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare corvid_deadline_begin: {e}"), Span::new(0, 0)))?;
 
     // A run's result as its public JSON text (one mapping for every type).
     let mut trace_run_completed_sig = module.make_signature();
@@ -851,6 +857,8 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         outage_clear: outage_clear_id,
         outage_stop_if_pending: outage_stop_if_pending_id,
         outage_catching: outage_catching_id,
+        deadline_begin: deadline_begin_id,
+        deadline_end: deadline_end_id,
         outage_plan: Default::default(),
         outage_checked: Default::default(),
         literal_counter: std::cell::Cell::new(0),

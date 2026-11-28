@@ -165,14 +165,13 @@ pub unsafe extern "C" fn corvid_runtime_call(
     let runtime = state.corvid_runtime();
     let call_name = name.clone();
     let call_runtime = runtime.clone();
-    let answer = state
-        .tokio_handle()
-        .block_on(async move {
-            match revealed {
-                Some(revealed) => call_runtime.call_tool_revealing_secrets(&call_name, values, revealed).await,
-                None => call_runtime.call_tool(&call_name, values).await,
-            }
-        });
+    // Within the deadline of any `try ... timeout` around the call.
+    let answer = crate::ffi_bridge::outage::within_deadline(&state.tokio_handle(), async move {
+        match revealed {
+            Some(revealed) => call_runtime.call_tool_revealing_secrets(&call_name, values, revealed).await,
+            None => call_runtime.call_tool(&call_name, values).await,
+        }
+    });
     let answer = match answer {
         Ok(answer) => answer,
         Err(err) => {

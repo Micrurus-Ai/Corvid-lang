@@ -301,3 +301,88 @@ agent main() -> String:
     );
     assert_eq!(out, "7");
 }
+
+fn interpret_with_slow_tool(ir: &corvid_ir::IrFile) -> Result<corvid_vm::Value, corvid_vm::InterpError> {
+    let runtime = Runtime::builder()
+        .approver(Arc::new(ProgrammaticApprover::always_yes()))
+        .tool("slow_answer", |args| async move {
+            let ms = args[0].as_i64().unwrap_or(0);
+            tokio::time::sleep(std::time::Duration::from_millis(ms.max(0) as u64)).await;
+            Ok(serde_json::json!(ms))
+        })
+        .build();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async { corvid_vm::run_agent(ir, entry_name(ir), vec![], &runtime).await })
+}
+
+/// `try ... timeout` in native code (TE-3e): a call that takes longer than
+/// the deadline is a timeout, an outage, caught by `else`; one that
+/// finishes in time gives its answer; with `retry`, each attempt has its
+/// own deadline.
+#[test]
+fn a_call_past_the_timeout_takes_the_fallback_and_one_in_time_answers() {
+    let src = r#"
+tool slow_answer(ms: Int) -> Int
+
+agent main() -> String:
+    late = try slow_answer(400) timeout 30 else -1
+    quick = try slow_answer(1) timeout 3000 else -1
+    retried = try slow_answer(400) timeout 30 on error retry 2 times backoff linear 1 else -2
+    return late.to_string() + " " + quick.to_string() + " " + retried.to_string()
+"#;
+    let ir = ir_of(src);
+    let value = interpret_with_slow_tool(&ir).expect("interpreter run");
+    assert_eq!(value, corvid_vm::Value::String("-1 1 -2".into()));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let binary = compile(&ir, &tmp);
+    let started = std::time::Instant::now();
+    let (stdout, stderr, status) = run_with_leak_detector(&binary);
+    assert!(status.success(), "compiled binary failed: {stderr}");
+    assert_eq!(stdout.trim(), "-1 1 -2", "stderr={stderr}");
+    // Four 400 ms calls, one after another, would take 1.6 s. Each is cut
+    // off at 30 ms instead; the calls given up on finish in the
+    // background, and the program waits for them before it exits.
+    assert!(started.elapsed() < std::time::Duration::from_millis(1400), "the slow calls were cut off: {:?}", started.elapsed());
+    assert_no_leaks(&stderr, src);
+}
+
+#[test]
+fn a_timeout_nothing_catches_stops_the_program_naming_the_bound() {
+    let src = r#"
+tool slow_answer(ms: Int) -> Int
+
+agent main() -> Int:
+    return try slow_answer(400) timeout 30
+"#;
+    let ir = ir_of(src);
+    let error = interpret_with_slow_tool(&ir).expect_err("the interpreter stops on the timeout");
+    assert!(error.to_string().contains("timed out after 30ms"), "{error}");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = crate::native_command(compile(&ir, &tmp)).output().expect("run compiled binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr={stderr}");
+    assert!(stderr.contains("timed out after 30ms"), "{stderr}");
+}
+
+#[test]
+fn a_timed_try_that_can_nest_with_another_try_is_refused_by_name() {
+    let src = r#"
+tool slow_answer(ms: Int) -> Int
+
+agent inner() -> Int:
+    return try slow_answer(400) timeout 10000 else -1
+
+agent main() -> Int:
+    return try inner() timeout 30 else -2
+"#;
+    let ir = ir_of(src);
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let error = build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[test_tools_lib_path().as_path()])
+        .expect_err("nested timeouts stay on the interpreter");
+    let message = error.to_string();
+    assert!(message.contains("nested timeouts"), "{message}");
+}
+

@@ -8564,3 +8564,13 @@ and the tool receives a secret argument as a `Secret`, whose text is
 wiped from memory when the tool is done with it. A parameter declared as
 `String` still receives the text as before.
 
+### `try … timeout` works in compiled programs
+
+`try fetch(url) timeout 2000 else cached` now runs as compiled code: a
+call that takes longer than the bound fails with
+`timed out after 2000ms`, which `else` catches and `retry` retries, each
+attempt with its own deadline. As in `corvid run`, a timeout fires at a
+call that waits, never in the middle of computation. A timed `try` that
+can nest with another `try`, or whose body uses `?`, still runs on the
+interpreter, and `corvid build` says why.
+

@@ -1015,6 +1015,11 @@ pub enum IrOutage {
     /// The value an unwinding function returns, or a `try` starts from:
     /// zero bits of the expression's type, which nothing reads.
     Unwind,
+    /// `Nothing`: start a `try ... timeout` attempt that must finish
+    /// within this many milliseconds (TE-3e).
+    DeadlineBegin(u64),
+    /// `Nothing`: end the innermost attempt's deadline.
+    DeadlineEnd,
 }
 
 #[derive(Debug, Clone)]

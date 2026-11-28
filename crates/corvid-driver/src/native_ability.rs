@@ -685,12 +685,14 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
                 None => Ok(()),
             }
         }
-        IrExprKind::TryRetry { body, timeout_ms, fallback: Some(_), .. } => Err(NotNativeReason::TryElseNotNative {
-            reason: match timeout_ms {
-                Some(_) => "it has a `timeout`, and native calls have no cancellation point yet".to_string(),
-                None => context.outages.try_refusal(body).unwrap_or_else(|| "it cannot be lowered natively".to_string()),
-            },
-        }),
+        IrExprKind::TryRetry { body, timeout_ms, fallback, .. } if fallback.is_some() || timeout_ms.is_some() => {
+            Err(NotNativeReason::TryElseNotNative {
+                reason: context
+                    .outages
+                    .try_refusal_with(body, *timeout_ms)
+                    .unwrap_or_else(|| "it cannot be lowered natively".to_string()),
+            })
+        }
         IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, current_return_ty, context)?;
             if &body.ty == &expr.ty

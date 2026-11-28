@@ -25,9 +25,10 @@ pub(super) fn call_llm_structured(
         sampling: Default::default(),
         messages: &[],
     };
-    let resp = state
-        .tokio_handle()
-        .block_on(async move { runtime.call_llm_ref_with_trace_rendered(req, Some(rendered)).await });
+    // Within the deadline of any `try ... timeout` around the call.
+    let resp = super::outage::within_deadline(&state.tokio_handle(), async move {
+        runtime.call_llm_ref_with_trace_rendered(req, Some(rendered)).await
+    });
     match resp {
         Ok(r) => Ok(r.value),
         Err(e) => {

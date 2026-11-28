@@ -69,6 +69,66 @@ pub extern "C" fn corvid_outage_stop_if_pending() {
     }
 }
 
+/// The deadlines of the `try ... timeout` attempts native code is inside,
+/// innermost last, with the milliseconds each was given (TE-3e). Native
+/// code runs on one thread, so the stack is that thread's.
+struct Deadline {
+    at: std::time::Instant,
+    milliseconds: u64,
+}
+
+thread_local! {
+    static DEADLINES: std::cell::RefCell<Vec<Deadline>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Start an attempt that must finish within `milliseconds`. A nested
+/// deadline never extends an outer one: the nearer of the two applies.
+#[no_mangle]
+pub extern "C" fn corvid_deadline_begin(milliseconds: i64) {
+    let milliseconds = milliseconds.max(0) as u64;
+    DEADLINES.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let mut at = std::time::Instant::now() + std::time::Duration::from_millis(milliseconds);
+        let mut reported = milliseconds;
+        if let Some(outer) = stack.last() {
+            if outer.at < at {
+                at = outer.at;
+                reported = outer.milliseconds;
+            }
+        }
+        stack.push(Deadline { at, milliseconds: reported });
+    });
+}
+
+/// End the innermost attempt's deadline. Compiled code ends every attempt
+/// it begins, on each path out of it; a `try ... timeout` whose body
+/// could leave by `?` is refused natively.
+#[no_mangle]
+pub extern "C" fn corvid_deadline_end() {
+    DEADLINES.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+}
+
+/// Run `call` on the runtime's tokio handle within the innermost
+/// deadline, if any: a call that does not finish in time is
+/// `RuntimeError::TimedOut`, an outage.
+pub(crate) fn within_deadline<T>(
+    handle: &tokio::runtime::Handle,
+    call: impl std::future::Future<Output = Result<T, crate::RuntimeError>>,
+) -> Result<T, crate::RuntimeError> {
+    let deadline = DEADLINES.with(|stack| stack.borrow().last().map(|d| (d.at, d.milliseconds)));
+    match deadline {
+        None => handle.block_on(call),
+        Some((at, milliseconds)) => {
+            let left = at.saturating_duration_since(std::time::Instant::now());
+            handle
+                .block_on(async move { tokio::time::timeout(left, call).await })
+                .unwrap_or(Err(crate::RuntimeError::TimedOut { milliseconds }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +144,20 @@ mod tests {
         corvid_outage_clear();
         assert_eq!(corvid_outage_pending(), 0);
         CATCHING.store(false, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn a_nested_deadline_never_extends_the_outer_one_and_ending_restores_it() {
+        corvid_deadline_begin(50);
+        corvid_deadline_begin(10_000);
+        DEADLINES.with(|stack| {
+            let stack = stack.borrow();
+            assert_eq!(stack[1].milliseconds, 50, "the nearer deadline applies");
+            assert!(stack[1].at <= stack[0].at);
+        });
+        corvid_deadline_end();
+        DEADLINES.with(|stack| assert_eq!(stack.borrow().len(), 1));
+        corvid_deadline_end();
+        DEADLINES.with(|stack| assert!(stack.borrow().is_empty()));
     }
 }

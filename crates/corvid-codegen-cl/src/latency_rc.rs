@@ -274,7 +274,7 @@ fn collect_prompt_pins_in_expr(
         | IrExprKind::Local { .. }
         | IrExprKind::Decl { .. }
         | IrExprKind::OptionNone
-        | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => {}
+        | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => {}
         IrExprKind::Replay {
             trace,
             arms,

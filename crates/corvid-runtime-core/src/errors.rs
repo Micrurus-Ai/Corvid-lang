@@ -26,6 +26,11 @@ pub enum RuntimeError {
     /// A tool handler returned an error.
     ToolFailed { tool: String, message: String },
 
+    /// A call did not finish before the deadline of the `try ... timeout`
+    /// around it (native code, recoverable failures TE-3e). An outage, as
+    /// the interpreter's timeout is.
+    TimedOut { milliseconds: u64 },
+
     /// A prompt name was called that has no registered template / handler.
     UnknownPrompt(String),
 
@@ -185,6 +190,7 @@ impl RuntimeError {
     pub fn is_outage(&self) -> bool {
         match self {
             Self::ToolFailed { .. }
+            | Self::TimedOut { .. }
             | Self::AdapterFailed { .. }
             | Self::PythonFailed { .. }
             | Self::DatabaseFailed { .. } => true,
@@ -222,6 +228,7 @@ impl fmt::Display for RuntimeError {
             Self::ToolFailed { tool, message } => {
                 write!(f, "tool `{tool}` failed: {message}")
             }
+            Self::TimedOut { milliseconds } => write!(f, "timed out after {milliseconds}ms"),
             Self::UnknownPrompt(name) => write!(f, "no prompt named `{name}`"),
             Self::NoAdapter(model) => {
                 write!(f, "no LLM adapter registered for model `{model}`")

@@ -211,6 +211,9 @@ pub extern "C" fn corvid_runtime_shutdown() {
     // SAFETY: Pointer came from `Box::into_raw` in `corvid_runtime_init`
     // and is owned by us (we just atomically swapped it out).
     let bridge = unsafe { Box::from_raw(ptr) };
+    // A tool call a `try ... timeout` gave up on may still be running on
+    // the runtime; let it finish before the runtime goes away.
+    crate::tools::wait_for_host_tools();
     if let Some(path) = std::env::var_os("CORVID_REPLAY_DIFFERENTIAL_REPORT_PATH") {
         if let Err(err) = bridge
             .corvid

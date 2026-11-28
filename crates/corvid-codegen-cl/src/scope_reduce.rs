@@ -242,7 +242,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             expr_mentions_local(receiver, local_id)
                 || args.iter().any(|a| expr_mentions_local(a, local_id))
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
         IrExprKind::Local {
             local_id: current, ..
         } => *current == local_id,

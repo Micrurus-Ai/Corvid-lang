@@ -1396,21 +1396,23 @@ pub(super) fn lower_expr(
                 // The expansion pass turned every `try ... else` native code
                 // catches exactly into a loop; this one it could not. The
                 // tier picker routes these to the interpreter first.
-                let reason = match timeout_ms {
-                    Some(_) => "it has a `timeout`, and native calls have no cancellation point yet".to_string(),
-                    None => runtime.outage_plan.try_refusal(body).unwrap_or_else(|| "it cannot be lowered natively".to_string()),
-                };
+                let reason = runtime
+                    .outage_plan
+                    .try_refusal_with(body, *timeout_ms)
+                    .unwrap_or_else(|| "it cannot be lowered natively".to_string());
                 return Err(CodegenError::not_supported(
                     format!("this `try ... else` runs on the interpreter: {reason}"),
                     expr.span,
                 ));
             }
             if timeout_ms.is_some() {
-                return Err(CodegenError::not_supported(
-                    "`try ... timeout <ms>` is interpreter-only today — the native tier's                      synchronous call lowering has no cancellation point; run through                      `corvid run --target=interpreter` (the default for effectful programs)"
-                        .to_string(),
-                    expr.span,
-                ));
+                // The expansion turned every timed `try` it can catch into
+                // its loop; this one it could not.
+                let reason = runtime
+                    .outage_plan
+                    .try_refusal_with(body, *timeout_ms)
+                    .unwrap_or_else(|| "it cannot be lowered natively".to_string());
+                return Err(CodegenError::not_supported(format!("this `try ... timeout` runs on the interpreter: {reason}"), expr.span));
             }
             match &body.ty {
             Type::Result(_, _) => lower_try_retry_result(
@@ -1533,6 +1535,17 @@ fn lower_outage(
             F64 => builder.ins().f64const(0.0),
             ty => builder.ins().iconst(ty, 0),
         }),
+        corvid_ir::IrOutage::DeadlineBegin(milliseconds) => {
+            let begin = module.declare_func_in_func(runtime.deadline_begin, builder.func);
+            let milliseconds = builder.ins().iconst(I64, (*milliseconds).min(i64::MAX as u64) as i64);
+            builder.ins().call(begin, &[milliseconds]);
+            Ok(builder.ins().iconst(I64, 0))
+        }
+        corvid_ir::IrOutage::DeadlineEnd => {
+            let end = module.declare_func_in_func(runtime.deadline_end, builder.func);
+            builder.ins().call(end, &[]);
+            Ok(builder.ins().iconst(I64, 0))
+        }
     }
 }
 

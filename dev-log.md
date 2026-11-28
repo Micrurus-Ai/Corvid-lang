@@ -2,6 +2,50 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `try ... timeout` in native code (TE-3e)
+
+The interpreter bounds each attempt with `tokio::time::timeout`, which
+fires only where the attempt waits. Native code now gets the same rule
+from a deadline:
+- **The deadline:** the expanded `try` loop begins one at the top of
+  each attempt (`IrOutage::DeadlineBegin`, `corvid_deadline_begin`) and
+  ends it on every way out (`DeadlineEnd`).
+- **Where it fires:** `corvid_runtime_call` and the prompt bridge run
+  their call within the remaining time (`outage::within_deadline`). A
+  call past it fails with the new `RuntimeError::TimedOut`, an outage,
+  held like any other.
+- **Nesting:** a nested deadline never extends the outer one.
+
+Found and fixed: a host tool call that is given up on keeps running on
+its blocking thread, which is right, since its work may have side
+effects. But native shutdown then tore the tokio runtime out from under
+it, and the tool's `block_on` panicked inside an `extern "C"` function,
+aborting the program. The runtime now counts host tool calls in flight,
+and shutdown waits for them.
+
+Narrowed, refused by name:
+- **A timed `try` that can nest with another `try`:** its agent called
+  from inside a `try`, a `try` around it in its agent, or a `try` its
+  body reaches through calls. On the interpreter an outer `try`'s timeout
+  belongs to the outer `try`, while one deadline stack cannot yet say
+  whose deadline fired.
+- **A timed body using `?`:** it would leave with its deadline set.
+
+The widening is filed at the front of the TE-3 list.
+
+Simpler alternatives considered:
+- An interrupting timer thread cannot stop compiled code at a safe point.
+- Checking the clock after every statement costs every loop and still
+  cannot stop a waiting call.
+
+Proof:
+- parity tests on both tiers: a 400 ms call cut off at 30 ms, a call in
+  time, a retried timeout (each under the leak detector, the whole run
+  under 1.4 s), an uncaught timeout that stops naming `timed out after
+  30ms`, and the nested refusal;
+- a runtime test of the deadline stack;
+- tier picker tests for native timeouts and the `?` refusal.
+
 ### Native `try` catches outages in `approve` arguments
 
 An `approve`'s arguments are evaluated before the approval is asked, and

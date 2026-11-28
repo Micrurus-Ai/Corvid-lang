@@ -587,7 +587,7 @@ fn walk_expr(expr: &IrExpr, consumed: bool, out: &mut Vec<LocalRead>) {
                 });
             }
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => {}
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => {}
         IrExprKind::FieldAccess { target, .. } => {
             // Target is borrowed by the field access — it's inspected,
             // a read of one field, the surrounding context owns the

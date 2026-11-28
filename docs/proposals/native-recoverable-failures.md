@@ -1,6 +1,6 @@
 # `try ... else` in native code (recoverable failures TE-3)
 
-**Status:** TE-3a to TE-3d built 2026-11-27. `match` arms widened the same day and guards on 2026-11-28 (`outage_lift.rs`). What remains is the widening on the roadmap (lambdas, `parallel` and `approve`) and `timeout`. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
+**Status:** TE-3a to TE-3d built 2026-11-27, TE-3e (`timeout`) on 2026-11-28. `match` arms widened the same day and guards on 2026-11-28 (`outage_lift.rs`). What remains is the widening on the roadmap (lambdas, `parallel` and `approve`) and `timeout`. No grammar change: `try ... else` is already parsed, checked and run by the interpreter (TE-1, TE-2). This slice makes compiled code mean the same thing.
 **Owner:** backend (Claude Code, Mac session).
 **Roadmap:** `try ... else` TE-3 in [backend-ai-roadmap](../backend-ai-roadmap.md); parent proposal [recoverable failures](recoverable-failures.md).
 
@@ -79,7 +79,23 @@ The interpreter records a caught failure like the failure it replaces, so a repl
 - [x] TE-3c. Prompts report outages through the same slot. Built 2026-11-27. Table operations are not native yet (B09 P6); they will use the same slot when they are.
 - [x] TE-3d. Record and replay, with a cross-tier replay test. Proved 2026-11-27 in `replay_native.rs`; it needed no code, because a replayed failure carries its `outage` flag into the pending slot.
 
+## `try ... timeout` (TE-3e, 2026-11-28)
+
+The interpreter wraps each attempt in `tokio::time::timeout`, so a timeout fires only where the attempt waits: at a tool, connector or prompt call. Pure computation between calls is never interrupted. Native code gets the same rule from a deadline instead of a cancellation point:
+
+- At the top of each attempt, the expanded loop sets a deadline `timeout` milliseconds ahead (`corvid_deadline_begin`, which returns the deadline it replaces). After the attempt, on every path out of it, the deadline is put back (`corvid_deadline_end`), so a nested `try` with its own timeout keeps the nearer one, and the outer one returns when it ends.
+- `corvid_runtime_call` and the prompt bridge run their call under the remaining time. A call that starts after the deadline, or does not finish before it, fails with `timed out after <ms>ms`, an outage, held like any other. The `try` retries the attempt or takes its fallback; with neither, the outage unwinds on, as on the interpreter.
+
+A body containing `?` is refused by name: `?` returns from the agent from inside the attempt, past the statement that puts the deadline back.
+
+Narrowed when built: a timed `try` that can nest with another `try` is refused by name. On the interpreter an outer `try`'s timeout belongs to the outer `try`, while a single deadline stack cannot yet say whose deadline a failed call met, so an inner `try` would catch the outer one's timeout. The widening is on the roadmap.
+
+A call given up on is not cut off midway, on either tier: its blocking work finishes in the background. Native shutdown waits for such calls before tearing the runtime down, which before this would abort the program.
+
+Alternatives considered:
+- A timer thread that interrupts the program cannot stop compiled code at a safe point, and would leave the reference counts of the interrupted frame wrong.
+- Checking the clock after every statement costs time in every loop, and still could not stop a call that is waiting.
+
 ## Not in scope
 
-- `try ... timeout` in native code. That needs a cancellation point in the synchronous call path, and stays refused by name, as it is today.
 - The fallback naming which failure happened (`else (failure) -> ...`). That waits on the failure value's type, as on the interpreter.

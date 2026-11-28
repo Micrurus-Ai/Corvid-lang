@@ -1023,7 +1023,7 @@ fn expr_mentions_local(expr: &IrExpr, target: LocalId) -> bool {
                     .any(|arm| expr_mentions_local(&arm.body, target))
                 || expr_mentions_local(else_body, target)
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind) => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
     }
 }
 
