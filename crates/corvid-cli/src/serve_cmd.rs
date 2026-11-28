@@ -71,6 +71,7 @@ mod actions;
 mod assistant_endpoint;
 mod browser_asset;
 mod browser_form;
+mod delegations;
 mod live_assets;
 mod live;
 mod own_origin;
@@ -601,6 +602,12 @@ pub(crate) fn cmd_serve(
     for (path, mr) in assistant_endpoint::routes(&action_catalog, &contract) {
         app = app.route(&path, mr);
     }
+    // B11-2b: a person's grants of authority to an assistant, served only
+    // when the identity block declares `delegation: up_to`.
+    let delegation_cap = state.auth_context.as_ref().and_then(|ctx| ctx.delegation_cap_secs);
+    for (path, mr) in delegations::routes(&action_catalog, delegation_cap) {
+        app = app.route(&path, mr);
+    }
 
     // Slice 52e: mount the login surface (`/auth/{provider}/login`,
     // `/callback`, `/logout`, `/session`) when an identity block is
@@ -900,8 +907,8 @@ fn enforce_route_policy(
     headers: &axum::http::HeaderMap,
 ) -> Result<EnforcedRouteActor, Response> {
     use corvid_runtime::{
-        authorize_route, effective_permissions_for, verify_csrf_double_submit, CsrfRequestMethod,
-        RouteAuthzOutcome, RoutePolicyRequirement,
+        verify_csrf_double_submit, CsrfRequestMethod,
+
     };
 
     let Some(ctx) = &state.auth_context else {
@@ -958,6 +965,57 @@ fn enforce_route_policy(
         }
     }
 
+    authorize_actor(ctx, actor, policy, route_path, &summary, &trace)
+}
+
+/// A caller presenting a delegation grant (`Authorization: Bearer`, B11):
+/// `None` when the request carries no bearer token. The grant must be
+/// live (not expired, not revoked) and its person must still exist in
+/// its tenant; then the person's own authority is checked fresh against
+/// `policy` by the same step a session caller takes. A bearer token is
+/// not an ambient credential, so no CSRF check applies. What the grant
+/// covers is the caller's to check against the action.
+fn enforce_grant(
+    state: &ServeState,
+    policy: &corvid_ir::IrRoutePolicy,
+    route_path: &str,
+    headers: &axum::http::HeaderMap,
+) -> Option<Result<(EnforcedRouteActor, corvid_runtime::DelegationRecord), Response>> {
+    let token = own_origin::single_header(headers, "authorization")?.strip_prefix("Bearer ")?.trim().to_string();
+    Some((|| {
+        let Some(ctx) = &state.auth_context else {
+            return Err(auth_error(StatusCode::UNAUTHORIZED, "authentication required"));
+        };
+        let refused = || auth_error(StatusCode::UNAUTHORIZED, "the grant is unknown, expired or revoked");
+        let at = epoch_ms();
+        let grant = match ctx.auth.resolve_delegation(&token, at) {
+            Ok(Some(grant)) if grant.is_live(at) => grant,
+            _ => return Err(refused()),
+        };
+        let actor = match ctx.auth.get_actor(&grant.actor_id) {
+            Ok(Some(actor)) if actor.tenant_id == grant.tenant_id => actor,
+            _ => return Err(refused()),
+        };
+        let summary = requirement_summary(policy);
+        let trace = format!("route-authz-{}", crate::serve_auth::pkce::random_token());
+        let enforced = authorize_actor(ctx, actor, policy, route_path, &summary, &trace)?;
+        Ok((enforced, grant))
+    })())
+}
+
+/// Steps 3 and 4 of a policy check, for a caller already verified by a
+/// session or a grant: the person's roles and permissions are read fresh
+/// against `policy`, the decision is audited, and the handler gets the
+/// typed caller.
+fn authorize_actor(
+    ctx: &crate::serve_auth::context::AuthContext,
+    actor: corvid_runtime::AuthActor,
+    policy: &corvid_ir::IrRoutePolicy,
+    route_path: &str,
+    summary: &str,
+    trace: &str,
+) -> Result<EnforcedRouteActor, Response> {
+    use corvid_runtime::{authorize_route, effective_permissions_for, RouteAuthzOutcome, RoutePolicyRequirement};
     // 3. Role + permission requirements (read FRESH per request, so a
     //    revoked role denies immediately).
     let roles = match ctx.auth.actor_roles(&actor.id) {

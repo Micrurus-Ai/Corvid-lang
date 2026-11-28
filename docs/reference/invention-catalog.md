@@ -1025,3 +1025,29 @@ agent store(renamed: Shelf) -> String:
 ```
 
 Try it: `corvid tour --topic tables`. Reference: [Tables](./tables.md).
+
+#### One Action for People and Assistants {#shared-actions}
+
+An action is declared once: its typed input, who may call it, and whether
+an assistant is offered it. The page's form, a one-click button, the JSON
+API, the TypeScript client and an authorized assistant all use that one
+definition, so there is no separate agent API:
+- **The form is checked.** `form_for(move_card, MoveCard(...), "Move")`
+  is checked against the action's input, so renaming a field of
+  `MoveCard` is a compile error at the form, the client and the
+  assistant's tool schema alike.
+- **The assistant's line.** `assistants: confirm` makes each assistant
+  call wait for the person. `assistants: allow` lets it run inside the
+  person's own session, or through a grant the person made.
+- **Grants.** `delegation: up_to 8 hours` caps how long a grant lasts.
+  Each grant is checked at every call against what the person may do at
+  that moment, so it never exceeds their authority, and revoking it
+  stops it at once.
+
+```corvid
+action move_card(move: MoveCard, by: Caller) -> Moved requires permission("board.edit"):
+    assistants: allow "Move a card to another column."
+    return Moved(move.card, move.position)
+```
+
+Try it: `corvid tour --topic shared-actions`. Reference: [`corvid serve` actions](./cli.md), [Shared actions](../proposals/shared-actions.md), [Assistant authority](../proposals/assistant-authority.md).

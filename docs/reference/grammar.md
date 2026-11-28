@@ -291,9 +291,11 @@ action_decl       ::= (annotation NEWLINE | approval_annotation NEWLINE)* 'actio
 action_policy     ::= route_policy
 
 # Only as an action's first line, so `assistants` is an ordinary name
-# elsewhere. Without it no assistant is offered the action. `allow`
-# arrives with on-behalf-of authority (B11).
-assistants_line   ::= 'assistants' ':' 'confirm' STRING_LITERAL NEWLINE
+# elsewhere. Without it no assistant is offered the action. `confirm`:
+# each call waits for the person to confirm. `allow` (B11): the assistant
+# may run it without asking, in the person's own session or through a
+# grant that names it with `allow`; an `approve` inside still applies.
+assistants_line   ::= 'assistants' ':' ('confirm' | 'allow') STRING_LITERAL NEWLINE
 
 # Pure function (slice 45r) — the fourth callable kind. The body is
 # statically EFFECT-FREE: it may call other fns and pure builtins,
@@ -406,6 +408,7 @@ identity_item     ::= 'provider' identity_provider NEWLINE
                     | 'linking' ':' INDENT (linking_setting NEWLINE)+ DEDENT
                     | 'provisioning' ':' INDENT (provisioning_setting NEWLINE)+ DEDENT
                     | 'roles' ':' INDENT (IDENT ':' STRING_LITERAL NEWLINE)+ DEDENT
+                    | 'delegation' ':' 'up_to' INT duration_unit NEWLINE   # B11: a grant's longest life, 1 minute to 720 hours
 identity_provider ::= 'google' | 'github' | 'microsoft' | 'apple' | 'discord' | 'slack'
                     | 'oidc' STRING_LITERAL 'as' IDENT
 session_setting   ::= 'lifetime' ':' INT ('s' | 'm' | 'h' | 'd')

@@ -8531,6 +8531,21 @@ archive = View(button_for(archive_card, card.id, "Archive"))
 
 [Browser views](docs/book/19-browser-views.md)
 
+### Let an assistant act for a person
+
+An action's `assistants:` line says how an assistant may call it:
+- **`confirm`.** Each call waits for the person.
+- **`allow`.** It runs at once inside the person's own session, with the action's `requires` checked fresh. An `approve` inside it still waits for its reviewer.
+
+An assistant outside the person's browser acts through a grant:
+- **Declare a cap.** The identity block says `delegation: up_to 8 hours`, from `1 minute` to `720 hours`, and without the line no grant can be made. A day isn't a fixed length, so the cap is written in hours.
+- **Make a grant.** The signed-in person posts `POST /__delegations` with a label, the actions and a lifetime. The answer carries a token, shown once.
+- **Use it.** The assistant sends `Authorization: Bearer <token>` to `/mcp` or `/actions/<name>`.
+
+Each call is allowed only where the grant names the action, the source offers it, and the person may call it now, so a grant can never do more than its person. It runs without confirmation only when both the grant and the `assistants:` line say `allow`. `GET /__delegations` lists the person's grants, and `DELETE /__delegations/<id>` revokes one at once.
+
+[`corvid serve` actions](docs/reference/cli.md)
+
 ### A tool written in Rust can fail
 
 A `#[tool]` whose `async fn` returns `Result<T, E>` now fails by

@@ -195,6 +195,7 @@ Each entry has a runnable tour, a specification and tests. The [full catalog](do
 | The Complete Application Runtime | [Protocol-Typed Connectors](./docs/reference/invention-catalog.md#protocol-typed-connectors) | `corvid tour --topic connectors` |
 | The Complete Application Runtime | [Verified Provider Protocols](./docs/reference/invention-catalog.md#verified-provider-protocols) | `corvid tour --topic verified-provider-protocols` |
 | The Complete Application Runtime | [Typed Tables With Revision-Checked Writes](./docs/reference/invention-catalog.md#typed-tables-with-revision-checked-writes) | `corvid tour --topic tables` |
+| The Complete Application Runtime | [One Action for People and Assistants](./docs/reference/invention-catalog.md#shared-actions) | `corvid tour --topic shared-actions` |
 
 ## Architecture
 

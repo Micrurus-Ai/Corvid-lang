@@ -834,6 +834,7 @@ mod tests {
                 },
             ],
             safeguards: vec!["authorization_code_with_pkce".into()],
+            delegation_up_to_secs: None,
             linking: crate::app_contract::ContractLinking {
                 confirmation_required: true,
                 email_match: "never".into(),

@@ -421,6 +421,7 @@ mod tests {
             jwks_fetcher: Arc::new(MockIdp::new("i", "a").fetcher()),
             public_base_url: None,
             post_login_redirect: "/".to_string(),
+            delegation_cap_secs: None,
         }
     }
 
@@ -553,6 +554,7 @@ mod callback_tests {
             jwks_fetcher: jwks,
             public_base_url: None,
             post_login_redirect: "/".to_string(),
+            delegation_cap_secs: None,
         }
     }
 

@@ -128,6 +128,11 @@ pub struct IdentityDecl {
     /// only on `authenticated`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<RoleDecl>,
+    /// How long a person may grant an assistant authority (B11). `None`:
+    /// no grant can be issued, and assistants act only inside the
+    /// person's session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<DelegationPolicy>,
     pub span: Span,
 }
 
@@ -1969,14 +1974,31 @@ pub struct AssistantExposure {
 pub enum AssistantMode {
     /// Each call waits for the person the assistant acts for to confirm.
     Confirm,
+    /// The assistant may run the action without asking each time (B11),
+    /// inside the person's own session or through a grant that names it
+    /// with `allow`. An `approve` inside the action still applies.
+    Allow,
 }
 
 impl AssistantMode {
     pub fn as_str(self) -> &'static str {
         match self {
             AssistantMode::Confirm => "confirm",
+            AssistantMode::Allow => "allow",
         }
     }
+}
+
+/// `delegation: up_to 8 hours` in an identity block (B11): a signed-in
+/// person may grant an assistant authority, for at most the cap. Without
+/// the item no grant can be issued; there is no default lifetime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegationPolicy {
+    /// The cap's number, as written (`8`).
+    pub count: String,
+    /// The cap's unit, as written (`hours`).
+    pub unit: String,
+    pub span: Span,
 }
 
 /// ABI marker on an exported agent declaration.

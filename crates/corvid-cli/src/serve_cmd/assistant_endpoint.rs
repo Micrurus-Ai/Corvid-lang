@@ -127,9 +127,15 @@ fn may_call(state: &ServeState, enforced: &EnforcedRouteActor, policy: &IrRouteP
 }
 
 async fn handle(state: &Arc<ServeState>, offered: &[Offered], headers: &axum::http::HeaderMap, body: &[u8]) -> Response {
-    let enforced = match enforce_route_policy(state, &signed_in(), HttpMethod::Post, MCP_PATH, headers) {
-        Ok(enforced) => enforced,
-        Err(refused) => return refused,
+    // The assistant acts for a person through their session, or through a
+    // grant they made (B11-3); either way it is that person's authority.
+    let (enforced, grant) = match super::enforce_grant(state, &signed_in(), MCP_PATH, headers) {
+        Some(Ok((enforced, grant))) => (enforced, Some(grant)),
+        Some(Err(refused)) => return refused,
+        None => match enforce_route_policy(state, &signed_in(), HttpMethod::Post, MCP_PATH, headers) {
+            Ok(enforced) => (enforced, None),
+            Err(refused) => return refused,
+        },
     };
     let Ok(request) = serde_json::from_slice::<Json_>(body) else {
         return rpc_error(Json_::Null, -32700, "the request is not JSON");
@@ -140,7 +146,13 @@ async fn handle(state: &Arc<ServeState>, offered: &[Offered], headers: &axum::ht
         // A notification, such as `notifications/initialized`, has no reply.
         return StatusCode::ACCEPTED.into_response();
     };
-    let callable: Vec<&Offered> = offered.iter().filter(|o| may_call(state, &enforced, &o.endpoint.policy)).collect();
+    // What this assistant may call: offered by the source, within what the
+    // person may do now, and, through a grant, named by the grant.
+    let callable: Vec<&Offered> = offered
+        .iter()
+        .filter(|o| may_call(state, &enforced, &o.endpoint.policy))
+        .filter(|o| grant.as_ref().is_none_or(|g| g.mode_for(&o.endpoint.name).is_some()))
+        .collect();
     match method {
         "initialize" => rpc_result(
             id,
@@ -177,10 +189,65 @@ async fn handle(state: &Arc<ServeState>, offered: &[Offered], headers: &axum::ht
                     return rpc_result(id, json!({ "isError": true, "content": [{ "type": "text", "text": detail }], "structuredContent": refused }));
                 }
             };
-            rpc_result(id, propose(state, tool, &enforced, inputs))
+            // `assistants: allow` (B11): inside the person's own session the
+            // assistant runs the action without asking each time. The
+            // action's `requires` is checked fresh, as for a confirmed
+            // call, and an `approve` inside it still waits for its
+            // reviewer. Every other call waits for the person to confirm.
+            // Through a grant, the grant must also name it at `allow`.
+            let source_allows = tool.endpoint.assistants.as_ref().is_some_and(|line| line.mode == corvid_ast::AssistantMode::Allow);
+            let grant_allows = grant
+                .as_ref()
+                .is_none_or(|g| g.mode_for(&tool.endpoint.name) == Some(corvid_runtime::DelegationMode::Allow));
+            if !(source_allows && grant_allows) {
+                return rpc_result(id, propose(state, tool, &enforced, inputs));
+            }
+            // The action's own `requires`, checked fresh as the call runs.
+            let checked = match &grant {
+                Some(_) => super::enforce_grant(state, &tool.endpoint.policy, &tool.endpoint.path, headers)
+                    .expect("the request carried a grant")
+                    .map(|(enforced, _)| enforced),
+                None if tool.endpoint.policy.requires_auth() => {
+                    enforce_route_policy(state, &tool.endpoint.policy, HttpMethod::Post, &tool.endpoint.path, headers)
+                }
+                None => Ok(enforced),
+            };
+            let enforced = match checked {
+                Ok(enforced) => enforced,
+                Err(refused) => return refused,
+            };
+            let surface = match &grant {
+                Some(g) => json!({ "surface": "assistant", "mode": "allow", "delegation": g.id, "label": g.label }),
+                None => json!({ "surface": "assistant", "mode": "allow" }),
+            };
+            let answer = execute(state, &tool.endpoint, Some(&enforced), inputs, surface).await;
+            rpc_result(id, tool_result(&tool.endpoint.name, answer).await)
         }
         _ => rpc_error(id, -32601, &format!("Method not found: {method}")),
     }
+}
+
+/// An action's answer as an MCP tool result: its value on success, the
+/// approval it waits for when an `approve` inside it queued one, and a
+/// tool error naming the refusal otherwise.
+async fn tool_result(action: &str, answer: Response) -> Json_ {
+    let status = answer.status();
+    let body = axum::body::to_bytes(answer.into_body(), 1 << 20).await.unwrap_or_default();
+    let value: Json_ = serde_json::from_slice(&body).unwrap_or(Json_::Null);
+    if status == StatusCode::ACCEPTED {
+        return json!({
+            "content": [{ "type": "text", "text": format!("`{action}` is waiting for an approval before it runs.") }],
+            "structuredContent": { "status": "approval_required", "approval": value },
+        });
+    }
+    if status.is_success() {
+        return json!({
+            "content": [{ "type": "text", "text": value.to_string() }],
+            "structuredContent": { "status": "done", "result": value },
+        });
+    }
+    let detail = value["detail"].as_str().or_else(|| value["error"].as_str()).unwrap_or("the action did not run").to_string();
+    json!({ "isError": true, "content": [{ "type": "text", "text": detail }], "structuredContent": value })
 }
 
 /// Record a pending confirmation for this person and say what happens next.

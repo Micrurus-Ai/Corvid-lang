@@ -234,6 +234,11 @@ pub struct ContractIdentity {
     pub safeguards: Vec<String>,
     /// Account-linking policy (slice 51i).
     pub linking: ContractLinking,
+    /// The longest a person may grant an assistant authority, in seconds
+    /// (B11 `delegation: up_to`). Absent: no grant can be issued, and
+    /// assistants act only inside the person's session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_up_to_secs: Option<u64>,
 }
 
 /// The account-linking posture surfaced to clients (slice 51i).
@@ -1020,6 +1025,9 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
         },
         auth_routes,
         safeguards: mandatory_auth_safeguards(),
+        // The checker refused a cap outside the bounds, so this is the
+        // cap the grant endpoint enforces.
+        delegation_up_to_secs: decl.delegation.as_ref().and_then(|policy| corvid_types::delegation::cap_seconds(policy).ok()),
         linking: ContractLinking {
             confirmation_required: true,
             email_match: linking.email_match.wire_name().to_string(),

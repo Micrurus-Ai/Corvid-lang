@@ -29,7 +29,7 @@ identity users:
     delegation: up_to 8 hours
 ```
 
-`delegation: up_to <duration>` is the only new line in the identity block. It says the program lets a signed-in person grant an assistant authority, and caps how long any grant may last. A token's lifetime is a consequential security policy, so there is no default: without the line, no grant can be issued and assistants act only inside the person's session, as in B10. The cap is a duration literal, written as a number and a unit as in `30 seconds`; it must be between `1 minute` and `30 days`, so a grant can never be permanent.
+`delegation: up_to <duration>` is the only new line in the identity block. It says the program lets a signed-in person grant an assistant authority, and caps how long any grant may last. A token's lifetime is a consequential security policy, so there is no default: without the line, no grant can be issued and assistants act only inside the person's session, as in B10. The cap is a duration literal, written as a number and a unit as in `30 seconds`; it must be between `1 minute` and `720 hours`, so a grant can never be permanent. (The top is written in hours because a duration counts exact time and a day is not a fixed length: in a time zone it is 23, 24 or 25 hours, so `30 days` is refused as a duration everywhere in the language.)
 
 ### A grant, made by the person
 
@@ -87,10 +87,10 @@ The roadmap's earlier B11 line said omitting the exposure should be a compile er
 
 ## Slices
 
-- [ ] B11-1. Grammar: `delegation: up_to <duration>` in the identity block (bounds checked) and `assistants: allow "..."`; contract carries both. Shared grammar: built after the review window.
+- [x] B11-1. Grammar: `delegation: up_to <duration>` in the identity block (bounds checked) and `assistants: allow "..."`; contract carries both. Built 2026-11-27 after frontend approval.
 - [x] B11-2a. The grant store (`SessionAuthRuntime::create_delegation`, `resolve_delegation`, `list_delegations`, `revoke_delegation`), grammar-independent, so built during the review window. Built 2026-11-26.
-- [ ] B11-2b. `POST/GET/DELETE /__delegations`, expiry bounded by the declared cap, traced.
-- [ ] B11-3. Bearer authority on `/mcp` and `/actions/<name>`: the three-way intersection read fresh, `allow` without confirmation through a grant or session, grant id and label in the trace.
+- [x] B11-2b. `POST/GET/DELETE /__delegations`, expiry bounded by the declared cap, traced. Built 2026-11-27.
+- [x] B11-3. Bearer authority on `/mcp` and `/actions/<name>`: the three-way intersection read fresh, `allow` without confirmation through a grant or session, grant id and label in the trace. Built 2026-11-27.
 - [ ] B11-4. Revocation: pending confirmations under a revoked or expired grant are dropped and answer `410`; tests revoke mid-flow.
 - [ ] B11-5. `corvid act --server --token-file`, and workers carrying the grant (B10-4b).
 

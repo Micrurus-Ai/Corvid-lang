@@ -78,6 +78,45 @@ async fn answer_action(
     headers: &axum::http::HeaderMap,
     body: &Bytes,
 ) -> Response {
+    // B11-3: an assistant presenting a person's grant. The call runs only
+    // where the grant, the source and the person all agree: the grant
+    // names the action at `allow`, the source offers it with `assistants:
+    // allow`, and the person may call it now (checked fresh). A narrower
+    // mode needs the person's confirmation, which `/mcp` asks for.
+    if let Some(granted) = super::enforce_grant(state, &endpoint.policy, &endpoint.path, headers) {
+        let (enforced, grant) = match granted {
+            Ok(granted) => granted,
+            Err(refused) => return refused,
+        };
+        let source = endpoint.assistants.as_ref().map(|line| line.mode);
+        match (grant.mode_for(&endpoint.name), source) {
+            (Some(corvid_runtime::DelegationMode::Allow), Some(corvid_ast::AssistantMode::Allow)) => {}
+            (Some(_), Some(_)) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "error": "confirmation_required",
+                        "detail": format!("`{}` needs the person's confirmation for this grant; call it through {}", endpoint.name, super::assistant_endpoint::MCP_PATH),
+                    })),
+                )
+                    .into_response();
+            }
+            _ => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({ "error": "not_granted", "detail": format!("the grant does not cover `{}`", endpoint.name) })),
+                )
+                    .into_response();
+            }
+        }
+        let types_by_id: HashMap<DefId, &IrType> = state.ir.types.iter().map(|t| (t.id, t)).collect();
+        let inputs = match decode_input(endpoint, headers, body, &types_by_id) {
+            Ok(inputs) => inputs,
+            Err(refused) => return refused,
+        };
+        let surface = serde_json::json!({ "surface": "assistant", "mode": "allow", "delegation": grant.id, "label": grant.label });
+        return execute(state, endpoint, Some(&enforced), inputs, surface).await;
+    }
     // A plain form carries its CSRF token in the reserved field; the one
     // double-submit check reads it from the header either way.
     let policy_headers = super::browser_form::with_form_csrf(headers, body);

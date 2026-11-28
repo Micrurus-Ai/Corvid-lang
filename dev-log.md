@@ -2,6 +2,58 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### B11-1 to B11-3: an assistant acts for its person, within their authority
+
+Frontend development approved the grammar on 2026-11-27 (review item 2).
+Under the no-hidden-defaults law, a declared policy value must be
+executable completely. A `delegation:` cap with no way to make a grant,
+or a grant whose token nothing accepts, would each be declared but
+unusable, so the three slices ship together.
+
+**B11-1.**
+- `delegation: up_to <duration literal>` in the identity block, checked
+  by `corvid_types::delegation::cap_seconds`, the one rule the checker,
+  the contract (`delegation_up_to_secs`) and the grant routes share.
+- `assistants: allow "..."`, which runs an assistant's call at once inside
+  the person's session, with the action's `requires` checked fresh. An
+  `approve` inside still waits for its reviewer.
+- The grammar reference is updated, and its drift test holds.
+
+**B11-2b.** `POST/GET/DELETE /__delegations`, served only when the cap is
+declared. A grant is refused when it lasts beyond the cap, names an action
+not offered, `allow`s one offered with `confirm` only, or names one the
+person may not call. The token is shown once. Grants are traced as
+`delegation` events.
+
+**B11-3.** `Authorization: Bearer` on `/mcp` and `/actions/<name>`:
+- **One authorization step.** `enforce_route_policy` split into resolving
+  the caller and `authorize_actor`, so a session and a grant are
+  authorized by one step, roles read fresh.
+- **The three-way check.** A call must be named by the grant, offered by
+  the source, and within the person's current authority.
+- **Modes.** A call runs without confirmation only where both the grant
+  and the line say `allow`. A narrower mode asks the person on `/mcp` and
+  answers `403 confirmation_required` on `/actions/<name>`.
+- **Traces.** Each call carries the grant's id and label.
+- **Revocation.** A revoked grant answers `401` at once.
+
+Found and fixed:
+- **"30 days" cannot be written.** The proposal's top bound cannot be
+  expressed: a duration counts exact time, and `days` is refused because a
+  day is 23, 24 or 25 hours in a time zone. The cap's top is `720 hours`,
+  and the proposal says why.
+- **The defining advantage had no invention entry.** Shared typed actions
+  had shipped across B10 without a README row, a catalog entry, a
+  proof-matrix row or a tour. Added: `corvid tour --topic
+  shared-actions`, the catalog entry and both rows.
+
+Filed:
+- **B11-4.** A confirmation proposed through a grant still waits after the
+  grant is revoked. The person confirms it, so nothing runs without them,
+  but nothing should be left pending.
+- **Two duration spellings.** The session block's `lifetime: 8h` is a
+  second spelling of a duration, beside the language's `8 hours`.
+
 ### Secrets' copies are wiped at the runtime's boundaries
 
 A `Secret` wiped its own bytes, but the copies of its text the runtime
@@ -71,6 +123,7 @@ Proof:
 - a parity test where the test tools library's `lookup_or_fail` returns
   `Err` and `Ok` under `try ... else` on both tiers, under the leak
   detector.
+
 
 ### B10-2b-5: forms and buttons that call actions
 

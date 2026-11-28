@@ -36,6 +36,7 @@ impl<'a> Parser<'a> {
         let mut linking = None;
         let mut provisioning = None;
         let mut roles = Vec::new();
+        let mut delegation = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
@@ -81,6 +82,16 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
+            if self.peek_ident_is("delegation") {
+                match self.parse_delegation_policy() {
+                    Ok(d) => delegation = Some(d),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
+                }
+                continue;
+            }
             if self.peek_ident_is("roles") {
                 match self.parse_roles_block() {
                     Ok(r) => roles = r,
@@ -95,7 +106,7 @@ impl<'a> Parser<'a> {
                 kind: ParseErrorKind::UnexpectedToken {
                     got: crate::parser::describe_token(self.peek()),
                     expected:
-                        "`provider ...`, `session:`, `linking:`, `provisioning:`, or `roles:` inside an identity block"
+                        "`provider ...`, `session:`, `linking:`, `provisioning:`, `roles:`, or `delegation:` inside an identity block"
                             .into(),
                 },
                 span: self.peek_span(),
@@ -113,8 +124,46 @@ impl<'a> Parser<'a> {
             linking,
             provisioning,
             roles,
+            delegation,
             span: start.merge(end),
         })
+    }
+
+    /// `delegation: up_to 8 hours` (B11): a signed-in person may grant an
+    /// assistant authority for at most this long. The cap is a duration
+    /// literal, as in any expression; the checker bounds it.
+    fn parse_delegation_policy(&mut self) -> Result<corvid_ast::DelegationPolicy, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // delegation
+        self.expect(TokKind::Colon, "`:` after `delegation`")?;
+        let expected = |got: &TokKind, span| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: crate::parser::describe_token(got),
+                expected: "`up_to` and a duration, as in `delegation: up_to 8 hours`".into(),
+            },
+            span,
+        };
+        if !self.peek_ident_is("up_to") {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // up_to
+        let count = match self.peek().clone() {
+            TokKind::Int(n) => {
+                self.bump();
+                n.to_string()
+            }
+            other => return Err(expected(&other, self.peek_span())),
+        };
+        let unit = match self.peek().clone() {
+            TokKind::Ident(word) if corvid_ast::duration_unit(&word).is_some() => {
+                self.bump();
+                word
+            }
+            other => return Err(expected(&other, self.peek_span())),
+        };
+        let span = start.merge(self.prev_span());
+        self.expect_newline()?;
+        Ok(corvid_ast::DelegationPolicy { count, unit, span })
     }
 
     /// `roles:` sub-block (slice 52f). Each line is

@@ -76,6 +76,10 @@ pub struct AuthContext {
     pub public_base_url: Option<String>,
     /// Where the callback sends the browser after a successful login.
     pub post_login_redirect: String,
+    /// The longest a person may grant an assistant authority, in seconds
+    /// (B11 `delegation: up_to`). `None`: no grant can be issued, and the
+    /// grant routes are not served.
+    pub delegation_cap_secs: Option<u64>,
 }
 
 const DEFAULT_SESSION_LIFETIME_SECS: u64 = 8 * 3600;
@@ -185,6 +189,8 @@ impl AuthContext {
             post_login_redirect: env("CORVID_POST_LOGIN_REDIRECT")
                 .filter(|v| !v.trim().is_empty())
                 .unwrap_or_else(|| "/".to_string()),
+            // The checker refused a cap outside the bounds, by the same rule.
+            delegation_cap_secs: identity.delegation.as_ref().and_then(|policy| corvid_types::delegation::cap_seconds(policy).ok()),
         })
     }
 }
@@ -329,6 +335,7 @@ mod tests {
                 .collect(),
             session,
             linking: None,
+            delegation: None,
             provisioning: Some(ProvisioningPolicy {
                 first_login,
                 tenant,

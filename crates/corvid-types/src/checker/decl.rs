@@ -320,7 +320,21 @@ impl<'a> Checker<'a> {
     /// SameSite plus session rotation. Disabling any of those is only
     /// allowed with an explicit `insecure_opt_out: true`, and even then
     /// a warning records the deliberately weakened posture.
+    /// `delegation: up_to <duration>` (B11) must be a cap from one minute
+    /// to thirty days, read by the one rule the grant endpoint bounds
+    /// grants with.
+    fn check_delegation(&mut self, decl: &IdentityDecl) {
+        let Some(policy) = &decl.delegation else { return };
+        if let Err(message) = crate::delegation::cap_seconds(policy) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::IdentityConfigInvalid { identity: decl.name.name.clone(), message },
+                policy.span,
+            ));
+        }
+    }
+
     pub(super) fn check_identity(&mut self, decl: &IdentityDecl) {
+        self.check_delegation(decl);
         let name = decl.name.name.clone();
         let invalid = |message: String, span: Span| {
             TypeError::new(

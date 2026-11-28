@@ -453,3 +453,105 @@ fn a_browser_form_carries_its_token_in_a_field_and_returns_to_its_page() {
         .expect("request completes");
     assert_eq!((status, body), (200, json!(3)));
 }
+
+const ALLOWED: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        editor: "board.edit"
+    delegation: up_to 8 hours
+
+action pin_card(card: Int, by: Caller) -> String requires permission("board.edit"):
+    assistants: allow "Pin a card to the top of its column."
+    return by.id + " pinned " + card.to_string()
+
+action tag_card(card: Int, label: String, by: Caller) -> String requires permission("board.edit"):
+    assistants: confirm "Add a label to a card."
+    return by.id + " tagged " + card.to_string() + " " + label
+"#;
+
+/// B11-1 — `assistants: allow`: inside the person's own session an
+/// assistant runs the action without asking each time, as that person,
+/// while a `confirm` action still waits for them.
+#[test]
+fn an_allowed_action_runs_in_the_persons_session_without_confirmation() {
+    let mut editor = Vec::new();
+    let mut viewer = Vec::new();
+    let app = serve(ALLOWED, |data| {
+        editor = seed_actor(data, "editor-1", Some("editor"));
+        viewer = seed_actor(data, "viewer-1", None);
+    });
+    let call = |name: &str, arguments: Value| json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+
+    let (_, ran) = mcp(&app, call("pin_card", json!({"card": 3})), &editor);
+    let done = &ran["result"]["structuredContent"];
+    assert_eq!(done["status"], "done", "no confirmation is asked: {ran}");
+    assert_eq!(done["result"], "editor-1 pinned 3", "it runs as the person: {ran}");
+
+    let (_, waits) = mcp(&app, call("tag_card", json!({"card": 3, "label": "urgent"})), &editor);
+    assert_eq!(waits["result"]["structuredContent"]["status"], "confirmation_required", "`confirm` keeps its meaning: {waits}");
+
+    let (_, unknown) = mcp(&app, call("pin_card", json!({"card": 3})), &viewer);
+    assert_eq!(unknown["error"]["code"], -32602, "allow never widens what the person may do: {unknown}");
+}
+
+/// B11-2b and B11-3 — a person grants an assistant authority, and the
+/// assistant acts with the grant's bearer token: only where the grant, the
+/// source and the person agree, and never after the grant is revoked.
+#[test]
+fn a_grant_lets_an_assistant_act_for_its_person_until_it_is_revoked() {
+    let mut editor = Vec::new();
+    let app = serve(ALLOWED, |data| editor = seed_actor(data, "editor-1", Some("editor")));
+    let grant = |body: Value| post_json(&app, "/__delegations", &body, &editor);
+
+    let (status, beyond) = grant(json!({"label": "Desk assistant", "actions": [{"action": "pin_card", "mode": "allow"}], "expires_in_secs": 9 * 3600}));
+    assert_eq!((status, beyond["error"].as_str()), (400, Some("expiry_beyond_cap")), "the cap is `up_to 8 hours`: {beyond}");
+    let (status, widened) = grant(json!({"label": "Desk assistant", "actions": [{"action": "tag_card", "mode": "allow"}], "expires_in_secs": 3600}));
+    assert_eq!((status, widened["error"].as_str()), (400, Some("mode_beyond_source")), "a grant cannot widen the source: {widened}");
+
+    let (status, made) = grant(json!({
+        "label": "Desk assistant",
+        "actions": [{"action": "pin_card", "mode": "allow"}, {"action": "tag_card", "mode": "confirm"}],
+        "expires_in_secs": 3600,
+    }));
+    assert_eq!(status, 201, "{made}");
+    let token = made["token"].as_str().expect("the token is shown once").to_string();
+    let id = made["id"].as_str().unwrap().to_string();
+    let bearer = vec![("Authorization".to_string(), format!("Bearer {token}"))];
+
+    // On `/mcp`, with the grant alone: no session cookie, no CSRF.
+    let (_, listed) = mcp(&app, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &bearer);
+    let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["pin_card", "tag_card"], "{listed}");
+    let call = |name: &str, arguments: Value| json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+    let (_, ran) = mcp(&app, call("pin_card", json!({"card": 5})), &bearer);
+    assert_eq!(ran["result"]["structuredContent"]["result"], "editor-1 pinned 5", "it runs as the person: {ran}");
+    let (_, waits) = mcp(&app, call("tag_card", json!({"card": 5, "label": "x"})), &bearer);
+    assert_eq!(waits["result"]["structuredContent"]["status"], "confirmation_required", "{waits}");
+
+    // On `/actions/<name>`: `allow` runs, a narrower mode points to `/mcp`.
+    let (status, body) = post_json(&app, "/actions/pin_card", &json!({"card": 6}), &bearer);
+    assert_eq!((status, body), (200, json!("editor-1 pinned 6")));
+    let (status, body) = post_json(&app, "/actions/tag_card", &json!({"card": 6, "label": "x"}), &bearer);
+    assert_eq!((status, body["error"].as_str()), (403, Some("confirmation_required")), "{body}");
+
+    // The person lists and revokes it; the token stops at once.
+    let (status, mine) = request(app.port, "GET", "/__delegations", "application/json", "", &editor).expect("lists");
+    assert_eq!(status, 200);
+    assert_eq!(mine["delegations"][0]["status"], "live", "{mine}");
+    assert!(mine.to_string().find(&token).is_none(), "a token is never shown again: {mine}");
+    let (status, _) = request(app.port, "DELETE", &format!("/__delegations/{id}"), "application/json", "", &editor).expect("revokes");
+    assert_eq!(status, 204);
+    let (status, _) = post_json(&app, "/actions/pin_card", &json!({"card": 7}), &bearer);
+    assert_eq!(status, 401, "a revoked grant authorizes nothing");
+}
+
+#[test]
+fn without_a_delegation_line_no_grant_can_be_made() {
+    let mut editor = Vec::new();
+    let app = serve(GUARDED, |data| editor = seed_actor(data, "ana", Some("editor")));
+    let (status, _) = post_json(&app, "/__delegations", &json!({"label": "x", "actions": [], "expires_in_secs": 60}), &editor);
+    assert_eq!(status, 404, "the grant routes are not served");
+}

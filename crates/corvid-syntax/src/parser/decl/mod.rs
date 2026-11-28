@@ -505,9 +505,10 @@ impl<'a> Parser<'a> {
 
     /// `assistants: confirm "description"`: an authorized assistant may
     /// call the action, and the person it acts for confirms each call.
-    /// `allow` is refused until on-behalf-of authority (B11) can run it;
-    /// an action people alone call leaves the line out, so there is no
-    /// `never`.
+    /// `assistants: allow "description"` (B11): the assistant may run it
+    /// without asking each time, inside the person's session or through a
+    /// grant that names it with `allow`. An action people alone call
+    /// leaves the line out, so there is no `never`.
     fn parse_assistant_exposure(&mut self) -> Result<corvid_ast::AssistantExposure, ParseError> {
         let start = self.peek_span();
         self.bump(); // assistants
@@ -517,16 +518,14 @@ impl<'a> Parser<'a> {
             span,
         };
         let mode_span = self.peek_span();
-        match self.peek().clone() {
+        let mode = match self.peek().clone() {
             TokKind::Ident(mode) if mode == "confirm" => {
                 self.bump();
+                corvid_ast::AssistantMode::Confirm
             }
             TokKind::Ident(mode) if mode == "allow" => {
-                return Err(refused(
-                    "`assistants: allow`".into(),
-                    "`assistants: confirm \"...\"`; calls without a person's confirmation arrive with on-behalf-of authority (B11)",
-                    mode_span,
-                ));
+                self.bump();
+                corvid_ast::AssistantMode::Allow
             }
             TokKind::Ident(mode) if mode == "never" => {
                 return Err(refused(
@@ -536,9 +535,9 @@ impl<'a> Parser<'a> {
                 ));
             }
             other => {
-                return Err(refused(describe_token(&other), "`confirm`", mode_span));
+                return Err(refused(describe_token(&other), "`confirm` or `allow`", mode_span));
             }
-        }
+        };
         let description = match self.peek().clone() {
             TokKind::StringLit(text) if !text.trim().is_empty() => {
                 self.bump();
@@ -554,7 +553,7 @@ impl<'a> Parser<'a> {
         };
         let span = start.merge(self.prev_span());
         self.expect_newline()?;
-        Ok(corvid_ast::AssistantExposure { mode: corvid_ast::AssistantMode::Confirm, description, span })
+        Ok(corvid_ast::AssistantExposure { mode, description, span })
     }
 
     /// `fn name(params) -> Ty:` — pure function declaration

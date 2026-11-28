@@ -1007,6 +1007,51 @@ agent ship(order: String) -> Job uses http_write:
     return submit_shipment(order)
 "#,
     },
+    TourTopic {
+        name: "shared-actions",
+        title: "One Action for People and Assistants",
+        category: "Whole-application building",
+        pitch: "An action is declared once, with its typed input, who may call it, and whether an assistant is offered it. The page's form, a one-click button, the JSON API and an authorized assistant all use that one definition: `form_for(move_card, ...)` is checked against `MoveCard`, so renaming a field is an error at the form. `assistants: confirm` makes each assistant call wait for the person; `assistants: allow` lets it run inside the person's session or through a grant they made. `delegation: up_to 8 hours` caps how long a grant lasts, and a grant is always checked against the person's current authority, so it never exceeds what they may do.",
+        spec: "docs/proposals/shared-actions.md",
+        roadmap: "docs/backend-ai-roadmap.md",
+        test: "crates/corvid-cli/tests/serve_actions.rs",
+        non_scope: "Pending confirmations survive a grant's revocation until B11-4 drops them; `corvid act --server --token-file` and workers carrying a grant are B11-5; native builds refuse a program with a `Caller` parameter for now.",
+        source: r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        editor: "board.edit"
+    delegation: up_to 8 hours
+
+type Column:
+    | Todo
+    | Done
+
+type MoveCard:
+    card: Int
+    to: Column
+    position: Int where between(0, 500)
+
+type Moved:
+    card: Int
+    position: Int
+
+action move_card(move: MoveCard, by: Caller) -> Moved requires permission("board.edit"):
+    assistants: allow "Move a card to another column."
+    return Moved(move.card, move.position)
+
+action archive_card(card: Int, by: Caller) -> Int requires permission("board.edit"):
+    assistants: confirm "Archive a card."
+    return card
+
+agent board_controls(card: Int) -> String:
+    move = form_for(move_card, MoveCard(card, Done, 0), "Move")
+    archive = button_for(archive_card, card, "Archive")
+    return move + archive
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.
