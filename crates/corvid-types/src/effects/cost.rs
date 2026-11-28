@@ -274,7 +274,7 @@ impl<'a> CostAnalyzer<'a> {
                     CostNodeKind::Sequence,
                     vec![
                         wrap_if_needed("cond", cond_est.tree, cond.span()),
-                        body_est.tree,
+                        unbounded_loop_tree("while", body_est.tree, *span),
                     ],
                     *span,
                 );
@@ -377,13 +377,22 @@ impl<'a> CostAnalyzer<'a> {
                         },
                         span: *span,
                     };
+                    // The body stays in the tree, once, under a loop with no
+                    // bound: the estimate is unbounded, so `@budget` compares
+                    // no number from it, and a reader (`corvid graph`) still
+                    // sees what the loop calls.
+                    let body_est = self.analyze_block(body, agent_name);
                     let tree = sequence_tree(
                         "for",
                         CostNodeKind::Sequence,
-                        vec![wrap_if_needed("iter", iter_est.tree, iter.span())],
+                        vec![
+                            wrap_if_needed("iter", iter_est.tree, iter.span()),
+                            unbounded_loop_tree("for", body_est.tree, *span),
+                        ],
                         *span,
                     );
                     let mut warnings = iter_est.warnings;
+                    warnings.extend(body_est.warnings);
                     warnings.push(warning);
                     CostEstimate {
                         dimensions: tree.costs.clone(),
@@ -641,12 +650,7 @@ impl<'a> CostAnalyzer<'a> {
                         },
                         span: *span,
                     };
-                    let tree = sequence_tree(
-                        "lambda",
-                        CostNodeKind::Sequence,
-                        vec![body_est.tree],
-                        *span,
-                    );
+                    let tree = unbounded_loop_tree("lambda", body_est.tree, *span);
                     let mut warnings = body_est.warnings;
                     warnings.push(warning);
                     CostEstimate {
@@ -980,6 +984,20 @@ fn add_costs(target: &mut HashMap<String, f64>, source: &HashMap<String, f64>) {
         let next =
             target.get(dim).copied().unwrap_or(0.0) + source.get(dim).copied().unwrap_or(0.0);
         target.insert(dim.to_string(), next);
+    }
+}
+
+/// A body that runs a number of times nothing bounds: a loop node with no
+/// iteration count, costing one pass. The estimate holding it is
+/// unbounded, so the budget check compares none of its numbers.
+fn unbounded_loop_tree(name: &str, body: CostTreeNode, span: corvid_ast::Span) -> CostTreeNode {
+    CostTreeNode {
+        name: name.to_string(),
+        kind: CostNodeKind::Loop { iterations: None },
+        costs: body.costs.clone(),
+        children: vec![body],
+        span,
+        dangerous: false,
     }
 }
 
