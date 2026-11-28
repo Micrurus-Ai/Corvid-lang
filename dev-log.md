@@ -70,6 +70,40 @@ holding only its own request, and `corvid trace lineage` roots it at `POST
 route root. Plus grammar drift evidence and every test target of the
 checker, IR, contract, driver and CLI crates.
 
+### `@budget` refuses a worst case it cannot bound
+
+`guarantees.md` promises that an agent's worst case under
+`@budget($X)` is at most `$X`. Planning the graph's multi-file slice
+turned up three ways a budgeted agent could pass with no bound on what it
+spends:
+- **An unbounded loop passed with a warning.** A loop nothing bounds
+  gave only W0251, and the budget was not compared. That was pinned by a
+  phase-20 test, `unbounded_loop_budget_produces_warning_not_error`. It
+  is now `E0251 BudgetUnbounded`, naming the reason and how to bound the
+  loop.
+- **A callee's missing bound was dropped at the call.**
+  `@budget($5.00)` passed an agent calling one that loops over a $1.00
+  tool with no bound. A call now carries the callee's boundedness.
+- **Recursion was charged once,** whatever its depth. A call back into
+  an agent still being costed is now unbounded.
+
+Also fixed: a `while` loop that costs nothing was counted as unbounded,
+against the comment beside it, because the test asked whether the whole
+sequence was empty. It now asks whether the loop costs anything.
+
+The rule changes one documented behaviour, so the reason is recorded
+here and in `guarantees.md`: a budget is a ceiling the compiler proves,
+and an unknown worst case proves nothing. No shipped example under
+`@budget` is affected; every one was checked.
+
+Found while testing recursion, and fixed in its own commit: a recursive
+agent crashed the compiler with a stack overflow in the effect
+analysis's capability walk, budget or not.
+
+Proof: tests cover an unbounded loop under a budget (refused), the same
+agent with no budget (checks), an unbounded callee, a recursive agent, a
+free `while`, and mutually recursive agents (no overflow).
+
 ### Schedules are roots of the agent graph (B47 G3c)
 
 A schedule starts work with no caller, so `callers_of` an agent must

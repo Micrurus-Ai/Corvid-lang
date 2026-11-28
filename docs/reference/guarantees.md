@@ -35,7 +35,10 @@ corvid claim --explain approval.dangerous_call_requires_token
   a `T` is expected. Unwrap is one of three named methods, each
   recorded in the audit log.
 - `effect_row.budget_within_limit` — when an agent has `@budget($X)`,
-  the composed worst-case cost of its call graph must be ≤ `$X`.
+  the composed worst-case cost of its call graph must be ≤ `$X`. A
+  worst case with no bound (a loop, a lambda, recursion or a callee
+  nothing bounds) cannot be shown to be, so it is refused (`E0251`),
+  never passed with a warning.
 - `effect_row.composition_well_formed` — composed effect rows obey
   the dimension algebra (cost adds, confidence multiplies, trust takes
   the strictest, etc.).

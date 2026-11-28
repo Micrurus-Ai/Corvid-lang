@@ -397,6 +397,14 @@ pub enum TypeErrorKind {
         message: String,
     },
 
+    /// `@budget` on an agent whose worst case has no bound: a loop, a
+    /// lambda, recursion or a callee nothing bounds. The budget promises
+    /// the worst case is at most the limit, which cannot be shown.
+    BudgetUnbounded {
+        agent: String,
+        reason: String,
+    },
+
     /// `assert <expr>` inside an eval must typecheck to Bool.
     AssertNotBool { got: String },
 
@@ -798,6 +806,7 @@ impl TypeErrorKind {
             Self::UnapprovedHighTrustCall { .. } => "E0109",
             Self::ApprovalReachabilityViolation { .. } => "E0110",
             Self::EffectConstraintViolation { .. } => "E0250",
+            Self::BudgetUnbounded { .. } => "E0251",
             Self::AssertNotBool { .. } => "E0230",
             Self::EvalUnknownTool { .. } => "E0906",
             Self::EvalUnknownApproval { .. } => "E0111",
@@ -1177,6 +1186,9 @@ impl TypeErrorKind {
             }
             Self::EffectConstraintViolation { agent, message, .. } => {
                 format!("effect constraint violated in agent `{agent}`: {message}")
+            }
+            Self::BudgetUnbounded { agent, reason } => {
+                format!("`@budget` cannot hold for `{agent}`: its worst case has no bound ({reason})")
             }
             Self::AssertNotBool { got } => {
                 format!("eval assertions must be `Bool`, got `{got}`")
@@ -1682,6 +1694,10 @@ impl TypeErrorKind {
             Self::EffectConstraintViolation { dimension, .. } => Some(format!(
                 "relax the `@{dimension}` constraint, or remove the call that violates it"
             )),
+            Self::BudgetUnbounded { .. } => Some(
+                "bound the loop: iterate a list literal, `range(start, end)`, a parameter or field refined with `between`, or a query's `take(n)`; a recursive agent cannot have a budget"
+                    .into(),
+            ),
             Self::AssertNotBool { .. } => Some(
                 "make the asserted expression evaluate to `Bool`, for example by adding a comparison".into(),
             ),

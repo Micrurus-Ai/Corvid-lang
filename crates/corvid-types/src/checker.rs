@@ -270,7 +270,7 @@ fn typecheck_with_everything(
         if let Some(estimate) =
             crate::effects::compute_worst_case_cost_with_types(file, resolved, &registry, &agent.name.name, &c.types)
         {
-            for warning in estimate.warnings {
+            for warning in estimate.warnings.clone() {
                 let crate::effects::CostWarningKind::UnboundedLoop { agent, message } =
                     warning.kind;
                 c.warnings.push(TypeWarning::new(
@@ -279,6 +279,22 @@ fn typecheck_with_everything(
                 ));
             }
             if !estimate.bounded {
+                // A budget promises the worst case is at most its limit,
+                // which a worst case with no bound cannot be shown to be.
+                let reason = estimate
+                    .warnings
+                    .iter()
+                    .map(|warning| {
+                        let crate::effects::CostWarningKind::UnboundedLoop { message, .. } = &warning.kind;
+                        message.clone()
+                    })
+                    .next()
+                    .unwrap_or_else(|| "a call it makes recurses".to_string());
+                c.errors.push(TypeError::with_guarantee(
+                    TypeErrorKind::BudgetUnbounded { agent: agent.name.name.clone(), reason },
+                    budget_constraints[0].span,
+                    "budget.compile_time_ceiling",
+                ));
                 continue;
             }
 

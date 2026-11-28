@@ -139,7 +139,13 @@ impl<'a> CostAnalyzer<'a> {
 
         let agent = find_agent(self.file, agent_name)?;
         if !self.visiting.insert(agent_name.to_string()) {
-            return Some(zero_estimate(agent_name, CostNodeKind::Agent, agent.span));
+            // A call back into an agent still being costed is recursion,
+            // and nothing bounds how deep it goes, so the worst case has
+            // no bound. Charging it once would let `@budget` pass a
+            // recursive agent that can spend without limit.
+            let mut estimate = zero_estimate(agent_name, CostNodeKind::Agent, agent.span);
+            estimate.bounded = false;
+            return Some(estimate);
         }
 
         let body_estimate = self.analyze_block(&agent.body, agent_name);
@@ -298,18 +304,23 @@ impl<'a> CostAnalyzer<'a> {
             corvid_ast::Stmt::While { cond, body, span } => {
                 let cond_est = self.analyze_expr(cond, agent_name);
                 let body_est = self.analyze_block(body, agent_name);
+                // A loop that costs nothing however often it runs is not
+                // drawn as one with no bound.
+                let costs_something = !tree_is_zero(&cond_est.tree) || !tree_is_zero(&body_est.tree);
+                let body_tree = if costs_something {
+                    unbounded_loop_tree("while", body_est.tree, *span)
+                } else {
+                    body_est.tree
+                };
                 let tree = sequence_tree(
                     "while",
                     CostNodeKind::Sequence,
-                    vec![
-                        wrap_if_needed("cond", cond_est.tree, cond.span()),
-                        unbounded_loop_tree("while", body_est.tree, *span),
-                    ],
+                    vec![wrap_if_needed("cond", cond_est.tree, cond.span()), body_tree],
                     *span,
                 );
                 let mut warnings = cond_est.warnings;
                 warnings.extend(body_est.warnings);
-                let zero = tree_is_zero(&tree);
+                let zero = !costs_something;
                 if !zero {
                     warnings.push(CostWarning {
                         kind: CostWarningKind::UnboundedLoop {
@@ -514,7 +525,22 @@ impl<'a> CostAnalyzer<'a> {
                     warnings.extend(arg_est.warnings);
                     bounded &= arg_est.bounded;
                 }
-                if let Some(call_tree) = self.call_cost_tree(callee, agent_name, *span) {
+                if let Some((call_tree, callee_bounded)) = self.call_cost_tree(callee, agent_name, *span) {
+                    // A callee whose worst case has no bound leaves its
+                    // caller with none: its numbers are one pass.
+                    if !callee_bounded {
+                        bounded = false;
+                        warnings.push(CostWarning {
+                            kind: CostWarningKind::UnboundedLoop {
+                                agent: agent_name.to_string(),
+                                message: format!(
+                                    "calls `{}` at {}..{}, whose worst case has no bound",
+                                    call_tree.name, span.start, span.end
+                                ),
+                            },
+                            span: *span,
+                        });
+                    }
                     children.push(call_tree);
                 }
                 if let Some((table, operation)) = self.table_operation(callee, args) {
@@ -854,18 +880,21 @@ impl<'a> CostAnalyzer<'a> {
         callee: &corvid_ast::Expr,
         agent_name: &str,
         span: corvid_ast::Span,
-    ) -> Option<CostTreeNode> {
+    ) -> Option<(CostTreeNode, bool)> {
+        // What calling `callee` costs, and whether that worst case is
+        // bounded: a tool or prompt always is; an agent is when its body is.
+        let bounded = |node: CostTreeNode| (node, true);
         if let Some((import, function)) = super::python_call_target(
             callee, self.file, &self.resolved.symbols, &self.resolved.bindings,
         ) {
-            return Some(effect_node_for_decl(
+            return Some(bounded(effect_node_for_decl(
                 &format!("{}.{}", import.module, function.name.name),
                 CostNodeKind::Tool,
                 &import.effect_row,
                 Effect::Safe,
                 self.registry,
                 span,
-            ));
+            )));
         }
         let corvid_ast::Expr::Ident { name, .. } = callee else {
             return None;
@@ -878,14 +907,14 @@ impl<'a> CostAnalyzer<'a> {
         match entry.kind {
             corvid_resolve::DeclKind::Tool => {
                 if let Some(tool) = find_tool(self.file, &entry.name) {
-                    return Some(effect_node_for_decl(
+                    return Some(bounded(effect_node_for_decl(
                         &tool.name.name,
                         CostNodeKind::Tool,
                         &tool.effect_row,
                         tool.effect,
                         self.registry,
                         span,
-                    ));
+                    )));
                 }
                 // A connector `operation` also resolves as a Tool but
                 // lives inside `Decl::Connector` (slice 52g-3a), so
@@ -925,9 +954,9 @@ impl<'a> CostAnalyzer<'a> {
                     + 1;
                 let requests = polls.saturating_mul(attempts);
                 if requests > 1 {
-                    Some(scale_tree(node, requests, span))
+                    Some(bounded(scale_tree(node, requests, span)))
                 } else {
-                    Some(node)
+                    Some(bounded(node))
                 }
             }
             corvid_resolve::DeclKind::Prompt => {
@@ -935,12 +964,12 @@ impl<'a> CostAnalyzer<'a> {
                 // A step is located where it is called, as tool steps are.
                 let mut node = effect_node_for_prompt(prompt, self.registry);
                 node.span = span;
-                Some(node)
+                Some(bounded(node))
             }
             corvid_resolve::DeclKind::Agent => self.analyze_agent(&entry.name).map(|estimate| {
                 let mut node = rename_tree(estimate.tree, &entry.name);
                 node.span = span;
-                node
+                (node, estimate.bounded)
             }),
             _ => {
                 let _ = agent_name;

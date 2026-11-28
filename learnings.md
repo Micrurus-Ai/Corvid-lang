@@ -2,6 +2,8 @@
 
 A program with a `server` block now says whether its requests are recorded: write `traces: none` at the top level, beside `server`. Leaving it out is a compile error that shows the line to add, and a second declaration is refused. Keeping what people sent you on disk is a privacy and disk choice, so it is never a default. To record each request instead, write `traces:` with `location: env("TRACE_DIR")` and `keep: 720 hours`: every request becomes a run of its own, its id comes back in the `Corvid-Run` response header, `corvid trace lineage` shows it rooted at the route, and traces older than `keep:` are deleted. `traces` is still an ordinary name everywhere else. [Lineage from real runs](docs/proposals/lineage-from-runs.md)
 
+`@budget` now refuses an agent whose worst case has no bound (`E0251`), where it used to pass with a warning. The usual causes are a loop over a list or `while` that nothing bounds, a recursive call, or calling an agent that has either. Bound the loop with a list literal, `range(start, end)`, a parameter or field refined with `between`, or a query's `take(n)`. An agent that calls itself, or two agents that call each other, no longer crash the compiler.
+
 `corvid graph` lists each `schedule` with its cron, time zone and the agent it runs, so the graph shows every way work starts: an action, a route, a `live` declaration, a schedule, or a public agent.
 
 `corvid graph` now shows each table operation as a step, such as `table Card.insert` or `table Card.query` for a whole `where(...).order_by(...)` chain. You can see which actions and routes read or write each table. In JSON the step carries `table` and `operation`.

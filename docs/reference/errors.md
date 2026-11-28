@@ -93,6 +93,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0239` | `TypeErrorKind::ExternOwnershipMismatch` | A user-declared ownership annotation disagrees with the compiler's inference for the same extern-visible boundary slot. |
 | `E0240` | `TypeErrorKind::UnknownMethod` | A method call on a type that has no method of that name: neither a builtin method nor, for a record, one added with `extend`. |
 | `E0250` | `TypeErrorKind::EffectConstraintViolation` | A dimensional effect constraint was violated. |
+| `E0251` | `TypeErrorKind::BudgetUnbounded` | `@budget` on an agent whose worst case has no bound: a loop, a lambda, recursion or a callee nothing bounds. The budget promises the worst case is at most the limit, which cannot be shown. |
 
 ## E03xx: Names and imports
 

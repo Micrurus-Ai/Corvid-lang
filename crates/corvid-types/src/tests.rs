@@ -4079,8 +4079,11 @@ agent planner(query: String) -> String:
         )), "got: {:?}", c.errors);
 }
 
+/// `@budget` promises the worst case is at most its limit, and a loop
+/// nothing bounds has no worst case to compare. It used to pass with only
+/// a warning (W0251), which let a budgeted agent spend without limit.
 #[test]
-fn unbounded_loop_budget_produces_warning_not_error() {
+fn unbounded_loop_under_budget_is_refused() {
     let src = r#"
 effect search_effect:
     cost: $0.010
@@ -4097,13 +4100,80 @@ agent planner(items: List<String>) -> String:
     return total
 "#;
     let c = check(src);
-    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
     assert!(
-        c.warnings
-            .iter()
-            .any(|warning| matches!(warning.kind, TypeWarningKind::UnboundedCostAnalysis { .. })),
+        c.errors.iter().any(|e| matches!(&e.kind, TypeErrorKind::BudgetUnbounded { agent, .. } if agent == "planner")),
         "got: {:?}",
-        c.warnings
+        c.errors
+    );
+}
+
+#[test]
+fn an_unbounded_loop_without_a_budget_checks() {
+    let src = r#"
+effect search_effect:
+    cost: $0.010
+
+tool search(query: String) -> String uses search_effect
+
+agent planner(items: List<String>) -> String:
+    total = ""
+    for item in items:
+        total = search(item)
+    return total
+"#;
+    // Only a budget makes a missing bound matter: the agent checks.
+    let c = check(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+/// A callee's unbounded loop used to be dropped at the call, so the
+/// caller's budget compared one pass of it.
+#[test]
+fn a_callee_with_no_bound_leaves_its_budgeted_caller_with_none() {
+    let src = r#"
+effect charge:
+    cost: $1.00
+
+tool charge_card(amount: Int) -> Int uses charge
+
+agent charge_all(items: List<Int>) -> Int:
+    for item in items:
+        sent = charge_card(item)
+    return 0
+
+@budget($5.00)
+agent checkout(items: List<Int>) -> Int:
+    return charge_all(items)
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(&e.kind, TypeErrorKind::BudgetUnbounded { agent, .. } if agent == "checkout")),
+        "got: {:?}",
+        c.errors
+    );
+}
+
+/// Recursion used to be charged once, whatever its depth.
+#[test]
+fn a_recursive_agent_under_budget_is_refused() {
+    let src = r#"
+effect charge:
+    cost: $1.00
+
+tool charge_card(amount: Int) -> Int uses charge
+
+@budget($5.00)
+agent retry_charge(amount: Int) -> Int:
+    sent = charge_card(amount)
+    if sent == 0:
+        return retry_charge(amount)
+    return sent
+"#;
+    let c = check(src);
+    assert!(
+        c.errors.iter().any(|e| matches!(&e.kind, TypeErrorKind::BudgetUnbounded { agent, .. } if agent == "retry_charge")),
+        "got: {:?}",
+        c.errors
     );
 }
 
@@ -4124,6 +4194,27 @@ agent pong(n: Int) -> Int:
 "#;
     let c = check(src);
     assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+/// A `while` loop that costs nothing however often it runs keeps a bound.
+#[test]
+fn a_free_while_loop_keeps_the_budget_bounded() {
+    let src = r#"
+effect charge:
+    cost: $1.00
+
+tool charge_card(amount: Int) -> Int uses charge
+
+@budget($2.00)
+agent count_then_charge(amount: Int) -> Int:
+    n = 0
+    while n < 10:
+        n = n + 1
+    return charge_card(amount)
+"#;
+    let c = check(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+    assert!(c.warnings.iter().all(|w| !matches!(w.kind, TypeWarningKind::UnboundedCostAnalysis { .. })), "{:?}", c.warnings);
 }
 
 #[test]
