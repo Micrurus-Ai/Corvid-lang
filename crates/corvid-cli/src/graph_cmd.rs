@@ -1,6 +1,9 @@
 //! `corvid graph` (B47): print each entry point's tree, the one `@budget`
 //! checks, as steps a reader follows, and the tools and prompts nothing
-//! reaches. See `docs/proposals/agent-graph.md`.
+//! reaches. See `docs/proposals/agent-graph.md`. This facade checks the
+//! program and hands the graph to one form's renderer.
+
+mod text;
 
 use anyhow::{Context, Result};
 use corvid_driver::agent_graph::{agent_graph, AgentGraphError};
@@ -23,20 +26,7 @@ pub(crate) fn run_graph(file: &Path, agent: Option<&str>) -> Result<u8> {
         }
     };
     let place = Place { file, source: &source };
-    let mut out = String::new();
-    for (index, entry) in graph.entries.iter().enumerate() {
-        if index > 0 {
-            out.push('\n');
-        }
-        render_entry(&entry.tree, entry.bounded, &place, &mut out);
-    }
-    if !graph.never_reached.is_empty() {
-        out.push_str("\nNever reached:\n");
-        for (kind, name, span) in &graph.never_reached {
-            out.push_str(&format!("  {kind} {name} ({})\n", place.at(*span)));
-        }
-    }
-    print!("{out}");
+    print!("{}", text::render(&graph, &place));
     Ok(0)
 }
 
@@ -48,29 +38,15 @@ struct Place<'a> {
 
 impl Place<'_> {
     fn at(&self, span: corvid_ast::Span) -> String {
-        let line = self.source[..span.start.min(self.source.len())].matches('\n').count() + 1;
-        let name = self.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        format!("{name}:{line}")
+        format!("{}:{}", self.file_name(), self.line(span))
     }
-}
 
-/// The width of a step's indentation and label, so every step's cost and
-/// location line up whatever its depth.
-const STEP_WIDTH: usize = 48;
+    fn line(&self, span: corvid_ast::Span) -> usize {
+        self.source[..span.start.min(self.source.len())].matches('\n').count() + 1
+    }
 
-/// `text` padded with spaces to `width` characters (the tree's box
-/// characters are one character each, though several bytes).
-fn pad(text: &str, width: usize) -> String {
-    let count = text.chars().count();
-    format!("{text}{}", " ".repeat(width.saturating_sub(count)))
-}
-
-fn render_entry(tree: &CostTreeNode, bounded: bool, place: &Place<'_>, out: &mut String) {
-    let worst = if bounded { costs(tree) } else { "no bound: a loop has none".to_string() };
-    out.push_str(&format!("{} worst case {worst}\n", pad(&format!("agent {}", tree.name), STEP_WIDTH)));
-    let steps = steps(&tree.children);
-    for (index, step) in steps.iter().enumerate() {
-        render_step(step, "", index + 1 == steps.len(), place, out);
+    fn file_name(&self) -> String {
+        self.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     }
 }
 
@@ -85,65 +61,4 @@ fn steps(children: &[CostTreeNode]) -> Vec<&CostTreeNode> {
         }
     }
     out
-}
-
-fn render_step(node: &CostTreeNode, prefix: &str, last: bool, place: &Place<'_>, out: &mut String) {
-    let branch = if last { "└─ " } else { "├─ " };
-    let label = match &node.kind {
-        CostNodeKind::Tool if node.dangerous => format!("tool {} (dangerous)", node.name),
-        CostNodeKind::Tool => format!("tool {}", node.name),
-        CostNodeKind::Prompt => format!("prompt {}", node.name),
-        CostNodeKind::Agent => format!("agent {}", node.name),
-        CostNodeKind::Approval => format!("approve {}", node.name),
-        CostNodeKind::Branch => "one of these paths".to_string(),
-        CostNodeKind::Loop { iterations: Some(n) } => format!("loop, at most {n} times"),
-        CostNodeKind::Loop { iterations: None } => "loop, unbounded".to_string(),
-        CostNodeKind::Sequence | CostNodeKind::Condition => node.name.clone(),
-    };
-    let detail = match node.kind {
-        CostNodeKind::Approval => "a person decides".to_string(),
-        _ => costs(node),
-    };
-    let left = format!("{prefix}{branch}{label}");
-    out.push_str(&format!("{} {detail:<24} {}\n", pad(&left, STEP_WIDTH), place.at(node.span)));
-    let inner = format!("{prefix}{}", if last { "   " } else { "│  " });
-    match node.kind {
-        // Each path of a branch is one child, drawn as its own group.
-        CostNodeKind::Branch => {
-            for (index, path) in node.children.iter().enumerate() {
-                let path_last = index + 1 == node.children.len();
-                out.push_str(&format!("{inner}{}path {}\n", if path_last { "└─ " } else { "├─ " }, index + 1));
-                let path_prefix = format!("{inner}{}", if path_last { "   " } else { "│  " });
-                let path_steps = steps(std::slice::from_ref(path));
-                if path_steps.is_empty() {
-                    out.push_str(&format!("{path_prefix}└─ (nothing)\n"));
-                }
-                for (step_index, step) in path_steps.iter().enumerate() {
-                    render_step(step, &path_prefix, step_index + 1 == path_steps.len(), place, out);
-                }
-            }
-        }
-        _ => {
-            let children = steps(&node.children);
-            for (index, child) in children.iter().enumerate() {
-                render_step(child, &inner, index + 1 == children.len(), place, out);
-            }
-        }
-    }
-}
-
-/// A node's worst-case costs, the dimensions that are not zero, or `free`.
-fn costs(node: &CostTreeNode) -> String {
-    let mut parts = Vec::new();
-    for dim in ["cost", "tokens", "latency_ms"] {
-        let value = node.costs.get(dim).copied().unwrap_or(0.0);
-        if value > f64::EPSILON {
-            parts.push(corvid_types::format_numeric_dimension(dim, value));
-        }
-    }
-    if parts.is_empty() {
-        "free".to_string()
-    } else {
-        parts.join(", ")
-    }
 }
