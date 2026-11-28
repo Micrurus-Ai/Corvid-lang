@@ -43,9 +43,11 @@ pub struct GraphEntry {
 /// One step a path takes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphStep {
-    /// Stable while the agent's structure is: the entry's name, then each
-    /// step's 1-based position, with `pathN` for a branch's paths, as in
-    /// `refund_bot/3/path2/1`.
+    /// The entry's name, then each enclosing step and this one by what it
+    /// calls (`approve.Label`, `branch`, `loop`, `lambda` for the rest),
+    /// with `pathN` for a branch's paths and `#N` for a repeat in the same
+    /// block: `refund_bot/branch/path2/issue_refund`. Adding or removing
+    /// an unrelated step changes no other step's id.
     pub id: String,
     pub kind: StepKind,
     /// The callee, for a tool, connector operation, Python function,
@@ -171,10 +173,19 @@ impl Builder<'_> {
     }
 
     fn step_list(&self, children: &[CostTreeNode], parent: &str) -> Vec<GraphStep> {
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
         steps(children)
             .into_iter()
-            .enumerate()
-            .map(|(index, node)| self.step(node, format!("{parent}/{}", index + 1)))
+            .map(|node| {
+                let segment = id_segment(node);
+                let count = seen.entry(segment.clone()).or_insert(0);
+                *count += 1;
+                let id = match *count {
+                    1 => format!("{parent}/{segment}"),
+                    n => format!("{parent}/{segment}#{n}"),
+                };
+                self.step(node, id)
+            })
             .collect()
     }
 
@@ -243,6 +254,19 @@ impl Builder<'_> {
             steps,
             paths,
         }
+    }
+}
+
+/// A step's part of its id: what it calls, so adding or removing an
+/// unrelated step elsewhere changes no other step's id. `#2`, `#3` mark a
+/// repeat of the same segment in the same block.
+fn id_segment(node: &CostTreeNode) -> String {
+    match node.kind {
+        CostNodeKind::Tool | CostNodeKind::Prompt | CostNodeKind::Agent => node.name.clone(),
+        CostNodeKind::Approval => format!("approve.{}", node.name),
+        CostNodeKind::Branch => "branch".to_string(),
+        CostNodeKind::Loop { .. } if node.name == "lambda" => "lambda".to_string(),
+        CostNodeKind::Loop { .. } | CostNodeKind::Sequence | CostNodeKind::Condition => "loop".to_string(),
     }
 }
 

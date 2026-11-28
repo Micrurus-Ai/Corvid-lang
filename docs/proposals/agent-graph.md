@@ -46,7 +46,7 @@ Never reached: tool archive_order (src/main.cor:41)
 
 - [x] G1 (2026-11-28). The cost tree records approvals and each node's source span, and marks `dangerous` tools; `corvid graph` prints the text form for one agent or every entry point, with the never-reached list.
 - [x] G2 (2026-11-28). `--format mermaid` and `--format json`: the JSON is `GraphDocument`, a public serde type in `corvid-driver` that B22 serializes too, with a stable id, location, kind, effects, numeric worst case and an approval's guarded tool per step (fields asked for by B22's owner). Documented in [the reference](../reference/agent-graph.md), with the invention's public proof.
-- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON; routes, schedules and table operations become steps of their own, and the graph spans a project's files.
+- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON. In the order B22's `callers_of` and `impact_of_change` need them: (1) routes and live declarations as roots (method and path, the handler's steps under them), and an action's routes and forms; (2) an action's assistant exposure (the `assistants:` mode and description), so who can call it includes agents; (3) table operations as steps (table and operation); then schedules; and the graph spans a project's files.
 
 ## Not in scope
 

@@ -74,9 +74,9 @@ Dangerous tools are outlined in red. The never-reached declarations are a separa
       "effects": ["dangerous", "lookup", "message", "model_call", "payment"],
       "worst_case": { "cost": 0.03, "latency_ms": 0.0, "tokens": 0.0 },
       "steps": [
-        { "id": "refund_bot/1", "kind": "tool", "name": "lookup_order", "location": { "line": 22, "column": 14 },
+        { "id": "refund_bot/lookup_order", "kind": "tool", "name": "lookup_order", "location": { "line": 22, "column": 14 },
           "effects": ["lookup"], "dangerous": false, "worst_case": { "cost": 0.0, "latency_ms": 0.0, "tokens": 0.0 } },
-        { "id": "refund_bot/2", "kind": "approval", "name": "IssueRefund", "location": { "line": 23, "column": 5 },
+        { "id": "refund_bot/approve.IssueRefund", "kind": "approval", "name": "IssueRefund", "location": { "line": 23, "column": 5 },
           "effects": [], "dangerous": true, "guards": "issue_refund", "worst_case": { "cost": 0.0, "latency_ms": 0.0, "tokens": 0.0 } }
       ]
     }
@@ -93,7 +93,7 @@ Each **step** has these fields:
 
 | Field | Meaning |
 | --- | --- |
-| `id` | The entry's name, then each step's 1-based position, with `pathN` for a branch's paths: `refund_bot/3/path2/1`. It stays the same while the agent's structure does, so a coding assistant can refer back to a step. |
+| `id` | The entry's name, then each enclosing step and this one, each named by what it calls (`approve.Label` for an approval; `branch`, `loop` or `lambda` otherwise), with `pathN` for a branch's paths: `refund_bot/branch/path2/issue_refund`. A repeat of the same name in the same block is `#2`, `#3`: `refund_bot/lookup_order#2`. Adding or removing an unrelated step changes no other step's id, so a coding assistant's saved reference keeps its meaning. |
 | `kind` | `tool`, `connector_operation`, `python_function`, `prompt`, `agent`, `action`, `approval`, `branch`, `loop` or `lambda`. |
 | `name` | The callee, for a call. The label, for an approval. Absent for a branch or loop. |
 | `location` | 1-based `line` and `column` (in characters) of the call. |

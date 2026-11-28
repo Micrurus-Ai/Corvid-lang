@@ -139,7 +139,7 @@ fn the_document_names_each_step_with_its_id_location_effects_and_cost() {
     assert!((total - 0.03).abs() < 1e-9, "the number @budget checks, in dollars: {total}");
 
     let approval = &entry.steps[1];
-    assert_eq!(approval.id, "refund_bot/2");
+    assert_eq!(approval.id, "refund_bot/approve.IssueRefund");
     assert_eq!(approval.kind, StepKind::Approval);
     assert_eq!(approval.guards.as_deref(), Some("issue_refund"));
     assert_eq!(approval.dangerous, Some(true));
@@ -148,13 +148,13 @@ fn the_document_names_each_step_with_its_id_location_effects_and_cost() {
     let branch = &entry.steps[2];
     assert_eq!(branch.kind, StepKind::Branch);
     let refund = &branch.paths[1][0];
-    assert_eq!(refund.id, "refund_bot/3/path2/1");
+    assert_eq!(refund.id, "refund_bot/branch/path2/issue_refund");
     assert_eq!((refund.kind, refund.dangerous), (StepKind::Tool, Some(true)));
     assert_eq!(refund.effects, vec!["dangerous", "payment"]);
 
     let lp = &entry.steps[3];
     assert_eq!((lp.kind, lp.iterations), (StepKind::Loop, Some(50)));
-    assert_eq!(lp.steps[0].id, "refund_bot/4/1");
+    assert_eq!(lp.steps[0].id, "refund_bot/loop/notify");
 
     assert_eq!(doc.never_reached[0].name, "archive_order");
     // B22 and the dev console read the same struct back.
@@ -185,4 +185,35 @@ agent drain(items: List<Int>) -> Int:
     let lp = &entry.steps[0];
     assert_eq!((lp.kind, lp.iterations, lp.worst_case.is_none()), (StepKind::Loop, None, true));
     assert_eq!(lp.steps[0].name.as_deref(), Some("notify"));
+}
+
+#[test]
+fn a_step_id_survives_adding_an_unrelated_step_and_repeats_are_numbered() {
+    use corvid_driver::agent_graph::{GraphDocument, GraphStep};
+    fn ids(steps: &[GraphStep], out: &mut Vec<String>) {
+        for step in steps {
+            out.push(step.id.clone());
+            ids(&step.steps, out);
+            for path in &step.paths {
+                ids(path, out);
+            }
+        }
+    }
+    let all = |source: &str| {
+        let doc = GraphDocument::new(&graph(source, Some("refund_bot")), "refund.cor", source);
+        let mut out = Vec::new();
+        ids(&doc.entries[0].steps, &mut out);
+        out
+    };
+    let before = all(REFUND);
+    let edited = REFUND.replace(
+        "    amount = lookup_order(id)\n",
+        "    archived = archive_order(id)\n    amount = lookup_order(id)\n    again = lookup_order(id)\n",
+    );
+    let after = all(&edited);
+    for id in &before {
+        assert!(after.contains(id), "`{id}` changed meaning after an insertion upstream: {after:?}");
+    }
+    assert!(after.contains(&"refund_bot/archive_order".to_string()));
+    assert!(after.contains(&"refund_bot/lookup_order#2".to_string()));
 }

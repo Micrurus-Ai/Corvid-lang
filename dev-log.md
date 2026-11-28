@@ -2,6 +2,21 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A graph step's id names what it calls
+
+G2's step ids were positions (`refund_bot/3/path2/1`), so adding a step
+upstream renumbered every later one, and a coding assistant's saved
+reference silently pointed at a different step. Desktop, which owns B22,
+caught it. A step's id is now built from names: the callee for a call,
+`approve.Label`, or `branch`, `loop` or `lambda`, as in
+`refund_bot/branch/path2/issue_refund`. A repeat in the same block takes
+`#2`. Adding or removing an unrelated step changes no other id. The
+schema keeps its `v1` name, because no reader had used it in the hour
+since it shipped.
+
+Proof: a driver test inserts two steps at the top of an agent and checks
+that every earlier id still exists.
+
 ### `corvid graph --format mermaid|json` (B47 G2)
 
 The graph now comes in three forms. `mermaid` is a flowchart for a pull
