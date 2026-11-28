@@ -27,7 +27,7 @@ pub mod type_receiver;
 pub mod types;
 
 pub use checker::{
-    effect_registry_for,
+    approve_label_for, effect_registry_for,
     typecheck, typecheck_with_config, typecheck_with_config_and_modules, typecheck_with_modules,
     Checked, ImportedCallKind, ImportedCallTarget,
 };

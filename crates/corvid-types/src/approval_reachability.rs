@@ -6,6 +6,7 @@
 //! exported agents) and records the entrypoint path that can reach an
 //! unapproved dangerous tool.
 
+use crate::checker::{pascal_case, snake_case};
 use crate::errors::{TypeError, TypeErrorKind};
 use corvid_ast::{
     AgentDecl, Block, Decl, Effect, Expr, HttpRouteDecl, ScheduleDecl, Span, Stmt, ToolDecl,
@@ -386,39 +387,4 @@ impl<'a> ReachabilityPass<'a> {
             "approval.reachable_entrypoints_require_contract",
         ));
     }
-}
-
-fn pascal_case(s: &str) -> String {
-    let mut out = String::new();
-    let mut cap = true;
-    for ch in s.chars() {
-        if ch == '_' || ch == '-' {
-            cap = true;
-            continue;
-        }
-        if cap {
-            out.extend(ch.to_uppercase());
-            cap = false;
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn snake_case(s: &str) -> String {
-    let mut out = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() {
-            if i != 0 {
-                out.push('_');
-            }
-            for lc in ch.to_lowercase() {
-                out.push(lc);
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }

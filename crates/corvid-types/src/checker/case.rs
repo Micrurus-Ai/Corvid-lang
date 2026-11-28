@@ -8,7 +8,14 @@
 //! Extracted from `checker.rs` as part of Phase 20i responsibility
 //! decomposition.
 
-pub(super) fn pascal_case(snake: &str) -> String {
+/// The label an `approve` must carry before a call to the dangerous tool
+/// `tool_name`: `issue_refund` needs `approve IssueRefund(...)`. The one
+/// rule the checker, the reachability audit and the agent graph share.
+pub fn approve_label_for(tool_name: &str) -> String {
+    pascal_case(tool_name)
+}
+
+pub(crate) fn pascal_case(snake: &str) -> String {
     let mut out = String::new();
     let mut cap_next = true;
     for c in snake.chars() {
@@ -26,7 +33,7 @@ pub(super) fn pascal_case(snake: &str) -> String {
     out
 }
 
-pub(super) fn snake_case(pascal: &str) -> String {
+pub(crate) fn snake_case(pascal: &str) -> String {
     let mut out = String::new();
     for (i, c) in pascal.chars().enumerate() {
         if c.is_uppercase() {

@@ -1003,7 +1003,8 @@ mod stmt;
 mod stream;
 mod types;
 
-use case::{pascal_case, snake_case};
+pub use case::approve_label_for;
+pub(crate) use case::{pascal_case, snake_case};
 
 fn is_weakable_type(ty: &Type) -> bool {
     matches!(
