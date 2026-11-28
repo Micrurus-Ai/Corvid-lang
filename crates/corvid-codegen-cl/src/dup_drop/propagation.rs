@@ -68,6 +68,11 @@ pub(super) fn expand_block(block: &mut IrBlock, cx: &Cx, next: &mut u32) {
                 value: Some(value), ..
             }
             | IrStmt::Expr { expr: value, .. } => expand_expr(value, cx, next, &mut output),
+            // Each is evaluated before the statement acts: an `approve`'s
+            // arguments before the approval is asked, a destructured value
+            // before its parts are bound.
+            IrStmt::Approve { args, .. } => expand_operands(args.iter_mut(), cx, next, &mut output),
+            IrStmt::Destructure { value, .. } => expand_expr(value, cx, next, &mut output),
             IrStmt::Assign { value, path, .. } => {
                 let indices = path.iter_mut().filter_map(|part| match part {
                     corvid_ir::IrPathSeg::Index(index) => Some(index),

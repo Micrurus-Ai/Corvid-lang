@@ -82,9 +82,11 @@ impl Lifter<'_> {
     fn block(&mut self, block: &mut IrBlock, owner: &Owner) {
         for stmt in &mut block.stmts {
             match stmt {
-                IrStmt::Let { value, .. } | IrStmt::Expr { expr: value, .. } | IrStmt::Return { value: Some(value), .. } => {
-                    self.expr(value, owner)
-                }
+                IrStmt::Let { value, .. }
+                | IrStmt::Expr { expr: value, .. }
+                | IrStmt::Return { value: Some(value), .. }
+                | IrStmt::Destructure { value, .. } => self.expr(value, owner),
+                IrStmt::Approve { args, .. } => args.iter_mut().for_each(|arg| self.expr(arg, owner)),
                 IrStmt::Assign { value, path, .. } => {
                     for part in path {
                         if let corvid_ir::IrPathSeg::Index(index) = part {

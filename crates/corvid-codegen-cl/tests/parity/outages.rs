@@ -284,3 +284,20 @@ agent main() -> String:
     assert_eq!(stdout.trim(), "3 -1", "stderr={stderr}");
     assert_no_leaks(&stderr, src);
 }
+
+/// An `approve`'s arguments are evaluated before the approval is asked,
+/// so an outage in one unwinds before anyone is asked, on both tiers.
+#[test]
+fn an_outage_in_an_approve_argument_unwinds_before_the_approval_is_asked() {
+    let out = assert_parity(
+        r#"
+agent refund(name: String) -> Int:
+    approve IssueRefund(echo_string(name))
+    return 1
+
+agent main() -> String:
+    return (try refund("a") else 7).to_string()
+"#,
+    );
+    assert_eq!(out, "7");
+}

@@ -2,6 +2,16 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native `try` catches outages in `approve` arguments
+
+An `approve`'s arguments are evaluated before the approval is asked, and
+a destructured value before its parts are bound. So the expansion pass,
+the outage plan and the lifter now treat both as ordinary operands, and
+a failing call there is hoisted and tested like any other. An outage in
+an `approve` argument unwinds before anyone is asked, on both tiers,
+which a parity test shows. `parallel` stays refused: hoisting its arms
+would run them one after another.
+
 ### User credentials C2: keep the person's provider token
 
 Frontend development cleared the grammar on 2026-11-27 (review item 4).

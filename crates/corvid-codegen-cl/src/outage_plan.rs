@@ -11,8 +11,8 @@
 //! A failing call inside a `match` arm or guard is lifted into an agent
 //! of its own (`outage_lift.rs`), and its call is checked after the
 //! `match`. Some calls still cannot be hoisted: one in a lambda body or a
-//! `parallel` or `approve` statement runs inside a construct the IR has
-//! no statement form for. Such a call is
+//! `parallel` statement runs inside a construct the IR has no statement
+//! form for. Such a call is
 //! followed by a test that stops the program on an outage, which is what
 //! native code always did. A `try` that can reach one would then stop
 //! where the interpreter catches, so native lowering refuses that `try`
@@ -123,9 +123,11 @@ impl OutagePlan {
     /// The statements the expansion pass hoists from, as it does.
     fn stmt_reason(&self, stmt: &IrStmt) -> Option<String> {
         match stmt {
-            IrStmt::Let { value, .. } | IrStmt::Expr { expr: value, .. } | IrStmt::Return { value: Some(value), .. } => {
-                self.expr_reason(value, true)
-            }
+            IrStmt::Let { value, .. }
+            | IrStmt::Expr { expr: value, .. }
+            | IrStmt::Return { value: Some(value), .. }
+            | IrStmt::Destructure { value, .. } => self.expr_reason(value, true),
+            IrStmt::Approve { args, .. } => args.iter().find_map(|arg| self.expr_reason(arg, true)),
             IrStmt::Assign { value, path, .. } => path
                 .iter()
                 .filter_map(|part| match part {
@@ -141,8 +143,8 @@ impl OutagePlan {
             IrStmt::For { iter, body, .. } => self.expr_reason(iter, true).or_else(|| self.block_reason(body)),
             IrStmt::While { cond, body, .. } => self.expr_reason(cond, true).or_else(|| self.block_reason(body)),
             other => {
-                // `parallel`, `atomic`, `approve`, `yield` and
-                // destructuring: nothing in them is hoisted from.
+                // `parallel`, `atomic` and `yield`: nothing in them is
+                // hoisted from.
                 let mut reason = None;
                 corvid_ir::for_each_stmt_expr(other, &mut |e| {
                     if reason.is_none() {
@@ -190,7 +192,7 @@ impl OutagePlan {
                 Some(format!("it calls agent `{name}`, and {}", self.blocked[def_id]))
             }
             _ if !hoisted && self.call_can_fail(kind) => Some(format!(
-                "it calls `{callee_name}` inside a lambda or a `parallel` or `approve` statement, where native code cannot yet unwind an outage"
+                "it calls `{callee_name}` inside a lambda or a `parallel` statement, where native code cannot yet unwind an outage"
             )),
             _ => None,
         }
