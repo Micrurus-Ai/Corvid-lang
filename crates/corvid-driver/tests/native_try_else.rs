@@ -63,7 +63,7 @@ agent main() -> Int:
 }
 
 #[test]
-fn a_timed_try_whose_body_uses_question_mark_names_it() {
+fn a_timed_try_whose_body_uses_question_mark_runs_natively() {
     let src = r#"
 agent half(n: Int) -> Option<Int>:
     if n > 0:
@@ -73,6 +73,5 @@ agent half(n: Int) -> Option<Int>:
 agent main() -> Option<Int>:
     return Some(try half(4)? timeout 50 else 0)
 "#;
-    let reason = ability(src).expect_err("`?` would leave the attempt with its deadline set");
-    assert!(reason.contains("`?`"), "{reason}");
+    assert_eq!(ability(src), Ok(()));
 }

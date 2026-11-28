@@ -8573,6 +8573,6 @@ call that takes longer than the bound fails with
 `timed out after 2000ms`, which `else` catches and `retry` retries, each
 attempt with its own deadline. As in `corvid run`, a timeout fires at a
 call that waits, never in the middle of computation. Nested timeouts
-belong to the `try` whose deadline fired. A timed `try` whose body uses
-`?` still runs on the interpreter, and `corvid build` says why.
+belong to the `try` whose deadline fired, and `?` inside a timed `try`
+works as anywhere else.
 

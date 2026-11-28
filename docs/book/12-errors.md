@@ -113,9 +113,7 @@ its answer is discarded.
 
 When timed `try`s nest, the nearer deadline fires and belongs to the
 `try` that set it: an outer `try`'s timeout is caught by the outer
-`try`, never by one inside it. A compiled program does not yet lower a
-timed `try` whose body uses `?`; such a program runs on the
-interpreter, and `corvid build` names the reason.
+`try`, never by one inside it.
 
 ## Circuit breakers
 

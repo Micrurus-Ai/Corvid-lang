@@ -2,6 +2,25 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `?` inside a native timed `try`
+
+`?` returns from the agent from inside a timed attempt, past the
+statement that ends its deadline, so it was refused natively. The
+expansion now counts the timed attempts around each point in the agent
+(`Cx::open_deadlines`), and `?`'s return ends that many deadlines first.
+A deadline in a callee is ended by the callee's own `try`, so the count
+is per agent.
+
+With nesting done in the previous slice, `try ... timeout` has no
+refusal of its own left, and `try_refusal_with` folded back into
+`try_refusal`.
+
+Proof: a parity test makes the leftover deadline observable. After a
+`?` returns out of a 50 ms timed attempt, an untimed 100 ms call
+follows, which a deadline left behind would cut off. Both tiers give
+`5 null 100`, and the test fails, `timed out after 50ms`, with the fix
+disabled.
+
 ### Nested native timeouts belong to the `try` that set them
 
 On the interpreter an outer `try`'s timeout cancels everything inside

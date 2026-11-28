@@ -400,3 +400,38 @@ agent main() -> String:
     assert_eq!(stdout.trim(), "-2 -1 -3", "stderr={stderr}");
     assert_no_leaks(&stderr, src);
 }
+
+/// `?` inside a timed `try` returns from the agent from inside the
+/// attempt, and ends the attempt's deadline as it goes: the untimed
+/// 100 ms call after it would otherwise meet the 50 ms deadline left
+/// behind and stop the program.
+#[test]
+fn a_question_mark_inside_a_timed_try_ends_its_deadline() {
+    let src = r#"
+tool slow_answer(ms: Int) -> Int
+
+agent half(n: Int) -> Option<Int>:
+    if n > 0:
+        return Some(n)
+    return None
+
+agent bounded(n: Int) -> Option<Int>:
+    value = try half(n)? + slow_answer(1) timeout 50 else 0
+    return Some(value)
+
+agent main() -> String:
+    some = bounded(4)
+    none = bounded(0)
+    after = slow_answer(100)
+    return some.to_json() + " " + none.to_json() + " " + after.to_string()
+"#;
+    let ir = ir_of(src);
+    let value = interpret_with_slow_tool(&ir).expect("interpreter run");
+    assert_eq!(value, corvid_vm::Value::String("5 null 100".into()));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (stdout, stderr, status) = run_with_leak_detector(&compile(&ir, &tmp));
+    assert!(status.success(), "compiled binary failed: {stderr}");
+    assert_eq!(stdout.trim(), "5 null 100", "stderr={stderr}");
+    assert_no_leaks(&stderr, src);
+}
+

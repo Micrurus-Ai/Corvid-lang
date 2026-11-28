@@ -10,6 +10,9 @@ pub(crate) struct Cx<'a> {
     /// Where an outage goes from here: out of the agent, or to the
     /// enclosing `try`.
     pub unwind: super::outage::Unwind,
+    /// How many timed `try` attempts in this agent enclose this point: a
+    /// `return` from here (`?`'s) ends that many deadlines first.
+    pub open_deadlines: usize,
 }
 
 /// Expose early returns to ownership analysis. Hoist only across operands
@@ -92,7 +95,7 @@ pub(super) fn expand_expr(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &m
     match &mut expr.kind {
         TryPropagate { inner } => {
             expand_expr(inner, cx, next, output);
-            expand_binding(expr, cx.return_ty, next, output);
+            expand_binding(expr, cx, next, output);
         }
         Match { scrutinee, arms } => {
             expand_expr(scrutinee, cx, next, output);
@@ -237,7 +240,8 @@ fn expand_operands<'a>(
     }
 }
 
-fn expand_binding(value: &mut IrExpr, return_ty: &Type, next: &mut u32, output: &mut Vec<IrStmt>) {
+fn expand_binding(value: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mut Vec<IrStmt>) {
+    let return_ty = cx.return_ty;
     let IrExprKind::TryPropagate { inner } = &value.kind else {
         return;
     };
@@ -308,10 +312,12 @@ fn expand_binding(value: &mut IrExpr, return_ty: &Type, next: &mut u32, output: 
             span,
         },
         then_block: IrBlock {
-            stmts: vec![IrStmt::Return {
-                value: Some(failure),
-                span,
-            }],
+            // `?` leaves the agent from inside any timed attempts around
+            // it, so it ends their deadlines first.
+            stmts: std::iter::repeat_with(|| super::outage::end_deadline(span))
+                .take(cx.open_deadlines)
+                .chain(std::iter::once(IrStmt::Return { value: Some(failure), span }))
+                .collect(),
             span,
         },
         else_block: None,

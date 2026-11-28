@@ -86,7 +86,7 @@ The interpreter wraps each attempt in `tokio::time::timeout`, so a timeout fires
 - At the top of each attempt, the expanded loop sets a deadline `timeout` milliseconds ahead (`corvid_deadline_begin`, which returns the deadline it replaces). After the attempt, on every path out of it, the deadline is put back (`corvid_deadline_end`), so a nested `try` with its own timeout keeps the nearer one, and the outer one returns when it ends.
 - `corvid_runtime_call` and the prompt bridge run their call under the remaining time. A call that starts after the deadline, or does not finish before it, fails with `timed out after <ms>ms`, an outage, held like any other. The `try` retries the attempt or takes its fallback; with neither, the outage unwinds on, as on the interpreter.
 
-A body containing `?` is refused by name: `?` returns from the agent from inside the attempt, past the statement that puts the deadline back.
+`?` inside a timed attempt returns from the agent from inside it, so the expansion ends the deadline of every timed attempt around it, in that agent, before its `return` (first built refused by name, widened the same day).
 
 Nested tries: on the interpreter an outer `try`'s timeout belongs to the outer `try`, since it cancels everything inside it. Natively, each deadline records which deadline sets its time (its own, or a nearer outer one), and a held timeout records that owner. Each `try` reads the deadline depth when it starts and catches a timeout only when its owner is at that depth or deeper (`corvid_outage_pending_for`); anything else it leaves held, and a test after its loop passes it on. First built narrowed (nested timed tries refused by name), then widened the same day.
 

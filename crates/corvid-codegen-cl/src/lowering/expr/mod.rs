@@ -1398,7 +1398,7 @@ pub(super) fn lower_expr(
                 // tier picker routes these to the interpreter first.
                 let reason = runtime
                     .outage_plan
-                    .try_refusal_with(body, *timeout_ms)
+                    .try_refusal(body)
                     .unwrap_or_else(|| "it cannot be lowered natively".to_string());
                 return Err(CodegenError::not_supported(
                     format!("this `try ... else` runs on the interpreter: {reason}"),
@@ -1410,7 +1410,7 @@ pub(super) fn lower_expr(
                 // its loop; this one it could not.
                 let reason = runtime
                     .outage_plan
-                    .try_refusal_with(body, *timeout_ms)
+                    .try_refusal(body)
                     .unwrap_or_else(|| "it cannot be lowered natively".to_string());
                 return Err(CodegenError::not_supported(format!("this `try ... timeout` runs on the interpreter: {reason}"), expr.span));
             }

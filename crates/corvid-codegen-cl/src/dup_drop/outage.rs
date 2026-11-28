@@ -133,7 +133,7 @@ fn test(cx: &Cx, span: Span) -> IrStmt {
 }
 
 /// End the innermost attempt's deadline.
-fn end_deadline(span: Span) -> IrStmt {
+pub(super) fn end_deadline(span: Span) -> IrStmt {
     IrStmt::Expr { expr: outage(IrOutage::DeadlineEnd, Type::Nothing, span), span }
 }
 
@@ -247,7 +247,7 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
         return;
     };
     let catches = fallback.is_some() || timeout_ms.is_some() || cx.outages.can_fail(body);
-    if !catches || cx.outages.try_refusal_with(body, *timeout_ms).is_some() {
+    if !catches || cx.outages.try_refusal(body).is_some() {
         // Retry without outages keeps its own lowering; the rest is refused.
         return;
     }
@@ -273,7 +273,12 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
     // Which deadlines are this `try`'s own: those set from here on.
     let depth = fresh(next);
     output.push(let_(depth, "__corvid_try_depth", Type::Int, outage(IrOutage::DeadlineDepth, Type::Int, span), span));
-    let inner = Cx { return_ty: cx.return_ty, outages: cx.outages, unwind: Unwind::Try { left, failed, timed, depth } };
+    let inner = Cx {
+        return_ty: cx.return_ty,
+        outages: cx.outages,
+        unwind: Unwind::Try { left, failed, timed, depth },
+        open_deadlines: cx.open_deadlines + usize::from(timed),
+    };
     let left_local = || local(left, "__corvid_try_left", Type::Int, span);
     let mut attempt = vec![assign(
         left,

@@ -86,7 +86,7 @@ pub fn insert_dup_drop_with(agent: &IrAgent, outages: &crate::outage_plan::Outag
 pub(crate) fn expand_propagation(agent: &IrAgent, outages: &crate::outage_plan::OutagePlan) -> (IrAgent, u32) {
     let mut expanded = agent.clone();
     let mut next = next_local_id(agent);
-    let cx = propagation::Cx { return_ty: &agent.return_ty, outages, unwind: outage::Unwind::Return };
+    let cx = propagation::Cx { return_ty: &agent.return_ty, outages, unwind: outage::Unwind::Return, open_deadlines: 0 };
     propagation::expand_block(&mut expanded.body, &cx, &mut next);
     (expanded, next)
 }

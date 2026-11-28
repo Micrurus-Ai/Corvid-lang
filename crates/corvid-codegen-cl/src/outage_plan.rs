@@ -94,7 +94,7 @@ impl OutagePlan {
         match &expr.kind {
             IrExprKind::TryRetry { body, timeout_ms, fallback, .. } => {
                 (fallback.is_some() || timeout_ms.is_some() || self.can_fail(body))
-                    && self.try_refusal_with(body, *timeout_ms).is_none()
+                    && self.try_refusal(body).is_none()
             }
             _ => false,
         }
@@ -105,19 +105,6 @@ impl OutagePlan {
         self.expr_reason(body, true)
     }
 
-    /// [`Self::try_refusal`] for a `try` that may carry a `timeout`. A
-    /// timed body containing `?` is refused: `?` returns from the agent
-    /// from inside the attempt, past the end of its deadline.
-    pub fn try_refusal_with(&self, body: &IrExpr, timeout_ms: Option<u64>) -> Option<String> {
-        if timeout_ms.is_some() {
-            let mut propagates = false;
-            corvid_ir::for_each_subexpr(body, &mut |e| propagates |= matches!(e.kind, IrExprKind::TryPropagate { .. }));
-            if propagates {
-                return Some("its body uses `?`, which would leave the attempt with its deadline still set".to_string());
-            }
-        }
-        self.try_refusal(body)
-    }
 
     fn block_can_fail(&self, block: &IrBlock) -> bool {
         block.stmts.iter().any(|stmt| {

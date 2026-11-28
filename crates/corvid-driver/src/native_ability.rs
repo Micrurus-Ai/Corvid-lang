@@ -706,7 +706,7 @@ fn scan_expr(expr: &IrExpr, current_return_ty: &Type, context: ScanContext<'_>) 
             Err(NotNativeReason::TryElseNotNative {
                 reason: context
                     .outages
-                    .try_refusal_with(body, *timeout_ms)
+                    .try_refusal(body)
                     .unwrap_or_else(|| "it cannot be lowered natively".to_string()),
             })
         }
