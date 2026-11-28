@@ -4,7 +4,8 @@
 //! from the loop node and returns to it on a dotted edge, and each shape
 //! says the kind: a tool is a box, a prompt rounded, an agent a
 //! subroutine, an approval a parallelogram, a branch a diamond, a loop a
-//! hexagon. Dangerous tools are outlined in red.
+//! hexagon, a table operation a cylinder. Dangerous tools are outlined in
+//! red.
 
 use super::{detail, entry_title, label, route_title, surface_line, Place};
 use corvid_driver::agent_graph::{has_unbounded_loop, steps, AgentGraph};
@@ -47,6 +48,7 @@ enum Shape {
     Diamond,
     Hexagon,
     Stadium,
+    Cylinder,
 }
 
 struct Chart {
@@ -72,6 +74,7 @@ impl Chart {
             Shape::Diamond => ("{\"", "\"}"),
             Shape::Hexagon => ("{{\"", "\"}}"),
             Shape::Stadium => ("([\"", "\"])"),
+            Shape::Cylinder => ("[(\"", "\")]"),
         };
         self.lines.push(format!("  {id}{open}{body}{close}"));
         id
@@ -109,6 +112,7 @@ impl Chart {
             CostNodeKind::Agent => Shape::Subroutine,
             CostNodeKind::Approval => Shape::Parallelogram,
             CostNodeKind::Branch => Shape::Diamond,
+            CostNodeKind::Table { .. } => Shape::Cylinder,
             CostNodeKind::Loop { .. } => Shape::Hexagon,
             CostNodeKind::Sequence | CostNodeKind::Condition => Shape::Box,
         };

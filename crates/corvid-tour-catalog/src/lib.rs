@@ -1060,7 +1060,7 @@ agent board_controls(card: Int) -> String:
         spec: "docs/reference/agent-graph.md",
         roadmap: "docs/backend-ai-roadmap.md",
         test: "crates/corvid-driver/tests/agent_graph.rs",
-        non_scope: "A run's actual path is `corvid trace lineage`; the graph draws the agents and routes of one file; table operations and schedules are not yet steps of their own.",
+        non_scope: "A run's actual path is `corvid trace lineage`; the graph draws the agents and routes of one file; schedules are not yet roots.",
         source: r#"effect lookup:
     cost: $0.00
 

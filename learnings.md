@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+`corvid graph` now shows each table operation as a step, such as `table Card.insert` or `table Card.query` for a whole `where(...).order_by(...)` chain. You can see which actions and routes read or write each table. In JSON the step carries `table` and `operation`.
+
 `corvid graph` now draws each route and `live` declaration with the steps its handler takes and who may call it. Each action shows its `POST /actions/<name>` route, its `requires` policy, whether it is offered to assistants, and the `form_for` and `button_for` calls that use it. A tool called only from a route is no longer listed under "Never reached".
 
 Put an agent's graph in a pull request: `corvid graph app.cor --format mermaid` writes a flowchart of each entry point's steps, with dangerous tools outlined in red. `--format json` gives the same graph as a typed document (schema `corvid.agent_graph.v1`): every step's id, line and column, kind, effects, worst-case cost in dollars, and, for an `approve`, the tool it guards. A loop nothing bounds now shows its steps, with `no bound` as its cost. See [the agent graph reference](docs/reference/agent-graph.md).

@@ -43,7 +43,7 @@ pub fn cost_path_for_dimension(tree: &CostTreeNode, dimension: &str) -> Vec<Stri
             path
         }
         // An approval costs nothing, so it is on no cost path.
-        CostNodeKind::Approval => Vec::new(),
+        CostNodeKind::Approval | CostNodeKind::Table { .. } => Vec::new(),
         CostNodeKind::Tool | CostNodeKind::Prompt => vec![format!(
             "{} ({})",
             tree.name,

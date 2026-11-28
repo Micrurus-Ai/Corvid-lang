@@ -305,3 +305,39 @@ fn an_action_says_its_route_policy_assistant_offer_and_the_forms_that_call_it() 
     assert_eq!(rename.action.as_ref().unwrap().assistants, None, "nothing is offered to an assistant by default");
     assert!(doc.entries.iter().all(|e| e.kind == StepKind::Action || e.action.is_none()));
 }
+
+#[test]
+fn a_table_operation_is_one_step_naming_its_table_and_operation() {
+    use corvid_driver::agent_graph::{GraphDocument, GraphStep, StepKind};
+    let source = BOARD.replace(
+        "action rename_card(card: Int, by: Caller) -> Int requires permission(\"board.edit\"):\n    return card\n",
+        "action rename_card(card: Int, by: Caller) -> Int requires permission(\"board.edit\"):\n    \
+         found = Card.get(card)\n    \
+         open = Card.where(fn (c) -> c.column == \"open\").order_by(fn (c) -> c.card).take(10)\n    \
+         total = Card.where(fn (c) -> c.board == \"main\").count()\n    \
+         return total\n",
+    );
+    let doc = GraphDocument::new(&graph(&source, None), "board.cor", &source);
+    let rename = doc.entries.iter().find(|e| e.name == "rename_card").unwrap();
+    let ops: Vec<(&str, Option<&str>, Option<&str>, StepKind)> = rename
+        .steps
+        .iter()
+        .map(|s: &GraphStep| (s.id.as_str(), s.table.as_deref(), s.operation.as_deref(), s.kind))
+        .collect();
+    assert_eq!(
+        ops,
+        vec![
+            ("rename_card/Card.get", Some("Card"), Some("get"), StepKind::TableOperation),
+            // A query chain is one statement, so one step, not one per stage.
+            ("rename_card/Card.query", Some("Card"), Some("query"), StepKind::TableOperation),
+            ("rename_card/Card.count", Some("Card"), Some("count"), StepKind::TableOperation),
+        ]
+    );
+    assert_eq!(rename.steps[0].name.as_deref(), Some("Card.get"));
+    assert_eq!(rename.steps[1].location.line, line_of(&source, "open = Card.where"));
+    assert_eq!(rename.worst_case.as_ref().unwrap()["cost"], 0.0, "a table operation adds no cost");
+
+    let live = &doc.routes[0];
+    assert_eq!(live.steps.len(), 1);
+    assert_eq!(live.steps[0].id, "board_app:live /boards/{board}/cards/Card.query");
+}

@@ -94,6 +94,11 @@ pub enum CostNodeKind {
     /// An `approve`: a person decides before the program goes on. It
     /// costs nothing itself.
     Approval,
+    /// A table operation (B47 G3b): the node's name is the table, and
+    /// `operation` a write (`get`, `insert`, `save`, `delete`), `query`
+    /// for a query chain, or the aggregate that ends one. It costs
+    /// nothing, so no budget changes; it shows what reaches persistence.
+    Table { operation: &'static str },
 }
 
 #[derive(Debug, Clone)]

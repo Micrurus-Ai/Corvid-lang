@@ -119,7 +119,8 @@ pub struct GraphStep {
     pub id: String,
     pub kind: StepKind,
     /// The callee, for a tool, connector operation, Python function,
-    /// prompt, agent or action; the label, for an approval.
+    /// prompt, agent or action; the label, for an approval; `Table.operation`
+    /// for a table operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub location: Location,
@@ -133,6 +134,14 @@ pub struct GraphStep {
     /// For an approval: the dangerous tool its label names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guards: Option<String>,
+    /// For a table operation: the table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
+    /// For a table operation: `get`, `insert`, `save`, `delete`, `query`
+    /// for a query chain, or the aggregate that ends one (`count`, `sum`,
+    /// `min`, `max`, `count_by`, `sum_by`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
     /// For a loop: the most times it runs. Absent when nothing bounds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iterations: Option<u64>,
@@ -177,6 +186,8 @@ pub enum StepKind {
     Loop,
     /// A function value whose body runs any number of times.
     Lambda,
+    /// A table write, or a query chain run as one statement.
+    TableOperation,
 }
 
 impl StepKind {
@@ -193,6 +204,7 @@ impl StepKind {
             StepKind::Branch => "branch",
             StepKind::Loop => "loop",
             StepKind::Lambda => "lambda",
+            StepKind::TableOperation => "table operation",
         }
     }
 }
@@ -307,6 +319,7 @@ impl Builder<'_> {
             CostNodeKind::Agent => declared.map_or(StepKind::Agent, |d| d.kind),
             CostNodeKind::Approval => StepKind::Approval,
             CostNodeKind::Branch => StepKind::Branch,
+            CostNodeKind::Table { .. } => StepKind::TableOperation,
             CostNodeKind::Loop { .. } if node.name == "lambda" => StepKind::Lambda,
             // `steps` never yields a grouping node; a connector's retries
             // and polls are a bounded loop around its call.
@@ -351,11 +364,19 @@ impl Builder<'_> {
         GraphStep {
             id,
             kind,
-            name: (calls || node.kind == CostNodeKind::Approval).then(|| node.name.clone()),
+            name: match node.kind {
+                CostNodeKind::Table { operation } => Some(format!("{}.{operation}", node.name)),
+                _ => (calls || node.kind == CostNodeKind::Approval).then(|| node.name.clone()),
+            },
             location: self.location(node.span),
             effects,
             dangerous,
             guards,
+            table: matches!(node.kind, CostNodeKind::Table { .. }).then(|| node.name.clone()),
+            operation: match node.kind {
+                CostNodeKind::Table { operation } => Some(operation.to_string()),
+                _ => None,
+            },
             iterations: match node.kind {
                 CostNodeKind::Loop { iterations } => iterations,
                 _ => None,
@@ -375,6 +396,7 @@ fn id_segment(node: &CostTreeNode) -> String {
         CostNodeKind::Tool | CostNodeKind::Prompt | CostNodeKind::Agent => node.name.clone(),
         CostNodeKind::Approval => format!("approve.{}", node.name),
         CostNodeKind::Branch => "branch".to_string(),
+        CostNodeKind::Table { operation } => format!("{}.{operation}", node.name),
         CostNodeKind::Loop { .. } if node.name == "lambda" => "lambda".to_string(),
         CostNodeKind::Loop { .. } | CostNodeKind::Sequence | CostNodeKind::Condition => "loop".to_string(),
     }

@@ -2,6 +2,26 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Table operations are steps of the agent graph (B47 G3b)
+
+An impact query that stopped at the last tool never reached persistence,
+so a changed column could not be traced to the actions that use it.
+- The cost tree gains a `Table` node, which costs nothing, so no
+  `@budget` verdict changes.
+- The node is placed by `table_call_target` and `table_query_call`, the
+  recognizers the checker and the lowerer use, not a second matcher.
+- A write (`get`, `insert`, `save`, `delete`) is one step.
+- A query chain is one step, `query` or the aggregate that ends it,
+  because the chain runs as one statement. Its inner stages are not
+  steps.
+- In JSON the step is `table_operation` with `table` and `operation`. Its
+  id is `Table.operation`, as in `rename_card/Card.query`.
+- In text it is `table Card.query`; in Mermaid, a cylinder.
+
+Proof: a driver test checks a `get`, an ordered and limited chain, and a
+`count`, each as one step with its id, line and zero cost, plus a `live`
+declaration's query.
+
 ### Routes are roots of the agent graph, and actions say who can call them (B47 G3a)
 
 B22's `callers_of` and `impact_of_change` need to know where outside

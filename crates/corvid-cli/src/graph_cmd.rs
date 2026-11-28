@@ -119,6 +119,7 @@ fn label(node: &CostTreeNode) -> String {
         CostNodeKind::Agent => format!("agent {}", node.name),
         CostNodeKind::Approval => format!("approve {}", node.name),
         CostNodeKind::Branch => "one of these paths".to_string(),
+        CostNodeKind::Table { operation } => format!("table {}.{operation}", node.name),
         CostNodeKind::Loop { iterations: Some(n) } => format!("loop, at most {n} times"),
         CostNodeKind::Loop { iterations: None } if node.name == "lambda" => {
             "lambda, called any number of times".to_string()

@@ -517,6 +517,22 @@ impl<'a> CostAnalyzer<'a> {
                 if let Some(call_tree) = self.call_cost_tree(callee, agent_name, *span) {
                     children.push(call_tree);
                 }
+                if let Some((table, operation)) = self.table_operation(callee, args) {
+                    // A query chain is one statement: its inner stages
+                    // (`Card.where(...)` under `.order_by(...)`) are not
+                    // operations of their own.
+                    for child in &mut children {
+                        drop_table_nodes(child);
+                    }
+                    children.push(CostTreeNode {
+                        name: table.to_string(),
+                        kind: CostNodeKind::Table { operation },
+                        costs: zero_costs(),
+                        children: Vec::new(),
+                        span: *span,
+                        dangerous: false,
+                    });
+                }
                 let tree = sequence_tree("call", CostNodeKind::Sequence, children, *span);
                 CostEstimate {
                     dimensions: tree.costs.clone(),
@@ -815,6 +831,24 @@ impl<'a> CostAnalyzer<'a> {
         }
     }
 
+    /// The table and operation a call is, by the recognizers the checker
+    /// and the lowerer use: a write, or a whole query chain.
+    fn table_operation(
+        &self,
+        callee: &corvid_ast::Expr,
+        args: &[corvid_ast::Expr],
+    ) -> Option<(&'a str, &'static str)> {
+        if let Some((table, op)) =
+            crate::table_ops::table_call_target(callee, self.file, &self.resolved.symbols, &self.resolved.bindings)
+        {
+            return Some((table.record.name.name.as_str(), op.name()));
+        }
+        let query =
+            crate::table_ops::table_query_call(callee, args, self.file, &self.resolved.symbols, &self.resolved.bindings)?;
+        let operation = query.aggregate.map_or("query", |(aggregate, _)| aggregate.name());
+        Some((query.table.record.name.name.as_str(), operation))
+    }
+
     fn call_cost_tree(
         &mut self,
         callee: &corvid_ast::Expr,
@@ -1013,6 +1047,15 @@ fn add_costs(target: &mut HashMap<String, f64>, source: &HashMap<String, f64>) {
         let next =
             target.get(dim).copied().unwrap_or(0.0) + source.get(dim).copied().unwrap_or(0.0);
         target.insert(dim.to_string(), next);
+    }
+}
+
+/// Remove the table-operation nodes under `node`: they are stages of a
+/// query chain an enclosing call stands for.
+fn drop_table_nodes(node: &mut CostTreeNode) {
+    node.children.retain(|child| !matches!(child.kind, CostNodeKind::Table { .. }));
+    for child in &mut node.children {
+        drop_table_nodes(child);
     }
 }
 

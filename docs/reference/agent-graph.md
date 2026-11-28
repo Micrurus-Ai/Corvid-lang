@@ -1,6 +1,6 @@
 # The agent graph: `corvid graph`
 
-`corvid graph` draws what each agent does, from the compiled program: every tool, connector operation, Python function, prompt, nested agent and `approve`, the paths of each branch, and each loop's bound. Every step shows its worst-case cost and where it is in the source. Dangerous tools are marked. Tools, connector operations and prompts that no entry point reaches are listed.
+`corvid graph` draws what each agent does, from the compiled program: every tool, connector operation, Python function, prompt, nested agent, table operation and `approve`, the paths of each branch, and each loop's bound. Every step shows its worst-case cost and where it is in the source. Dangerous tools are marked. Tools, connector operations and prompts that no entry point reaches are listed.
 
 The graph is the tree `@budget` checks, not a second description of the program. So it cannot drift from the code, and its numbers are the ones the budget check compares.
 
@@ -40,6 +40,7 @@ corvid graph [FILE] [--agent NAME] [--format text|mermaid|json]
 - A loop nothing bounds, and a lambda whose body costs something, are drawn with their steps but have **no bound**. Their cost reads `no bound`, never a number, because the number would cover one pass, not the worst case. `@budget` refuses to pass such an agent for the same reason.
 - An `approve` costs nothing and reads `a person decides`.
 - A connector operation's retries and polls are a bounded loop around its call.
+- A table operation costs nothing. It is drawn so that a reader can see what reaches persistence.
 
 ## Mermaid
 
@@ -54,6 +55,7 @@ corvid graph [FILE] [--agent NAME] [--format text|mermaid|json]
 | `approve` | parallelogram |
 | branch | diamond |
 | loop | hexagon |
+| table operation | cylinder |
 
 Dangerous tools are outlined in red. The never-reached declarations are a separate group.
 
@@ -94,12 +96,13 @@ Each **step** has these fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | The entry's name, then each enclosing step and this one, each named by what it calls (`approve.Label` for an approval; `branch`, `loop` or `lambda` otherwise), with `pathN` for a branch's paths: `refund_bot/branch/path2/issue_refund`. A repeat of the same name in the same block is `#2`, `#3`: `refund_bot/lookup_order#2`. Adding or removing an unrelated step changes no other step's id, so a coding assistant's saved reference keeps its meaning. |
-| `kind` | `tool`, `connector_operation`, `python_function`, `prompt`, `agent`, `action`, `approval`, `branch`, `loop` or `lambda`. |
-| `name` | The callee, for a call. The label, for an approval. Absent for a branch or loop. |
+| `kind` | `tool`, `connector_operation`, `python_function`, `prompt`, `agent`, `action`, `approval`, `table_operation`, `branch`, `loop` or `lambda`. |
+| `name` | The callee, for a call. The label, for an approval. `Table.operation` for a table operation. Absent for a branch or loop. |
 | `location` | 1-based `line` and `column` (in characters) of the call. |
 | `effects` | The effects the callee declares with `uses`, plus `dangerous` for a dangerous tool. For an agent, branch or loop, every effect under it. Sorted. |
 | `dangerous` | For a tool or connector operation, whether it is dangerous. For an approval, whether the tool it guards is. |
 | `guards` | For an approval, the dangerous tool its label names (`IssueRefund` guards `issue_refund`, by the rule the checker uses). |
+| `table`, `operation` | For a table operation, the table and what it does: `get`, `insert`, `save` or `delete`; `query` for a query chain; or the aggregate that ends one (`count`, `sum`, `min`, `max`, `count_by`, `sum_by`). A chain such as `Card.where(...).order_by(...).take(10)` runs as one statement, so it is one step. |
 | `iterations` | For a loop, the most times it runs. Absent when nothing bounds it. |
 | `worst_case` | Worst-case cost by dimension, as numbers (`cost` in US dollars), or `null` when a loop inside has no bound. |
 | `steps` | The steps inside a nested agent, action or loop. |
@@ -144,4 +147,4 @@ An **action** entry also has `action`:
 
 - A run's actual path. `corvid trace lineage` draws that.
 - Editing the graph. The code is the graph.
-- Several files at once. The graph draws the agents and routes of one file. Table operations and schedules are not yet steps of their own; they come next, in that order, then a project's files.
+- Several files at once. The graph draws the agents and routes of one file. Schedules are not yet roots; they come next, then a project's files.
