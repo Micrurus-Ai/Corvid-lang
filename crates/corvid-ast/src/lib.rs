@@ -54,6 +54,7 @@ mod tests {
             params: vec![Param {
                 name: id("id"),
                 ty: ty_named("String"),
+                refinement: None,
                 ownership: None,
                 span: sp(),
             }],
@@ -73,12 +74,14 @@ mod tests {
                 Param {
                     name: id("id"),
                     ty: ty_named("String"),
+                    refinement: None,
                     ownership: None,
                     span: sp(),
                 },
                 Param {
                     name: id("amount"),
                     ty: ty_named("Float"),
+                    refinement: None,
                     ownership: None,
                     span: sp(),
                 },
@@ -155,6 +158,7 @@ mod tests {
             params: vec![Param {
                 name: id("ticket"),
                 ty: ty_named("Ticket"),
+                refinement: None,
                 ownership: None,
                 span: sp(),
             }],

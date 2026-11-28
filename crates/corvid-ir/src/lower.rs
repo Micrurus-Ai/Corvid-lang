@@ -750,6 +750,7 @@ impl<'a> Lowerer<'a> {
             name: "path".to_string(),
             local_id: locals.path,
             ty: Type::RouteParams(path_fields),
+            refinement: None,
             span: ast_route.span,
         });
         if let (Some(query_local), Some(query_ty)) = (locals.query, ir_route.query_ty.clone()) {
@@ -757,6 +758,7 @@ impl<'a> Lowerer<'a> {
                 name: "query".to_string(),
                 local_id: query_local,
                 ty: query_ty,
+                refinement: None,
                 span: ast_route.span,
             });
         }
@@ -765,6 +767,7 @@ impl<'a> Lowerer<'a> {
                 name: "body".to_string(),
                 local_id: body_local,
                 ty: body_ty,
+                refinement: None,
                 span: ast_route.span,
             });
         }
@@ -773,6 +776,7 @@ impl<'a> Lowerer<'a> {
                 name: "actor".to_string(),
                 local_id: actor_local,
                 ty: actor_route_params_type(),
+                refinement: None,
                 span: ast_route.span,
             });
         }
@@ -1333,6 +1337,7 @@ impl<'a> Lowerer<'a> {
                     name: p.name.name.clone(),
                     local_id,
                     ty: self.type_ref_to_type(&p.ty),
+                    refinement: p.refinement,
                     span: p.span,
                 }
             })

@@ -529,7 +529,7 @@ impl<'a> Parser<'a> {
     /// Optional field refinement (slice 50j): contextual `where`
     /// followed by `between(min, max)` or `len_between(min, max)`.
     /// `where` stays an ordinary identifier everywhere else.
-    fn parse_field_refinement(
+    pub(super) fn parse_field_refinement(
         &mut self,
     ) -> Result<Option<corvid_ast::Refinement>, ParseError> {
         if !matches!(self.peek(), TokKind::Ident(w) if w == "where") {

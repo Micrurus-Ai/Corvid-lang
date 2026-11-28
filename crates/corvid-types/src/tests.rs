@@ -19,6 +19,7 @@ mod secrets;
 mod comparison_literals;
 mod passwords;
 mod signatures;
+mod parameter_refinements;
 
 fn check(src: &str) -> Checked {
     let tokens = lex(src).expect("lex failed");

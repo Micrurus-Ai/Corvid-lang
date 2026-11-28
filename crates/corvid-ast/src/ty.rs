@@ -140,6 +140,11 @@ impl TypeRef {
 pub struct Param {
     pub name: Ident,
     pub ty: TypeRef,
+    /// `where between(16, 1024)` after the type: the refinement a field
+    /// takes, on an input. A literal argument outside it is a compile
+    /// error, and a computed one is checked when the call starts.
+    #[serde(default)]
+    pub refinement: Option<Refinement>,
     #[serde(default)]
     pub ownership: Option<OwnershipAnnotation>,
     pub span: Span,

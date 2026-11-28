@@ -243,6 +243,7 @@ fn infer_params(
             Param {
                 name: Ident::new(param_name, *sp),
                 ty,
+                refinement: None,
                 ownership: None,
                 span: *sp,
             }

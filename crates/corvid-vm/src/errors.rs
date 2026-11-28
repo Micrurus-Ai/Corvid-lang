@@ -44,6 +44,7 @@ impl InterpErrorKind {
             | Self::Arithmetic(_)
             | Self::IndexOutOfBounds { .. }
             | Self::RefinementViolated { .. }
+            | Self::ArgumentOutOfRange { .. }
             | Self::BudgetExceeded { .. }
             | Self::ParallelArmCancelled
             | Self::ConfidenceFloorBreached { .. }
@@ -83,6 +84,9 @@ pub enum InterpErrorKind {
     /// A value built or assigned in code breaks its field's refinement
     /// (B09): `Search(q, n)` with `n` outside `between(1, 50)`.
     RefinementViolated { type_name: String, field: String, refinement: String, value: String },
+    /// An argument outside its parameter's refinement, found when the
+    /// call starts: a bug in the caller, never an outage.
+    ArgumentOutOfRange { callable: String, param: String, refinement: String, value: String },
 
     /// A streaming computation crossed the active cost budget.
     BudgetExceeded { budget: f64, used: f64 },
@@ -153,6 +157,9 @@ impl fmt::Display for InterpErrorKind {
             }
             Self::RefinementViolated { type_name, field, refinement, value } => {
                 write!(f, "`{type_name}.{field}` must be {refinement}, but this value is {value}")
+            }
+            Self::ArgumentOutOfRange { callable, param, refinement, value } => {
+                write!(f, "`{param}` is {value}, outside `{refinement}`, in this call to `{callable}`")
             }
             Self::BudgetExceeded { budget, used } => {
                 write!(f, "stream budget exceeded: used ${used:.4} over budget ${budget:.4}")

@@ -31,6 +31,7 @@ mod secrets;
 mod passwords;
 mod ed25519;
 mod outages;
+mod parameter_refinements;
 mod prompt_json;
 mod tool_json;
 

@@ -245,6 +245,7 @@ mod tests {
             name: name.to_string(),
             local_id: LocalId(local),
             ty: Type::RouteParams(vec![]),
+            refinement: None,
             span: span(),
         }
     }

@@ -40,16 +40,28 @@ impl<'a> Checker<'a> {
     /// here, and a computed value is checked when the record is built.
     pub(super) fn check_constant_refinement(&mut self, type_name: &str, field: &corvid_ast::Field, value: &Expr) {
         let Some(refinement) = &field.refinement else { return };
-        let (admitted, shown) = match constant_value(value) {
-            Some(Constant::Int(n)) => (refinement.admits_int(n), n.to_string()),
-            Some(Constant::Text(text)) => (refinement.admits_text(text), format!("{text:?}")),
-            None => return,
-        };
-        if !admitted {
+        if let Some(shown) = constant_outside(refinement, value) {
             self.errors.push(TypeError::new(
                 TypeErrorKind::RefinementOutOfRange {
                     type_name: type_name.to_string(),
                     field: field.name.name.clone(),
+                    refinement: refinement.describe(),
+                    value: shown,
+                },
+                value.span(),
+            ));
+        }
+    }
+
+    /// A constant argument outside its parameter's refinement is a
+    /// compile error, by the rule a refined field's constant follows.
+    pub(super) fn check_constant_argument(&mut self, callable: &str, param: &corvid_ast::Param, value: &Expr) {
+        let Some(refinement) = &param.refinement else { return };
+        if let Some(shown) = constant_outside(refinement, value) {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::ArgumentOutOfRange {
+                    callable: callable.to_string(),
+                    param: param.name.name.clone(),
                     refinement: refinement.describe(),
                     value: shown,
                 },
@@ -233,3 +245,14 @@ impl<'a> Checker<'a> {
         Type::Struct(def_id)
     }
 }
+
+/// `value` as shown in a message, when it is a constant `refinement`
+/// refuses; `None` for a value that is admitted or not a constant.
+fn constant_outside(refinement: &corvid_ast::Refinement, value: &Expr) -> Option<String> {
+    let (admitted, shown) = match constant_value(value)? {
+        Constant::Int(n) => (refinement.admits_int(n), n.to_string()),
+        Constant::Text(text) => (refinement.admits_text(text), format!("{text:?}")),
+    };
+    (!admitted).then_some(shown)
+}
+

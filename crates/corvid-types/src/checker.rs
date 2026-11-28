@@ -607,6 +607,28 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Each parameter refinement fits its parameter's type, by the rule
+    /// a field's does.
+    fn check_param_refinements(&mut self, callable: &str, params: &[corvid_ast::Param]) {
+        for param in params {
+            let Some(refinement) = &param.refinement else { continue };
+            let type_name = match &param.ty {
+                corvid_ast::TypeRef::Named { name, .. } => name.name.as_str(),
+                _ => "",
+            };
+            if let Some(message) = refinement_problem(refinement, type_name, "parameter") {
+                self.errors.push(TypeError::new(
+                    TypeErrorKind::ParamRefinementInvalid {
+                        callable: callable.to_string(),
+                        param: param.name.name.clone(),
+                        message,
+                    },
+                    param.span,
+                ));
+            }
+        }
+    }
+
     fn check_field_refinements(&mut self, t: &corvid_ast::TypeDecl) {
         // A variant's payload fields take refinements as record fields do.
         for field in t.fields.iter().chain(t.variants.iter().flat_map(|v| v.fields.iter())) {
@@ -617,33 +639,7 @@ impl<'a> Checker<'a> {
                 corvid_ast::TypeRef::Named { name, .. } => name.name.as_str(),
                 _ => "",
             };
-            let message = match refinement {
-                corvid_ast::Refinement::Between { .. } if field_type_name != "Int" => {
-                    Some(format!(
-                        "refinement `{}` requires an Int field, but the field is `{}`",
-                        refinement.describe(),
-                        field_type_name
-                    ))
-                }
-                corvid_ast::Refinement::Between { min, max } if min > max => Some(format!(
-                    "refinement `{}` has min > max",
-                    refinement.describe()
-                )),
-                corvid_ast::Refinement::LenBetween { .. }
-                    if field_type_name != "String" =>
-                {
-                    Some(format!(
-                        "refinement `{}` requires a String field, but the field is `{}`",
-                        refinement.describe(),
-                        field_type_name
-                    ))
-                }
-                corvid_ast::Refinement::LenBetween { min, max } if min > max => Some(format!(
-                    "refinement `{}` has min > max",
-                    refinement.describe()
-                )),
-                _ => None,
-            };
+            let message = refinement_problem(refinement, field_type_name, "field");
             if let Some(message) = message {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::RefinementInvalid {
@@ -869,6 +865,24 @@ impl<'a> Checker<'a> {
         self.check_builtin_type_names(file);
         for decl in &file.decls {
             match decl {
+                Decl::Agent(a) => self.check_param_refinements(&a.name.name, &a.params),
+                Decl::Fn(f) => self.check_param_refinements(&f.name.name, &f.params),
+                Decl::Prompt(p) => self.check_param_refinements(&p.name.name, &p.params),
+                Decl::Tool(t) => self.check_param_refinements(&t.name.name, &t.params),
+                Decl::Extend(ext) => {
+                    for method in &ext.methods {
+                        match &method.kind {
+                            ExtendMethodKind::Agent(a) => self.check_param_refinements(&a.name.name, &a.params),
+                            ExtendMethodKind::Prompt(p) => self.check_param_refinements(&p.name.name, &p.params),
+                            ExtendMethodKind::Tool(t) => self.check_param_refinements(&t.name.name, &t.params),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for decl in &file.decls {
+            match decl {
                 Decl::Agent(a) => self.check_agent(a),
                 Decl::Fn(f) => self.check_fn(f),
                 Decl::Eval(e) => self.check_eval(e),
@@ -1025,3 +1039,26 @@ fn is_weakable_type(ty: &Type) -> bool {
         Type::String | Type::Struct(_) | Type::ImportedStruct(_) | Type::List(_)
     )
 }
+
+/// Why `refinement` cannot refine a `type_name` slot, if it cannot: the
+/// one rule fields and parameters share. `what` names the slot.
+fn refinement_problem(refinement: &corvid_ast::Refinement, type_name: &str, what: &str) -> Option<String> {
+    match *refinement {
+        corvid_ast::Refinement::Between { .. } if type_name != "Int" => Some(format!(
+            "refinement `{}` requires an Int {what}, but the {what} is `{type_name}`",
+            refinement.describe()
+        )),
+        corvid_ast::Refinement::LenBetween { .. } if type_name != "String" => Some(format!(
+            "refinement `{}` requires a String {what}, but the {what} is `{type_name}`",
+            refinement.describe()
+        )),
+        corvid_ast::Refinement::Between { min, max } if min > max => {
+            Some(format!("refinement `{}` has min > max", refinement.describe()))
+        }
+        corvid_ast::Refinement::LenBetween { min, max } if min > max => {
+            Some(format!("refinement `{}` has min > max", refinement.describe()))
+        }
+        _ => None,
+    }
+}
+

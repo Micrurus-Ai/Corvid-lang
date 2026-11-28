@@ -787,6 +787,8 @@ pub struct IrParam {
     pub name: String,
     pub local_id: LocalId,
     pub ty: Type,
+    /// The parameter's `where` refinement, checked when a call starts.
+    pub refinement: Option<corvid_ast::Refinement>,
     pub span: Span,
 }
 

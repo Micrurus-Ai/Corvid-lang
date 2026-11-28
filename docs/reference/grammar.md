@@ -191,7 +191,7 @@ tool_decl         ::= 'tool' IDENT params '->' type_ref ownership? 'dangerous'? 
 
 params            ::= '(' (param (',' param)*)? ')'
 
-param             ::= IDENT ':' type_ref ownership?
+param             ::= IDENT ':' type_ref refinement? ownership?
 
 ownership         ::= '@owned' | '@borrowed'
 

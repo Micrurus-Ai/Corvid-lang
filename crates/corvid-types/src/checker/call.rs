@@ -1350,6 +1350,7 @@ impl<'a> Checker<'a> {
         let mut arg_types = Vec::with_capacity(args.len());
         for (i, arg) in args.iter().enumerate() {
             if let Some(param) = params.get(i) {
+                self.check_constant_argument(callee_name, param, arg);
                 let param_ty = self.type_ref_to_type(&param.ty);
                 let arg_ty = self.check_expr_as(arg, Some(&param_ty));
                 // `Tainted<T>` where `T` is expected is type-compatible

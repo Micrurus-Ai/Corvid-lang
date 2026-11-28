@@ -491,6 +491,12 @@ pub enum TypeErrorKind {
         argument_index: usize,
         arg_type: String,
     },
+    /// A parameter refinement whose form does not fit the parameter's
+    /// type, or whose bounds are inverted.
+    ParamRefinementInvalid { callable: String, param: String, message: String },
+    /// A constant argument outside its parameter's refinement:
+    /// `random_token(8)` where `bytes: Int where between(16, 1024)`.
+    ArgumentOutOfRange { callable: String, param: String, refinement: String, value: String },
     /// Slice 50j — a field refinement whose form does not fit the
     /// field's type (or whose bounds are inverted).
     RefinementInvalid {
@@ -801,6 +807,8 @@ impl TypeErrorKind {
             Self::InvalidCustomDimension { .. } => "E0232",
             Self::TaintedDangerousArgument { .. } => "E0115",
             Self::RefinementInvalid { .. } => "E0404",
+            Self::ParamRefinementInvalid { .. } => "E0403",
+            Self::ArgumentOutOfRange { .. } => "E0406",
             Self::DurationLiteralInvalid { .. } => "E0515",
             Self::FloatLiteralInexact { .. } => "E0516",
             Self::UnknownMethod { .. } => "E0240",
@@ -853,6 +861,12 @@ impl TypeErrorKind {
             }
             Self::RefinementOutOfRange { type_name, field, refinement, value } => {
                 format!("`{type_name}.{field}` must be {refinement}, but this value is {value}")
+            }
+            Self::ParamRefinementInvalid { callable, param, message } => {
+                format!("parameter `{param}` of `{callable}`: {message}")
+            }
+            Self::ArgumentOutOfRange { callable, param, refinement, value } => {
+                format!("`{param}` is {value}, outside `{refinement}`, in this call to `{callable}`")
             }
             Self::ImpossibleConflictCase { case, possible } => {
                 format!("this conflict is never `{case}`: it can only be {possible}")
@@ -1445,6 +1459,12 @@ impl TypeErrorKind {
             ),
             Self::RefinementOutOfRange { .. } => Some(
                 "use a value the refinement admits; every value of a refined field holds its refinement, however it is built".into(),
+            ),
+            Self::ParamRefinementInvalid { .. } => Some(
+                "use `between(min, max)` on an `Int` parameter and `len_between(min, max)` on a `String` one, with min no greater than max".into(),
+            ),
+            Self::ArgumentOutOfRange { .. } => Some(
+                "pass a value the parameter's refinement admits; a computed value outside it stops the call when it starts".into(),
             ),
             Self::ImpossibleConflictCase { .. } => Some(
                 "remove the arm: each table write returns only the conflicts it can produce".into(),

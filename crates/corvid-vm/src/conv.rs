@@ -773,7 +773,12 @@ fn json_kind(j: &serde_json::Value) -> &'static str {
 /// decoding, building a record in code, assigning a field, and reading
 /// a table row.
 pub fn refinement_breach(field: &corvid_ir::IrField, value: &Value) -> Option<String> {
-    let refinement = field.refinement.as_ref()?;
+    refinement_breach_of(field.refinement.as_ref()?, value)
+}
+
+/// [`refinement_breach`] for any refinement, a parameter's included: the
+/// value as shown in a message when `refinement` refuses it.
+pub fn refinement_breach_of(refinement: &corvid_ast::Refinement, value: &Value) -> Option<String> {
     let admitted = match value {
         Value::Int(n) => refinement.admits_int(*n),
         Value::String(s) => refinement.admits_text(s),

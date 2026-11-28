@@ -165,6 +165,7 @@ fn benchmark_shaped_fixture_has_nonzero_dup_drop_reduction() {
             name: "s".into(),
             local_id: LocalId(0),
             ty: string_ty(),
+            refinement: None,
             span: span(),
         }],
         return_ty: Type::Int,

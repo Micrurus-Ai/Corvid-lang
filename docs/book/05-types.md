@@ -502,6 +502,28 @@ outside the program cannot hand on a value its column forbids. Native
 code checks refinements the same way and stops with the same message,
 so a refined program compiles with `corvid build`.
 
+### Refined parameters
+
+A parameter takes the refinement a field takes, after its type:
+
+```corvid
+tool fetch_page(limit: Int where between(1, 50)) -> String
+
+agent search(term: String where len_between(1, 200), limit: Int where between(1, 50)) -> String:
+    return fetch_page(limit)
+```
+
+A constant argument outside the refinement is a compile error at the
+call: `fetch_page(500)` says `` `limit` is 500, outside
+`between(1, 50)` ``. A computed argument is checked when the call
+starts, so a tool's implementation never sees an out-of-range value,
+and the call stops with the same message. That stop is a bug in the
+caller, not an outage, so `try … else` does not catch it.
+
+Compiled code does not check a refined parameter yet, so a program with
+one runs on the interpreter, and `corvid build` says so; native checks
+are next on the roadmap.
+
 ## Sum types (enums)
 
 Sum types declare "one of N shapes" — unit variants are bare

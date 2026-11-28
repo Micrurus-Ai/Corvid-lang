@@ -286,7 +286,15 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
   - [ ] U3. A connector `body file` streams an on-disk upload instead of reading it whole.
   - [ ] U4. Native code, with native serving.
 - [x] Run `verify_password` off the interpreter's thread: the interpreter now runs it on the blocking pool, as `hash_password` already did, and a test shows a single-threaded runtime keeps running other work during a check (it got no time at all before). Built 2026-11-26. Measuring it under B19's concurrent load stays with B19.
-- [ ] Refuse a literal `PasswordCost` below the OWASP floor and a literal `random_token` size outside 16..=1024 at compile time; both are run-time errors today. Proposed 2026-11-27 as [refinements on parameters](proposals/parameter-refinements.md), posted for frontend review (shared grammar); build after one working day without objection.
+- [ ] Refinements on parameters. [Proposal](proposals/parameter-refinements.md), item 5 of the frontend review brief, approved by frontend development.
+  - [ ] PR-2. Native code checks a refined parameter when a call starts, with the interpreter's message, which lifts the native refusal PR-1 left. With it, `std:crypto` declares `random_token`'s 16 to 1024 bytes and `PasswordCost`'s field bounds, moved here from PR-1 because a bound in `std` would otherwise keep every native program using it on the interpreter.
+  - [x] PR-1. Built 2026-11-28:
+    - **Syntax:** `param ::= IDENT ':' type_ref refinement? ownership?`, parsed by the field refinement parser, as frontend asked.
+    - **Checker:** the refinement must fit the parameter's type (`ParamRefinementInvalid`, E0403, sharing `refinement_problem` with fields), and a constant argument outside it is a compile error at the call (`ArgumentOutOfRange`, E0406, sharing `constant_outside` with refined fields' constants).
+    - **Interpreter:** a computed argument is checked when an agent, tool or prompt call starts, before a tool runs.
+    - **Native code:** refuses such a program by name until PR-2.
+  - [ ] PR-3. The contract, OpenAPI, the TypeScript client and the form binding carry the bound. Frontend asked that the form show the bound before submission, associate it with the control for assistive technology, and show a field-level error when violated.
+  - [ ] PR-4. Cost analysis bounds loops by a refined parameter.
   - [ ] PR-1. Parser and checker: refined parameters, literal arguments checked at compile time, computed ones on entry on the interpreter; `random_token` and `PasswordCost` declare their bounds.
   - [ ] PR-2. Native entry checks with the interpreter's message.
   - [ ] PR-3. Contract, OpenAPI, TypeScript client and form binding carry the bound.

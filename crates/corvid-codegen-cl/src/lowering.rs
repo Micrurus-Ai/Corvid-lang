@@ -64,6 +64,12 @@ pub fn lower_file(
     // A `match` arm that can raise an outage becomes a call to an agent
     // of its own, so the outage unwinds by ordinary returns
     // (recoverable failures TE-3).
+    if let Some((callable, param)) = crate::first_refined_parameter(ir) {
+        return Err(CodegenError::not_supported(
+            format!("parameter `{param}` of `{callable}` has a `where` refinement, which native code does not yet check when a call starts (parameter refinements PR-2)"),
+            Span::new(0, 0),
+        ));
+    }
     let lifted = crate::outage_lift::lift_failing_arms(ir);
     let ir = lifted.as_ref().unwrap_or(ir);
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();

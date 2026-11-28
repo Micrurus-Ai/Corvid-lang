@@ -224,6 +224,7 @@ impl<'ir> Interpreter<'ir> {
         span: Span,
     ) -> Result<ExprFlow, InterpError> {
         let prompt = self.prompt_by_id(def_id, callee_name, span)?;
+        Self::check_refined_arguments(&prompt.name, &prompt.params, arg_values, span)?;
         if let Some(mock) = self.mock_tools.get(&def_id).copied() {
             let value = self.eval_mock_body(mock, callee_name, arg_values.to_vec(), span).await?;
             let value = super::super::grounding::maybe_ground_prompt_result(prompt, callee_name, value);

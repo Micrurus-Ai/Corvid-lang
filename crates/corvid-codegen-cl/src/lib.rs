@@ -400,3 +400,19 @@ pub fn native_numeric_conversion(kind: corvid_types::BuiltinMethodKind) -> bool 
 pub fn dup_drop_pass_enabled() -> bool {
     std::env::var("CORVID_DUP_DROP_PASS").map(|v| v != "0" && v != "false").unwrap_or(true)
 }
+
+/// The first agent, tool or prompt parameter with a `where` refinement,
+/// as (callable, parameter). Native code does not yet check one when a
+/// call starts (parameter refinements PR-2), so native lowering and the
+/// tier picker refuse such a program by name rather than skip the check.
+pub fn first_refined_parameter(ir: &corvid_ir::IrFile) -> Option<(String, String)> {
+    let refined = |name: &str, params: &[corvid_ir::IrParam]| {
+        params.iter().find(|p| p.refinement.is_some()).map(|p| (name.to_string(), p.name.clone()))
+    };
+    ir.agents
+        .iter()
+        .find_map(|a| refined(&a.name, &a.params))
+        .or_else(|| ir.tools.iter().find_map(|t| refined(&t.name, &t.params)))
+        .or_else(|| ir.prompts.iter().find_map(|p| refined(&p.name, &p.params)))
+}
+

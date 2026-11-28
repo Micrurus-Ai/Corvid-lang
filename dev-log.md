@@ -2,6 +2,40 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Refinements on parameters (PR-1)
+
+Frontend development approved item 5 of the review brief, so PR-1 is
+built:
+- **Syntax:** a parameter takes the `where` refinement a field takes,
+  parsed between the type and the ownership annotation by the field's
+  own parser, as frontend asked.
+- **Fit:** the checker requires the refinement to fit the parameter's
+  type (E0403), with the rule fields use, now one function
+  (`refinement_problem`) for both.
+- **Constant arguments:** a constant argument outside the refinement is
+  a compile error at the call (E0406). It shares `constant_outside` with
+  the refined-field constant check, so `random_token(8)` cannot compile
+  once `std` declares the bound.
+- **Computed arguments:** the interpreter checks them when an agent,
+  tool or prompt call starts (`check_refined_arguments`, through
+  `conv::refinement_breach_of`), before a tool's implementation runs.
+  That stop is a bug in the caller, not an outage, so `try ... else`
+  does not catch it.
+
+Native code does not check yet, so a program with a refined parameter is
+refused by name natively (`first_refined_parameter`, shared by native
+lowering and the tier picker), not compiled without the check. Because
+of that, `std:crypto`'s bounds wait for PR-2: declaring them now would
+send every native program that uses `random_token` to the interpreter.
+
+Proof: checker tests cover three things. A constant out of range at an
+agent, a tool and a prompt fails to compile. A constant in range and a
+computed argument compile. A refinement that does not fit its type is
+refused, and a refinement combines with an ownership annotation. An
+interpreter test shows a computed argument stopping the call with the
+message, and the tool never called. A driver test covers the native
+refusal.
+
 ### Large uploads held on disk U1 and U2: memory bounded by the threshold, not the maximum
 
 Frontend development agreed on 2026-11-27 (review item 7), with one

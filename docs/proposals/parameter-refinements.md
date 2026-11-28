@@ -79,6 +79,10 @@ with its existing message.
 - **Assistant:** an action's tool schema carries `minimum`/`maximum`, so
   a model is told the range instead of discovering it from a refusal.
 
+## Status
+
+PR-1 built 2026-11-28, after frontend development approved (item 5 of the review brief). `std:crypto`'s bounds move to PR-2: declared now, they would keep every native program that uses `random_token` on the interpreter, since PR-1 refuses refined parameters natively until native code checks them.
+
 ## Slices
 
 1. PR-1. The parser and checker: refinements on parameters, literal

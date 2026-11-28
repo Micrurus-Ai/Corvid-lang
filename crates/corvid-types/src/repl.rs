@@ -104,6 +104,7 @@ fn synthetic_agent(locals: &[ReplLocal], stmts: Vec<Stmt>, symbols: &SymbolTable
         .map(|local| Param {
             name: Ident::new(local.name.clone(), span),
             ty: type_to_type_ref(&local.ty, symbols),
+            refinement: None,
             ownership: None,
             span,
         })

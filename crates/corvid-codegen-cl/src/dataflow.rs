@@ -173,6 +173,7 @@ mod tests {
                     name: format!("p{id}"),
                     local_id: LocalId(id),
                     ty,
+                    refinement: None,
                     span: span(),
                 })
                 .collect(),

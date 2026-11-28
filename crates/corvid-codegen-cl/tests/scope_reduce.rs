@@ -36,6 +36,7 @@ fn test_agent(body: Vec<IrStmt>) -> IrAgent {
             name: "s".into(),
             local_id: LocalId(0),
             ty: Type::String,
+            refinement: None,
             span: span(),
         }],
         return_ty: Type::Int,

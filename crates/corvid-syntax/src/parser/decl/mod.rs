@@ -649,11 +649,14 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident()?;
         self.expect(TokKind::Colon, "`:` between parameter name and type")?;
         let ty = self.parse_type_ref()?;
+        // The refinement a field takes, between the type and the ownership.
+        let refinement = self.parse_field_refinement()?;
         let ownership = self.parse_optional_ownership_annotation()?;
         let end = ownership.as_ref().map(|o| o.span).unwrap_or_else(|| ty.span());
         Ok(Param {
             name: Ident::new(name, name_span),
             ty,
+            refinement,
             ownership,
             span: start.merge(end),
         })

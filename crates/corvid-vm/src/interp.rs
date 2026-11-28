@@ -241,6 +241,32 @@ impl<'ir> Interpreter<'ir> {
         Ok(())
     }
 
+    /// Stop a call whose argument breaks its parameter's refinement,
+    /// before the callee runs: a tool's implementation never sees an
+    /// out-of-range value. The rule is `conv::refinement_breach_of`.
+    pub(crate) fn check_refined_arguments(
+        callable: &str,
+        params: &[IrParam],
+        args: &[Value],
+        span: Span,
+    ) -> Result<(), InterpError> {
+        for (param, value) in params.iter().zip(args) {
+            let Some(refinement) = &param.refinement else { continue };
+            if let Some(shown) = crate::conv::refinement_breach_of(refinement, value) {
+                return Err(InterpError::new(
+                    InterpErrorKind::ArgumentOutOfRange {
+                        callable: callable.to_string(),
+                        param: param.name.clone(),
+                        refinement: refinement.describe(),
+                        value: shown,
+                    },
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn bind_params(&mut self, agent: &'ir IrAgent, args: Vec<Value>) -> Result<(), InterpError> {
         if agent.params.len() != args.len() {
             return Err(InterpError::new(
@@ -253,6 +279,7 @@ impl<'ir> Interpreter<'ir> {
                 agent.span,
             ));
         }
+        Self::check_refined_arguments(&agent.name, &agent.params, &args, agent.span)?;
         for (p, v) in agent.params.iter().zip(args) {
             Self::check_grounded_argument(p, &v)?;
             self.env.bind(p.local_id, v.clone());
@@ -1788,6 +1815,7 @@ impl<'ir> Interpreter<'ir> {
                         span,
                     )
                 })?;
+                Self::check_refined_arguments(&tool.name, &tool.params, &arg_values, span)?;
 
                 // Replay reproduction of cancellation (slice 52d-3): a
                 // recorded-cancelled arm stops at exactly its recorded

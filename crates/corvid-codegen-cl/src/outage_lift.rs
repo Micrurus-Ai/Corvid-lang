@@ -181,7 +181,7 @@ impl Lifter<'_> {
         let span = body.span;
         let params: Vec<IrParam> = free
             .iter()
-            .map(|(local_id, (name, ty))| IrParam { name: name.clone(), local_id: *local_id, ty: ty.clone(), span })
+            .map(|(local_id, (name, ty))| IrParam { name: name.clone(), local_id: *local_id, ty: ty.clone(), refinement: None, span })
             .collect();
         let args = params
             .iter()

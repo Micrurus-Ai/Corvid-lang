@@ -130,8 +130,10 @@ This page is generated from the compiler's diagnostic kinds by
 | --- | --- | --- |
 | `E0401` | `TypeErrorKind::NonExhaustiveMatch` | A `match` doesn't cover every case of its scrutinee (slice 45i). |
 | `E0402` | `TypeErrorKind::RefinementOutOfRange` | A constant given to a refined field breaks its refinement: `Search("dune", 500)` where `limit: Int where between(1, 50)`. |
+| `E0403` | `TypeErrorKind::ParamRefinementInvalid` | A parameter refinement whose form does not fit the parameter's type, or whose bounds are inverted. |
 | `E0404` | `TypeErrorKind::RefinementInvalid` | Slice 50j — a field refinement whose form does not fit the field's type (or whose bounds are inverted). |
 | `E0405` | `TypeErrorKind::JsonKeyInvalid` | B01 — a type's JSON keys (`@json(key:)` / `@json(case:)`) are empty or name one key twice. |
+| `E0406` | `TypeErrorKind::ArgumentOutOfRange` | A constant argument outside its parameter's refinement: `random_token(8)` where `bytes: Int where between(16, 1024)`. |
 | `E0407` | `TypeErrorKind::NoJsonForm` | `T.from_json(text)` or `value.to_json()` on a type that has no public JSON form, or whose JSON form would drop a guarantee (`Grounded` provenance, `Tainted` marking). |
 | `E0408` | `TypeErrorKind::StructLiteralInvalid` | A malformed named struct literal or destructuring pattern (slice 45n): unknown/duplicate/missing fields, non-record targets, bare `..` in expression position. |
 | `E0409` | `TypeErrorKind::RetiredJsonDecoderTool` | A tool declared as `decode_<Type>_from_json(text: String) -> Result<T, String>`, the retired convention `T.from_json` replaced. The runtime no longer decodes JSON for it. |
