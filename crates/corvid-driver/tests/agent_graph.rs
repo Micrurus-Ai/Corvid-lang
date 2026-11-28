@@ -251,6 +251,8 @@ action archive_card(card: Int, by: Caller) -> Int requires permission("board.edi
 action rename_card(card: Int, by: Caller) -> Int requires permission("board.edit"):
     return card
 
+traces: none
+
 server board_app:
     live "/boards/{board}/cards" -> Card requires permission("board.view"):
         return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
