@@ -250,8 +250,11 @@ fn an_action_offered_to_assistants_says_how_and_why() {
 
 #[test]
 fn the_assistants_line_offers_only_what_runs_today() {
+    // `allow` runs since B11; like `confirm`, it needs someone who can sign in.
     let found = errors("action ping() -> String requires anyone:\n    assistants: allow \"Ping.\"\n    return \"pong\"\n");
-    assert!(found.iter().any(|m| m.contains("on-behalf-of authority (B11)")), "{found:#?}");
+    assert!(found.iter().any(|m| m.contains("no one can sign in")), "{found:#?}");
+    let allowed = errors(&format!("{IDENTITY}action ping() -> String requires anyone:\n    assistants: allow \"Ping.\"\n    return \"pong\"\n"));
+    assert!(allowed.is_empty(), "{allowed:#?}");
     let found = errors("action ping() -> String requires anyone:\n    assistants: never \"Ping.\"\n    return \"pong\"\n");
     assert!(found.iter().any(|m| m.contains("no `assistants:` line")), "{found:#?}");
     let found = errors("action ping() -> String requires anyone:\n    assistants: confirm \"\"\n    return \"pong\"\n");
