@@ -328,6 +328,36 @@ pub struct ContractVariant {
     pub ui: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+/// The bounds a `where` refinement gives a field or a parameter, in the
+/// JSON-Schema vocabulary (`minimum`/`maximum`, `minLength`/`maxLength`
+/// on the wire), so a form, a client and an assistant's tool schema
+/// validate from the same declaration. Fields and parameters both carry
+/// one, flattened, so their JSON is the same shape.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractBounds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u64>,
+}
+
+impl ContractBounds {
+    /// The bounds `refinement` states, or none.
+    pub fn of(refinement: Option<Refinement>) -> Self {
+        match refinement {
+            Some(Refinement::Between { min, max }) => Self { minimum: Some(min), maximum: Some(max), ..Self::default() },
+            Some(Refinement::LenBetween { min, max }) => {
+                Self { min_length: Some(min), max_length: Some(max), ..Self::default() }
+            }
+            None => Self::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractField {
     pub name: String,
@@ -337,14 +367,8 @@ pub struct ContractField {
     /// Value constraints from a `where` refinement (slice 50j),
     /// projected into the JSON-Schema vocabulary so frontends get
     /// client-side validation for free.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub minimum: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub maximum: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_length: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_length: Option<u64>,
+    #[serde(flatten)]
+    pub bounds: ContractBounds,
     /// Optional `@ui(...)` presentation hints (slice 51d). A SEPARATE
     /// channel from the constraints above: a frontend may ignore
     /// these display suggestions but never the semantic constraints.
@@ -551,6 +575,9 @@ pub struct ContractParam {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
+    /// The parameter's `where` refinement, as a field's is published.
+    #[serde(flatten)]
+    pub bounds: ContractBounds,
 }
 
 /// A public agent or prompt, with its AI-native capabilities.
@@ -1162,28 +1189,14 @@ fn ui_hints_map(hints: &[corvid_ast::UiHint]) -> std::collections::BTreeMap<Stri
 
 fn contract_field(f: &corvid_ast::Field, case: Option<corvid_ast::JsonCase>, names: &ContractTypes<'_>) -> ContractField {
     let key = corvid_ast::json_key(&f.name.name, f.json_key.as_deref(), case);
-    let mut field = ContractField {
+    let field = ContractField {
         json_key: (key != f.name.name).then_some(key),
         name: f.name.name.clone(),
         type_name: names.name(&f.ty),
-        minimum: None,
-        maximum: None,
-        min_length: None,
-        max_length: None,
+        bounds: ContractBounds::of(f.refinement),
         ui: ui_hints_map(&f.ui),
         upload: names.upload(&f.ty, f.upload.as_ref()),
     };
-    match f.refinement {
-        Some(Refinement::Between { min, max }) => {
-            field.minimum = Some(min);
-            field.maximum = Some(max);
-        }
-        Some(Refinement::LenBetween { min, max }) => {
-            field.min_length = Some(min);
-            field.max_length = Some(max);
-        }
-        None => {}
-    }
     field
 }
 
@@ -1305,6 +1318,8 @@ fn contract_path_params(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>
     r.path_params.iter().map(|p| ContractParam {
         name: p.name.name.clone(),
         type_name: names.name(&p.ty),
+        // A route's path segments take no refinement.
+        bounds: ContractBounds::default(),
     }).collect()
 }
 
@@ -1347,6 +1362,7 @@ fn contract_callable(
         .map(|p| ContractParam {
             name: p.name.name.clone(),
             type_name: names.name(&p.ty),
+            bounds: ContractBounds::of(p.refinement),
         })
         .collect::<Vec<_>>();
 
@@ -1696,13 +1712,41 @@ public agent support(question: String) -> Answer uses ask:
         assert_eq!(contract.contract_version, CONTRACT_VERSION);
         let ty = contract.types.iter().find(|t| t.name == "Answer").unwrap();
         let score = ty.fields.iter().find(|f| f.name == "score").unwrap();
-        assert_eq!(score.minimum, Some(0));
-        assert_eq!(score.maximum, Some(100));
+        assert_eq!(score.bounds.minimum, Some(0));
+        assert_eq!(score.bounds.maximum, Some(100));
 
         let agent = contract.agents.iter().find(|a| a.name == "support").unwrap();
         assert!(!agent.capabilities.streaming);
         assert_eq!(agent.capabilities.latency_class.as_deref(), Some("fast"));
         assert_eq!(agent.capabilities.max_cost_usd, Some(0.05));
+    }
+
+    /// A parameter's refinement is published as a field's is (parameter
+    /// refinements PR-3), so a form, a client and an assistant's tool
+    /// schema validate from the one declaration.
+    #[test]
+    fn an_actions_parameter_refinements_are_published_as_bounds() {
+        let contract = contract_for(
+            "\
+action search(query: String where len_between(1, 200), limit: Int where between(1, 50)) -> List<String> requires anyone:
+    return [query]
+",
+        );
+        let action = contract.actions.iter().find(|a| a.callable.name == "search").expect("action");
+        let bounds: Vec<(&str, ContractBounds)> =
+            action.callable.inputs.iter().map(|p| (p.name.as_str(), p.bounds.clone())).collect();
+        assert_eq!(
+            bounds,
+            vec![
+                ("query", ContractBounds { min_length: Some(1), max_length: Some(200), ..ContractBounds::default() }),
+                ("limit", ContractBounds { minimum: Some(1), maximum: Some(50), ..ContractBounds::default() }),
+            ]
+        );
+        let json = serde_json::to_value(&action.callable.inputs[1]).expect("json");
+        assert_eq!(json, serde_json::json!({"name": "limit", "type": "Int", "minimum": 1, "maximum": 50}));
+        let schema = crate::openapi::action_input_schema(action);
+        assert_eq!(schema["properties"]["limit"]["maximum"], 50);
+        assert_eq!(schema["properties"]["query"]["minLength"], 1);
     }
 
     #[test]

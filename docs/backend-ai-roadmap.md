@@ -298,7 +298,8 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
     - **Checker:** the refinement must fit the parameter's type (`ParamRefinementInvalid`, E0403, sharing `refinement_problem` with fields), and a constant argument outside it is a compile error at the call (`ArgumentOutOfRange`, E0406, sharing `constant_outside` with refined fields' constants).
     - **Interpreter:** a computed argument is checked when an agent, tool or prompt call starts, before a tool runs.
     - **Native code:** refuses such a program by name until PR-2.
-  - [ ] PR-3. The contract, OpenAPI, the TypeScript client and the form binding carry the bound. Frontend asked that the form show the bound before submission, associate it with the control for assistive technology, and show a field-level error when violated.
+  - [x] PR-3, backend half. The contract publishes a parameter's bounds as a field's (`ContractBounds`, now shared by `ContractField` and `ContractParam`, flattened, so the JSON keys are unchanged), and the OpenAPI input schema of an action, which the assistant endpoint's tool list also uses, carries `minimum`/`maximum` and `minLength`/`maxLength`. Done 2026-11-28. The TypeScript client validates no bounds for fields either, so nothing changes there.
+  - [ ] PR-3, frontend half (frontend development): a form bound to an action shows the bound before submission, associates it with the control for assistive technology, and shows a field-level error when violated, reading the contract's parameter bounds.
   - [ ] PR-4. Cost analysis bounds loops by a refined parameter.
   - [ ] PR-1. Parser and checker: refined parameters, literal arguments checked at compile time, computed ones on entry on the interpreter; `random_token` and `PasswordCost` declare their bounds.
   - [ ] PR-2. Native entry checks with the interpreter's message.

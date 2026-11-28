@@ -2,6 +2,26 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Parameter bounds reach the contract (PR-3, backend half)
+
+The contract carried a refined field's bounds but not a parameter's. A
+new `ContractBounds` holds the four, built once from a refinement
+(`ContractBounds::of`), and both `ContractField` and `ContractParam`
+flatten it, so a field's JSON keys are unchanged. OpenAPI writes a
+parameter's bounds with the helper a field's uses (`write_bounds`), so an
+action's input schema says `minimum`/`maximum` and
+`minLength`/`maxLength`. The assistant endpoint's tool list reads the
+same schema, so an assistant is told the range instead of discovering it
+from a refusal.
+
+The form binding is frontend development's, and is filed for them with
+their answer's requirements. The TypeScript client validates no field
+bounds, so nothing changed there.
+
+Proof: a contract test publishes an action's `len_between` and
+`between` parameters as bounds, checks the serialized parameter's JSON,
+and reads them back from the OpenAPI input schema.
+
 ### Native code checks refined parameters (PR-2)
 
 Native code now checks a refined parameter when a call starts:

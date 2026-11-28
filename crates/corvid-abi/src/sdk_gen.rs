@@ -183,7 +183,7 @@ public agent full() -> BoardError:
         );
         let error = c.types.iter().find(|t| t.name == "BoardError").expect("published");
         let limit = &error.variants[0].fields[0];
-        assert_eq!((limit.minimum, limit.maximum), (Some(1), Some(50)));
+        assert_eq!((limit.bounds.minimum, limit.bounds.maximum), (Some(1), Some(50)));
     }
 
     #[test]

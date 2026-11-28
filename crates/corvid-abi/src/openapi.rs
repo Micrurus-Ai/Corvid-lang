@@ -260,7 +260,7 @@ pub fn action_input_schema(action: &ContractAction) -> Value {
                 .callable
                 .inputs
                 .iter()
-                .map(|p| (p.name.clone(), schema_for_type_name(&p.type_name)))
+                .map(|p| (p.name.clone(), schema_for_param(p)))
                 .collect();
             let required: Vec<&str> = action.callable.inputs.iter().map(|p| p.name.as_str()).collect();
             json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false })
@@ -360,21 +360,34 @@ fn schema_for_field(field: &ContractField) -> Value {
         Some(s) => s,
         None => return schema_for_type_name(&field.type_name),
     };
-    if let Value::Object(map) = &mut schema {
-        if let Some(min) = field.minimum {
+    write_bounds(&mut schema, &field.bounds);
+    schema
+}
+
+/// A parameter's schema: its type's, with its refinement's bounds, as a
+/// field's (`schema_for_field`).
+fn schema_for_param(param: &crate::app_contract::ContractParam) -> Value {
+    let mut schema = scalar_schema(&param.type_name).unwrap_or_else(|| schema_for_type_name(&param.type_name));
+    write_bounds(&mut schema, &param.bounds);
+    schema
+}
+
+/// Add a refinement's bounds to a scalar schema, in JSON Schema's names.
+fn write_bounds(schema: &mut Value, bounds: &crate::app_contract::ContractBounds) {
+    if let Value::Object(map) = schema {
+        if let Some(min) = bounds.minimum {
             map.insert("minimum".into(), json!(min));
         }
-        if let Some(max) = field.maximum {
+        if let Some(max) = bounds.maximum {
             map.insert("maximum".into(), json!(max));
         }
-        if let Some(min) = field.min_length {
+        if let Some(min) = bounds.min_length {
             map.insert("minLength".into(), json!(min));
         }
-        if let Some(max) = field.max_length {
+        if let Some(max) = bounds.max_length {
             map.insert("maxLength".into(), json!(max));
         }
     }
-    schema
 }
 
 fn schema_for_upload(upload: &ContractUpload) -> Value {
@@ -575,10 +588,7 @@ mod tests {
                     ContractField {
                         name: "amount".into(),
                         type_name: "Float".into(),
-                        minimum: None,
-                        maximum: None,
-                        min_length: None,
-                        max_length: None,
+                        bounds: Default::default(),
                         ui: Default::default(),
                         upload: None,
                         json_key: None,
@@ -586,10 +596,7 @@ mod tests {
                     ContractField {
                         name: "explanation".into(),
                         type_name: "String".into(),
-                        minimum: None,
-                        maximum: None,
-                        min_length: Some(20),
-                        max_length: Some(500),
+                        bounds: crate::app_contract::ContractBounds { min_length: Some(20), max_length: Some(500), ..Default::default() },
                         ui: Default::default(),
                         upload: None,
                         json_key: None,
@@ -616,7 +623,7 @@ mod tests {
             live: vec![],
             agents: vec![ContractCallable {
                 name: "chat".into(),
-                inputs: vec![ContractParam { name: "m".into(), type_name: "String".into() }],
+                inputs: vec![ContractParam { name: "m".into(), type_name: "String".into(), bounds: Default::default() }],
                 output_type: "Stream<String>".into(),
                 capabilities: Capabilities::default(),
             }],
@@ -697,10 +704,7 @@ mod tests {
                 json_key: None,
                 name: "file".into(),
                 type_name: "Upload<Pdf>".into(),
-                minimum: None,
-                maximum: None,
-                min_length: None,
-                max_length: None,
+                bounds: Default::default(),
                 ui: Default::default(),
                 upload: Some(ContractUpload {
                     format: "Pdf".into(),
@@ -782,10 +786,7 @@ mod tests {
                 json_key: None,
                 name: "id".into(),
                 type_name: "String".into(),
-                minimum: None,
-                maximum: None,
-                min_length: None,
-                max_length: None,
+                bounds: Default::default(),
                 ui: Default::default(),
                 upload: None,
             }],
