@@ -372,96 +372,6 @@ impl ReplaySession {
                     saw_completion = true;
                     i += 1;
                 }
-                TraceEvent::ModelSelected {
-                    run_id: event_run_id,
-                    ..
-                } => {
-                    ensure_run_id(&path, &run_id, event_run_id)?;
-                    i += 1;
-                }
-                TraceEvent::ProgressiveEscalation {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ProgressiveExhausted {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::AbVariantChosen {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::EnsembleVote {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::AdversarialPipelineCompleted {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::AdversarialContradiction {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ApprovalDecision {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ApprovalTokenIssued {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ApprovalScopeViolation {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HumanInputRequest {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HumanInputResponse {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HumanChoiceRequest {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HumanChoiceResponse {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HostEvent {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::HttpExchange {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::DbTiming {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::AgentStarted {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::AgentFinished {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::PromptCache {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ProvenanceEdge {
-                    run_id: event_run_id,
-                    ..
-                } => {
-                    ensure_run_id(&path, &run_id, event_run_id)?;
-                    i += 1;
-                }
                 TraceEvent::StreamUpgrade {
                     ts_ms,
                     run_id: event_run_id,
@@ -482,21 +392,6 @@ impl ReplaySession {
                     });
                     i += 1;
                 }
-                TraceEvent::SchemaHeader {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::SeedRead {
-                    run_id: event_run_id,
-                    ..
-                }
-                | TraceEvent::ClockRead {
-                    run_id: event_run_id,
-                    ..
-                } => {
-                    ensure_run_id(&path, &run_id, event_run_id)?;
-                    i += 1;
-                }
                 TraceEvent::ToolResult { .. }
                 | TraceEvent::LlmResult { .. }
                 | TraceEvent::ApprovalResponse { .. } => {
@@ -504,6 +399,13 @@ impl ReplaySession {
                         path,
                         message: "trace contains an unpaired result/response event".into(),
                     });
+                }
+                // Every other event takes no step of its own here; it still
+                // belongs to this run. `run_id()` reads it for each kind, so a
+                // new kind needs no arm.
+                other => {
+                    ensure_run_id(&path, &run_id, other.run_id())?;
+                    i += 1;
                 }
             }
         }
@@ -758,81 +660,11 @@ fn ensure_run_id(path: &Path, expected: &str, got: &str) -> Result<(), ReplayLoa
 }
 
 fn first_ts(events: &[TraceEvent]) -> u64 {
-    match events.first() {
-        Some(TraceEvent::SchemaHeader { ts_ms, .. })
-        | Some(TraceEvent::RunStarted { ts_ms, .. })
-        | Some(TraceEvent::RunCompleted { ts_ms, .. })
-        | Some(TraceEvent::ToolCall { ts_ms, .. })
-        | Some(TraceEvent::ToolResult { ts_ms, .. })
-        | Some(TraceEvent::LlmCall { ts_ms, .. })
-        | Some(TraceEvent::LlmResult { ts_ms, .. })
-        | Some(TraceEvent::PromptCache { ts_ms, .. })
-        | Some(TraceEvent::ApprovalRequest { ts_ms, .. })
-        | Some(TraceEvent::ApprovalDecision { ts_ms, .. })
-        | Some(TraceEvent::ApprovalResponse { ts_ms, .. })
-        | Some(TraceEvent::ApprovalTokenIssued { ts_ms, .. })
-        | Some(TraceEvent::ApprovalScopeViolation { ts_ms, .. })
-        | Some(TraceEvent::HumanInputRequest { ts_ms, .. })
-        | Some(TraceEvent::HumanInputResponse { ts_ms, .. })
-        | Some(TraceEvent::HumanChoiceRequest { ts_ms, .. })
-        | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
-        | Some(TraceEvent::HostEvent { ts_ms, .. })
-        | Some(TraceEvent::HttpExchange { ts_ms, .. })
-        | Some(TraceEvent::DbTiming { ts_ms, .. })
-        | Some(TraceEvent::AgentStarted { ts_ms, .. })
-        | Some(TraceEvent::AgentFinished { ts_ms, .. })
-        | Some(TraceEvent::SeedRead { ts_ms, .. })
-        | Some(TraceEvent::ClockRead { ts_ms, .. })
-        | Some(TraceEvent::ModelSelected { ts_ms, .. })
-        | Some(TraceEvent::ProgressiveEscalation { ts_ms, .. })
-        | Some(TraceEvent::ProgressiveExhausted { ts_ms, .. })
-        | Some(TraceEvent::AbVariantChosen { ts_ms, .. })
-        | Some(TraceEvent::EnsembleVote { ts_ms, .. })
-        | Some(TraceEvent::AdversarialPipelineCompleted { ts_ms, .. })
-        | Some(TraceEvent::AdversarialContradiction { ts_ms, .. })
-        | Some(TraceEvent::StreamUpgrade { ts_ms, .. })
-        | Some(TraceEvent::ProvenanceEdge { ts_ms, .. }) => *ts_ms,
-        None => 0,
-    }
+    events.first().map(TraceEvent::ts_ms).unwrap_or(0)
 }
 
 fn last_ts(events: &[TraceEvent]) -> u64 {
-    match events.last() {
-        Some(TraceEvent::SchemaHeader { ts_ms, .. })
-        | Some(TraceEvent::RunStarted { ts_ms, .. })
-        | Some(TraceEvent::RunCompleted { ts_ms, .. })
-        | Some(TraceEvent::ToolCall { ts_ms, .. })
-        | Some(TraceEvent::ToolResult { ts_ms, .. })
-        | Some(TraceEvent::LlmCall { ts_ms, .. })
-        | Some(TraceEvent::LlmResult { ts_ms, .. })
-        | Some(TraceEvent::PromptCache { ts_ms, .. })
-        | Some(TraceEvent::ApprovalRequest { ts_ms, .. })
-        | Some(TraceEvent::ApprovalDecision { ts_ms, .. })
-        | Some(TraceEvent::ApprovalResponse { ts_ms, .. })
-        | Some(TraceEvent::ApprovalTokenIssued { ts_ms, .. })
-        | Some(TraceEvent::ApprovalScopeViolation { ts_ms, .. })
-        | Some(TraceEvent::HumanInputRequest { ts_ms, .. })
-        | Some(TraceEvent::HumanInputResponse { ts_ms, .. })
-        | Some(TraceEvent::HumanChoiceRequest { ts_ms, .. })
-        | Some(TraceEvent::HumanChoiceResponse { ts_ms, .. })
-        | Some(TraceEvent::HostEvent { ts_ms, .. })
-        | Some(TraceEvent::HttpExchange { ts_ms, .. })
-        | Some(TraceEvent::DbTiming { ts_ms, .. })
-        | Some(TraceEvent::AgentStarted { ts_ms, .. })
-        | Some(TraceEvent::AgentFinished { ts_ms, .. })
-        | Some(TraceEvent::SeedRead { ts_ms, .. })
-        | Some(TraceEvent::ClockRead { ts_ms, .. })
-        | Some(TraceEvent::ModelSelected { ts_ms, .. })
-        | Some(TraceEvent::ProgressiveEscalation { ts_ms, .. })
-        | Some(TraceEvent::ProgressiveExhausted { ts_ms, .. })
-        | Some(TraceEvent::AbVariantChosen { ts_ms, .. })
-        | Some(TraceEvent::EnsembleVote { ts_ms, .. })
-        | Some(TraceEvent::AdversarialPipelineCompleted { ts_ms, .. })
-        | Some(TraceEvent::AdversarialContradiction { ts_ms, .. })
-        | Some(TraceEvent::StreamUpgrade { ts_ms, .. })
-        | Some(TraceEvent::ProvenanceEdge { ts_ms, .. }) => *ts_ms,
-        None => 0,
-    }
+    events.last().map(TraceEvent::ts_ms).unwrap_or(0)
 }
 
 fn render_json_array(values: &[Value]) -> String {
@@ -855,5 +687,61 @@ fn render_window(start_ts_ms: u64, end_ts_ms: Option<u64>) -> String {
         }
         Some(end_ts_ms) => format!("{start_ts_ms} -> {end_ts_ms}"),
         None => format!("{start_ts_ms} -> <missing>"),
+    }
+}
+
+#[cfg(test)]
+mod run_id_tests {
+    use super::*;
+
+    fn trace_file(events: &[TraceEvent]) -> (tempdir_lite::Dir, PathBuf) {
+        let dir = tempdir_lite::Dir::new();
+        let path = dir.0.join("trace.jsonl");
+        let body: String = events.iter().map(|e| serde_json::to_string(e).unwrap() + "\n").collect();
+        std::fs::write(&path, body).unwrap();
+        (dir, path)
+    }
+
+    /// An event that takes no replay step still belongs to the run: one
+    /// from another run is refused, whatever its kind, through
+    /// `TraceEvent::run_id()`, so a new kind needs no arm here.
+    #[test]
+    fn an_event_from_another_run_is_refused_whatever_its_kind() {
+        let started = TraceEvent::RunStarted { ts_ms: 1, run_id: "a".into(), agent: "main".into(), args: vec![] };
+        let host = |run_id: &str| TraceEvent::HostEvent {
+            ts_ms: 2,
+            run_id: run_id.into(),
+            name: "std.secrets.read".into(),
+            payload: serde_json::json!({}),
+        };
+        let (_dir, path) = trace_file(&[started.clone(), host("a")]);
+        let session = ReplaySession::load(&path).expect("one run loads");
+        assert_eq!((first_ts(&[started.clone()]), last_ts(&[started.clone(), host("a")])), (1, 2));
+        drop(session);
+
+        let (_dir, path) = trace_file(&[started, host("b")]);
+        let error = ReplaySession::load(&path).expect_err("a second run is refused");
+        assert!(error.to_string().contains("mixed run ids in one replay file: `a` vs `b`"), "{error}");
+    }
+
+    /// A temporary directory removed on drop, without a test dependency.
+    mod tempdir_lite {
+        pub struct Dir(pub std::path::PathBuf);
+        impl Dir {
+            pub fn new() -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "corvid-repl-replay-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+                ));
+                std::fs::create_dir_all(&path).unwrap();
+                Dir(path)
+            }
+        }
+        impl Drop for Dir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
     }
 }

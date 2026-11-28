@@ -2,6 +2,18 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### The REPL's replay reads run ids and timestamps through the accessors
+
+`corvid-repl`'s `replay.rs` listed every trace event kind three times:
+- once to check each event's run id;
+- twice to read the first and last timestamps.
+
+These were copies of `TraceEvent::run_id()` and `ts_ms()`, so each new
+kind (L2's `DbTiming`) had to be added by hand. The run-id arms are now
+one catch-all after the arms that build replay steps, and the timestamp
+helpers call `ts_ms()`. The file shrinks from 859 lines to 691. A test
+checks that an event from another run is refused whatever its kind.
+
 ### `@budget` bounds loops by refined parameters (PR-4)
 
 The cost analysis bounded a loop only by a list literal or a query's
