@@ -1,10 +1,22 @@
 use crate::errors::RuntimeError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SecretRead {
     pub name: String,
     pub present: bool,
     pub value: Option<String>,
+}
+
+/// Never prints the value: a `{:?}` in a log line or a panic message must
+/// not show an environment secret.
+impl std::fmt::Debug for SecretRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretRead")
+            .field("name", &self.name)
+            .field("present", &self.present)
+            .field("value", &self.value.as_ref().map(|_| corvid_crypto::SECRET_DISPLAY))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

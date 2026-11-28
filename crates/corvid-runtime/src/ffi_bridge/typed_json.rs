@@ -201,6 +201,12 @@ pub unsafe extern "C" fn corvid_runtime_call(
         },
     };
     runtime.record_connector_call(&name, true);
+    if accepts_secrets {
+        // A secret tool's answer held the text the decoded `Secret` now
+        // holds; wipe this copy.
+        let mut answer = answer;
+        crate::wipe_json(&mut answer);
+    }
     unsafe { payload.write(decoded.bits) };
     RESULT_TAG_OK
 }

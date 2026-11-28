@@ -67,7 +67,12 @@ pub(super) async fn hash_password(args: &[Value]) -> Result<Value, RuntimeError>
     };
     let cost = corvid_crypto::PasswordCost::new(field("memory_kib")?, field("iterations")?, field("lanes")?)
         .map_err(failed)?;
-    let hashed = tokio::task::spawn_blocking(move || corvid_crypto::hash_password(password.as_bytes(), cost))
+    let hashed = tokio::task::spawn_blocking(move || {
+        let mut password = password;
+        let hashed = corvid_crypto::hash_password(password.as_bytes(), cost);
+        corvid_crypto::wipe_text(&mut password);
+        hashed
+    })
         .await
         .map_err(|problem| failed(format!("the hashing task stopped: {problem}")))?
         .map_err(failed)?;

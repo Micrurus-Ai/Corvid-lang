@@ -258,7 +258,19 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] A form field bound to a `Secret` as a password input that is masked, never echoed and never prefilled, with password-manager hints: the contract leaves secret fields out today; the frontend binding needs a contract marker agreed with the frontend roadmap.
 - [ ] A `Secret` table column, for a value the program must use again: it needs an encrypted column (B09). Until then the checker refuses it and points at `hash_password(...)` for values that are only checked. Proposed 2026-11-27 as [keys and encryption at rest](proposals/encryption-at-rest.md): a `Secret` column becomes legal when its database declares `encryption: key(secret("..."))`, stored with XChaCha20-Poly1305 bound to its table, column and row. Item 8 of the frontend review brief; slices K1 to K6 after the review window. K1, the crypto primitive, has no grammar and can start now.
 - [x] Zero a secret's memory when the last reference drops: `corvid_crypto::Secret` holds its bytes in an `Arc<[u8]>`, freed but not wiped. Done 2026-11-27: the bytes sit in `Arc<zeroize::Zeroizing<Vec<u8>>>`, overwritten when the last clone drops; a test asserts at compile time that the storage is `ZeroizeOnDrop`.
-- [ ] Copies of a secret's text outside `Secret` are not wiped: the `String` a tool receives from `expose_text`, the environment value `secret(name)` read, and request-body text before it becomes a `Secret`. Stronger: hand tools a `Zeroizing<String>` and wipe intermediate buffers at each boundary where a secret enters or leaves.
+- [ ] Wipe the last copies of a secret's text outside `Secret`. Two remain:
+  - the argument values a Rust tool closure is handed, which it owns;
+  - the JSON text native code encodes in a Corvid string to reveal a secret to a tool of the program's own, released like any string.
+
+  Stronger: hand tool implementations a type that wipes on drop, and have the native revealed-argument encoder write into a buffer the runtime clears after the call. Request bodies carry no secret yet (item below).
+- [x] Wipe the runtime's own copies of a secret's text. Done 2026-11-28. Wiped now:
+  - `secret(name)`'s text, which the interpreter's `Secret` takes without a copy (`Secret::from_text`) and native decoding wipes;
+  - the revealed arguments (`RevealedToolArguments` wipes on drop);
+  - a host tool's serialized and C argument buffers;
+  - the password `hash_password` hashed;
+  - the trace's copy of a result, before `<redacted>` replaces it.
+
+  Found and fixed: `SecretRead` derived `Debug`, so `{:?}` printed an environment secret in full; it now prints `<secret>`. The cryptography reference also still said native code could not pass a secret to a tool of its own, which it has since B2b.
 - [ ] A reusable webhook verifier for providers (header parsing, a declared timestamp tolerance against the clock, several signatures while a key rolls), with raw request bodies in routes: B16's verified webhooks. The acceptance test parses the headers with string methods. [Proposal](proposals/verified-webhooks.md) posted for review 2026-11-26: a `verified stripe(secret: "...", within: 5 minutes)` route clause checked before the body is decoded (slices W1 to W3).
 - [ ] Show a newly issued token to its owner once in a route response, as a "copy your new key" page needs (the proposal's `reveal_once()`). A route cannot return a secret today, so a key is delivered through a tool that takes a `Secret`. It needs the response written without being recorded, a contract marker so the client shows the value once and never caches it, and the frontend binding; agree it with the frontend roadmap.
 - [ ] A route request body field of type `Secret`, so a login form's password reaches `verify_password` without being recorded: the checker refuses a secret in a route body today. Pairs with the masked password input above.

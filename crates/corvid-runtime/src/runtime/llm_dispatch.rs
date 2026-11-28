@@ -2010,6 +2010,8 @@ fn redact_secret_result_for_trace(tool: &str, result: &serde_json::Value) -> ser
     let mut recorded = result.clone();
     if is_secret_value_read(tool) {
         if let Some(ok) = recorded.get_mut("ok") {
+            // The clone held the text; wipe it before the marker replaces it.
+            crate::wipe_json(ok);
             *ok = serde_json::json!(crate::REDACTED_SECRET);
         }
         return recorded;

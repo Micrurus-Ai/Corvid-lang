@@ -51,6 +51,13 @@ impl Secret {
         Secret { bytes: Arc::new(Zeroizing::new(text.as_bytes().to_vec())), is_text: true }
     }
 
+    /// A secret taking `text`'s own buffer, so no copy of the text is
+    /// left behind to linger unwiped. Prefer this whenever the caller
+    /// owns the text.
+    pub fn from_text(text: String) -> Self {
+        Secret { bytes: Arc::new(Zeroizing::new(text.into_bytes())), is_text: true }
+    }
+
     /// The secret's text, for the one caller that must hand it on: a
     /// tool implementation receiving its arguments. Never format it.
     /// `None` for a key decoded by [`Secret::decode_base64_after`],
@@ -130,6 +137,25 @@ impl fmt::Display for Secret {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_secret_from_owned_text_is_the_same_secret_and_takes_the_buffer() {
+        let text = String::from("correct horse");
+        let pointer = text.as_ptr();
+        let secret = Secret::from_text(text);
+        assert_eq!(secret, Secret::new("correct horse"));
+        assert_eq!(secret.expose_text().map(str::as_ptr), Some(pointer), "no copy is made");
+    }
+
+    #[test]
+    fn wiping_empties_the_text_and_the_bytes() {
+        let mut text = String::from("hunter2");
+        crate::wipe_text(&mut text);
+        assert!(text.is_empty());
+        let mut bytes = b"hunter2".to_vec();
+        crate::wipe_bytes(&mut bytes);
+        assert!(bytes.is_empty());
+    }
+
     use super::*;
 
     #[test]

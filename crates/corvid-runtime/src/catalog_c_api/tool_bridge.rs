@@ -195,9 +195,11 @@ pub fn call_registered_host_tool(name: &str, args: &[serde_json::Value]) -> Resu
     if !host_tool_registered(name) {
         return Err(crate::RuntimeError::UnknownTool(name.to_string()));
     }
-    let args_json = serde_json::to_string(args).map_err(|e| failed(format!("its arguments are not JSON: {e}")))?;
+    let mut args_json = serde_json::to_string(args).map_err(|e| failed(format!("its arguments are not JSON: {e}")))?;
     REPORTED_FAILURE.with(|slot| slot.borrow_mut().take());
     let answer = dispatch_registered_tool(name, &args_json);
+    // The arguments may hold a revealed secret; wipe this serialized copy.
+    corvid_crypto::wipe_text(&mut args_json);
     if let Some(message) = REPORTED_FAILURE.with(|slot| slot.borrow_mut().take()) {
         return Err(failed(message));
     }
@@ -235,6 +237,8 @@ fn dispatch_registered_tool(name: &str, args_json: &str) -> Option<String> {
             user_data as *mut c_void,
         )
     };
+    // The C copy of the arguments may hold a revealed secret: wipe it.
+    corvid_crypto::wipe_bytes(&mut args_c.into_bytes());
     if result_ptr.is_null() {
         return None;
     }

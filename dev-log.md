@@ -2,6 +2,42 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Secrets' copies are wiped at the runtime's boundaries
+
+A `Secret` wiped its own bytes, but the copies of its text the runtime
+made on the way did not. Each now is:
+- **`secret(name)`:** the interpreter's `Secret` takes the text's own
+  buffer through the new `Secret::from_text`, with no copy, and native
+  decoding wipes the answer JSON.
+- **Revealed tool arguments:** `RevealedToolArguments` wipes its texts
+  and its revealed JSON on drop.
+- **Host tools:** the serialized arguments and their C copy are wiped
+  after the call.
+- **`hash_password`:** the password is wiped after hashing.
+- **The trace:** a result's text in the trace copy is wiped before
+  `<redacted>` replaces it.
+
+The wiping is `corvid_crypto::wipe_text` and `wipe_bytes`, zeroize's,
+next to `Secret`, and `corvid_runtime::wipe_json` for JSON values.
+
+Found and fixed:
+- `SecretRead` derived `Debug`, so `{:?}` printed an environment secret
+  in full; it now prints `<secret>`.
+- The cryptography reference's status line and its "Not yet" section
+  still said native code could not pass a secret to a tool of its own,
+  which it has since B2b.
+
+Two copies remain, filed:
+- the arguments a Rust tool closure owns;
+- the text native code encodes to reveal a secret to a tool.
+
+Proof:
+- `from_text` takes the buffer, checked by pointer;
+- the wiping helpers empty text and bytes;
+- `wipe_json` leaves no secret in nested strings or keys;
+- `SecretRead`'s debug output names the variable but not the value;
+- the secret suites still pass on both tiers.
+
 ### A Rust `#[tool]` can fail
 
 The `#[tool]` macro accepted only an `async fn` returning `T`, so a tool

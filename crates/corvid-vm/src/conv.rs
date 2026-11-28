@@ -471,7 +471,7 @@ pub fn json_to_value(
 /// whose recorded results carry `<redacted>` in place of the text.
 pub fn secret_tool_result_to_value(json: serde_json::Value, return_ty: &Type) -> Result<Value, ConvError> {
     match (return_ty, json) {
-        (Type::Secret, serde_json::Value::String(text)) => Ok(Value::Secret(corvid_crypto::Secret::new(&text))),
+        (Type::Secret, serde_json::Value::String(text)) => Ok(Value::Secret(corvid_crypto::Secret::from_text(text))),
         (Type::Result(ok, err), json) if **ok == Type::Secret && **err == Type::String => secret_read_result_to_value(json),
         (other, _) => Err(ConvError::TypeMismatch {
             expected: format!("{} (a tool that produces a secret)", other.display_name()),
@@ -481,15 +481,16 @@ pub fn secret_tool_result_to_value(json: serde_json::Value, return_ty: &Type) ->
 }
 
 /// The `Result<Secret, String>` of `secret(name)`.
-fn secret_read_result_to_value(json: serde_json::Value) -> Result<Value, ConvError> {
+fn secret_read_result_to_value(mut json: serde_json::Value) -> Result<Value, ConvError> {
     let mismatch = || ConvError::TypeMismatch {
         expected: "Result<Secret, String>".into(),
         got: "a result that is not `secret(name)`'s".into(),
     };
     match json.get("tag").and_then(|tag| tag.as_str()) {
-        Some("ok") => match json.get("ok") {
+        // The secret takes the text's own buffer, so no copy lingers.
+        Some("ok") => match json.get_mut("ok").map(std::mem::take) {
             Some(serde_json::Value::String(text)) => {
-                Ok(Value::ResultOk(BoxedValue::new(Value::Secret(corvid_crypto::Secret::new(text.as_str())))))
+                Ok(Value::ResultOk(BoxedValue::new(Value::Secret(corvid_crypto::Secret::from_text(text)))))
             }
             _ => Err(mismatch()),
         },

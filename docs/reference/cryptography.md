@@ -2,7 +2,7 @@
 
 `Bytes` holds a byte string: a digest, a MAC tag, a signature, a key or a binary payload. The SHA-2 hashes, HMAC and Ed25519 signature verification are methods on it. Every `Bytes` method is pure: it runs in `@deterministic` agents, is not traced, and gives the same result on every run and in replay. `Secret` holds sensitive text, such as a signing key, a password or an API token, that the program can use but never reveal; see [Secrets](#secrets). `std/crypto` issues random tokens as secrets and hashes passwords with Argon2id at a declared cost; see [Random tokens](#random-tokens) and [Passwords](#passwords).
 
-Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. `Bytes`, hashing, HMAC with a `Bytes` key and Ed25519 verification also compile to native code, and so does everything a program does with a `Secret` except pass it to a tool of its own: reading, holding and comparing one, an HMAC keyed by one, `verify_password`, `decode_base64_after`, random tokens and `hash_password` (see [Native code](#native-code)). Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
+Status: B04 in progress. `Bytes`, SHA-2 hashing, HMAC, Ed25519 verification, `Secret`, random tokens and password hashing run on the interpreter. `Bytes`, hashing, HMAC with a `Bytes` key and Ed25519 verification also compile to native code, and so does everything a program does with a `Secret`: reading, holding and comparing one, an HMAC keyed by one, `verify_password`, `decode_base64_after`, random tokens, `hash_password`, and passing one to a tool of the program's own (see [Native code](#native-code)). Ed25519 signing is not offered yet. [Proposal](../proposals/cryptography.md)
 
 ```corvid
 agent content_hash(body: String) -> String:
@@ -228,6 +228,14 @@ agent token_matches(supplied: Secret) -> Result<Bool, String>:
 
 Displaying a secret, in a run's printed result, the REPL, a debugger or a Rust panic, shows `<secret>`.
 
+A secret's memory is wiped. A `Secret` holds its bytes in a buffer that is overwritten with zeros when the last copy drops. The runtime also wipes the copies of the text it makes on the way:
+- the value `secret(name)` read, once the `Secret` takes it;
+- the arguments revealed to a tool, and their serialized form for a host tool, once the call returns;
+- the password `hash_password` hashed, once it is hashed;
+- the trace's copy of a result, before `<redacted>` replaces it.
+
+Two copies are not wiped yet: the arguments a tool's own implementation was handed, which are the implementation's, and the text native code encodes to pass a secret to a tool of its own (see [Not yet](#not-yet)).
+
 ### What the compiler refuses
 
 Each of these is a compile error that names the place and says what to write instead.
@@ -285,7 +293,7 @@ The application contract publishes no secret. A public type's field that holds a
 
 ### Not yet
 
-Native code cannot yet pass a secret to a tool of the program's own (see [Native code](#native-code)). Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
+Two copies of a secret's text are not wiped yet. One is the arguments a tool's implementation was handed, which are the implementation's to wipe. The other is the text native code encodes to hand a secret to a tool of the program's own, which is released like any string; it will be wiped when native code builds that text in a buffer it clears. Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
 
 ## Random tokens
 

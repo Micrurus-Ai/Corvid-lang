@@ -132,6 +132,37 @@ impl RevealedToolArguments {
     }
 }
 
+/// Wipe the revealed texts when the arguments are dropped, so the
+/// secrets they held do not linger in freed memory. The tool's own copy
+/// of its arguments is the tool's.
+impl Drop for RevealedToolArguments {
+    fn drop(&mut self) {
+        for text in &mut self.texts {
+            corvid_crypto::wipe_text(text);
+        }
+        for arg in &mut self.args {
+            wipe_json(arg);
+        }
+    }
+}
+
+/// Overwrite every string in `value` with zeros, keys included, before
+/// a value that held a secret's text is dropped.
+pub fn wipe_json(value: &mut J) {
+    match value {
+        J::String(text) => corvid_crypto::wipe_text(text),
+        J::Array(items) => items.iter_mut().for_each(wipe_json),
+        J::Object(fields) => {
+            let mut entries: Vec<(String, J)> = std::mem::take(fields).into_iter().collect();
+            for (key, item) in &mut entries {
+                corvid_crypto::wipe_text(key);
+                wipe_json(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn collect_texts(recorded: &J, revealed: &J, texts: &mut Vec<String>) {
     match (recorded, revealed) {
         (J::String(marker), J::String(text)) if marker == REDACTED_SECRET && text != REDACTED_SECRET => {
@@ -155,6 +186,21 @@ fn collect_texts(recorded: &J, revealed: &J, texts: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wiping_json_empties_every_string_and_key() {
+        let mut value = serde_json::json!({"token": "sk_live_1", "nested": ["sk_live_2", {"sk_key": 3}], "n": 4});
+        crate::wipe_json(&mut value);
+        let text = value.to_string();
+        assert!(!text.contains("sk_"), "{text}");
+    }
+
+    #[test]
+    fn an_environment_secret_read_never_prints_its_value() {
+        let read = crate::SecretRead { name: "API_KEY".into(), present: true, value: Some("sk_live_123".into()) };
+        let shown = format!("{read:?}");
+        assert!(shown.contains("API_KEY") && shown.contains("<secret>") && !shown.contains("sk_live_123"), "{shown}");
+    }
+
     use super::*;
     use serde_json::json;
 
