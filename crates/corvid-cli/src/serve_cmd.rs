@@ -114,6 +114,9 @@ struct PendingInvocation {
 /// `GET /__approvals/<id>`) can list and fetch pending entries without
 /// going through the runtime.
 struct ServeState {
+    /// The private directory for uploads held on disk, opened at startup
+    /// only when a route declares `@upload(..., disk_over_mb: N)`.
+    held_uploads: Option<Arc<corvid_runtime::held_upload::UploadDir>>,
     live_routes: live::Routes,
     /// One evaluation per distinct live query, shared by its subscribers.
     live_queries: Arc<live::SharedQueries>,
@@ -414,7 +417,29 @@ pub(crate) fn cmd_serve(
         page_scripts.events = Some(browser_asset::PageScripts::tag("events.js", &bytes));
         compiled_assets.push(("events.js", mime, bytes));
     }
+    // Large uploads held on disk (U2): opened only when the source asks,
+    // and a directory that cannot be made private refuses to start,
+    // never a silent fallback to memory.
+    let holds_uploads = ir.servers.iter().flat_map(|server| &server.routes).any(|route| {
+        route.upload_policy.as_ref().is_some_and(|policy| policy.disk_over_bytes.is_some())
+    });
+    let held_uploads = if holds_uploads {
+        let base = match &data_dir {
+            Some(dir) => Ok(dir.join("uploads")),
+            None => corvid_runtime::held_upload::UploadDir::default_base(),
+        };
+        match base.and_then(|base| corvid_runtime::held_upload::UploadDir::open(&base)) {
+            Ok(dir) => Some(Arc::new(dir)),
+            Err(problem) => {
+                eprintln!("error: {} holds large uploads on disk (`disk_over_mb`), but {problem}", file.display());
+                return Ok(1);
+            }
+        }
+    } else {
+        None
+    };
     let state = Arc::new(ServeState {
+        held_uploads,
         live_routes: live::Routes::new(&ir)?,
         live_queries: Arc::default(),
         live_shutdown: tokio::sync::watch::channel(false).0,
@@ -529,6 +554,7 @@ pub(crate) fn cmd_serve(
                             route.upload_format.as_deref().unwrap_or(""),
                             &policy.mime,
                         ),
+                        disk_over_bytes: policy.disk_over_bytes,
                     })
                 }),
                 param_names,
@@ -834,6 +860,8 @@ struct RouteMeta {
 struct RouteUploadPolicy {
     max_bytes: u64,
     accepted_mime: Vec<String>,
+    /// `disk_over_mb`: a file past this size is held on disk.
+    disk_over_bytes: Option<u64>,
 }
 
 /// Live declarations are reached through SUBSCRIBE frames on the page socket.
@@ -1405,6 +1433,7 @@ async fn run_route(
                 body,
                 meta.upload_format.as_deref(),
                 policy,
+                state.held_uploads.as_deref(),
             )
             .await
             {
@@ -1531,6 +1560,7 @@ async fn parse_multipart_upload(
     body: Body,
     format: Option<&str>,
     policy: &RouteUploadPolicy,
+    held_uploads: Option<&corvid_runtime::held_upload::UploadDir>,
 ) -> Result<Value, Response> {
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
@@ -1590,15 +1620,26 @@ async fn parse_multipart_upload(
             ));
         }
 
+        // In memory up to `disk_over_mb`; past it, the file moves to a
+        // private temporary file and the rest streams there, so memory per
+        // request stays bounded by the threshold (U2). A writer dropped
+        // before it finishes (a refusal, an error, a cancelled request)
+        // deletes its file.
         let mut field = field;
         let mut data = Vec::new();
+        let mut held: Option<corvid_runtime::held_upload::HeldUploadWriter> = None;
+        let mut observed: u64 = 0;
+        let disk_failure = |e: std::io::Error| {
+            eprintln!("corvid serve: an upload could not be held on disk: {e}");
+            internal_error("upload_storage_failed", "the upload could not be stored")
+        };
         loop {
             let chunk = match field.chunk().await {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break,
                 Err(e) => return Err(bad_request("invalid_upload", &e.to_string())),
             };
-            let observed = (data.len() as u64).saturating_add(chunk.len() as u64);
+            observed = observed.saturating_add(chunk.len() as u64);
             if observed > policy.max_bytes {
                 return Err(bad_request(
                     "upload_too_large",
@@ -1608,13 +1649,33 @@ async fn parse_multipart_upload(
                     ),
                 ));
             }
-            data.extend_from_slice(&chunk);
+            if held.is_none() && policy.disk_over_bytes.is_some_and(|over| observed > over) {
+                // Checked at startup: a route declaring `disk_over_mb`
+                // opens the directory or the server does not start.
+                let Some(dir) = held_uploads else {
+                    return Err(internal_error("upload_storage_missing", "the upload directory was not opened"));
+                };
+                let writer = dir.writer().map_err(disk_failure)?;
+                held = Some(write_held(writer, std::mem::take(&mut data).into()).await.map_err(disk_failure)?);
+            }
+            match held.take() {
+                Some(writer) => held = Some(write_held(writer, chunk).await.map_err(disk_failure)?),
+                None => data.extend_from_slice(&chunk),
+            }
         }
 
-        // One shared buffer, not one value per byte: a 10 MB file is
-        // 10 MB in memory, as the declared `max_bytes` assumes.
-        let size = data.len() as i64;
-        let bytes = Value::Bytes(corvid_crypto::Bytes::from(data));
+        let (size, content) = match held {
+            Some(writer) => {
+                let file = tokio::task::spawn_blocking(move || writer.finish())
+                    .await
+                    .map_err(|e| disk_failure(std::io::Error::other(e)))?
+                    .map_err(disk_failure)?;
+                (file.size(), ("file".to_string(), Value::HeldUpload(Arc::new(file))))
+            }
+            // One shared buffer, not one value per byte: a 10 MB file is
+            // 10 MB in memory, as the declared `max_bytes` assumes.
+            None => (data.len() as u64, ("bytes".to_string(), Value::Bytes(corvid_crypto::Bytes::from(data)))),
+        };
         let upload = corvid_driver::StructValue::new(
             DefId(0),
             "Upload",
@@ -1624,12 +1685,23 @@ async fn parse_multipart_upload(
                     "content_type".to_string(),
                     Value::String(content_type.into()),
                 ),
-                ("size".to_string(), Value::Int(size)),
-                ("bytes".to_string(), bytes),
+                ("size".to_string(), Value::Int(i64::try_from(size).unwrap_or(i64::MAX))),
+                content,
             ],
         );
         return Ok(Value::Struct(upload));
     }
+}
+
+/// Append `chunk` to a held upload on the blocking pool, so a disk write
+/// never stalls the threads serving other requests.
+async fn write_held(
+    mut writer: corvid_runtime::held_upload::HeldUploadWriter,
+    chunk: Bytes,
+) -> std::io::Result<corvid_runtime::held_upload::HeldUploadWriter> {
+    tokio::task::spawn_blocking(move || writer.write(&chunk).map(|()| writer))
+        .await
+        .map_err(std::io::Error::other)?
 }
 
 /// If the dispatch outcome surfaced an `ApprovalQueued` from the

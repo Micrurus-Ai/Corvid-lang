@@ -931,6 +931,25 @@ impl<'a> Checker<'a> {
                 },
                 spec.span,
             )),
+            // `disk_over_mb` must be able to apply: a threshold at or past
+            // the maximum would never hold a file on disk.
+            (Some(spec), true) => {
+                if let (Some(over), Some(max)) = (spec.disk_over_bytes, spec.max_bytes) {
+                    if over >= max {
+                        self.errors.push(TypeError::new(
+                            TypeErrorKind::RouteUploadPolicyInvalid {
+                                path: route.path.clone(),
+                                message: format!(
+                                    "`disk_over_mb` is {} MB, but no file can be larger than the {} MB maximum, so nothing would be held on disk; lower it below `max_mb` or remove it",
+                                    over / (1024 * 1024),
+                                    max.div_ceil(1024 * 1024)
+                                ),
+                            },
+                            spec.span,
+                        ));
+                    }
+                }
+            }
             _ => {}
         }
 

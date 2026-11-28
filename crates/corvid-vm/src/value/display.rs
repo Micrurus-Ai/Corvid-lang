@@ -137,6 +137,7 @@ impl fmt::Display for Value {
                 Ok(map) => write!(f, "JsonBuilder({} fields)", map.len()),
                 Err(_) => write!(f, "JsonBuilder(<poisoned>)"),
             },
+            Value::HeldUpload(held) => write!(f, "<upload held on disk, {} bytes>", held.size()),
         }
     }
 }

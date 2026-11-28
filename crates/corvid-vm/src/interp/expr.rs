@@ -817,16 +817,21 @@ pub(super) fn eval_builtin_method(
         UploadFilename => upload_field(&recv, "filename", span),
         UploadContentType => upload_field(&recv, "content_type", span),
         UploadSize => upload_field(&recv, "size", span),
-        UploadBytes => upload_field(&recv, "bytes", span),
-        UploadText => match upload_field(&recv, "bytes", span)? {
-            Value::Bytes(bytes) => Ok(Value::String(std::sync::Arc::from(
-                String::from_utf8_lossy(bytes.as_slice()).into_owned(),
-            ))),
-            other => Err(InterpError::new(
-                InterpErrorKind::TypeMismatch { expected: "an upload's Bytes".into(), got: other.type_name() },
-                span,
-            )),
-        },
+        // In memory or held on disk, the same content (`crate::upload`).
+        UploadBytes | UploadText => {
+            let Value::Struct(upload) = &recv else {
+                return Err(InterpError::new(
+                    InterpErrorKind::TypeMismatch { expected: "Upload".into(), got: recv.type_name() },
+                    span,
+                ));
+            };
+            let bytes = crate::upload::upload_content(upload)
+                .map_err(|message| InterpError::new(InterpErrorKind::Other(message), span))?;
+            Ok(match kind {
+                UploadBytes => Value::Bytes(bytes),
+                _ => Value::String(std::sync::Arc::from(String::from_utf8_lossy(bytes.as_slice()).into_owned())),
+            })
+        }
 
         // These need checked types, so `eval_json_decode` and
         // `eval_json_encode` run them.

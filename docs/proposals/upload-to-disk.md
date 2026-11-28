@@ -1,6 +1,6 @@
 # Large uploads held on disk (limits plan row 13)
 
-**Status:** proposal, 2026-11-27. It adds an argument to `@upload(...)`, which is written in `docs/reference/grammar.md`, the copy both sides parse, so it is posted for frontend review (item 7 of [the review brief](frontend-review-2026-11-27.md)) and built after one working day without objection.
+**Status:** U1 and U2 built 2026-11-27, together, after frontend review (item 7 of [the review brief](frontend-review-2026-11-27.md)). Frontend development agreed, adding that the threshold is server storage policy and must not become a second client-side size limit. A `disk_over_mb` the server ignored would be a declared choice that does not run, so U1 and U2 shipped as one.
 **Owner:** backend (Claude Code).
 **Roadmap:** [limits plan](removing-limits.md) row 13; [HTTP client decision 8](http-client.md#decisions), which defers sending an upload from disk until `corvid serve` keeps uploads out of memory.
 
@@ -40,10 +40,20 @@ route POST "/videos" body Upload<Video> requires authenticated -> json Receipt:
 | Word it `spill_over_mb` | "Spill" is jargon; "disk over 16 MB" says what happens. |
 | A server-wide setting in `corvid.toml` | A privacy choice per route belongs in the source, next to the route it concerns. |
 
+### Decided when building (2026-11-27)
+
+- **Not published.** The design allowed publishing `disk_over_mb` in the contract. The frontend answer asked that it never become a client-side limit, so the contract does not carry it at all, and a test holds that.
+- **Below the maximum.** `N` must be below `max_mb`, not at most: a threshold equal to the maximum would never hold a file on disk.
+- **Deleted with its last reference.** A held file belongs to a VM value (`Value::HeldUpload`) and is deleted when the last value holding it drops. For a request, that is when it ends. A request queued for approval keeps its arguments, as it always has, so its file lives until the approval is decided.
+- **Each server's own directory.** Each server holds a lock on its own directory under the upload base. The startup sweep removes only directories whose lock is free, so two servers sharing a data directory never delete each other's files.
+- **Private, or refused.** On Unix the base and the server's directory are `0700` and must belong to the server's user (found from the owner of a file it creates, since std has no call for it). A symbolic link, another user's directory, or a file in the way refuses to start. On Windows the server cannot yet check a directory's ACL, so `disk_over_mb` refuses to start there, and the roadmap holds the check.
+- **A field's upload** inside a multipart record refuses `disk_over_mb` by name; only a route's direct `body Upload<Format>` is held on disk for now.
+- **Writes off the request threads.** Each chunk is written on Tokio's blocking pool. The digest the trace records is computed as the file is written, and every reader of an upload (`bytes()`, `text()`, the trace digest, a connector body) goes through `corvid_vm::upload`.
+
 ## Slices
 
-- [ ] U1. `disk_over_mb` parsed and checked (at most `max_mb`, only on an `Upload` route), carried in the contract beside `max_mb`.
-- [ ] U2. `corvid serve` writes a file past the threshold to a private temporary file, with the digest computed on the way, deleted when the request ends, swept at start, and a refusal to start on a directory it cannot make private. Tests: a 64 MB upload under a 16 MB threshold keeps the server's memory under a bound, the file is gone after the request and after a cancelled one, and the methods read the same values from disk as from memory.
+- [x] U1. `disk_over_mb` parsed and checked (below `max_mb`, only on a route's `Upload`). It is kept out of the contract (decided above). Built 2026-11-27.
+- [x] U2. `corvid serve` writes a file past the threshold to a private temporary file, with the digest computed on the way, deleted when the request ends, swept at start, and a refusal to start on a directory it cannot make private. Built 2026-11-27. Tests (`serve_uploads_on_disk.rs`, Linux): a 64 MB upload under a 16 MB threshold grows the server's peak memory by less than 40 MB; the file is gone after the request, after a refused one and after a cancelled one; the directory is `0700`; and `bytes()`, `text()` and the digest read the same values from disk as from memory. `held_upload.rs` unit tests cover the file modes, deletion, and the sweep keeping a running server's directory.
 - [ ] U3. A connector `body file` sends an on-disk upload by streaming it.
 - [ ] U4. Native code, with native serving.
 

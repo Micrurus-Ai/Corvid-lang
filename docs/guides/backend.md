@@ -123,6 +123,18 @@ Notes on the shape:
   on any route is the raw body, unchanged. **Narrowed for now:** native
   code refuses a verified route's handler by name; native serving is on
   the roadmap.
+- `@upload(max_mb: 500, mime: "video/mp4", disk_over_mb: 16)` holds a
+  file larger than 16 MB in a private temporary file instead of memory,
+  so many large uploads at once do not exhaust the server. The file is
+  deleted when the request ends, and `size()`, `bytes()` and `text()`
+  work as for a file in memory. The threshold must be below `max_mb`.
+  Without it, nothing a person sends is written to disk. The files live
+  under `CORVID_SERVE_DATA_DIR/uploads`, or a per-user directory under the
+  system's temporary directory. A directory the server cannot make
+  private refuses to start. **Narrowed for now:** Windows refuses to start
+  with `disk_over_mb` (its directory check is not built), a record field's
+  `@upload` refuses it, and a connector reads a held file whole to send it.
+  The roadmap holds each.
 
 The typechecker enforces:
 

@@ -94,9 +94,8 @@ fn payload_forms(value: &Value, ty: &Type, types_by_id: &HashMap<DefId, &IrType>
                 Some(Value::String(s)) => s.to_string(),
                 _ => String::new(),
             };
-            let Some(Value::Bytes(bytes)) = upload.get_field("bytes") else {
-                return Err("the upload has no bytes".to_string());
-            };
+            // A held file is read here; streaming it from disk is U3.
+            let bytes = crate::upload::upload_content(upload)?;
             Ok(file_forms(Some(text("filename")), Some(text("content_type")), bytes.as_slice()))
         }
         (Type::Bytes, Value::Bytes(bytes)) => Ok(file_forms(None, None, bytes.as_slice())),

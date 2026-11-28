@@ -377,7 +377,10 @@ route_verified    ::= 'verified' IDENT '(' verified_arg (',' verified_arg)* ')'
 verified_arg      ::= 'secret' ':' STRING_LITERAL | 'within' ':' INT IDENT | 'replays' ':' 'accepted'
 
 upload_annotation ::= '@' 'upload' '(' (upload_arg (',' upload_arg)* ','?)? ')'
-upload_arg        ::= ('max_mb' | 'max_bytes' | 'retention_days') ':' INT | 'mime' ':' STRING_LITERAL
+# `disk_over_mb` (U1): a route's file past N MB is held in a private
+# temporary file instead of memory; it must be below `max_mb`, and a
+# field's `@upload` refuses it.
+upload_arg        ::= ('max_mb' | 'max_bytes' | 'retention_days' | 'disk_over_mb') ':' INT | 'mime' ':' STRING_LITERAL
 approval_annotation ::= '@' 'approval' '(' approval_arg (',' approval_arg)* ','? ')'
 approval_arg      ::= ('role' | 'risk' | 'data') ':' STRING_LITERAL
                     | 'expires_ms' ':' INT | 'max_cost_usd' ':' '$' (FLOAT | INT)

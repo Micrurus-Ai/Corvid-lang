@@ -190,6 +190,9 @@ fn to_json(v: &Value) -> serde_json::Value {
                 "tag": "json_builder_poisoned",
             }),
         },
+        // A held file is never put in JSON whole; its size and digest are
+        // what a trace may hold.
+        Value::HeldUpload(held) => serde_json::json!({ "size": held.size(), "sha256": held.sha256_hex() }),
     }
 }
 

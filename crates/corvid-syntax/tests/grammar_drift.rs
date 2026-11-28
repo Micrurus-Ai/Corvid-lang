@@ -511,7 +511,7 @@ server api:
         return body
     route POST "/form" query HealthStatus form HealthStatus -> json HealthStatus:
         return body
-    @upload(max_mb: 2, retention_days: 1, mime: "text/csv")
+    @upload(max_mb: 2, retention_days: 1, mime: "text/csv", disk_over_mb: 1)
     route POST "/import" body Upload<Csv> -> json HealthStatus:
         return HealthStatus(true)
     live "/boards/{board: Int}/cards" -> HealthStatus requires permission("status.read"):

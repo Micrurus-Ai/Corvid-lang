@@ -206,6 +206,7 @@ fn render_value_inner(
             Ok(map) => format!("JsonBuilder({} fields)", map.len()),
             Err(_) => "JsonBuilder(<poisoned>)".to_string(),
         },
+        Value::HeldUpload(held) => format!("<upload held on disk, {} bytes>", held.size()),
     }
 }
 

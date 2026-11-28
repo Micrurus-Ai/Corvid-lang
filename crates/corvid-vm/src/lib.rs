@@ -29,6 +29,7 @@ pub mod jobs;
 pub mod repl_display;
 pub mod schema;
 pub mod step;
+pub mod upload;
 pub mod value;
 
 pub use conv::{json_to_value, value_to_json, ConvError};

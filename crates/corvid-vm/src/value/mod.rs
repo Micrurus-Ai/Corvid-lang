@@ -122,6 +122,11 @@ pub enum Value {
     /// the same builder all see each other's mutations — useful
     /// when passing a builder through a chain of agent calls.
     JsonBuilder(Arc<std::sync::Mutex<serde_json::Map<String, serde_json::Value>>>),
+
+    /// An uploaded file held in a private temporary file (`@upload(...,
+    /// disk_over_mb: N)`), inside an `Upload`. Its file is deleted when the
+    /// last value holding it drops. It is never made from JSON.
+    HeldUpload(Arc<corvid_runtime::held_upload::HeldUpload>),
 }
 
 // Phase 33S3b — `DbHandleInner` moved to `corvid-runtime::db`
@@ -282,6 +287,7 @@ impl Clone for Value {
             // (set_* on one clone is visible through another).
             Value::JsonValue(value) => Value::JsonValue(value.clone()),
             Value::JsonBuilder(builder) => Value::JsonBuilder(builder.clone()),
+            Value::HeldUpload(held) => Value::HeldUpload(held.clone()),
         }
     }
 }
@@ -333,6 +339,7 @@ impl Value {
             Value::DbHandle(_) => "DbHandle".into(),
             Value::JsonValue(_) => "JsonValue".into(),
             Value::JsonBuilder(_) => "JsonBuilder".into(),
+            Value::HeldUpload(_) => "Upload file".into(),
         }
     }
 
@@ -429,6 +436,7 @@ impl PartialEq for Value {
             // race against concurrent mutations.
             (Value::JsonValue(a), Value::JsonValue(b)) => **a == **b,
             (Value::JsonBuilder(a), Value::JsonBuilder(b)) => Arc::ptr_eq(a, b),
+            (Value::HeldUpload(a), Value::HeldUpload(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }

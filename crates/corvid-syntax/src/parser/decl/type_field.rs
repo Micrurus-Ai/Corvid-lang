@@ -301,7 +301,20 @@ impl<'a> Parser<'a> {
                     ui.extend(self.parse_field_ui_hints()?);
                 }
                 TokKind::Ident(w) if w == "upload" && matches!(self.peek(), TokKind::At) => {
-                    upload = Some(self.parse_upload_spec()?);
+                    let spec = self.parse_upload_spec()?;
+                    // Holding a file on disk is built for a route's direct
+                    // `body Upload<Format>`; a field's upload is refused by
+                    // name rather than kept in memory against the source.
+                    if spec.disk_over_bytes.is_some() {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: "`disk_over_mb` on a field's `@upload`".into(),
+                                expected: "`disk_over_mb` on a route's `@upload`, whose `body Upload<Format>` it holds on disk; a field's upload stays in memory for now".into(),
+                            },
+                            span: spec.span,
+                        });
+                    }
+                    upload = Some(spec);
                 }
                 _ => break,
             }
@@ -387,6 +400,7 @@ impl<'a> Parser<'a> {
             max_bytes: None,
             retention_days: None,
             mime: Vec::new(),
+            disk_over_bytes: None,
             span: start,
         };
         while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
@@ -404,6 +418,10 @@ impl<'a> Parser<'a> {
                 "retention_days" => {
                     let (days, _) = self.expect_positive_int_literal("a retention in days")?;
                     spec.retention_days = Some(days);
+                }
+                "disk_over_mb" => {
+                    let (mb, _) = self.expect_positive_int_literal("a megabyte size")?;
+                    spec.disk_over_bytes = Some(mb.saturating_mul(1024 * 1024));
                 }
                 "mime" => match self.peek().clone() {
                     TokKind::StringLit(s) => {
@@ -428,7 +446,7 @@ impl<'a> Parser<'a> {
                     return Err(ParseError {
                         kind: ParseErrorKind::UnexpectedToken {
                             got: format!("`@upload` key `{key}`"),
-                            expected: "`max_mb`, `max_bytes`, `retention_days`, or `mime`".into(),
+                            expected: "`max_mb`, `max_bytes`, `retention_days`, `mime`, or `disk_over_mb`".into(),
                         },
                         span: key_span,
                     });

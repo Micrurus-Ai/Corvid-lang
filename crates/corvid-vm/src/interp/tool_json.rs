@@ -109,10 +109,7 @@ fn without_file_contents(value: &Value) -> Value {
     match value {
         Value::Struct(record) if record.type_name() == "Upload" => {
             let field = |name: &str| record.get_field(name).unwrap_or(Value::Nothing);
-            let digest = match record.get_field("bytes") {
-                Some(Value::Bytes(bytes)) => corvid_crypto::sha256(&bytes).to_hex(),
-                _ => String::new(),
-            };
+            let digest = crate::upload::upload_sha256_hex(record);
             Value::Struct(StructValue::new(
                 record.type_id(),
                 "Upload",

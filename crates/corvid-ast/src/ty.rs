@@ -314,6 +314,11 @@ pub struct UploadSpec {
     /// Explicit accepted MIME types; overrides the format-tag default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mime: Vec<String>,
+    /// `disk_over_mb: N`: a file larger than this many bytes is held in
+    /// a private temporary file instead of memory. `None` = every file
+    /// stays in memory; nothing a person sends is written to disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_over_bytes: Option<u64>,
     pub span: Span,
 }
 

@@ -2,6 +2,55 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Large uploads held on disk U1 and U2: memory bounded by the threshold, not the maximum
+
+Frontend development agreed on 2026-11-27 (review item 7), with one
+condition: the threshold is server storage policy and must never become a
+client-side size limit. So it stays out of the contract, and a test holds
+that. A `disk_over_mb` the server ignored would be a declared choice that
+does not run, so U1 and U2 ship together.
+
+- **Grammar and checker.** `disk_over_mb: N` in `@upload`. It must be below
+  `max_mb`, since a threshold at the maximum would hold nothing on disk.
+  A field's `@upload` refuses it by name, because only a route's direct
+  upload is held on disk so far.
+- **`corvid_runtime::held_upload`.** Each server gets a private directory:
+  `0700` on Unix, owned by the server's user, holding a lock for the
+  server's life. Each held file is `0600` with a random name, and its
+  SHA-256 is computed as it is written. A writer dropped before finishing
+  deletes its file. A finished `HeldUpload` deletes its file when its last
+  reference drops. At start the sweep removes the directories whose lock
+  is free, so a crash leaves nothing for long and two servers sharing a
+  data directory never delete each other's files.
+- **VM.** `Value::HeldUpload` sits in an `Upload`'s `file` field in place of
+  `bytes`. Every reader of an upload's content or digest goes through
+  `corvid_vm::upload`: `bytes()`, `text()`, the trace digest and a
+  connector body. Before, each read the `bytes` field itself.
+- **Server.** The multipart loop buffers up to the threshold, then moves
+  the file to disk and streams the rest there, writing on the blocking
+  pool. A directory that cannot be proven private refuses to start.
+- **Simpler alternatives** are in the proposal's table. On building,
+  `disk_over_mb` read plainly in a realistic route next to `max_mb`, and it
+  stayed.
+- **Narrowed, by refusal.** Windows refuses to start with `disk_over_mb`,
+  because its ACL check is not built. A field's upload refuses it. A
+  connector still reads a held file whole to send it (U3). The roadmap
+  holds all three.
+- **Three tiers.** Backend: memory per request is bounded by the threshold.
+  Frontend: nothing changes on the wire, and the threshold is not
+  published. AI: an assistant sees a file's content only through an
+  action that reads it, so holding it on disk changes nothing it can
+  reach.
+
+Tests: `held_upload.rs` (modes, deletion when finished or abandoned, the
+sweep keeping a running server's directory, a too-open directory made
+private), `uploads_on_disk.rs` (checker, contract), and
+`serve_uploads_on_disk.rs` (a real server on Linux). In that test a 64 MB
+upload under a 16 MB threshold grows peak memory by less than 40 MB. The
+held file is gone after a request, a refused one and a cancelled one. The
+directory is `0700`. `bytes()`, `text()` and the digest agree between
+memory and disk.
+
 ### `?` inside a native timed `try`
 
 `?` returns from the agent from inside a timed attempt, past the
@@ -49,6 +98,7 @@ Proof:
 Also found: the two outage unit tests shared the process-wide holding
 switch and raced, so one could exit the test process. They now take
 turns.
+
 
 ### Verified webhooks W1 to W3: a provider's signed call, checked before the handler
 
