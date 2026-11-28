@@ -124,6 +124,8 @@ test successful_preview_preserves_the_child_markup:
     page = guide("Water & snacks", GuideContext("/ridge"))
     assert page.contains("<h3>Current note</h3>" + ui.preformatted_text("Water & snacks").html)
 
+traces: none
+
 server trail_guide:
     route GET "/" -> html:
         return guide("Bring water", GuideContext("/guide"))

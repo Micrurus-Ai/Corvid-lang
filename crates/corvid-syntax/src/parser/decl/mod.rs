@@ -30,6 +30,7 @@ mod model;
 mod server_route;
 mod store;
 mod table;
+mod traces;
 mod type_field;
 mod local_type;
 
@@ -87,6 +88,9 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(_) if self.at_contextual_block_decl("table") => self.parse_table_decl(visibility).map(Decl::Table),
             TokKind::Ident(_) if self.at_contextual_block_decl("database") => self.parse_database_decl(visibility).map(Decl::Database),
+            // `traces:` (lineage L3): contextual, so `traces` stays an
+            // ordinary name everywhere else.
+            TokKind::Ident(_) if self.at_traces_decl() => self.parse_traces_decl().map(Decl::Traces),
             TokKind::KwImport => self.parse_import_decl().map(Decl::Import),
             TokKind::Ident(word) if word == "local" => self.parse_local_type(visibility),
             TokKind::KwType => self.parse_type_decl(visibility, false).map(Decl::Type),

@@ -900,6 +900,8 @@ type Filter:
 agent ticks(n: Int) -> Stream<Tick>:
     yield Tick(n)
 
+traces: none
+
 server app:
     route GET "/boards/{board: Int}/ticks/{lane}" query Filter -> json Stream<Tick>:
         return ticks(path.board)

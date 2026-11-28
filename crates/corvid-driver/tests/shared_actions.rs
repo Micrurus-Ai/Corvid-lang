@@ -116,11 +116,11 @@ fn an_action_cannot_take_or_return_a_secret() {
 #[test]
 fn a_route_cannot_take_an_actions_path() {
     let found = errors(
-        "action ping() -> String requires anyone:\n    return \"pong\"\n\nserver api:\n    route POST \"/actions/ping\" -> json String:\n        return \"mine\"\n",
+        "action ping() -> String requires anyone:\n    return \"pong\"\n\ntraces: none\n\nserver api:\n    route POST \"/actions/ping\" -> json String:\n        return \"mine\"\n",
     );
     assert!(found.iter().any(|m| m.contains("takes the path action `ping` is served at")), "{found:#?}");
     let found = errors(
-        "action ping() -> String requires anyone:\n    return \"pong\"\n\nserver api:\n    route GET \"/actions/other\" -> json String:\n        return \"mine\"\n",
+        "action ping() -> String requires anyone:\n    return \"pong\"\n\ntraces: none\n\nserver api:\n    route GET \"/actions/other\" -> json String:\n        return \"mine\"\n",
     );
     assert!(found.is_empty(), "only an action's own path is taken: {found:#?}");
 }
@@ -144,6 +144,8 @@ type Card:
 
 action claim(card: Int, by: Caller) -> Card requires permission("board.edit"):
     return Card(card, by.tenant + "/" + by.id)
+
+traces: none
 
 server board:
     route POST "/cards/{card: Int}/claim" -> json Card requires authenticated:
@@ -175,7 +177,7 @@ fn only_a_verified_session_supplies_an_actor() {
     );
 
     let route = format!(
-        "{IDENTITY}type Claim:\n    by: Caller\n\nserver api:\n    route POST \"/claim\" body Claim -> json String:\n        return claim_owner(body)\n\nagent claim_owner(c: Claim) -> String:\n    return c.by.id\n"
+        "{IDENTITY}type Claim:\n    by: Caller\n\ntraces: none\n\nserver api:\n    route POST \"/claim\" body Claim -> json String:\n        return claim_owner(body)\n\nagent claim_owner(c: Claim) -> String:\n    return c.by.id\n"
     );
     let found = errors(&route);
     assert!(found.iter().any(|m| m.contains("a route's path, query or body")), "{found:#?}");

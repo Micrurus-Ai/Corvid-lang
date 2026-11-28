@@ -63,6 +63,8 @@ identity users:
     roles:
         finance_reviewer: "approvals.decide"
 
+traces: none
+
 server refund_api:
     route GET "/status" -> json RefundStatus:
         return refund_status()

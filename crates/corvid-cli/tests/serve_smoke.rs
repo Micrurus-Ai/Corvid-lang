@@ -430,6 +430,8 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     approve SendMessage(req)
     return send_message(req)
 
+traces: none
+
 server test_serve_5_api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body SendReq -> json SendReceipt uses send_external requires authenticated:
@@ -575,7 +577,7 @@ agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     // from the E0-serve-5 test, returning a deterministic receipt
     // the test can observe end-to-end.
     let source = format!(
-        "{IDENTITY_WITH_REVIEWER}{source}\nserver test_serve_6_api:\n    @approval(role: \"reviewer\", risk: \"external_message\", data: \"private\", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external requires authenticated:\n        return execute_send(body)\n"
+        "{IDENTITY_WITH_REVIEWER}{source}\ntraces: none\n\nserver test_serve_6_api:\n    @approval(role: \"reviewer\", risk: \"external_message\", data: \"private\", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)\n    route POST \"/send\" body SendReq -> json SendReceipt uses send_external requires authenticated:\n        return execute_send(body)\n"
     );
     std::fs::write(&src_path, source).unwrap();
 
@@ -828,6 +830,8 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     echoed = echo_string(req.value)
     return EchoReceipt(echoed)
 
+traces: none
+
 server test_serve_q1b_api:
     @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
@@ -984,6 +988,8 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     echoed = echo_string(req.value)
     return EchoReceipt(echoed)
 
+traces: none
+
 server test_serve_q6_api:
     @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
@@ -1134,6 +1140,8 @@ agent execute_echo(req: EchoReq) -> EchoReceipt uses echo_external:
     approve EchoString(req.value)
     echoed = echo_string(req.value)
     return EchoReceipt(echoed)
+
+traces: none
 
 server test_serve_q1a_api:
     @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -1289,6 +1297,8 @@ agent execute_broken(req: BrokenReq) -> BrokenReceipt uses broken_external:
     approve PermanentlyBrokenTool(req.value)
     out = permanently_broken_tool(req.value)
     return BrokenReceipt(out)
+
+traces: none
 
 server test_serve_q2_api:
     @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -1498,6 +1508,8 @@ agent execute_reset(req: EchoReq) -> EchoReceipt uses echo_external:
 agent execute_classify(req: EchoReq) -> EchoReceipt:
     return EchoReceipt(req.value)
 
+traces: none
+
 server test_serve_q9_api:
     @approval(role: "reviewer", risk: "external_call", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/reset" body EchoReq -> json EchoReceipt uses echo_external requires authenticated:
@@ -1631,6 +1643,8 @@ agent run_classify(req: ClassifyReq) -> ClassifyVerdict uses classify_effect:
     verdict = classify_anything(req.raw)
     return verdict
 
+traces: none
+
 server test_serve_q10_api:
     route POST "/classify" body ClassifyReq -> json ClassifyVerdict uses classify_effect:
         return run_classify(body)
@@ -1732,6 +1746,8 @@ fn serve_enforces_a_requires_authenticated_route_instead_of_refusing_to_start() 
 type Classified:
     value: String
 
+traces: none
+
 server secure_api:
     route GET "/secret" -> json Classified requires authenticated:
         return Classified("classified")
@@ -1788,6 +1804,8 @@ agent ticker() -> Stream<Tick>:
     yield Tick(1, "first")
     yield Tick(2, "second")
     yield Tick(3, "third")
+
+traces: none
 
 server ticker_api:
     route GET "/ticks" -> json Stream<Tick>:
@@ -1959,6 +1977,8 @@ fn serve_parses_a_multipart_upload_and_enforces_mime() {
 agent take_import(body: Upload<Csv>) -> ImportReceipt:
     return ImportReceipt(body.filename(), body.size(), body.text())
 
+traces: none
+
 server import_api:
     @upload(max_bytes: 24, mime: "text/csv")
     route POST "/import" body Upload<Csv> -> json ImportReceipt:
@@ -2034,6 +2054,8 @@ agent take_pdf(body: Upload<Pdf>) -> UpReceipt:
 
 agent take_audio(body: Upload<Audio>) -> UpReceipt:
     return UpReceipt(body.filename(), body.size(), body.content_type())
+
+traces: none
 
 server up_api:
     @upload(max_mb: 3)
@@ -2125,6 +2147,8 @@ type ItemQuery:
     cursor: String
     limit: Int
 
+traces: none
+
 server items_api:
     route GET "/items" query ItemQuery -> json Page<Item>:
         a = Item("i1", "first")
@@ -2177,6 +2201,8 @@ fn serve_reads_a_typed_path_parameter_and_refuses_a_segment_that_is_not_one() {
     let source = r#"type Board:
     id: Int
     next: Int
+
+traces: none
 
 server boards_api:
     route GET "/boards/{board: Int}/summary" -> json Board:
@@ -2239,6 +2265,8 @@ type Found:
     open: Bool
     statuses: Int
     limited: Bool
+
+traces: none
 
 server search_api:
     route GET "/accounts/{amount: Decimal}/{status: Status}" query Search -> json Found:
@@ -2326,6 +2354,8 @@ fn serve_mounts_the_oauth_login_surface_and_redirects_to_the_provider() {
     provisioning:
         first_login: open
         tenant: fixed("public")
+
+traces: none
 
 server ping_api:
     route GET "/ping" -> json String:
@@ -2425,6 +2455,8 @@ tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
 agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     approve SendMessage(req)
     return send_message(req)
+
+traces: none
 
 server durable_api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -2561,6 +2593,8 @@ fn a_role_gated_route_allows_the_right_role_and_denies_others() {
     roles:
         admin: "billing:read"
 
+traces: none
+
 server admin_api:
     route GET "/admin" -> json String requires role("admin"):
         return actor.id
@@ -2693,6 +2727,8 @@ tool send_message(req: SendReq) -> SendReceipt dangerous uses send_external
 agent execute_send(req: SendReq) -> SendReceipt uses send_external:
     approve SendMessage(req)
     return SendReceipt(true)
+
+traces: none
 
 server adversary_api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -2863,6 +2899,8 @@ agent lookup(owner: String, repo: String) -> RepoView uses http_read:
     r = get_repo(owner, repo)
     return RepoView(r.name)
 
+traces: none
+
 server repo_api:
     route GET "/repo" -> json RepoView uses http_read:
         return lookup("micrurus", "corvid")
@@ -2933,6 +2971,8 @@ agent lookup(owner: String, repo: String) -> RepoView uses http_read:
     r = get_repo(owner, repo)
     return RepoView(r.name)
 
+traces: none
+
 server repo_api:
     route GET "/repo" -> json RepoView uses http_read:
         return lookup("micrurus", "corvid")
@@ -2980,6 +3020,8 @@ connector github:
     modes: [real]
     operation get_repo(owner: String, repo: String) -> Repo uses http_read:
         GET "/repos/{owner}/{repo}"
+
+traces: none
 
 server repo_api:
     route GET "/repo" -> json Repo uses http_read:
@@ -3076,6 +3118,8 @@ fn serve_page_and_json_api_from_one_project() {
     let project = dir.path().join("notes");
     let main = project.join("src/main.cor");
     let source = r#"import "std:ui" as ui
+
+traces: none
 
 server notes:
     route GET "/" -> html:
@@ -3179,6 +3223,8 @@ type SearchReply:
     owner: String
     term: String
     limit: Int
+
+traces: none
 
 server status_api:
     route GET "/owners/{id}/search" query Search -> json SearchReply:
@@ -3602,6 +3648,8 @@ connector provider:
 agent relay(topic: String) -> Stream<Delta> uses provider_read:
     return deltas(topic)
 
+traces: none
+
 server api:
     route GET "/relay" -> json Stream<Delta> uses provider_read:
         return relay("news")
@@ -3683,7 +3731,7 @@ server api:
 fn sigterm_drains_an_inflight_route_before_exiting() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("main.cor");
-    std::fs::write(&src, "type Message:\n    text: String\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
+    std::fs::write(&src, "type Message:\n    text: String\n\ntraces: none\n\nserver relay:\n    route POST \"/echo\" body Message -> json Message:\n        return body\n").unwrap();
     let port = free_port();
     let child = Command::new(corvid_bin()).arg("serve").arg(&src).arg("--listen")
         .arg(format!("127.0.0.1:{port}")).current_dir(dir.path()).spawn().unwrap();
@@ -3729,6 +3777,8 @@ agent configured() -> Result<Bool, String>:
     secret = secret_read("CORVID_TEST_SERVICE_KEY")?
     return Ok(secret.present and secret.value.length() > 0)
 
+traces: none
+
 server app:
     route GET "/configuration/{id}" -> json Result<Bool, String>:
         return configured()
@@ -3771,6 +3821,8 @@ async fn serve_validates_an_imported_form_record_and_advertises_its_schema() {
     std::fs::write(
         &source,
         r#"import "./filter" use Filter as Query
+traces: none
+
 server forms:
     route POST "/apply" form Query -> html:
         return body.term

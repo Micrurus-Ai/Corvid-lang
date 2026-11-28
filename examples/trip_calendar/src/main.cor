@@ -43,6 +43,8 @@ test calendars_include_localized_fallbacks_and_document_direction:
     assert arabic_calendar().contains("value=\"2\">مدة يومين</data>")
     assert english_calendar().contains("datetime=\"2028-06-14\">06/14/2028</time>")
 
+traces: none
+
 server trip_planner:
     route GET "/" -> html:
         return english_calendar()

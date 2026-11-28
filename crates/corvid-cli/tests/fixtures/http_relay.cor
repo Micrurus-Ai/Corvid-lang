@@ -42,6 +42,8 @@ agent wait_for_reply() -> Result<Int, String> uses upstream_read:
         Ok(answer) -> Ok(answer.status())
         Err(e) -> Err(reason_of(e))
 
+traces: none
+
 server relay:
     route POST "/messages" body Message -> json Result<Receipt, String> uses upstream_write:
         return deliver_message(body)

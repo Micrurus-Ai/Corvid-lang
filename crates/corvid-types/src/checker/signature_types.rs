@@ -75,7 +75,8 @@ impl<'a> Checker<'a> {
                 | Decl::Test(_)
                 | Decl::Schedule(_)
                 | Decl::Identity(_)
-                | Decl::Database(_) => {}
+                | Decl::Database(_)
+                | Decl::Traces(_) => {}
             }
         }
         self.errors.truncate(mark);

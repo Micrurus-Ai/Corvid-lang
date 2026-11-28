@@ -42,6 +42,8 @@ test junction_links_named_arrows_to_their_trail_descriptions:
     assert page.contains("<h2 id=\"bridge\">Bridge</h2>")
     assert page.contains("<h2 id=\"lookout\">Lookout</h2>")
 
+traces: none
+
 server trail_junction:
     route GET "/" -> html:
         return junction_page()

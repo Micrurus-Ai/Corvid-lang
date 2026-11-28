@@ -1,14 +1,18 @@
 # Corvid — learnings
 
+A program with a `server` block now says whether its requests are recorded: write `traces: none` at the top level, beside `server`. Leaving it out is a compile error that shows the line to add, and a second declaration is refused. Keeping what people sent you on disk is a privacy and disk choice, so it is never a default. To record each request instead, write `traces:` with `location: env("TRACE_DIR")` and `keep: 720 hours`: every request becomes a run of its own, its id comes back in the `Corvid-Run` response header, `corvid trace lineage` shows it rooted at the route, and traces older than `keep:` are deleted. `traces` is still an ordinary name everywhere else. [Lineage from real runs](docs/proposals/lineage-from-runs.md)
+
 `corvid graph` lists each `schedule` with its cron, time zone and the agent it runs, so the graph shows every way work starts: an action, a route, a `live` declaration, a schedule, or a public agent.
 
 `corvid graph` now shows each table operation as a step, such as `table Card.insert` or `table Card.query` for a whole `where(...).order_by(...)` chain. You can see which actions and routes read or write each table. In JSON the step carries `table` and `operation`.
 
 `corvid graph` now draws each route and `live` declaration with the steps its handler takes and who may call it. Each action shows its `POST /actions/<name>` route, its `requires` policy, whether it is offered to assistants, and the `form_for` and `button_for` calls that use it. A tool called only from a route is no longer listed under "Never reached".
 
+
 Put an agent's graph in a pull request: `corvid graph app.cor --format mermaid` writes a flowchart of each entry point's steps, with dangerous tools outlined in red. `--format json` gives the same graph as a typed document (schema `corvid.agent_graph.v1`): every step's id, line and column, kind, effects, worst-case cost in dollars, and, for an `approve`, the tool it guards. A loop nothing bounds now shows its steps, with `no bound` as its cost. See [the agent graph reference](docs/reference/agent-graph.md).
 
 See what an agent does before it runs: `corvid graph app.cor --agent refund_bot` prints its steps (each tool, prompt, nested agent and `approve`, the paths of each branch, each loop's bound) with the worst-case cost of each and where it is in the source, and marks `dangerous` tools. Without `--agent` it draws every entry point, then lists the tools and prompts nothing calls. The numbers are the ones `@budget` checks. Costs below a tenth of a cent now show their digits (`$0.0002`) instead of `$0.000`.
+
 
 Store a secret the program must use again, such as a customer's API key. Give its database a data key, `encryption: key(secret("BILLING_DATA_KEY"))` (32 random bytes in base64, such as `openssl rand -base64 32` prints), and declare the column `stripe_key: Secret`. The value is sealed to its table, column and row: the database and the trace hold only ciphertext, and a value copied to another row will not open. Reading the row gives back the `Secret`, with every rule a secret has. A sealed column cannot be filtered, ordered, made unique or sent through a `live`, because the database holds only ciphertext. `corvid serve` refuses to start without the key, and a replay needs it too. [Encryption at rest](docs/proposals/encryption-at-rest.md)
 

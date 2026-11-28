@@ -24,6 +24,8 @@ agent broken(board: Int) -> Stream<Result<Delta, FeedError>> uses vault_read:
     yield Ok(Delta("before"))
     yield Ok(secret_note("http://127.0.0.1:9/Users/ops/vault/notes/" + board.to_string()))
 
+traces: none
+
 server feed_app:
     route GET "/boards/{board: Int}/feed" -> json Stream<Result<Delta, FeedError>>:
         return feed(path.board)

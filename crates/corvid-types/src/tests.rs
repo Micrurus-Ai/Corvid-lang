@@ -112,6 +112,8 @@ type RefundResponse:
 tool get_order(id: String) -> Order
 tool approve_refund(req: RefundRequest) -> RefundResponse
 
+traces: none
+
 server refund_api:
     route GET "/orders/{id}" query OrderQuery -> json Order:
         return get_order(path.id)
@@ -127,6 +129,8 @@ fn server_route_json_response_mismatch_is_rejected() {
     let src = r#"
 type Order:
     id: String
+
+traces: none
 
 server refund_api:
     route GET "/orders/{id}" -> json Order:
@@ -150,6 +154,8 @@ type Order:
 
 tool get_order(id: String) -> Order
 
+traces: none
+
 server refund_api:
     route GET "/orders/{id}" -> json Order:
         return get_order(path.id)
@@ -172,6 +178,8 @@ fn server_get_route_body_is_rejected() {
 type RefundRequest:
     order_id: String
 
+traces: none
+
 server refund_api:
     route GET "/refunds" body RefundRequest -> json RefundRequest:
         return body
@@ -190,6 +198,8 @@ server refund_api:
 fn upload_route_requires_an_explicit_maximum() {
     let missing_policy = check(
         r#"
+traces: none
+
 server api:
     route POST "/imports" body Upload<Csv> -> json Int:
         return body.size()
@@ -206,6 +216,8 @@ server api:
 
     let missing_maximum = check(
         r#"
+traces: none
+
 server api:
     @upload(mime: "text/csv")
     route POST "/imports" body Upload<Csv> -> json Int:
@@ -226,6 +238,8 @@ server api:
 fn route_upload_policy_is_rejected_on_a_non_upload_body() {
     let checked = check(
         r#"
+traces: none
+
 server api:
     @upload(max_mb: 1)
     route POST "/value" body String -> json String:
@@ -246,6 +260,8 @@ server api:
 fn upload_route_with_explicit_maximum_typechecks() {
     let checked = check(
         r#"
+traces: none
+
 server api:
     @upload(max_bytes: 32, mime: "text/csv")
     route POST "/imports" body Upload<Csv> -> json Int:
@@ -264,6 +280,8 @@ tool send_message(body: String) -> String dangerous
 agent send(body: String) -> String:
     approve SendMessage(body)
     return send_message(body)
+
+traces: none
 
 server api:
     route POST "/send" body String -> json String:
@@ -298,6 +316,8 @@ agent send(body: String) -> String:
     approve SendMessage(body)
     return send_message(body)
 
+traces: none
+
 server api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body String -> json String requires authenticated:
@@ -322,6 +342,8 @@ identity users:
 agent send(body: String) -> String:
     approve SendMessage(body)
     return body
+
+traces: none
 
 server api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
@@ -359,6 +381,8 @@ agent send(body: String) -> String:
     approve SendMessage(body)
     return body
 
+traces: none
+
 server api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/send" body String -> json String requires authenticated:
@@ -388,6 +412,8 @@ identity users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server api:
     @approval(role: "reviewer", risk: "external_message", data: "private", expires_ms: 900000, max_cost_usd: $5.0, irreversible: true)
     route POST "/echo" body String -> json String requires authenticated:
@@ -412,6 +438,8 @@ fn ordinary_agent_call_does_not_make_route_approval_capable() {
 agent classify(body: String) -> String:
     return body
 
+traces: none
+
 server api:
     route POST "/classify" body String -> json String:
         return classify(body)
@@ -431,6 +459,8 @@ extend Message:
     agent send(message: Message) -> String:
         approve SendMessage(message.body)
         return message.body
+
+traces: none
 
 server api:
     route POST "/send" body Message -> json String:
@@ -454,6 +484,8 @@ type Receipt:
     id: String
 
 tool issue_refund(id: String) -> Receipt dangerous
+
+traces: none
 
 server refund_api:
     route POST "/refunds/{id}" -> json Receipt:
@@ -486,6 +518,8 @@ type Receipt:
 
 tool issue_refund(id: String) -> Receipt dangerous
 
+traces: none
+
 server refund_api:
     @approval(role: "reviewer", risk: "financial", data: "private", expires_ms: 900000, max_cost_usd: $100.0, irreversible: true)
     route POST "/refunds/{id}" -> json Receipt requires authenticated:
@@ -506,6 +540,8 @@ tool issue_refund(id: String) -> Receipt dangerous
 
 agent unsafe_refund(id: String) -> Receipt:
     return issue_refund(id)
+
+traces: none
 
 server refund_api:
     route POST "/refunds/{id}" -> json Receipt:
@@ -2858,7 +2894,9 @@ agent main() -> Int uses http_read:
     assert!(has(&in_tool, "a tool's signature"), "{in_tool:?}");
 
     let route = errors(program(
-        r#"server api:
+        r#"traces: none
+
+server api:
     route HEAD "/status" -> json String:
         return "ok"
     route GET "/charge" -> json Response<Charge> uses http_read:

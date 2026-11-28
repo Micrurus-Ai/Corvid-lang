@@ -239,6 +239,8 @@ fn add_declarations(items: &mut CompletionSet, file: &File) {
                 "table",
                 format!("table {}", table.record.name.name),
             )),
+            // `traces:` names nothing to complete.
+            Decl::Traces(_) => {}
             Decl::Database(database) => items.add(symbol_item(
                 &database.name.name,
                 CompletionItemKind::MODULE,

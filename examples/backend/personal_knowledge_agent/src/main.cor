@@ -566,6 +566,8 @@ identity knowledge_users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server personal_knowledge_agent_api:
     route GET "/config" -> json KnowledgeConfig:
         return knowledge_config()

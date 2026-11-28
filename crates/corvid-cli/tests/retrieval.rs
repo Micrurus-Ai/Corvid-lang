@@ -99,6 +99,8 @@ async fn document_replacement_preserves_an_index_on_failure() {
         dir.join("src/main.cor"),
         r#"import "std:rag" use rag_search, RagChunkEnvelope
 
+traces: none
+
 server library:
     route GET "/find" -> json List<RagChunkEnvelope>:
         found: Result<List<RagChunkEnvelope>, String> = rag_search("index.sqlite", "vehicle", 1)

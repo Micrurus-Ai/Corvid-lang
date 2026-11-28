@@ -26,6 +26,8 @@ table Card:
     column: String
     title: String where len_between(1, 120)
 
+traces: none
+
 server board_app:
     live "/boards/{board: Int}/cards" -> Card requires permission("board.view"):
         return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)

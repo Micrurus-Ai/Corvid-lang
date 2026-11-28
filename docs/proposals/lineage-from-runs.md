@@ -58,7 +58,7 @@ A field on `ToolResult` was rejected because 24 places build one. An evidence ev
 ```corvid
 traces:
     location: env("TRACE_DIR")
-    keep: 30 days
+    keep: 720 hours
 
 server api:
     route post "/cards" -> json Card requires authenticated:
@@ -75,7 +75,7 @@ server api:
 ```corvid
 traces:
     location: env("TRACE_DIR")
-    keep: 30 days
+    keep: 720 hours
     export: otlp(env("OTEL_EXPORTER_OTLP_ENDPOINT"))
 ```
 
@@ -109,7 +109,12 @@ traces:
 - [x] L1c. Model calls carry their token counts and cost, so `Prompt` spans and `observe`'s cost totals are real. Built 2026-11-27. The trace already held each call's usage as the `llm.usage` host event the usage ledger also gets, so the projection reads that one record, and a test checks that the lineage cost equals the ledger's. The event's name is now one constant at the emitter and the reader.
 - [x] L1d. A streamed model call recorded no usage: not in the usage ledger, not in `llm.usage`, not in the cost observations. The provider's final chunk carries it (`LlmStreamChunk.usage`), and the runtime dropped it. Built 2026-11-27: a stream records its usage when it ends, through `Runtime::record_model_usage`, the same method a whole call now uses. A stream that ends without a done marker records zero tokens, as a whole call with no reported usage does. A test streams a priced call and checks the ledger, the trace order and the derived lineage. `@budget` was not affected: the interpreter charges a streamed prompt its declared per-call cost on the final chunk, not the ledger's measured cost.
 - [x] L2. The time each table operation waited for a turn and ran, on both engines: a `DbTiming` evidence event in the trace, `db_wait_us` and `db_statement_us` on `Db` spans, `waited=` and `ran=` in the tree, and `corvid.db.wait_us` and `corvid.db.statement_us` in both OTLP exporters. Replay skips it. Built 2026-11-27. A run's trace replays with the database deleted.
-- [ ] L3. The `traces:` block (`location:`, `keep:`, `none`) parsed and checked, and required with a `server` block. `corvid serve` records one run per request, with the route as root, and deletes traces older than `keep:`. Served examples declare it. Needs the frontend review.
+- **Build plan for L3 (2026-11-28).** Frontend development agreed (review item 9). It asked that `traces` stay an ordinary name elsewhere, with both uses tested, and that the single declaration be checked across the whole loaded program, imported server modules included. It also asked that six scripts which slice or rewrite `server …:` headers keep working, with each run against its rewritten source, and that generated fixtures and ordinary examples declare `traces: none`. A declared policy must run completely, so L3 lands in two commits:
+  - **L3a:** the block is parsed (contextual `traces:` at top level), required with a `server` block (a compile error offering `traces: none`), and declared at most once. Only `none` is accepted; `location:` and `keep:` are refused by name until L3b. Every served program and test source gains `traces: none`, and the frontend's scripts are run.
+  - **L3b:** `corvid serve` gives each request its own tracer under `location:` (`Runtime::with_tracer`), returns the run id in `Corvid-Run`, labels the root with the route, and deletes trace files older than `keep:` at start and then hourly. `location:` and `keep:` are accepted from this commit.
+- [x] L3a, built 2026-11-28: `traces: none` required with a `server` block and declared once (E0723); the block form refused by name until L3b; every served program, example, doc and frontend script declares it. Refusing a second `traces:` in an imported module is filed on the roadmap.
+- [x] L3b, built 2026-11-28: each request is its own run under `location:`, named in `Corvid-Run` and rooted at its route; traces past `keep:` (1 to 8784 hours) are deleted at start and hourly; the directory is private on Unix.
+- [x] L3. The `traces:` block (`location:`, `keep:`, `none`) parsed and checked, and required with a `server` block. `corvid serve` records one run per request, with the route as root, and deletes traces older than `keep:`. Served examples declare it. Needs the frontend review.
 - [ ] L4. `export: otlp(env(...))`, exporting each finished run's redacted lineage. Needs the frontend review.
 - [ ] L5. Compiled binaries follow the `traces:` block, not the working directory.
 

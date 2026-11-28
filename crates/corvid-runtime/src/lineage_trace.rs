@@ -38,6 +38,12 @@ const TABLE_TOOL_PREFIX: &str = "table:";
 /// The host event a model call's usage is recorded as.
 pub(crate) const LLM_USAGE_EVENT: &str = "llm.usage";
 
+/// The host event `corvid serve` writes first in each request's run
+/// (lineage L3b), with the request's `method` and `route`. The projection
+/// roots the run's lineage at that route instead of the synthetic handler
+/// agent the route runs through. Replay skips host events.
+pub const ROUTE_REQUEST_EVENT: &str = "route.request";
+
 /// The lineage of every run in `events`, one tree per run, in the order
 /// the runs start. Events of different runs may be interleaved.
 pub fn lineage_from_trace(events: &[TraceEvent]) -> Vec<LineageEvent> {
@@ -75,14 +81,29 @@ struct RunLineage {
 impl RunLineage {
     fn project(run_id: &str, events: &[&TraceEvent]) -> Vec<LineageEvent> {
         let first_ms = events.first().map(|e| e.ts_ms()).unwrap_or(0);
-        let root_name = events
-            .iter()
-            .find_map(|e| match e {
-                TraceEvent::RunStarted { agent, .. } => Some(agent.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| run_id.to_string());
-        let mut root = LineageEvent::root(run_id, LineageKind::Agent, root_name, first_ms);
+        // A served request's run is rooted at its route (`POST /cards`).
+        let route = events.iter().find_map(|e| match e {
+            TraceEvent::HostEvent { name, payload, .. } if name == ROUTE_REQUEST_EVENT => {
+                let method = payload.get("method")?.as_str()?;
+                let path = payload.get("route")?.as_str()?;
+                Some(format!("{method} {path}"))
+            }
+            _ => None,
+        });
+        let (root_kind, root_name) = match route {
+            Some(route) => (LineageKind::Route, route),
+            None => (
+                LineageKind::Agent,
+                events
+                    .iter()
+                    .find_map(|e| match e {
+                        TraceEvent::RunStarted { agent, .. } => Some(agent.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| run_id.to_string()),
+            ),
+        };
+        let mut root = LineageEvent::root(run_id, root_kind, root_name, first_ms);
         root.replay_key = run_id.to_string();
         let mut run = Self { spans: vec![root], open: HashMap::new(), children: BTreeMap::new(), agents: Vec::new(), last_ms: first_ms };
         let mut completed = false;
@@ -328,6 +349,30 @@ mod tests {
         assert_eq!(lineage[0].replay_key, RUN, "the root names the run to replay");
         assert!(lineage[1..].iter().all(|span| span.parent_span_id == lineage[0].span_id));
         assert_eq!(lineage[1].latency_ms, 4);
+    }
+
+    #[test]
+    fn a_served_request_is_rooted_at_its_route() {
+        let route = TraceEvent::HostEvent {
+            ts_ms: 9,
+            run_id: RUN.into(),
+            name: ROUTE_REQUEST_EVENT.into(),
+            payload: json!({ "method": "POST", "route": "/cards" }),
+        };
+        let lineage = lineage_from_trace(&[
+            route,
+            started(10),
+            tool_call(11, "table:Card.insert"),
+            tool_result(15, "table:Card.insert"),
+            completed(16, None),
+        ]);
+        assert_eq!(
+            shape(&lineage)[..2],
+            [
+                (LineageKind::Route, "POST /cards", LineageStatus::Ok, 10, 16),
+                (LineageKind::Db, "Card.insert", LineageStatus::Ok, 11, 15),
+            ]
+        );
     }
 
     #[test]

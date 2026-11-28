@@ -823,6 +823,8 @@ tool echo_stream(m: String) -> Stream<String>
 type Classified:
     value: String
 
+traces: none
+
 server secure_api:
     # This route COMPILES and SERVES: `corvid serve` resolves the
     # caller's session to a verified `actor` and enforces the policy
@@ -884,6 +886,8 @@ agent worker() -> Bool:
     roles:
         admin: "refund:write, user:read"
         member: "user:read"
+
+traces: none
 
 server billing_api:
     # Enforced before the handler runs: a caller without a session is

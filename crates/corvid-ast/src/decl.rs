@@ -52,6 +52,9 @@ pub enum Decl {
     Identity(IdentityDecl),
     /// `connector Name:` protocol-typed integration surface (slice 52g).
     Connector(ConnectorDecl),
+    /// `traces: none`, or a `traces:` block saying where a served
+    /// program keeps its run traces and for how long (lineage L3).
+    Traces(TracesDecl),
 }
 
 impl Decl {
@@ -62,6 +65,7 @@ impl Decl {
             Decl::Store(d) => d.span,
             Decl::Table(d) => d.record.span,
             Decl::Database(d) => d.span,
+            Decl::Traces(d) => d.span,
             Decl::Tool(d) => d.span,
             Decl::Prompt(d) => d.span,
             Decl::Agent(d) => d.span,
@@ -1613,6 +1617,27 @@ pub struct DatabaseDecl {
     /// nothing is encrypted and a `Secret` column is refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encryption: Option<DatabaseEncryption>,
+    pub span: Span,
+}
+
+/// A program's `traces:` declaration (lineage L3). A program with a
+/// `server` block must declare one, because keeping what people sent on
+/// disk is a privacy and cost choice, never a default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TracesDecl {
+    /// `None` for `traces: none`, which records nothing.
+    pub recording: Option<TraceRecording>,
+    pub span: Span,
+}
+
+/// Where a served program keeps its run traces, and for how long.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraceRecording {
+    /// `location:`, a path or `env("NAME")`, as for a database.
+    pub location: Option<DatabaseLocation>,
+    /// `keep:`, how long a trace file is kept: the number and unit as
+    /// written, with the span of the duration.
+    pub keep: Option<(String, String, Span)>,
     pub span: Span,
 }
 

@@ -16,8 +16,15 @@
 > sits under its tool. A lineage file (`*.lineage.jsonl`) is still read as
 > written.
 >
+> A served program declares whether its requests are recorded. With
+> `traces: none` nothing is recorded. With a `traces:` block naming a
+> `location:` and how long to `keep:` each trace, every request becomes a
+> run of its own under that directory. Its id comes back in the
+> `Corvid-Run` response header, and its lineage is rooted at the route
+> (`POST /cards`). Traces older than `keep:` are deleted at start and
+> hourly.
+>
 > Not built yet:
-> - `corvid serve` records no trace.
 > - In compiled native code, calls from one agent to another are not nested:
 >   a native run's steps sit directly under the run.
 > - A running program exports nothing to OpenTelemetry. The

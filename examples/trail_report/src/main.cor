@@ -17,6 +17,8 @@ test suggestions_escape_text_and_reference_the_named_list:
     assert field.html.contains(">Bridge &amp; creek</li>")
     assert field.html.contains(">&lt;summit&gt;</li>")
 
+traces: none
+
 server trail_report:
     route GET "/" -> html:
         return report_page()

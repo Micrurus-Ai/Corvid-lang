@@ -23,6 +23,8 @@ fn plan_editor(initial: ReadingPlan) -> ui.View:
     ])
     return ui.local_selection(plan, controls, ui.stack([summary, notes]))
 
+traces: none
+
 server reading_plan:
     route GET "/" -> html:
         initial = ReadingPlan(3, false, false)

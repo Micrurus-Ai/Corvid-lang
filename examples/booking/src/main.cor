@@ -33,6 +33,8 @@ fn booking_page(date: String) -> String:
     form = ui.agent_post_form("book_date", "Save the chosen booking date.", "/book", controls)
     return ui.interactive_page("Booking", [form])
 
+traces: none
+
 server booking_app:
     route GET "/" -> html:
         return match booking_date():

@@ -290,6 +290,8 @@ prompt answer(question: String) -> Stream<String>:
     with max_tokens 200
     "{question}"
 
+traces: none
+
 server answers:
     route GET "/answer/{question}" -> json Stream<String>:
         return try answer(path.question) timeout 700 on error retry 2 times backoff linear 1

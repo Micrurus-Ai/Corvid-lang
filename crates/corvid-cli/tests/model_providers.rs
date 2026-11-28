@@ -191,6 +191,8 @@ async fn streamed_prompt_reaches_http_consumer_before_provider_finishes() {
     with max_tokens 20
     "{mode}"
 
+traces: none
+
 server stream_api:
     route GET "/answer/{mode}" -> json Stream<String>:
         return try generate(path.mode) timeout 700 on error retry 2 times backoff linear 1

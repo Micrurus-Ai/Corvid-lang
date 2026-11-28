@@ -32,6 +32,8 @@ agent suggest_title(shelf: Shelf) -> BookSuggestion:
 
     return BookSuggestion(shelf, title)
 
+traces: none
+
 server suggestions:
     route POST "/suggest" form Shelf -> html:
         return match suggest_title(body):

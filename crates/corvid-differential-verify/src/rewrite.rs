@@ -1240,6 +1240,7 @@ fn collect_all_names(file: &File) -> BTreeSet<String> {
             Decl::Database(database) => {
                 names.insert(database.name.name.clone());
             }
+            Decl::Traces(_) => {}
             Decl::Store(store) => {
                 names.insert(store.name.name.clone());
                 for field in &store.fields {

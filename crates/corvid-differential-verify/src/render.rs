@@ -22,7 +22,7 @@ pub fn render_file(file: &File) -> String {
 
 fn render_decl(decl: &Decl, indent: usize, out: &mut String) {
     match decl {
-        Decl::Table(_) | Decl::Database(_) => {
+        Decl::Table(_) | Decl::Database(_) | Decl::Traces(_) => {
             // Never synthesized by rewrite passes; placeholder keeps
             // the renderer total.
             push_indent(indent, out);

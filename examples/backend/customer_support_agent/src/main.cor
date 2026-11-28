@@ -486,6 +486,8 @@ identity support_users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server customer_support_agent_api:
     route GET "/config" -> json SupportConfig:
         return support_config()

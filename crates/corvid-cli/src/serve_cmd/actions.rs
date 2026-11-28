@@ -31,7 +31,7 @@ use crate::action_calls::{decode_text_input, TextInputRefusal};
 use crate::request_text::urlencoded_values;
 
 use super::{
-    approval_runtime, bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish,
+    bad_request, capture_pending_invocation_if_queued, enforce_route_policy, finish, request_runtime, with_run_header,
     reply_encoding, EnforcedRouteActor, ServeState,
 };
 
@@ -166,10 +166,11 @@ pub(super) async fn execute(
     }
     state.runtime.emit_host_event("action", event);
     let route = format!("POST {}", endpoint.path);
-    let runtime = approval_runtime(state, enforced, endpoint.approval.as_ref(), route.clone());
+    let runtime = request_runtime(state, enforced, endpoint.approval.as_ref(), route.clone());
     let outcome = run_ir_with_runtime(&state.ir, Some(&endpoint.agent), args.clone(), &runtime).await;
     capture_pending_invocation_if_queued(state, &endpoint.agent, &args, &outcome);
-    finish(outcome, RouteResponseKind::Json, &state.page_scripts, reply_encoding(state, &endpoint.agent), route)
+    let response = finish(outcome, RouteResponseKind::Json, &state.page_scripts, reply_encoding(state, &endpoint.agent), route);
+    with_run_header(state, &runtime, response)
 }
 
 /// The action's arguments, in declaration order, from a JSON or form body.

@@ -54,6 +54,7 @@ decl              ::= visibility? (
                       | store_decl
                       | table_decl
                       | database_decl
+                      | traces_decl
                       | tool_decl
                       | prompt_decl
                       | agent_decl
@@ -152,6 +153,14 @@ table_decl        ::= 'table' IDENT ('in' IDENT)? ':' INDENT (table_field | tabl
 table_field       ::= 'key'? IDENT ':' type_ref ('renamed' 'from' IDENT)? NEWLINE
 table_retired     ::= 'retired' IDENT (',' IDENT)* NEWLINE
 table_unique      ::= 'unique' IDENT (',' IDENT)* NEWLINE
+# Lineage L3: a program with a `server` block declares whether its
+# requests are recorded, once, at the top level. `traces` is contextual.
+# The block form records each request as its own run under `location:`,
+# deleted after `keep:` (1 to 8784 hours; both required, no default).
+traces_decl       ::= 'traces' ':' 'none' NEWLINE
+                    | 'traces' ':' INDENT traces_item+ DEDENT
+traces_item       ::= 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
+                    | 'keep' ':' INT IDENT NEWLINE
 database_decl     ::= 'database' IDENT ':' INDENT database_setting+ DEDENT
 database_setting  ::= 'engine' ':' IDENT NEWLINE
                     | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE

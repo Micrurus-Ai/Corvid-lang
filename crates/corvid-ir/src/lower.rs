@@ -405,6 +405,8 @@ impl<'a> Lowerer<'a> {
                 // operation (IrExprKind::TableOp).
                 Decl::Table(t) => types.push(self.lower_type(&t.record)),
                 Decl::Database(_) => {}
+                // Read by `corvid serve` from the source, as `identity` is.
+                Decl::Traces(_) => {}
                 Decl::Tool(t) => tools.push(self.lower_tool(t)),
                 Decl::Prompt(p) => prompts.push(self.lower_prompt(p)),
                 Decl::Agent(a) => {

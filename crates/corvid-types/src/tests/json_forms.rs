@@ -45,6 +45,8 @@ memory Ledger:
 agent latest() -> Invoice:
     return Invoice(1.50, Instant.from_epoch_milliseconds(0), Instant.from_epoch_milliseconds(0) - Instant.from_epoch_milliseconds(0), Instant.from_epoch_milliseconds(0).in_zone(\"UTC\"), \"UTC\", \"EUR\", \"de-DE\")
 
+traces: none
+
 server Billing:
     route GET \"/invoice\" -> json Invoice:
         return latest()

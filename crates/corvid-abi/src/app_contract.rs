@@ -1876,7 +1876,7 @@ public agent ingest(doc: DocSubmission) -> String:
     #[test]
     fn direct_upload_route_surfaces_the_enforced_boundary_policy() {
         let contract = contract_for(
-            "server imports:
+            "traces: none\n\nserver imports:
     @upload(max_bytes: 32, mime: \"text/csv\")
     route POST \"/imports\" body Upload<Csv> -> json Int:
         return body.size()
@@ -1905,6 +1905,8 @@ public agent ingest(doc: DocSubmission) -> String:
 agent submit_payment(body: String) -> String:
     approve SubmitPayment(body)
     return body
+
+traces: none
 
 server payments:
     @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
@@ -2192,6 +2194,8 @@ public type Shelf:
     roles:
         admin: \"user:read, user:write\"
 
+traces: none
+
 server admin_api:
     route GET \"/admin\" -> json String requires role(\"admin\"):
         return actor.id
@@ -2439,7 +2443,7 @@ server admin_api:
     #[test]
     fn a_declared_role_and_permission_referenced_by_a_route_compiles() {
         let errors = check_errors_of(
-            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"refund:write, user:read\"\n\nserver api:\n    route GET \"/admin\" -> json String requires role(\"admin\") and permission(\"refund:write\"):\n        return actor.id\n",
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"refund:write, user:read\"\n\ntraces: none\n\nserver api:\n    route GET \"/admin\" -> json String requires role(\"admin\") and permission(\"refund:write\"):\n        return actor.id\n",
         );
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
@@ -2447,7 +2451,7 @@ server admin_api:
     #[test]
     fn requires_an_undeclared_role_is_rejected() {
         let errors = check_errors_of(
-            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\nserver api:\n    route GET \"/x\" -> json String requires role(\"superadmin\"):\n        return actor.id\n",
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\ntraces: none\n\nserver api:\n    route GET \"/x\" -> json String requires role(\"superadmin\"):\n        return actor.id\n",
         );
         assert!(
             errors.iter().any(|e| matches!(
@@ -2462,7 +2466,7 @@ server admin_api:
     #[test]
     fn requires_an_undeclared_permission_is_rejected() {
         let errors = check_errors_of(
-            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\nserver api:\n    route GET \"/x\" -> json String requires permission(\"refund:write\"):\n        return actor.id\n",
+            "identity users:\n    provider google\n    provisioning:\n        first_login: open\n        tenant: fixed(\"public\")\n    roles:\n        admin: \"user:read\"\n\ntraces: none\n\nserver api:\n    route GET \"/x\" -> json String requires permission(\"refund:write\"):\n        return actor.id\n",
         );
         assert!(
             errors.iter().any(|e| matches!(

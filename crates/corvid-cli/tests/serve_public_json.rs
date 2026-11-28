@@ -193,6 +193,8 @@ type Receipt:
     order: Order
     outcome: Result<Outcome, String>
 
+traces: none
+
 server notes:
     route POST "/notes" body Note -> json Note:
         return body

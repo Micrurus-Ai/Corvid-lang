@@ -500,9 +500,18 @@ extend Customer:
 "#,
     ),
     (
+        "traces_recording",
+        r#"traces:
+    location: env("TRACE_DIR")
+    keep: 720 hours
+"#,
+    ),
+    (
         "server_and_schedule",
         r#"type HealthStatus:
     healthy: Bool
+
+traces: none
 
 server api:
     route GET "/health" -> json HealthStatus:
@@ -779,6 +788,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("table_unique", "tables_and_databases"),
     ("atomic_stmt", "tables_and_databases"),
     ("database_decl", "tables_and_databases"),
+    ("traces_decl", "server_and_schedule"),
+    ("traces_item", "traces_recording"),
     ("database_setting", "tables_and_databases"),
     ("type_ref", "record_types_and_stores"),
     ("type_args", "record_types_and_stores"),

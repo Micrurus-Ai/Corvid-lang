@@ -227,6 +227,8 @@ action claim(card: Int, by: Caller) -> String requires authenticated:
 action retire(card: Int, by: Caller) -> Int requires permission("board.edit"):
     return card
 
+traces: none
+
 server board:
     route POST "/cards/{card: Int}/retire" -> json Int requires authenticated:
         return retire(path.card, actor)

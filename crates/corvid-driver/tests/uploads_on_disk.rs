@@ -7,6 +7,8 @@ use corvid_driver::{compile_to_application_contract_with_config, compile_to_ir};
 const PROGRAM: &str = r#"type Receipt:
     size: Int
 
+traces: none
+
 server files:
     @upload(max_mb: 500, mime: "video/mp4", disk_over_mb: 16)
     route POST "/videos" body Upload<Video> -> json Receipt:

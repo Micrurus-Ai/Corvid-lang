@@ -474,6 +474,8 @@ identity maintenance_users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server code_maintenance_agent_api:
     route GET "/config" -> json CodeConfig:
         return code_config()

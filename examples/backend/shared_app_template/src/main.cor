@@ -84,6 +84,8 @@ public @replayable
 agent connector_mocks() -> ConnectorMockSummary:
     return ConnectorMockSummary(5, "gmail:mock", "calendar:mock", "tasks:mock", "slack:mock", "files:mock")
 
+traces: none
+
 server shared_app_template:
     route GET "/healthz" -> json HealthResponse:
         return healthz()

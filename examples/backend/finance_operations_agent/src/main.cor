@@ -541,6 +541,8 @@ identity finance_users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server finance_operations_agent_api:
     route GET "/config" -> json FinanceConfig:
         return finance_config()

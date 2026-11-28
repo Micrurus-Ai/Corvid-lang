@@ -23,6 +23,8 @@ agent receipt(quantities: Quantities) -> String:
     total = notebook_cents(quantities.notebook) + pencil_cents(quantities.pencil)
     return shop_page("Checkout summary", [View("<h1>Checkout summary</h1>"), ui.text("Notebooks: " + quantities.notebook.to_string()), ui.text("Pencils: " + quantities.pencil.to_string()), ui.text("Total: " + total.to_string() + " cents"), ui.link("Catalog", "/")])
 
+traces: none
+
 server shop:
     route GET "/" -> html:
         return shop_page("Catalog", [View("<h1>Catalog</h1>"), ui.link("Open cart", "/cart"), ui.grid([ui.link("Notebook · 450 cents", "/notebook"), ui.link("Pencil · 125 cents", "/pencil")])])

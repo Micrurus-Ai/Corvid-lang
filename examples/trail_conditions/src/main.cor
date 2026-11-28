@@ -54,6 +54,8 @@ test class_group_escapes_classes_and_keeps_child_order:
     group = ui.class_group("map\" & <trail>", [ui.text("First"), ui.text("Second")])
     assert group.html == "<div class=\"map&quot; &amp; &lt;trail&gt;\"><p>First</p><p>Second</p></div>"
 
+traces: none
+
 server trail_conditions:
     route GET "/" -> html:
         return conditions_page()

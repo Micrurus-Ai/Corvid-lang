@@ -33,6 +33,8 @@ test moved_document_keeps_the_query_in_its_fallback_link:
     assert page.contains("content=\"0;url=/stops?trail=ridge&amp;days=3\"")
     assert page.contains(ui.link("New itinerary", url).html)
 
+traces: none
+
 server trail_itinerary:
     route GET "/" -> html:
         return ui.page("Trail itinerary", [ui.link("River lookout", lookout_path())])

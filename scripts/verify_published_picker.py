@@ -20,6 +20,8 @@ fn settings(value: Color) -> String:
 agent main() -> String:
     return color_name(Color(0))
 
+traces: none
+
 server theme_editor:
     route GET "/" -> html:
         return settings(Color(0))

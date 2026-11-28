@@ -2,6 +2,8 @@ import "./sketch" use Sketch
 import "./sidebar" use Sidebar
 import "std:ui" as ui
 
+traces: none
+
 server workspace:
     route GET "/" -> html:
         sketch = ui.assistant_drag(Sketch(), "add_stroke", "Draw a line between two canvas points.")

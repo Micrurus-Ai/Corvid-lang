@@ -72,6 +72,8 @@ fn agent_list(workspace: Workspace) -> ui.View:
     editor = ui.list_editor(agent_rows(workspace.agents), agent_rows([new_agent]), "Add agent", "Remove agent")
     return ui.assistant_reorder(editor, "move_agent", "Move an agent up or down by its ID.")
 
+traces: none
+
 server app:
     route GET "/agents" -> html:
         workspace = Workspace([WorkspaceAgent("reader", "Reader", true), WorkspaceAgent("writer", "Writer", false)])

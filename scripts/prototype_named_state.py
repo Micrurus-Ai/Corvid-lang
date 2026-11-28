@@ -73,6 +73,8 @@ def build(path, project, cli):
     main = f"""import "./component" use render_component
 import "std:ui" as ui
 
+traces: none
+
 server app:
     route GET "/" -> html:
         return ui.interactive_page("{name}", [render_component(), render_component()])

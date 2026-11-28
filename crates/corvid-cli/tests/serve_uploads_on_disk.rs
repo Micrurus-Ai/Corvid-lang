@@ -22,7 +22,7 @@ fn program() -> String {
     let route = |path: &str, body: &str| {
         format!("    @upload(max_mb: 80, mime: \"text/plain\", disk_over_mb: 16)\n    route POST \"{path}\" body Upload<Text> -> json Receipt:\n        {body}\n")
     };
-    let mut source = "type Receipt:\n    size: Int\n    digest: String\n\nserver files:\n".to_string();
+    let mut source = "type Receipt:\n    size: Int\n    digest: String\n\ntraces: none\n\nserver files:\n".to_string();
     source.push_str(&route("/size", "return Receipt(body.size(), \"\")"));
     source.push_str(&route("/digest", "return Receipt(body.size(), body.bytes().sha256().to_hex())"));
     source.push_str(&route("/text", "return Receipt(body.text().length(), \"\")"));

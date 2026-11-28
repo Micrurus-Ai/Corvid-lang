@@ -324,7 +324,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `"path"` or `env("NAME")`.
-    fn parse_database_location(&mut self) -> Result<DatabaseLocation, ParseError> {
+    pub(super) fn parse_database_location(&mut self) -> Result<DatabaseLocation, ParseError> {
         let span = self.peek_span();
         match self.peek().clone() {
             TokKind::StringLit(path) => {
@@ -362,7 +362,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_block_start(&mut self) -> Result<(), ParseError> {
+    pub(super) fn expect_block_start(&mut self) -> Result<(), ParseError> {
         if !matches!(self.peek(), TokKind::Indent) {
             return Err(ParseError {
                 kind: ParseErrorKind::UnexpectedToken {

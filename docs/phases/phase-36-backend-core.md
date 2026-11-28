@@ -36,6 +36,8 @@ agent approve_refund(req: RefundRequest) -> RefundResponse uses transfer_money:
     approve IssueRefund(req.order_id)
     return issue_refund(req)
 
+traces: none
+
 server refund_api:
     route POST "/refunds" body RefundRequest -> json RefundResponse:
         return approve_refund(body)

@@ -20,6 +20,8 @@ def verify_reader_app(cli, project, env):
 import "std:ui" as controls
 import "std:ui" use View
 
+traces: none
+
 server reader:
     route GET "/" -> html:
         record = controls.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to the reading count.")

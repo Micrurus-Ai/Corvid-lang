@@ -373,7 +373,7 @@ fn web_bundle_without_event_handlers_contains_only_application_inputs() {
     .unwrap();
     fs::write(
         root.join("src/main.cor"),
-        "server app:\n    route GET \"/\" -> html:\n        return \"Hello\"\n",
+        "traces: none\n\nserver app:\n    route GET \"/\" -> html:\n        return \"Hello\"\n",
     )
     .unwrap();
     fs::write(root.join("src/session.log"), "runtime data").unwrap();
@@ -417,7 +417,7 @@ fn web_bundle_compiles_events_and_preserves_the_previous_build_on_handler_errors
     fs::create_dir(&src).unwrap();
     fs::write(
         src.join("main.cor"),
-        "server app:\n    route GET \"/\" -> html:\n        return \"Counter\"\n",
+        "traces: none\n\nserver app:\n    route GET \"/\" -> html:\n        return \"Counter\"\n",
     )
     .unwrap();
     let handler = "agent increment(current: Int) -> Int:\n    return current + 1\n";
@@ -463,6 +463,8 @@ type Filter:
     term: String
     ratio: Float
     enabled: Bool
+
+traces: none
 
 server app:
     route POST "/save" form Filter -> html:

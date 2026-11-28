@@ -4,6 +4,8 @@ import "std:ui" as ui
 fn palette(value: Color) -> String:
     return ui.interactive_page("Palette", [ui.text("Selected: " + color_name(value)), ColorPicker(value, "/")])
 
+traces: none
+
 server palette_app:
     route GET "/" -> html:
         return palette(Color(0))

@@ -679,6 +679,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Decl::Database(_) => {}
+                Decl::Traces(_) => {}
                 Decl::Store(_) => {}
                 Decl::Import(_) => {}
                 Decl::Effect(_) => {}
@@ -898,6 +899,8 @@ impl<'a> Checker<'a> {
                     self.check_json_keys(&t.record);
                 }
                 Decl::Database(d) => self.check_database(d),
+                // Checked for the whole file below, as one declaration.
+                Decl::Traces(_) => {}
                 Decl::Identity(i) => self.check_identity(i),
                 Decl::Connector(c) => self.check_connector(c),
                 Decl::Tool(t) => self.check_retired_json_decoder_tool(t),
@@ -921,6 +924,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        self.check_traces(file);
     }
 
     fn has_known_approval_label(&self, label: &str) -> bool {
@@ -972,6 +976,7 @@ mod call;
 mod case;
 mod decl;
 mod decl_eval;
+mod traces;
 mod decl_extern_c;
 mod decimal;
 mod bytes;

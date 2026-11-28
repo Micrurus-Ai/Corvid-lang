@@ -19,6 +19,8 @@ const GITHUB_KEY: &str = "corvid-github-test-key";
 const PROGRAM: &str = r#"type PaymentEvent:
     id: String
 
+traces: none
+
 server payments:
     route POST "/webhooks/stripe" body PaymentEvent verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes) -> json String:
         return body.id

@@ -342,6 +342,8 @@ fn top_level_definitions(file: &File, resolved: &Resolved) -> Vec<Definition> {
                 table.record.name.span,
                 SymbolKind::STRUCT,
             ),
+            // `traces:` defines no name.
+            Decl::Traces(_) => {}
             Decl::Database(database) => push_definition(
                 &mut out,
                 resolved,

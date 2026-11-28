@@ -76,6 +76,7 @@ mod live_assets;
 mod live;
 mod own_origin;
 mod public_failure;
+mod request_traces;
 mod route_stream;
 mod webhook;
 use browser_asset::browser_asset;
@@ -117,6 +118,9 @@ struct ServeState {
     /// The private directory for uploads held on disk, opened at startup
     /// only when a route declares `@upload(..., disk_over_mb: N)`.
     held_uploads: Option<Arc<corvid_runtime::held_upload::UploadDir>>,
+    /// Where each request is recorded as its own run (`traces:`, lineage
+    /// L3b); `None` for `traces: none`.
+    request_traces: Option<Arc<request_traces::RequestTraces>>,
     live_routes: live::Routes,
     /// One evaluation per distinct live query, shared by its subscribers.
     live_queries: Arc<live::SharedQueries>,
@@ -450,8 +454,21 @@ pub(crate) fn cmd_serve(
     } else {
         None
     };
+    // Lineage L3b: a program that records its requests says where and
+    // for how long; a location that cannot be made refuses to start.
+    let request_traces = match request_traces::RequestTraces::from_source(&source) {
+        Ok(traces) => traces.map(Arc::new),
+        Err(problem) => {
+            eprintln!("error: {} records its requests (`traces:`), but {problem}", file.display());
+            return Ok(1);
+        }
+    };
+    if let Some(traces) = &request_traces {
+        traces.clone().spawn_sweeper();
+    }
     let state = Arc::new(ServeState {
         held_uploads,
+        request_traces,
         live_routes: live::Routes::new(&ir)?,
         live_queries: Arc::default(),
         live_shutdown: tokio::sync::watch::channel(false).0,
@@ -1524,7 +1541,7 @@ async fn run_route(
         }
     }
 
-    let request_runtime = approval_runtime(
+    let request_runtime = request_runtime(
         &state,
         enforced_actor.as_ref(),
         meta.approval_policy.as_ref(),
@@ -1539,13 +1556,44 @@ async fn run_route(
     .await;
     capture_pending_invocation_if_queued(&state, &meta.handler_agent, &args, &outcome);
     let route = format!("{} {}", meta.method.as_str(), meta.route_path);
-    finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route)
+    let response = finish(outcome, meta.response_kind, &state.page_scripts, reply_encoding(&state, &meta.handler_agent), route);
+    with_run_header(&state, &request_runtime, response)
 }
 
 /// The runtime one request runs on. A signed-in request to a route or an
 /// action with an `@approval(...)` policy queues each `approve` it
 /// reaches under that policy, with the verified caller as requester; any
-/// other request keeps the process runtime, whose approver says no.
+/// other request keeps the process runtime, whose approver says no. When
+/// the program records its requests (`traces:`, lineage L3b), the request
+/// gets a run of its own, whose first event names the route.
+fn request_runtime(
+    state: &ServeState,
+    enforced: Option<&EnforcedRouteActor>,
+    policy: Option<&corvid_ast::ApprovalSpec>,
+    label: String,
+) -> Runtime {
+    let runtime = approval_runtime(state, enforced, policy, label.clone());
+    let Some(traces) = &state.request_traces else { return runtime };
+    let runtime = runtime.with_tracer(traces.open_run());
+    let (method, route) = label.split_once(' ').unwrap_or(("", label.as_str()));
+    runtime.emit_host_event(
+        corvid_runtime::ROUTE_REQUEST_EVENT,
+        serde_json::json!({ "method": method, "route": route }),
+    );
+    runtime
+}
+
+/// The response to a request, with its run id in `Corvid-Run` when the
+/// program records its requests.
+fn with_run_header(state: &ServeState, runtime: &Runtime, mut response: Response) -> Response {
+    if state.request_traces.is_some() {
+        if let Ok(value) = axum::http::HeaderValue::from_str(runtime.tracer().run_id()) {
+            response.headers_mut().insert(request_traces::RUN_HEADER, value);
+        }
+    }
+    response
+}
+
 fn approval_runtime(
     state: &ServeState,
     enforced: Option<&EnforcedRouteActor>,

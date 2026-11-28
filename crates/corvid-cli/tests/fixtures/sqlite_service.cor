@@ -31,6 +31,8 @@ agent locked_events(db: DbHandle) -> Stream<String>:
 agent failed_events(reason: String) -> Stream<String>:
     yield reason
 
+traces: none
+
 server notes_api:
     route GET "/events" -> json Stream<String>:
         return match db_open("notes.sqlite"):

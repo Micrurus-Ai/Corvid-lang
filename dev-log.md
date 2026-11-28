@@ -2,6 +2,74 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Lineage L3: a served program declares its traces, and each request is recorded; the launch track
+
+**The launch track.** On 2026-11-28 the owner asked for the roadmap to be
+rearranged: launch sooner and stronger, with a demo that makes developers
+say "wow", and a first hour good enough that they keep using Corvid. The
+track now leads `docs/backend-ai-roadmap.md`:
+
+- **A, trying it:** B21, B23 and B43.
+- **B, the demo:** B24, B47 (taken by the Mac session), B22, B27, B46 and
+  B49.
+- **C, deep AI:** B51, B54, and B57 with B17.
+- **D, launch:** the launch materials, each approved by the owner.
+
+The reasons are recorded there. The in-flight L3 finishes first.
+
+**L3a.** Frontend development agreed (review item 9).
+
+- **The declaration.** `traces: none` is a contextual top-level declaration,
+  so `traces` stays an ordinary name; a test uses it as an agent and a
+  local. A file with a `server` block must declare it: E0723 names the
+  server and offers `traces: none`. A second declaration is refused.
+- **Narrowed, by refusal.** The block form (`location:`, `keep:`) parses,
+  in its final shape, and is refused by name until L3b records requests. A
+  program cannot declare recording that does not run.
+- **Every served program declares it.** About 60 test sources, examples
+  and docs gained `traces: none`, through three scripts: raw strings,
+  ordinary and escaped strings, and Markdown `corvid` blocks.
+- **Frontend scripts.** Four of the frontend's scripts write server
+  programs from scratch and now write the line.
+  `benchmark_reading_save.py`, `verify_storefront.py` and
+  `verify_browser_diagnostics.py` rewrite `server ...:` headers, whose
+  anchors are unchanged, in sources that already declare it. The
+  catalog starter the packaged-catalog script extends has no server
+  of its own.
+- **Scope of "once".** Only the root file's servers are lowered and served,
+  so the rule applies to the file that declares a `server`. Refusing a
+  `traces:` in an imported module that a root also declares is filed on
+  the roadmap.
+
+**L3b, recording.** `traces:` with `location:` and `keep:` records each
+request as its own run. Both items are required, with no default, and
+`keep:` must be 1 to 8784 hours, read by `corvid_types::traces::keep_seconds`,
+the rule the server deletes by. Days are refused, as the delegation cap
+refuses them, because a day is not a fixed length.
+
+- **Where.** `request_runtime`, the one place routes and actions get their
+  runtime, gives each request `Runtime::with_tracer` and writes a
+  `route.request` host event first. `with_run_header` returns the run id
+  in `Corvid-Run`.
+- **The root.** The lineage projection roots a run with that event at
+  the route (`POST /cards`), not at the synthetic handler agent. The
+  event's name is one constant at the writer and the reader. Replay
+  already skips host events.
+- **Retention.** Trace files past `keep:` are deleted at start, then
+  hourly, on the blocking pool. The directory is created `0700` on Unix.
+  A location that cannot be read or made refuses to start.
+- **Slicing.** L3a and L3b were built back to back. L3b's code went in
+  while L3a's gate ran, so they are one commit, gated together.
+
+Tests: `crates/corvid-driver/tests/traces_declaration.rs` (required, once,
+the recording block's rules, ordinary name). `serve_request_traces.rs`
+runs a real server: each request is its own run named in `Corvid-Run`,
+holding only its own request, and `corvid trace lineage` roots it at `POST
+/cards`; the directory is created private. Unit tests cover the sweep
+(only traces past `keep:`, never other files), `keep_seconds`, and the
+route root. Plus grammar drift evidence and every test target of the
+checker, IR, contract, driver and CLI crates.
+
 ### Schedules are roots of the agent graph (B47 G3c)
 
 A schedule starts work with no caller, so `callers_of` an agent must
@@ -67,6 +135,7 @@ Proof: two driver tests cover the route ids, the `live` row and policy,
 a public route's `null`, a route's tool steps and cost, an action's
 route, policy and assistant offer, its `button_for` caller, and the
 default of no assistant offer.
+
 
 ### A graph step's id names what it calls
 
@@ -240,6 +309,7 @@ Proof:
 - a checker test that `random_token(8)` and `PasswordCost(4096, 0, 1)`
   fail to compile;
 - the bounds-agreement test.
+
 
 ### Encryption at rest K2 and K3: a `Secret` column, sealed to its row
 

@@ -3,6 +3,8 @@ import "std:ui" as ui
 fn welcome_page() -> String:
     return ui.page("Welcome", [ui.text("Hello, Corvid!")])
 
+traces: none
+
 server site:
     route GET "/" -> html:
         return welcome_page()

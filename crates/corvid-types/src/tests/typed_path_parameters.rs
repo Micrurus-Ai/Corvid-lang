@@ -11,6 +11,8 @@ fn a_typed_path_parameter_has_its_type_in_the_handler() {
         "type Board:
     id: Int
 
+traces: none
+
 server board_app:
     route GET \"/boards/{board: Int}\" -> json Board:
         return Board(path.board + 1)
@@ -22,7 +24,7 @@ server board_app:
 #[test]
 fn an_untyped_path_parameter_stays_a_string() {
     let checked = check(
-        "server board_app:
+        "traces: none\n\nserver board_app:
     route GET \"/boards/{board}\" -> json Int:
         return path.board + 1
 ",
@@ -36,6 +38,8 @@ fn every_exact_scalar_and_a_type_of_plain_variants_is_a_path_parameter() {
         "type Status:
     | Open
     | Closed
+
+traces: none
 
 server reports:
     route GET \"/reports/{day: Instant}/{amount: Decimal}/{status: Status}/{ratio: Float}/{draft: Bool}\" -> json Bool:
@@ -51,6 +55,8 @@ fn a_type_one_segment_cannot_hold_is_refused_by_name() {
         "type Outcome:
     | Done(code: Int)
     | Pending
+
+traces: none
 
 server reports:
     route GET \"/reports/{outcome: Outcome}\" -> json Int:
@@ -78,6 +84,8 @@ type Search:
     limit: Option<Int>
     total: Decimal
 
+traces: none
+
 server search:
     route GET \"/cards\" query Search -> json Int:
         return 1
@@ -91,6 +99,8 @@ server search:
 
 type Search:
     lines: List<Line>
+
+traces: none
 
 server search:
     route GET \"/cards\" query Search -> json Int:

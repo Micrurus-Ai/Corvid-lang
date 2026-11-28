@@ -705,6 +705,8 @@ identity executive_users:
     roles:
         reviewer: "approvals.decide"
 
+traces: none
+
 server personal_executive_agent_api:
     route GET "/schema" -> json ExecutiveSchemaManifest:
         return executive_schema_manifest()

@@ -166,7 +166,7 @@ fn an_action_input_cannot_take_the_csrf_fields_name() {
 fn a_route_form_takes_every_field_one_form_value_carries() {
     let route = |field: &str| {
         format!(
-            "type Filter:\n    name: String\n    {field}\n\nserver api:\n    route POST \"/save\" form Filter -> html:\n        return \"saved\"\n\nagent page() -> String:\n    return form_for(\"POST /save\", Filter(\"milk\", {}), \"Save\")\n",
+            "type Filter:\n    name: String\n    {field}\n\ntraces: none\n\nserver api:\n    route POST \"/save\" form Filter -> html:\n        return \"saved\"\n\nagent page() -> String:\n    return form_for(\"POST /save\", Filter(\"milk\", {}), \"Save\")\n",
             if field.contains("Column") { "Done" } else { "1.5" }
         )
     };

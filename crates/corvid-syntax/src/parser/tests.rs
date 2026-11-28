@@ -3291,6 +3291,8 @@ type RefundResponse:
 effect transfer_money:
     cost: $1
 
+traces: none
+
 server refund_api:
     route GET "/orders/{id}" query RefundQuery -> json Order:
         return get_order(path.id)
@@ -3321,6 +3323,8 @@ server refund_api:
     #[test]
     fn server_upload_route_parses_explicit_boundary_policy() {
         let src = r#"
+traces: none
+
 server imports:
     @upload(max_mb: 12, mime: "text/csv, application/csv")
     route POST "/imports" body Upload<Csv> -> json Int:
@@ -3348,6 +3352,8 @@ server imports:
     #[test]
     fn server_approval_route_parses_complete_policy() {
         let src = r#"
+traces: none
+
 server payments:
     @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
     route POST "/payments" body String -> json Bool requires authenticated:
@@ -3376,6 +3382,8 @@ server payments:
     #[test]
     fn server_approval_route_rejects_an_incomplete_policy() {
         let src = r#"
+traces: none
+
 server payments:
     @approval(role: "finance_reviewer", risk: "financial_transfer")
     route POST "/payments" body String -> json Bool requires authenticated:
@@ -3394,6 +3402,8 @@ server payments:
     #[test]
     fn server_approval_route_rejects_duplicate_policy_keys() {
         let src = r#"
+traces: none
+
 server payments:
     @approval(role: "reviewer", role: "operator", risk: "write", data: "private", expires_ms: 600000, max_cost_usd: $5.0, irreversible: true)
     route POST "/payments" body String -> json Bool requires authenticated:

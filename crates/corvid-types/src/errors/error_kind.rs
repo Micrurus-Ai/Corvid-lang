@@ -584,6 +584,10 @@ pub enum TypeErrorKind {
     /// shape a provider's signed call cannot take.
     WebhookVerificationInvalid { path: String, problem: String },
 
+    /// A served program's `traces:` declaration (lineage L3) is missing,
+    /// declared twice, or asks for recording not built yet.
+    TracesPolicyInvalid { problem: String },
+
     /// A connector `Response` outside the program that made the call.
     ResponseOutsideCaller { place: String },
 
@@ -834,6 +838,7 @@ impl TypeErrorKind {
             Self::GetRouteBody { .. } => "E0721",
             Self::RouteMethodAnsweredByServer { .. } => "E0722",
             Self::WebhookVerificationInvalid { .. } => "E0718",
+            Self::TracesPolicyInvalid { .. } => "E0723",
             Self::ResponseOutsideCaller { .. } => "E0802",
             Self::ModelOutputFormatMismatch { .. } => "E0914",
             Self::RolloutPercentOutOfRange { .. } => "E0233",
@@ -1329,6 +1334,7 @@ impl TypeErrorKind {
             Self::WebhookVerificationInvalid { path, problem } => {
                 format!("verified route `{path}`: {problem}")
             }
+            Self::TracesPolicyInvalid { problem } => problem.clone(),
             Self::RouteMethodAnsweredByServer { server, method, path } => {
                 format!("route `{method} {path}` in server `{server}` declares a method the server answers itself")
             }
@@ -1813,6 +1819,9 @@ impl TypeErrorKind {
             )),
             Self::GetRouteBody { .. } => Some(
                 "move request data for GET into a `query Type` clause, or change the method to POST/PUT/PATCH".into(),
+            ),
+            Self::TracesPolicyInvalid { .. } => Some(
+                "a served program declares `traces: none` at the top level; recording each request, kept on disk for a declared time, is on the roadmap (lineage L3b)".into(),
             ),
             Self::WebhookVerificationInvalid { .. } => Some(
                 "a verified route is a provider's signed call: `route POST \"/webhooks/stripe\" body Event verified stripe(secret: \"STRIPE_WEBHOOK_SECRET\", within: 5 minutes) -> json Nothing:`. Schemes that sign no time (`github`, `linear`) write `replays: accepted` instead of `within:`".into(),

@@ -1,6 +1,8 @@
 import "./color_picker" use Color, LocalColorPicker, ColorPicker, selected_color
 import "std:ui" as ui
 
+traces: none
+
 server palette:
     route GET "/" -> html:
         picker = LocalColorPicker(Color(20, 80, 160))

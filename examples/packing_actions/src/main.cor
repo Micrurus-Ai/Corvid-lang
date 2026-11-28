@@ -20,6 +20,8 @@ test packing_actions_are_available_at_their_source_before_mount:
     assert page.contains(ui.portal("packing-actions", [ui.checkbox_field_with_value("Map packed", "packed", "Map", false)]).html)
     assert page.contains("<div id=\"packing-actions\" data-corvid-portal-target></div>")
 
+traces: none
+
 server packing_list:
     route GET "/" -> html:
         return packing_page()

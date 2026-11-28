@@ -163,5 +163,6 @@ fn decl_kind_name(decl: &Decl) -> String {
         Decl::Schedule(_) => "schedule".into(),
         Decl::Identity(_) => "identity".into(),
         Decl::Connector(_) => "connector".into(),
+        Decl::Traces(_) => "traces".into(),
     }
 }

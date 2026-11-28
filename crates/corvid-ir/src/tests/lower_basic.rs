@@ -340,6 +340,8 @@ agent make_manifest() -> Manifest:
 agent handle(req: Req) -> Resp:
     return Resp(req.id)
 
+traces: none
+
 server demo_api:
     route GET \"/schema\" -> json Manifest:
         return make_manifest()
@@ -406,6 +408,8 @@ server demo_api:
 fn lowers_direct_upload_policy_into_the_route_ir() {
     let ir = lower_src(
         r#"
+traces: none
+
 server imports:
     @upload(max_mb: 3, mime: "text/csv, application/csv")
     route POST "/imports" body Upload<Csv> -> json Int:

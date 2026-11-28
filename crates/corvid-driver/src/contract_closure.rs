@@ -464,6 +464,8 @@ mod tests {
 agent take(body: Upload<Csv>) -> R:
     return R(true)
 
+traces: none
+
 server a:
     @upload(max_mb: 1)
     route POST "/i" body Upload<Csv> -> json R:
@@ -494,6 +496,8 @@ server a:
 
 agent list_items() -> Page<Item>:
     return list_items()
+
+traces: none
 
 server a:
     route GET "/items" -> json Page<Item>:

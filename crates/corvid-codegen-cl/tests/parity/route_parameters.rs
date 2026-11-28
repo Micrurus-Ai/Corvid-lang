@@ -16,6 +16,8 @@ fn an_authenticated_route_can_read_checked_path_and_caller_fields() {
         &[
             IDENTITY,
             r#"
+traces: none
+
 server board:
     route GET "/cards/{card: Int}" -> json Int requires authenticated:
         return path.card

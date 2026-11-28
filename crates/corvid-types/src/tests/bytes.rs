@@ -108,6 +108,8 @@ prompt summarize(digest: Bytes) -> String:
 agent sign(body: String) -> Signed:
     return Signed(body, body.utf8().sha256())
 
+traces: none
+
 server Webhooks:
     route GET \"/latest\" -> json Signed:
         return sign(\"hello\")

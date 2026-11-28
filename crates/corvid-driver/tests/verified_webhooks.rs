@@ -7,6 +7,8 @@ use corvid_driver::{compile_to_application_contract_with_config, compile_to_ir};
 const PROGRAM: &str = r#"type PaymentEvent:
     id: String
 
+traces: none
+
 server payments:
     route POST "/webhooks/stripe" body PaymentEvent verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes) -> json String:
         return body.id

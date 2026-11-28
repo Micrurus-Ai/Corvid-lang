@@ -146,7 +146,7 @@ fn build_server_emits_runnable_local_http_binary() {
         if let Some(mut stderr) = child.0.stderr.take() {
             let _ = stderr.read_to_string(&mut log);
         }
-        panic!("GET / failed:\n{root}\nserver log:\n{log}");
+        panic!("GET / failed:\n{root}\ntraces: none\n\nserver log:\n{log}");
     }
     assert!(root.contains(r#""result":"hello from corvid""#), "{root}");
 

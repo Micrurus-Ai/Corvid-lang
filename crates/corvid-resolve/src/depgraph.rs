@@ -88,6 +88,7 @@ pub fn decl_name(decl: &Decl) -> Option<&str> {
         Decl::Server(d) => Some(&d.name.name),
         Decl::Identity(d) => Some(&d.name.name),
         Decl::Connector(d) => Some(&d.name.name),
+        Decl::Traces(_) => None,
         Decl::Mock(_) | Decl::Extend(_) | Decl::Effect(_) | Decl::Model(_) | Decl::Schedule(_) => {
             None
         }
@@ -179,6 +180,7 @@ fn collect_decl_deps(decl: &Decl, resolved: &Resolved, deps: &mut HashSet<DefId>
                 collect_expr_deps(arg, resolved, deps);
             }
         }
+        Decl::Traces(_) => {}
         Decl::Connector(connector) => {
             // A connector's operations reference the types their params
             // and returns declare — collect those as deps so a connector

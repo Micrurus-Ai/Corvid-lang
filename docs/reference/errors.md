@@ -206,6 +206,7 @@ This page is generated from the compiler's diagnostic kinds by
 | `E0720` | `TypeErrorKind::DuplicateServerRoute` | A backend server declared the same method/path pair more than once. |
 | `E0721` | `TypeErrorKind::GetRouteBody` | A GET route declared a request body. |
 | `E0722` | `TypeErrorKind::RouteMethodAnsweredByServer` | A route declared with `HEAD` or `OPTIONS`, which the server answers itself (B05: the methods exist for connector operations). |
+| `E0723` | `TypeErrorKind::TracesPolicyInvalid` | A served program's `traces:` declaration (lineage L3) is missing, declared twice, or asks for recording not built yet. |
 | `E0725` | `TypeErrorKind::RouteQueryFieldType` | A route's `query` record with a field the server cannot read from a query string; `field` is empty when the query type is not a record at all. |
 
 ## E08xx: Connectors

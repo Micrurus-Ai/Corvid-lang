@@ -271,6 +271,8 @@ agent save_and_show(reading: Reading) -> Result<String, String>:
     readings = read_shelves(db)?
     return Ok(screen(readings, saved.shelf, "Saved"))
 
+traces: none
+
 server library:
     route GET "/search" query Search -> html:
         return search_page(query.term)

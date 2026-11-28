@@ -14,6 +14,8 @@ table Card:
     key card: Int
     board: String
 
+traces: none
+
 server boards_app:
     route GET "/boards/{board}/cards" -> json List<Card>:
         return Card.all()

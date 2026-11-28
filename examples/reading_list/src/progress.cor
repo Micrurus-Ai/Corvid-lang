@@ -1,5 +1,7 @@
 import "std:ui" as ui
 
+traces: none
+
 server progress:
     route GET "/" -> html:
         record = ui.assistant_action("Read one page", "read_page", "record_page_read", "Add one page to this session's reading count.")

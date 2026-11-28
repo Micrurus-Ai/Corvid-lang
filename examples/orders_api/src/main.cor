@@ -78,6 +78,8 @@ agent order_activity() -> Stream<OrderEvent>:
     yield OrderEvent("order-1", "picked")
     yield OrderEvent("order-1", "shipped")
 
+traces: none
+
 server orders_api:
     # Path parameter → `path.id`.
     route GET "/orders/{id}" -> json OrderView:

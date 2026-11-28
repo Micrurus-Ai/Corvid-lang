@@ -142,6 +142,8 @@ def check_contract(cli, project):
         check_types("String")
         main.write_text('''import "std:ui" as ui
 
+traces: none
+
 server progress:
     route GET "/" -> html:
         note = ui.assistant_text_state("Reading note", "first", "read_page", "record_page_read", "Edit the reading note.")

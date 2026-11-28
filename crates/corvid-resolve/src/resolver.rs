@@ -278,6 +278,9 @@ impl Resolver {
                 Decl::Schedule(_) => {
                     continue;
                 }
+                Decl::Traces(_) => {
+                    continue;
+                }
                 Decl::Connector(c) => {
                     // 52g-3: each `operation` becomes a callable tool
                     // symbol, so an agent can call it by name. The
@@ -514,6 +517,7 @@ impl Resolver {
                     }
                     self.resolve_effect_row(&schedule.effect_row);
                 }
+                Decl::Traces(_) => {}
                 Decl::Connector(c) => {
                     // 52g-1/3b: resolve the type references each operation's
                     // params / return declare, and its effect row. The

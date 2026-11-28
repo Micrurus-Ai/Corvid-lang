@@ -19,6 +19,8 @@ type PaymentEvent:
     id: String
     type: String
 
+traces: none
+
 server payments:
     route POST "/webhooks/stripe" body PaymentEvent verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes) -> json Nothing:
         return record_payment(body)

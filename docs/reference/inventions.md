@@ -604,6 +604,8 @@ identity users:
         first_login: open
         tenant: fixed("public")
 
+traces: none
+
 server secure_api:
     route GET "/secret" -> json Secret requires authenticated:
         return Secret("classified")
@@ -717,6 +719,8 @@ must state to compile at all.
 ### Complete Approval Policies Are Source, Not Middleware {#complete-approval-policies}
 
 ```corvid
+traces: none
+
 server payments:
     @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
     route POST "/payments" body Payment -> json Receipt requires authenticated:

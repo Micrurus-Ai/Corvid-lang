@@ -62,6 +62,8 @@ Non-scope: Corvid proves the approval boundary exists; it does not decide whethe
 For served applications, an approval boundary also requires a verified requester and a complete route policy. If a route can reach `approve`—directly or through called agents—but omits `requires authenticated` or any `@approval(...)` field, the compiler rejects it. Reviewer role, risk, data class, expiry, cost ceiling, and reversibility come from source and travel through the Application Contract into the queue; `serve` invents none of them. At decision time Corvid verifies that the reviewer holds the exact declared role plus `approvals.decide`, in the same tenant, with valid CSRF, and is not the requester.
 
 ```corvid
+traces: none
+
 server payments:
     @approval(role: "finance_reviewer", risk: "financial_transfer", data: "financial", expires_ms: 600000, max_cost_usd: $2500.0, irreversible: true)
     route POST "/payments" body Payment -> json Receipt requires authenticated:
@@ -890,6 +892,8 @@ Non-scope: Corvid owns the AI-backend↔frontend boundary — it describes the s
 Phase 51 makes a Corvid backend describe its interface; Phase 52 makes the runtime prove it implements it. Every declared route shape executes through the interpreter — a path parameter (`path.id`), a typed query struct (`query.status`), and a typed JSON body (`body.item`) each run their handler body through the ordinary agent machinery, so effects, approval, provenance, and replay apply to route execution automatically. Malformed boundary input is a structured `400`, never a `500`. And the HTTP-boundary types execute: a `Stream<T>` route streams as Server-Sent Events (a `chunk` event per item, `completed` to close, `failed` with a sanitized `{error, detail}` on a server failure); an `Upload<Format>` body is parsed from multipart under its required source-declared `@upload(max_mb: N, mime: "...")` policy and read via `body.text()`/`bytes()`/`filename()`; a `Page<Item>` response built with `Page(items, next_cursor)` serves the `{items, next_cursor, has_more}` cursor envelope. Omitting an upload maximum is a compile error—there is no hidden runtime limit.
 
 ```corvid
+traces: none
+
 server imports:
     @upload(max_mb: 25, mime: "text/csv")
     route POST "/imports" body Upload<Csv> -> json ImportReceipt:

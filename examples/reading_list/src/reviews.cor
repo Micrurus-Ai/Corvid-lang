@@ -200,6 +200,8 @@ agent review_screen(selected: Int) -> Result<String, String>:
     content.append(review_controls())
     return Ok(ui.page("Shelf reviews", content))
 
+traces: none
+
 server reviews:
     route GET "/" -> html:
         return match review_screen(0):
