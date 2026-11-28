@@ -752,6 +752,30 @@ impl<'ir> Interpreter<'ir> {
                             })?;
                         return Ok(ExprFlow::Value(Value::Bool(verified)));
                     }
+                    // `by.token("github")` (user credentials C2) reads the
+                    // person's kept token from the runtime, which records
+                    // the read (presence only) so a replay takes the same
+                    // branch.
+                    if matches!(kind, Bmk::CallerToken) {
+                        let actor = match &recv {
+                            Value::Struct(caller) => caller.get_field("id"),
+                            _ => None,
+                        };
+                        let (Some(Value::String(actor)), Some(Value::String(provider))) = (actor, arg_vals.first()) else {
+                            return Err(InterpError::new(
+                                InterpErrorKind::Other("internal: `token` needs a caller and a provider name".into()),
+                                expr.span,
+                            ));
+                        };
+                        let token = self
+                            .runtime
+                            .caller_token(&actor, provider)
+                            .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), expr.span))?;
+                        return Ok(ExprFlow::Value(match token {
+                            Some(secret) => Value::OptionSome(crate::value::BoxedValue::new(Value::Secret(secret))),
+                            None => Value::OptionNone,
+                        }));
+                    }
                 }
                 // B06 — a replay warns when this operation's zone rules
                 // may differ from the recording's tz database.

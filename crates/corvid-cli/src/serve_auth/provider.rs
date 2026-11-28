@@ -106,7 +106,18 @@ pub fn resolve_provider(
     provider: &IdentityProvider,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<ResolvedProvider, String> {
-    let preset = preset_for(&provider.kind);
+    let mut preset = preset_for(&provider.kind);
+    // A kept token is asked for its declared scopes too (user credentials
+    // C2); the browser cannot widen them, since the server builds the
+    // request from source.
+    if let Some(keep) = &provider.keep_token {
+        for scope in &keep.scopes {
+            if !preset.scopes.split(' ').any(|have| have == scope) {
+                preset.scopes.push(' ');
+                preset.scopes.push_str(scope);
+            }
+        }
+    }
     let (client_id, client_secret) = read_credentials(&preset.provider_name, env)?;
     match preset.endpoints {
         PresetEndpoints::Discovery { discovery_url } => {
@@ -266,6 +277,7 @@ mod tests {
     fn provider(kind: ProviderKind) -> IdentityProvider {
         IdentityProvider {
             kind,
+            keep_token: None,
             span: Span::new(0, 0),
         }
     }

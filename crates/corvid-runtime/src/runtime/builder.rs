@@ -29,6 +29,7 @@ pub struct RuntimeBuilder {
     approver: Option<Arc<dyn Approver>>,
     human: Option<Arc<dyn HumanInteractor>>,
     tracer: Option<Tracer>,
+    caller_tokens: crate::caller_tokens::CallerTokens,
     pub(super) trace_schema_writer: &'static str,
     default_model: String,
     model_catalog: ModelCatalog,
@@ -82,6 +83,7 @@ impl Default for RuntimeBuilder {
             approver: None,
             human: None,
             tracer: None,
+            caller_tokens: crate::caller_tokens::CallerTokens::default(),
             trace_schema_writer: WRITER_INTERPRETER,
             default_model: String::new(),
             model_catalog: ModelCatalog::default(),
@@ -284,6 +286,13 @@ impl RuntimeBuilder {
         self.tracer(tracer)
     }
 
+    /// The store sign-in keeps people's provider tokens in (user
+    /// credentials C2), shared with the server's auth context.
+    pub fn caller_tokens(mut self, tokens: crate::caller_tokens::CallerTokens) -> Self {
+        self.caller_tokens = tokens;
+        self
+    }
+
     pub fn default_model(mut self, model: impl Into<String>) -> Self {
         self.default_model = model.into();
         self
@@ -471,6 +480,7 @@ impl RuntimeBuilder {
             prompt_cache: PromptCache::default(),
             stores,
             usage_ledger: LlmUsageLedger::new(),
+            caller_tokens: self.caller_tokens,
             http,
             http_policy: self.http_policy,
             io,

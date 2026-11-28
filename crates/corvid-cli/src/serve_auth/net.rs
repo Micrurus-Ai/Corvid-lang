@@ -68,9 +68,11 @@ impl ProviderGateway for HttpProviderGateway {
             .get("id_token")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        let expires_in = body.get("expires_in").and_then(|v| v.as_u64());
         Ok(TokenResponse {
             access_token,
             id_token,
+            expires_in,
         })
     }
 

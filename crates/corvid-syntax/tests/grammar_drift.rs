@@ -480,6 +480,8 @@ extend Customer:
         "identity_settings",
         r#"identity users:
     provider github
+    provider google:
+        keep_token: scopes("openid", "https://www.googleapis.com/auth/calendar.readonly")
     provider oidc "https://example.org/.well-known/openid-configuration" as workplace
     session:
         lifetime: 8h
@@ -493,6 +495,7 @@ extend Customer:
         default_role: reader
     roles:
         reader: "status.read"
+    delegation: up_to 8 hours
 "#,
     ),
     (
@@ -834,6 +837,7 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("protocol_names", "connector_settings"),
     ("identity_item", "identity_settings"),
     ("identity_provider", "identity_settings"),
+    ("provider_item", "identity_settings"),
     ("session_setting", "identity_settings"),
     ("linking_setting", "identity_settings"),
     ("provisioning_setting", "identity_settings"),

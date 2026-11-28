@@ -80,6 +80,12 @@ pub struct AuthContext {
     /// (B11 `delegation: up_to`). `None`: no grant can be issued, and the
     /// grant routes are not served.
     pub delegation_cap_secs: Option<u64>,
+    /// The providers declared with `keep_token:` (user credentials C2), by
+    /// route name: sign-in keeps their access token, and no other.
+    pub kept_providers: std::collections::HashSet<String>,
+    /// Where sign-in keeps those tokens; `corvid serve` gives the same store
+    /// to its runtime, which `by.token(...)` reads.
+    pub caller_tokens: corvid_runtime::caller_tokens::CallerTokens,
 }
 
 const DEFAULT_SESSION_LIFETIME_SECS: u64 = 8 * 3600;
@@ -191,6 +197,8 @@ impl AuthContext {
                 .unwrap_or_else(|| "/".to_string()),
             // The checker refused a cap outside the bounds, by the same rule.
             delegation_cap_secs: identity.delegation.as_ref().and_then(|policy| corvid_types::delegation::cap_seconds(policy).ok()),
+            kept_providers: identity.providers.iter().filter(|p| p.keep_token.is_some()).map(|p| p.kind.wire_name()).collect(),
+            caller_tokens: corvid_runtime::caller_tokens::CallerTokens::default(),
         })
     }
 }
@@ -330,6 +338,7 @@ mod tests {
                 .into_iter()
                 .map(|kind| IdentityProvider {
                     kind,
+                    keep_token: None,
                     span: Span::new(0, 0),
                 })
                 .collect(),

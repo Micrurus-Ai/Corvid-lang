@@ -261,6 +261,10 @@ pub enum BuiltinMethodKind {
     /// names the field a single-value input travels in (empty when the
     /// value is the whole input record).
     ActionButton,
+    /// `by.token("github") -> Option<Secret>` on a `Caller` (user
+    /// credentials C2): the person's provider token kept at sign-in. Not
+    /// pure: it reads runtime state, so the runtime records each read.
+    CallerToken,
     BrowserFields,
 
     // ----- HTTP-boundary uploads (slice 52c-2) --------------------
@@ -899,6 +903,7 @@ fn text_result() -> Type {
 /// meant. `builtin_method_names_match_the_table` holds it to the names in
 /// `builtin_method`'s match.
 pub const BUILTIN_METHOD_NAMES: &[&str] = &[
+    "token",
     "abs",
     "add_days",
     "add_months",
@@ -1167,6 +1172,9 @@ pub fn builtin_method(receiver: &Type, name: &str) -> Option<BuiltinMethodSig> {
             Type::Result(Box::new(Type::Secret), Box::new(Type::String)),
         ),
         (Type::Secret, "verify_password") => sig(SecretVerifyPassword, vec![Type::String], Type::Bool),
+        (receiver, "token") if *receiver == Type::actor() => {
+            sig(CallerToken, vec![Type::String], Type::Option(Box::new(Type::Secret)))
+        }
         (Type::Decimal, "abs") => sig(DecimalAbs, vec![], Type::Decimal),
         (Type::Decimal, "scale") => sig(DecimalScale, vec![], Type::Int),
         (Type::Decimal, "to_string") => sig(DecimalToString, vec![], Type::String),

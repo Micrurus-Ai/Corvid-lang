@@ -245,6 +245,19 @@ impl EmailMatchPolicy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IdentityProvider {
     pub kind: ProviderKind,
+    /// `keep_token: scopes("repo", ...)` under the provider (user
+    /// credentials C2): sign-in asks for these scopes and keeps the access
+    /// token the provider returns, for `by.token("<provider>")`. `None`:
+    /// sign-in keeps nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_token: Option<KeepToken>,
+    pub span: Span,
+}
+
+/// The scopes a provider's kept token is asked for (user credentials C2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeepToken {
+    pub scopes: Vec<String>,
     pub span: Span,
 }
 

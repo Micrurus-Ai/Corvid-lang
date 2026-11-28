@@ -248,6 +248,15 @@ fn run_callback(
         })
         .map_err(|e| e.to_string())?;
 
+    // A provider declared with `keep_token:` keeps the person's access
+    // token, in memory, for `by.token(...)`; every other token is dropped.
+    if ctx.kept_providers.contains(provider) {
+        if let Some(token) = identity.access_token.clone() {
+            let expires_ms = identity.access_expires_in.map(|secs| at.saturating_add(secs.saturating_mul(1000)));
+            ctx.caller_tokens.keep(&provisioned.actor.id, provider, token, expires_ms);
+        }
+    }
+
     // 7. Issue the session only after provisioning succeeds.
     let raw_token = random_token();
     let csrf_binding = random_token();
@@ -422,6 +431,8 @@ mod tests {
             public_base_url: None,
             post_login_redirect: "/".to_string(),
             delegation_cap_secs: None,
+            kept_providers: Default::default(),
+            caller_tokens: Default::default(),
         }
     }
 
@@ -555,6 +566,8 @@ mod callback_tests {
             public_base_url: None,
             post_login_redirect: "/".to_string(),
             delegation_cap_secs: None,
+            kept_providers: Default::default(),
+            caller_tokens: Default::default(),
         }
     }
 
@@ -597,6 +610,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "at".to_string(),
                 id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+                expires_in: None,
             },
             userinfo: serde_json::Value::Null,
         });
@@ -643,6 +657,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "at".to_string(),
                 id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+                expires_in: None,
             },
             userinfo: serde_json::Value::Null,
         });
@@ -670,6 +685,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "at".to_string(),
                 id_token: Some(id_token(&idp, "sub-1", "attacker-nonce", "e@x.com")),
+                expires_in: None,
             },
             userinfo: serde_json::Value::Null,
         });
@@ -694,6 +710,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "at".to_string(),
                 id_token: Some(idp.mint_tampered_signature()),
+                expires_in: None,
             },
             userinfo: serde_json::Value::Null,
         });
@@ -719,6 +736,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "at".to_string(),
                 id_token: Some(id_token(&idp, "sub-1", nonce, "ada@example.com")),
+                expires_in: None,
             },
             userinfo: serde_json::Value::Null,
         });
@@ -762,6 +780,7 @@ mod callback_tests {
             token: TokenResponse {
                 access_token: "gho_token".to_string(),
                 id_token: None,
+                expires_in: None,
             },
             userinfo: serde_json::json!({ "id": 4210, "login": "ada", "email": "ada@x.com" }),
         });
@@ -782,5 +801,31 @@ mod callback_tests {
             .unwrap();
         assert_eq!(session.actor.tenant_id, "public");
         assert_eq!(session.actor.display_name, "ada");
+    }
+
+    /// User credentials C2: sign-in keeps the access token only for a
+    /// provider declared with `keep_token:`, for that person, until the
+    /// provider's stated expiry.
+    #[test]
+    fn a_kept_providers_token_is_kept_for_the_person_and_no_other() {
+        let sign_in = |kept: bool| {
+            let idp = MockIdp::new("unused", "unused");
+            let auth = Arc::new(SessionAuthRuntime::open_in_memory().unwrap());
+            let gateway = Arc::new(StubGateway {
+                token: TokenResponse { access_token: "gho_kept".to_string(), id_token: None, expires_in: Some(3600) },
+                userinfo: serde_json::json!({ "id": 4210, "login": "ada", "email": "ada@x.com" }),
+            });
+            let mut context =
+                ctx(auth.clone(), gateway, Arc::new(idp.fetcher()), FirstLoginPolicy::Open, TenantSource::Fixed("public".to_string()));
+            if kept {
+                context.kept_providers.insert("github".to_string());
+            }
+            let state = seed_login_state(&auth, "1", "n");
+            let token = run_callback(&context, &userinfo_config(), "github", "c", &state, "cb", "t").expect("login").session_token;
+            let actor = auth.resolve_session_cookie(&token, "check", now_ms()).unwrap().actor.id;
+            context.caller_tokens.get(&actor, "github", now_ms()).and_then(|s| s.expose_text().map(str::to_string))
+        };
+        assert_eq!(sign_in(true), Some("gho_kept".to_string()));
+        assert_eq!(sign_in(false), None, "without `keep_token:` sign-in keeps nothing");
     }
 }

@@ -1,6 +1,6 @@
 # Calling a service as the signed-in user (limits plan row 7)
 
-**Status:** proposal, 2026-11-26. C1 is connector grammar, which only backend code writes ([HTTP client decision 1](http-client.md#decisions)), so it is built now. C2 adds an item to the `identity` block and is posted for frontend review under the propose-then-build law.
+**Status:** C1 built 2026-11-26; C2 built 2026-11-27 after frontend review. C1 is connector grammar, which only backend code writes ([HTTP client decision 1](http-client.md#decisions)). C2 adds an item to the `identity` block, so it was posted for frontend review under the propose-then-build law first.
 **Owner:** backend (Claude Code).
 **Roadmap:** [limits plan](removing-limits.md) row 7; [HTTP client decision 4](http-client.md#decisions).
 
@@ -62,6 +62,7 @@ action file_issue(repo: String, title: String, by: Caller) -> Result<Issue, Issu
 - `by.token("github")`, on a `Caller`, is an `Option<Secret>`. The checker refuses a provider that is not declared with `keep_token:`, naming the item to add. The value is `None` when the token has expired, the person signed in before the item existed, or the session was started by another means, so the program decides what to show. It never fails at run time.
 - **Narrowed for now:** the token is held only in memory, beside the session that signed in. A restart, or a request served by another instance, sees `None` until the person signs in again. Keeping tokens across restarts needs encryption at rest, which waits on the key-storage design (Ed25519 and encryption, in the plan's planned work). Refresh tokens wait on the same design. The reference page says so, and the roadmap holds the widening.
 - A delegated assistant (B11) reaches the token only through an action the source declares with `assistants:`, and the trace marks each call made with a person's token, so people see which calls an agent made as them.
+- **Replay (decided when building, 2026-11-27).** `by.token(...)` is not a pure built-in method: it reads a person's credential, which a replay does not have. Each read is recorded like a tool call (`caller:token`, with the provider as its argument), and its result records only whether a token was present, never the token. A replay serves that record: a present token becomes a placeholder `Secret`, so the run takes the same branches. Any call that would use the placeholder is itself served from the trace, so it never reaches a provider.
 
 ## Three tiers
 
@@ -82,9 +83,9 @@ action file_issue(repo: String, title: String, by: Caller) -> Result<Issue, Issu
 ## Slices
 
 - [x] C1. Operation `auth: bearer(param)` on the interpreter: parser, checker (a `Secret` parameter, only in `auth:`, refused on `async:`), the runtime sending the revealed token, `<redacted>` recording and replay without the token, and tests for each refusal, for a cross-origin redirect, and that the token reaches no trace or log. Built 2026-11-26. The token is marked as the request's credential header, which the existing redirect handling drops on another origin. The test asserts the marking rather than adding a second redirect test.
-- [ ] C2. `keep_token: scopes(...)` and `Caller.token("provider")`, with the token held in memory beside its session, after frontend review.
-- [ ] C3. Durable, encrypted token storage and refresh, after the key-storage design.
-- [ ] C4. Native code, with the native connector dispatch.
+- [x] C2. `keep_token: scopes(...)` and `Caller.token("provider")`, with the token held in memory beside its session. Frontend review cleared 2026-11-27. Built 2026-11-27. The parser takes the provider block, the checker refuses an unkept provider (E0717), and the contract lists `kept_token_scopes`. Sign-in asks for the scopes and keeps the token with its expiry, keyed by person and provider. The interpreter reads it as `Option<Secret>` and records each read as `caller:token` with presence only. Tests: `crates/corvid-driver/tests/user_credentials.rs`, the callback test `a_kept_providers_token_is_kept_for_the_person_and_no_other`, and `caller_tokens` unit tests.
+- [ ] C3. Durable, encrypted token storage and refresh, after the key-storage design. This widens C2's memory-only narrowing.
+- [ ] C4. Native code, with the native connector dispatch: `auth: bearer(...)` and `by.token(...)`. Native code refuses `by.token` by name today.
 
 ## Non-scope
 

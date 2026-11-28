@@ -276,6 +276,13 @@ pub struct ContractProvider {
     /// The OIDC discovery URL, for `kind == "oidc"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discovery_url: Option<String>,
+    /// The scopes sign-in asks for to keep the person's token (user
+    /// credentials C2, `keep_token: scopes(...)`), so a sign-in screen can
+    /// explain the consent. Only the declared names: the server builds the
+    /// real request from source, and no token or per-person grant detail
+    /// is ever part of the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_token_scopes: Vec<String>,
 }
 
 /// The login-session posture surfaced to clients.
@@ -947,17 +954,22 @@ fn contract_identity(decl: &corvid_ast::IdentityDecl) -> ContractIdentity {
     let providers = decl
         .providers
         .iter()
-        .map(|p| match &p.kind {
-            ProviderKind::Oidc { discovery_url, alias } => ContractProvider {
-                kind: "oidc".into(),
-                name: alias.name.clone(),
-                discovery_url: Some(discovery_url.clone()),
-            },
-            other => ContractProvider {
-                kind: other.wire_name(),
-                name: other.wire_name(),
-                discovery_url: None,
-            },
+        .map(|p| {
+            let kept_token_scopes = p.keep_token.as_ref().map(|keep| keep.scopes.clone()).unwrap_or_default();
+            match &p.kind {
+                ProviderKind::Oidc { discovery_url, alias } => ContractProvider {
+                    kind: "oidc".into(),
+                    name: alias.name.clone(),
+                    discovery_url: Some(discovery_url.clone()),
+                    kept_token_scopes,
+                },
+                other => ContractProvider {
+                    kind: other.wire_name(),
+                    name: other.wire_name(),
+                    discovery_url: None,
+                    kept_token_scopes,
+                },
+            }
         })
         .collect();
     let session = decl.session.clone().unwrap_or_default();

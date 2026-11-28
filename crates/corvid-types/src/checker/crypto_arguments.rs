@@ -32,6 +32,28 @@ impl<'a> Checker<'a> {
 
     /// Checks that the prefix of `secret.decode_base64_after(prefix)` is
     /// a string literal.
+    /// `by.token("github")` (user credentials C2) must name, as a string
+    /// literal, a provider the identity block declares with `keep_token:`,
+    /// so a program never reads a token sign-in does not keep.
+    pub(super) fn check_kept_provider(&mut self, args: &[Expr], span: corvid_ast::Span) {
+        let named = match args.first() {
+            Some(Expr::Literal { value: corvid_ast::Literal::String(name), .. }) => name.clone(),
+            _ => {
+                self.errors.push(TypeError::new(TypeErrorKind::TokenNotKept { provider: "a provider name".into() }, span));
+                return;
+            }
+        };
+        let kept = self.file.decls.iter().any(|decl| match decl {
+            corvid_ast::Decl::Identity(identity) => {
+                identity.providers.iter().any(|p| p.keep_token.is_some() && p.kind.wire_name() == named)
+            }
+            _ => false,
+        });
+        if !kept {
+            self.errors.push(TypeError::new(TypeErrorKind::TokenNotKept { provider: format!("\"{named}\"") }, span));
+        }
+    }
+
     pub(super) fn check_secret_key_prefix(&mut self, args: &[Expr]) {
         let Some(prefix) = args.first() else { return };
         if string_literal_argument(prefix).is_none() {

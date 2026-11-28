@@ -522,11 +522,73 @@ impl<'a> Parser<'a> {
                 }
             }
         };
-        self.expect_newline()?;
+        // `provider github:` opens a block of the provider's items (user
+        // credentials C2); `provider github` stays a one-line provider.
+        let keep_token = if matches!(self.peek(), TokKind::Colon) {
+            self.bump();
+            Some(self.parse_provider_block()?)
+        } else {
+            self.expect_newline()?;
+            None
+        };
         Ok(IdentityProvider {
             kind,
+            keep_token,
             span: start.merge(self.prev_span()),
         })
+    }
+
+    /// The items under `provider <name>:`. One item exists:
+    /// `keep_token: scopes("repo", ...)`.
+    fn parse_provider_block(&mut self) -> Result<corvid_ast::KeepToken, ParseError> {
+        self.expect_newline()?;
+        if !matches!(self.peek(), TokKind::Indent) {
+            return Err(ParseError { kind: ParseErrorKind::ExpectedBlock, span: self.peek_span() });
+        }
+        self.bump(); // Indent
+        self.skip_newlines();
+        let start = self.peek_span();
+        let expected = |got: &TokKind, span| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: crate::parser::describe_token(got),
+                expected: "`keep_token: scopes(\"...\")` under the provider, the scopes sign-in asks for and the token it keeps".into(),
+            },
+            span,
+        };
+        if !self.peek_ident_is("keep_token") {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // keep_token
+        self.expect(TokKind::Colon, "`:` after `keep_token`")?;
+        if !self.peek_ident_is("scopes") {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // scopes
+        self.expect(TokKind::LParen, "`(` after `scopes`")?;
+        let mut scopes = Vec::new();
+        loop {
+            match self.peek().clone() {
+                TokKind::StringLit(scope) => {
+                    self.bump();
+                    scopes.push(scope);
+                }
+                other => return Err(expected(&other, self.peek_span())),
+            }
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(TokKind::RParen, "`)` after the scopes")?;
+        let span = start.merge(self.prev_span());
+        self.expect_newline()?;
+        self.skip_newlines();
+        if !matches!(self.peek(), TokKind::Dedent) {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // Dedent
+        Ok(corvid_ast::KeepToken { scopes, span })
     }
 
     /// `session:` sub-block with lifetime / same_site / cookie flags /

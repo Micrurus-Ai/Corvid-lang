@@ -1127,6 +1127,9 @@ impl<'a> Checker<'a> {
             if sig.kind == BuiltinMethodKind::SecretDecodeBase64After {
                 self.check_secret_key_prefix(args);
             }
+            if sig.kind == BuiltinMethodKind::CallerToken {
+                self.check_kept_provider(args, span);
+            }
             return sig.ret;
         }
 

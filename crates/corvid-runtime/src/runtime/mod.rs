@@ -89,6 +89,8 @@ pub struct Runtime {
     prompt_cache: PromptCache,
     stores: StoreManager,
     usage_ledger: LlmUsageLedger,
+    /// Provider tokens kept at sign-in (user credentials C2), in memory.
+    pub(crate) caller_tokens: crate::caller_tokens::CallerTokens,
     http: HttpClient,
     /// Slice 33S2a: policy carrying the configured `[http] allow`
     /// list + the always-on SSRF block. The `http_*` tool-

@@ -38,6 +38,8 @@ pub struct TokenExchange<'a> {
 pub struct TokenResponse {
     pub access_token: String,
     pub id_token: Option<String>,
+    /// Seconds until the access token expires, when the provider says.
+    pub expires_in: Option<u64>,
 }
 
 /// The network operations a login flow performs against a provider.
@@ -70,6 +72,12 @@ pub struct VerifiedExternalIdentity {
     pub email: Option<String>,
     pub display_name: Option<String>,
     pub tenant_claim: Option<String>,
+    /// The provider's access token, for a provider declared with
+    /// `keep_token:` (user credentials C2). The callback keeps it, or drops
+    /// it for any other provider; it is never logged or persisted.
+    pub access_token: Option<corvid_crypto::Secret>,
+    /// Seconds until `access_token` expires, when the provider says.
+    pub access_expires_in: Option<u64>,
 }
 
 /// Everything the resolver needs for one callback.
@@ -104,7 +112,7 @@ pub fn resolve_identity(
     jwks_fetcher: Arc<dyn JwksFetcher>,
 ) -> Result<VerifiedExternalIdentity, String> {
     let tokens = gateway.exchange_code(res.config, &res.exchange)?;
-    match &res.config.verification {
+    let mut identity = match &res.config.verification {
         IdentityVerification::Oidc {
             issuer,
             jwks_url,
@@ -114,7 +122,12 @@ pub fn resolve_identity(
             source_marker,
             userinfo_url,
         } => resolve_userinfo(&tokens, source_marker, userinfo_url, gateway),
+    }?;
+    if !tokens.access_token.trim().is_empty() {
+        identity.access_token = Some(corvid_crypto::Secret::from_text(tokens.access_token.clone()));
+        identity.access_expires_in = tokens.expires_in;
     }
+    Ok(identity)
 }
 
 fn resolve_oidc(
@@ -171,6 +184,8 @@ fn resolve_oidc(
         email,
         display_name,
         tenant_claim,
+        access_token: None,
+        access_expires_in: None,
     })
 }
 
@@ -197,6 +212,8 @@ fn resolve_userinfo(
         email,
         display_name,
         tenant_claim: None,
+        access_token: None,
+        access_expires_in: None,
     })
 }
 
@@ -244,6 +261,7 @@ mod tests {
                 token: TokenResponse {
                     access_token: "at".to_string(),
                     id_token: Some(id_token),
+                    expires_in: None,
                 },
                 userinfo: serde_json::Value::Null,
                 last_code: RefCell::new(None),
@@ -254,6 +272,7 @@ mod tests {
                 token: TokenResponse {
                     access_token: "at".to_string(),
                     id_token: None,
+                    expires_in: None,
                 },
                 userinfo,
                 last_code: RefCell::new(None),

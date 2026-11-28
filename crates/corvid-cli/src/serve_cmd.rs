@@ -291,6 +291,11 @@ pub(crate) fn cmd_serve(
     if let Some(embedder) = rag_embedder.clone() {
         builder = builder.rag_embedder(embedder);
     }
+    // Sign-in keeps provider tokens in the auth context's store; the
+    // runtime reads the same store for `by.token(...)`.
+    if let Some(ctx) = &auth_context {
+        builder = builder.caller_tokens(ctx.caller_tokens.clone());
+    }
     let runtime = corvid_driver::apply_env_llm_wiring(
         builder
             .http_policy(http_policy.clone())

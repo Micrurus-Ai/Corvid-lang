@@ -213,7 +213,7 @@ impl Runtime {
         Ok(())
     }
 
-    pub(super) fn replay_source(&self) -> Result<Option<&ReplaySource>, RuntimeError> {
+    pub(crate) fn replay_source(&self) -> Result<Option<&ReplaySource>, RuntimeError> {
         if let Some(err) = &self.replay_error {
             return Err(err.clone());
         }

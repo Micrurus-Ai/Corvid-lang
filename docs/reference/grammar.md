@@ -404,6 +404,7 @@ it as a future feature. Use `open` or `invited` for a runnable application.
 ```ebnf
 identity_decl     ::= 'identity' IDENT ':' INDENT identity_item+ DEDENT
 identity_item     ::= 'provider' identity_provider NEWLINE
+                    | 'provider' identity_provider ':' INDENT provider_item DEDENT   # user credentials C2
                     | 'session' ':' INDENT (session_setting NEWLINE)+ DEDENT
                     | 'linking' ':' INDENT (linking_setting NEWLINE)+ DEDENT
                     | 'provisioning' ':' INDENT (provisioning_setting NEWLINE)+ DEDENT
@@ -411,6 +412,9 @@ identity_item     ::= 'provider' identity_provider NEWLINE
                     | 'delegation' ':' 'up_to' INT duration_unit NEWLINE   # B11: a grant's longest life, 1 minute to 720 hours
 identity_provider ::= 'google' | 'github' | 'microsoft' | 'apple' | 'discord' | 'slack'
                     | 'oidc' STRING_LITERAL 'as' IDENT
+# Sign-in asks for these scopes and keeps the person's access token, for
+# `by.token("<provider>")`. Without the item, sign-in keeps nothing.
+provider_item     ::= 'keep_token' ':' 'scopes' '(' STRING_LITERAL (',' STRING_LITERAL)* ')' NEWLINE
 session_setting   ::= 'lifetime' ':' INT ('s' | 'm' | 'h' | 'd')
                     | 'same_site' ':' ('strict' | 'lax' | 'none')
                     | ('secure' | 'http_only' | 'rotate_on_privilege_change' | 'insecure_opt_out') ':' ('true' | 'false')

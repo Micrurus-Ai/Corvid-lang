@@ -301,6 +301,10 @@ pub enum TypeErrorKind {
     /// An action input named `corvid_csrf`, the hidden field that carries
     /// a form's CSRF token (B10-2b-5): the two would collide in a form.
     ActionInputReservedName { action: String, name: String },
+    /// `by.token("...")` names a provider the identity block does not
+    /// declare with `keep_token: scopes(...)` (user credentials C2), or does
+    /// not name it with a string literal.
+    TokenNotKept { provider: String },
     /// A `Caller` where a request, a client or a model supplies the value.
     ActorFromInput { place: String, at: String },
     /// A route's `query` record with a field the server cannot read
@@ -761,6 +765,7 @@ impl TypeErrorKind {
             Self::AssistantsWithoutIdentity { .. } => "E0712",
             Self::ActionCallerWithoutSignIn { .. } => "E0713",
             Self::ActionInputReservedName { .. } => "E0716",
+            Self::TokenNotKept { .. } => "E0717",
             Self::ActorFromInput { .. } => "E0226",
             Self::RouteQueryFieldType { .. } => "E0725",
             Self::TryElseFallbackType { .. } => "E0227",
@@ -1075,6 +1080,9 @@ impl TypeErrorKind {
             }
             Self::AssistantsWithoutIdentity { action } => format!(
                 "action `{action}` is offered to assistants, but no one can sign in to confirm an assistant's call"
+            ),
+            Self::TokenNotKept { provider } => format!(
+                "`by.token({provider})` reads a token sign-in never keeps: no provider `{provider}` is declared with `keep_token:`"
             ),
             Self::ActionInputReservedName { action, name } => format!(
                 "action `{action}` has an input named `{name}`, the field a form for an action carries its CSRF token in"
@@ -1874,6 +1882,9 @@ impl TypeErrorKind {
                 "declare it in the identity block's `roles:`, e.g. a role granting `{name}`, or a role named `{name}` (for a `requires {kind}`)"
             )),
             Self::ActionInputReservedName { .. } => Some("rename the input: `corvid_csrf` is reserved for every action's forms".into()),
+            Self::TokenNotKept { .. } => Some(
+                "declare the provider with a block in the identity block, such as `provider github:` then `keep_token: scopes(\"repo\")`, and name it as a string literal".into(),
+            ),
             Self::ActionCallerWithoutSignIn { .. } => Some(
                 "require a signed-in caller, such as `requires authenticated`, or remove the `Caller` parameter".into(),
             ),

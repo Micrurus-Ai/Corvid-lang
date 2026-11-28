@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+Act as the signed-in person with their provider. Declare the provider with a block, `provider github:` and under it `keep_token: scopes("repo")`. Sign-in asks for those scopes and keeps the token. In an action, `by.token("github")` is an `Option<Secret>` to pass to an operation's `auth: bearer(token)`. A provider without `keep_token:` keeps nothing, and `by.token` for it is refused (E0717). The trace records each read as present or absent, never the token, and a replay takes the same branches. For now the token is held in memory only, so after a restart the person signs in again; encrypted storage is planned. [Backend guide](docs/guides/backend.md)
+
 Order activity uses the same server frames as generated route calls. A GET item loop yields each chunk and rejects on server failure or interruption, so a screen can retain the rows it already received. [Order client example](docs/book/19-browser-views.md#read-order-activity-and-upload-a-csv)
 
 A native library can include HTTP handlers with checked path and caller fields. The native compiler uses the same field names, order and types as the interpreter. [Native route parameter layouts](docs/proposals/native-dispatch.md#native-layouts-for-route-arguments)

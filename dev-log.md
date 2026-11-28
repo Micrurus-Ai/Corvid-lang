@@ -2,6 +2,48 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### User credentials C2: keep the person's provider token
+
+Frontend development cleared the grammar on 2026-11-27 (review item 4).
+
+- **Grammar.** `provider github:` opens a block holding
+  `keep_token: scopes("repo", ...)`. A one-line spelling
+  (`provider github keep_token scopes("repo")`) was considered. The block
+  won because a provider will take more items (C3's refresh policy), and a
+  block reads as a list of settings rather than one long line.
+  `grammar.md` has the `provider_item` production and its drift evidence.
+- **Checker.** `by.token("<provider>")` on a `Caller` is
+  `Option<Secret>`. The provider must be a string literal naming a
+  provider declared with `keep_token:`, otherwise E0717 names the item to
+  add. A computed name is refused, so a typo is caught at compile time.
+- **Contract.** Each provider lists `kept_token_scopes`, so a sign-in
+  screen can say what it asks for.
+- **Sign-in.** The callback adds the kept scopes to the provider's own,
+  then keeps the access token with its `expires_in`, keyed by person and
+  provider, in `corvid_runtime::caller_tokens::CallerTokens`, which
+  `corvid serve` hands to the runtime. A test signs in as one person and
+  checks that another person reads `None`.
+- **Replay, decided when building.** `by.token` is not pure, because it
+  reads a credential a replay does not have. Each read is recorded as a
+  `caller:token` tool call whose result is only `{"present": bool}`. A
+  replay serves a placeholder `Secret` when one was present. The run takes
+  the same branches, and the calls that would use the token are
+  themselves served from the trace.
+- **Narrowed, by refusal.** The token is held in memory only. A restart or
+  another instance sees `None`, which the program already handles. The
+  roadmap holds C3 for encrypted storage and refresh. Native code refuses
+  `by.token` by name, and C4 holds the widening.
+- **Three tiers.** The backend keeps the token and the compiler knows
+  which providers keep one. The contract tells the frontend which scopes
+  sign-in asks for. An assistant reaches the token only through an action
+  offered with `assistants:`, never the value, and each read is in the
+  trace.
+
+Tests: `crates/corvid-driver/tests/user_credentials.rs` (contract scopes,
+E0717 for an unkept or computed provider, the interpreter reading the
+person's own token), the sign-in callback test, and two `caller_tokens`
+unit tests.
+
 ### Native `try` catches outages inside `match` guards
 
 A guard that can fail is now lifted into an agent returning `Bool`, as
@@ -64,6 +106,7 @@ Proof: a runtime test shows a sole string zeroed, a retained one and an
 immortal one left as they were. Native `hash_password`, which reveals
 its password through this path, still verifies against the hash on
 both tiers.
+
 
 ### B11-1 to B11-3: an assistant acts for its person, within their authority
 

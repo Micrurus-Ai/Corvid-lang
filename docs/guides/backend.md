@@ -96,6 +96,19 @@ Notes on the shape:
   absent, `None` in the handler) and `List` (the name repeated:
   `?status=Open&status=Closed`). A value is read exactly as it would be
   in a JSON body, so `?total=19.90` keeps its digits.
+- To act as the signed-in person with their provider, declare the
+  provider with a block: `provider github:` then
+  `keep_token: scopes("repo")` indented under it. Sign-in then asks for
+  those scopes and keeps the token, and `by.token("github")` on a
+  `Caller` is an `Option<Secret>` you pass to an operation's
+  `auth: bearer(token)`. Without `keep_token:` nothing is kept, and the
+  checker refuses `by.token` for that provider (E0717). Each read is
+  recorded in the trace as present or absent, never the token, and a
+  replay takes the same branches without it. **Narrowed for now:** the
+  token is held in memory only, so a restart or another instance sees
+  `None` until the person signs in again; encrypted storage and refresh
+  are planned (user credentials C3), and native code refuses `by.token`
+  by name (C4).
 
 The typechecker enforces:
 
