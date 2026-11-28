@@ -208,6 +208,39 @@ impl<'a> Checker<'a> {
                 ));
             }
             self.check_http_route(server, route);
+            self.check_verified_route(route);
+        }
+    }
+
+    /// A route's `verified <scheme>(...)` clause (verified webhooks,
+    /// B16). The scheme and window are read by `crate::webhook`, the rule
+    /// the contract and `corvid serve` share. A verified route is a
+    /// provider's signed call, so it has a body to sign, which is
+    /// buffered so its exact bytes can be checked, and it takes no
+    /// `requires`: the caller is a provider, not a signed-in person, so a
+    /// sign-in requirement would refuse every delivery.
+    fn check_verified_route(&mut self, route: &corvid_ast::HttpRouteDecl) {
+        let Some(clause) = &route.verified else { return };
+        let mut invalid = |problem: String| {
+            self.errors.push(TypeError::new(
+                TypeErrorKind::WebhookVerificationInvalid { path: route.path.clone(), problem },
+                clause.span,
+            ));
+        };
+        if let Err(problem) = crate::webhook::window_seconds(clause) {
+            invalid(problem);
+        }
+        if route.policy.is_some() {
+            invalid("takes no `requires`: the provider is not a signed-in person, so a sign-in requirement would refuse every delivery; the signature is the route's authority".into());
+        }
+        if matches!(route.method, HttpMethod::Get | HttpMethod::Delete) {
+            invalid(format!(
+                "is a {} route, which carries no body for the provider to sign; providers deliver with POST",
+                route.method.as_str()
+            ));
+        }
+        if route.upload.is_some() || matches!(&route.body_ty, Some(corvid_ast::TypeRef::Generic { name, .. }) if name.name == "Upload") {
+            invalid("takes an `Upload`, whose body is streamed to disk; a signature is checked over the body's exact bytes, so take `body Bytes` or a typed body".into());
         }
     }
 

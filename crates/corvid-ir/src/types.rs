@@ -244,7 +244,24 @@ pub struct IrRoute {
     /// from the AST so `corvid serve` can enforce it before the handler
     /// runs. `None` = a public route.
     pub policy: Option<IrRoutePolicy>,
+    /// The route's `verified <scheme>(...)` clause (verified webhooks,
+    /// B16): `corvid serve` checks the provider's signature over the raw
+    /// body before decoding it or running the handler.
+    pub verified: Option<IrWebhookVerification>,
     pub span: Span,
+}
+
+/// A verified route's clause, as the server needs it. The checker has
+/// already refused an unknown scheme or an unusable window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrWebhookVerification {
+    /// The signing scheme (`stripe`).
+    pub scheme: String,
+    /// The name the signing secret is read by at startup.
+    pub secret: String,
+    /// How old a signed request may be, in seconds; `None` for a scheme
+    /// that signs no time, whose source wrote `replays: accepted`.
+    pub window_secs: Option<u64>,
 }
 
 /// A route's `requires authenticated|role|permission` clause, lowered

@@ -421,6 +421,36 @@ pub struct ContractRoute {
     /// permission` clause. Present = the route needs a login session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<ContractRoutePolicy>,
+    /// Present on a verified route (verified webhooks, B16): a
+    /// provider's signed call, which no browser or assistant can make.
+    /// Generated clients, the dev console and assistant discovery leave
+    /// such a route out. The secret's name is never published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<ContractWebhook>,
+}
+
+/// A verified route's scheme, as the contract publishes it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContractWebhook {
+    pub scheme: String,
+    /// The headers the provider signs with, which a provider's tooling
+    /// sends when it tests the route.
+    pub signature_headers: Vec<String>,
+    /// How old a signed request may be, in seconds; absent for a scheme
+    /// that signs no time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within_secs: Option<u64>,
+}
+
+impl ContractWebhook {
+    fn of(clause: &corvid_ast::WebhookVerification) -> Option<Self> {
+        let scheme = corvid_types::webhook::scheme(&clause.scheme.name)?;
+        Some(ContractWebhook {
+            scheme: scheme.name.to_string(),
+            signature_headers: scheme.signature_headers.iter().map(|h| h.to_string()).collect(),
+            within_secs: corvid_types::webhook::window_seconds(clause).ok().flatten(),
+        })
+    }
 }
 
 /// A `live` declaration in the contract (B14). A client reaches it by
@@ -1227,7 +1257,13 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
         path_params: contract_path_params(r, names),
         query_type: r.query_ty.as_ref().map(|ty| names.name(ty)),
         body_type: r.body_ty.as_ref().map(|ty| names.name(ty)),
-        request_media_type: r.form_encoded.then(|| "application/x-www-form-urlencoded".into()),
+        request_media_type: if r.form_encoded {
+            Some("application/x-www-form-urlencoded".into())
+        } else if is_raw_bytes_body(r) {
+            Some(RAW_BODY_MEDIA_TYPE.into())
+        } else {
+            None
+        },
         upload: r
             .body_ty
             .as_ref()
@@ -1250,7 +1286,19 @@ fn contract_route(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> C
             .collect(),
         pagination: names.pagination(&r.response.ty),
         policy: route_policy(r),
+        verified: r.verified.as_ref().and_then(ContractWebhook::of),
     }
+}
+
+/// The media type a `body Bytes` route is documented with: the body is
+/// the bytes as sent, whatever their type.
+pub const RAW_BODY_MEDIA_TYPE: &str = "application/octet-stream";
+
+/// Whether the route takes its body as the raw bytes sent (`body
+/// Bytes`), which `corvid serve` hands over unchanged instead of
+/// decoding them as JSON.
+pub fn is_raw_bytes_body(r: &corvid_ast::HttpRouteDecl) -> bool {
+    !r.form_encoded && matches!(&r.body_ty, Some(corvid_ast::TypeRef::Named { name, .. }) if name.name == "Bytes")
 }
 
 fn contract_path_params(r: &corvid_ast::HttpRouteDecl, names: &ContractTypes<'_>) -> Vec<ContractParam> {

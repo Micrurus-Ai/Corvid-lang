@@ -572,6 +572,12 @@ pub enum TypeErrorKind {
     /// answers itself (B05: the methods exist for connector operations).
     RouteMethodAnsweredByServer { server: String, method: String, path: String },
 
+    /// A route's `verified <scheme>(...)` clause (verified webhooks, B16)
+    /// that cannot be served: an unknown scheme, a missing or misplaced
+    /// replay window, a window outside 30 seconds to 1 hour, or a route
+    /// shape a provider's signed call cannot take.
+    WebhookVerificationInvalid { path: String, problem: String },
+
     /// A connector `Response` outside the program that made the call.
     ResponseOutsideCaller { place: String },
 
@@ -819,6 +825,7 @@ impl TypeErrorKind {
             Self::DuplicateServerRoute { .. } => "E0720",
             Self::GetRouteBody { .. } => "E0721",
             Self::RouteMethodAnsweredByServer { .. } => "E0722",
+            Self::WebhookVerificationInvalid { .. } => "E0718",
             Self::ResponseOutsideCaller { .. } => "E0802",
             Self::ModelOutputFormatMismatch { .. } => "E0914",
             Self::RolloutPercentOutOfRange { .. } => "E0233",
@@ -1305,6 +1312,9 @@ impl TypeErrorKind {
             Self::ResponseOutsideCaller { place } => {
                 format!("{place} cannot hold a `Response`")
             }
+            Self::WebhookVerificationInvalid { path, problem } => {
+                format!("verified route `{path}`: {problem}")
+            }
             Self::RouteMethodAnsweredByServer { server, method, path } => {
                 format!("route `{method} {path}` in server `{server}` declares a method the server answers itself")
             }
@@ -1783,6 +1793,9 @@ impl TypeErrorKind {
             )),
             Self::GetRouteBody { .. } => Some(
                 "move request data for GET into a `query Type` clause, or change the method to POST/PUT/PATCH".into(),
+            ),
+            Self::WebhookVerificationInvalid { .. } => Some(
+                "a verified route is a provider's signed call: `route POST \"/webhooks/stripe\" body Event verified stripe(secret: \"STRIPE_WEBHOOK_SECRET\", within: 5 minutes) -> json Nothing:`. Schemes that sign no time (`github`, `linear`) write `replays: accepted` instead of `within:`".into(),
             ),
             Self::ResponseOutsideCaller { .. } => Some(
                 "a `Response` is what a connector call answered: read `status()`, `header(name)` and `body()` where the call is made, and pass on the values you need".into(),

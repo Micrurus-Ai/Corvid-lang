@@ -373,13 +373,14 @@ struct StreamRoutes {
 /// Only streaming routes are generated so far; ordinary routes join the
 /// same table next (frontend roadmap). A streaming route with an `Upload`
 /// body is left out and named in a comment, because the client cannot yet
-/// send multipart.
+/// send multipart. A verified route is never generated: it is a
+/// provider's signed call, which no browser can make.
 fn stream_routes(contract: &ApplicationContract) -> StreamRoutes {
     let mut entries = Vec::new();
     let mut example = None;
     let mut shapes = Vec::new();
     let mut skipped = Vec::new();
-    for route in &contract.routes {
+    for route in contract.routes.iter().filter(|route| route.verified.is_none()) {
         let Some(item) = route
             .pagination
             .as_ref()

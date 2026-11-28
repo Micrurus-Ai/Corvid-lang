@@ -66,6 +66,19 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
                 }));
             }
         }
+        // A verified route documents the headers the provider signs with,
+        // so a provider's tooling can send a test delivery.
+        if let Some(verified) = &route.verified {
+            for header in &verified.signature_headers {
+                parameters.push(json!({
+                    "name": header,
+                    "in": "header",
+                    "required": true,
+                    "schema": { "type": "string" },
+                    "description": format!("Signed by the provider under the `{}` scheme.", verified.scheme),
+                }));
+            }
+        }
         if !parameters.is_empty() {
             operation.insert("parameters".into(), Value::Array(parameters));
         }
@@ -76,6 +89,9 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
             // upload uses the route's explicit policy as its schema.
             let (media_type, schema) = if let Some(upload) = &route.upload {
                 ("multipart/form-data", schema_for_upload(upload))
+            } else if route.request_media_type.as_deref() == Some(crate::app_contract::RAW_BODY_MEDIA_TYPE) {
+                // `body Bytes`: the bytes as sent, not a base64 string.
+                (crate::app_contract::RAW_BODY_MEDIA_TYPE, json!({ "type": "string", "format": "binary" }))
             } else if let Some(media_type) = route.request_media_type.as_deref() {
                 (media_type, schema_for_type_name(body))
             } else if body_type_has_upload(body, contract) {
@@ -110,6 +126,12 @@ pub fn emit_openapi(contract: &ApplicationContract) -> Value {
         // branches instead of a single opaque failure (slice 51e).
         for (status, schema) in error_status_responses(&route.response_type, contract) {
             responses.entry(status).or_insert(schema);
+        }
+        if let Some(verified) = &route.verified {
+            responses.entry("401".to_string()).or_insert(json!({
+                "description": "The signature did not verify, or the signed time is outside the window (`webhook_signature_invalid`, `webhook_expired`)."
+            }));
+            operation.insert("x-corvid-verified".into(), json!(verified));
         }
         operation.insert("responses".into(), Value::Object(responses));
 
@@ -589,6 +611,7 @@ mod tests {
                 requires: vec!["issue_refund".into()],
                 pagination: None,
                 policy: None,
+                verified: None,
             }],
             live: vec![],
             agents: vec![ContractCallable {
@@ -702,6 +725,7 @@ mod tests {
             requires: vec![],
             pagination: None,
             policy: None,
+            verified: None,
         });
         let openapi = emit_openapi(&c);
         // Body carrying an upload is multipart/form-data.
@@ -737,6 +761,7 @@ mod tests {
             requires: vec![],
             pagination: None,
             policy: None,
+            verified: None,
         });
         let schema =
             &emit_openapi(&c)["paths"]["/imports"]["post"]["requestBody"]["content"]
@@ -784,6 +809,7 @@ mod tests {
                 cursor_param: Some("cursor".into()),
             }),
             policy: None,
+            verified: None,
         });
         let openapi = emit_openapi(&c);
         let op = &openapi["paths"]["/items"]["get"];
@@ -860,6 +886,7 @@ mod tests {
                 roles: vec!["admin".into()],
                 permissions: vec![],
             }),
+            verified: None,
         });
         let openapi = emit_openapi(&c);
         // Auth login path is present and carries the safeguards.

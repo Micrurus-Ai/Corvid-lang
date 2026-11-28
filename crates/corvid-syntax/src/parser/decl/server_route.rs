@@ -228,6 +228,7 @@ impl<'a> Parser<'a> {
             response: RouteResponse { kind: RouteResponseKind::Live, span: row_span, ty: snapshot },
             effect_row: Default::default(),
             policy,
+            verified: None,
             body,
             span: start.merge(end),
         })
@@ -263,6 +264,7 @@ impl<'a> Parser<'a> {
         let mut query_ty = None;
         let mut body_ty = None;
         let mut form_encoded = false;
+        let mut verified = None;
         loop {
             if self.peek_ident_is("query") {
                 self.bump();
@@ -291,6 +293,19 @@ impl<'a> Parser<'a> {
                     });
                 }
                 body_ty = Some(self.parse_type_ref()?);
+                continue;
+            }
+            if self.peek_ident_is("verified") {
+                if verified.is_some() {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: "duplicate `verified` route clause".into(),
+                            expected: "at most one `verified <scheme>(...)` clause".into(),
+                        },
+                        span: self.peek_span(),
+                    });
+                }
+                verified = Some(self.parse_webhook_verification()?);
                 continue;
             }
             break;
@@ -341,9 +356,122 @@ impl<'a> Parser<'a> {
             response,
             effect_row,
             policy,
+            verified,
             body,
             span: start.merge(end),
         })
+    }
+
+    /// `verified <scheme>(secret: "<NAME>", within: <duration>)`, or
+    /// `replays: accepted` in place of `within` for a scheme that signs
+    /// no time (verified webhooks, B16). Each key at most once; the
+    /// checker decides which window a scheme needs.
+    fn parse_webhook_verification(&mut self) -> Result<corvid_ast::WebhookVerification, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // verified
+        let (scheme, scheme_span) = self.expect_ident()?;
+        self.expect(TokKind::LParen, "`(` after the `verified` scheme")?;
+        let mut secret = None;
+        let mut replay = None;
+        while !matches!(self.peek(), TokKind::RParen | TokKind::Eof) {
+            let (key, key_span) = self.expect_ident()?;
+            let duplicate = match key.as_str() {
+                "secret" => secret.is_some(),
+                "within" | "replays" => replay.is_some(),
+                _ => false,
+            };
+            if duplicate {
+                return Err(ParseError {
+                    kind: ParseErrorKind::UnexpectedToken {
+                        got: format!("a second `{key}` in `verified`"),
+                        expected: "`secret` once, and one of `within` or `replays`".into(),
+                    },
+                    span: key_span,
+                });
+            }
+            self.expect(TokKind::Colon, "`:` after a `verified` key")?;
+            match key.as_str() {
+                "secret" => match self.peek().clone() {
+                    TokKind::StringLit(name) => {
+                        self.bump();
+                        secret = Some(name);
+                    }
+                    other => {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(&other),
+                                expected: "a string naming the signing secret, as in `secret: \"STRIPE_WEBHOOK_SECRET\"`".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                },
+                "within" => {
+                    let window_start = self.peek_span();
+                    let expected = |got: &TokKind, span| ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: describe_token(got),
+                            expected: "a duration, as in `within: 5 minutes`".into(),
+                        },
+                        span,
+                    };
+                    let count = match self.peek().clone() {
+                        TokKind::Int(n) => {
+                            self.bump();
+                            n.to_string()
+                        }
+                        other => return Err(expected(&other, self.peek_span())),
+                    };
+                    let unit = match self.peek().clone() {
+                        TokKind::Ident(word) if corvid_ast::duration_unit(&word).is_some() => {
+                            self.bump();
+                            word
+                        }
+                        other => return Err(expected(&other, self.peek_span())),
+                    };
+                    replay = Some(corvid_ast::WebhookReplay::Within { count, unit, span: window_start.merge(self.prev_span()) });
+                }
+                "replays" => {
+                    if !self.peek_ident_is("accepted") {
+                        return Err(ParseError {
+                            kind: ParseErrorKind::UnexpectedToken {
+                                got: describe_token(self.peek()),
+                                expected: "`accepted`, as in `replays: accepted`".into(),
+                            },
+                            span: self.peek_span(),
+                        });
+                    }
+                    self.bump();
+                    replay = Some(corvid_ast::WebhookReplay::Accepted { span: key_span.merge(self.prev_span()) });
+                }
+                _ => {
+                    return Err(ParseError {
+                        kind: ParseErrorKind::UnexpectedToken {
+                            got: format!("`verified` key `{key}`"),
+                            expected: "`secret`, `within`, or `replays`".into(),
+                        },
+                        span: key_span,
+                    });
+                }
+            }
+            if matches!(self.peek(), TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RParen, "`)` after `verified`")?;
+        let span = start.merge(self.prev_span());
+        let Some(secret) = secret else {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "`verified` without a `secret`".into(),
+                    expected: "`secret: \"<NAME>\"` naming the signing secret".into(),
+                },
+                span,
+            });
+        };
+        Ok(corvid_ast::WebhookVerification { scheme: Ident::new(scheme, scheme_span), secret, replay, span })
     }
 
     /// A complete approval policy. Every key is mandatory because

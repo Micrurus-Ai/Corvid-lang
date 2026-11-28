@@ -427,8 +427,38 @@ pub struct HttpRouteDecl {
     /// permission("refund:write")`. `None` = a public route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<RoutePolicy>,
+    /// `verified stripe(secret: "...", within: 5 minutes)` (verified
+    /// webhooks, B16): the request is a provider's signed call, checked
+    /// before the body is decoded. `None` = an ordinary route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<WebhookVerification>,
     pub body: Block,
     pub span: Span,
+}
+
+/// A route's `verified <scheme>(secret: "<NAME>", within: <duration>)`
+/// clause, or `replays: accepted` for a scheme that signs no time. The
+/// checker validates the scheme, the window and the pairing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebhookVerification {
+    /// The signing scheme, as written (`stripe`).
+    pub scheme: Ident,
+    /// The name the signing secret is read by at startup.
+    pub secret: String,
+    /// How replays are handled; `None` when the source said neither.
+    pub replay: Option<WebhookReplay>,
+    pub span: Span,
+}
+
+/// How a verified route treats a recorded request sent again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WebhookReplay {
+    /// `within: 5 minutes`: the signed time must be this close to the
+    /// clock. The number and unit as written.
+    Within { count: String, unit: String, span: Span },
+    /// `replays: accepted`: the scheme signs no time, and the source
+    /// takes on that a recorded request can be sent again.
+    Accepted { span: Span },
 }
 
 /// A route's auth policy (slice 51h). Any of the three may be present;

@@ -518,6 +518,10 @@ server api:
         return HealthStatus.all()
     route GET "/boards/{board}" -> json HealthStatus:
         return HealthStatus(true)
+    route POST "/webhooks/stripe" body HealthStatus verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes) -> json HealthStatus:
+        return body
+    route POST "/webhooks/github" body Bytes verified github(secret: "GITHUB_WEBHOOK_SECRET", replays: accepted) -> json HealthStatus:
+        return HealthStatus(true)
 
 schedule "0 9 * * *" zone "UTC" -> daily_summary()
 "#,
@@ -821,6 +825,8 @@ const EVIDENCE: &[(&str, &str)] = &[
     ("upload_annotation", "server_and_schedule"),
     ("route_payload", "server_and_schedule"),
     ("route_policy", "server_and_schedule"),
+    ("route_verified", "server_and_schedule"),
+    ("verified_arg", "server_and_schedule"),
     ("route_path", "server_and_schedule"),
     ("path_placeholder", "server_and_schedule"),
     ("identity_decl", "identity_settings"),

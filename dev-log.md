@@ -2,6 +2,67 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Verified webhooks W1 to W3: a provider's signed call, checked before the handler
+
+Frontend development agreed on 2026-11-27 (review item 3). A `verified` clause
+that compiled while the server did not check it would be a declared policy
+that does not run, so the three slices ship together.
+
+- **The verifier, strengthened first** (its own commit). The connector
+  runtime's verifier becomes the only one. It had a 5-minute window when
+  none was given, its own constant-time compare over hex text (so uppercase
+  hex failed), and one signature per header (so a key roll broke). It also
+  judged the timestamp before the signature. Every call now states a
+  `ReplayWindow`, every signature is tried, tags are compared as bytes by
+  corvid-crypto, and the signature comes first. It gained Stripe and
+  Standard Webhooks, tested with the recorded requests the Corvid-code test
+  already used.
+- **Grammar.** `verified <scheme>(secret: "<NAME>", within: <duration>)`
+  sits before `->`, where frontend development asked for it. Simpler
+  spellings were considered. `@webhook(stripe, ...)` was rejected because a
+  route reads left to right as what it takes and who may call it. A bare
+  `verified stripe` with defaults was rejected because the window is
+  security policy. A scheme that signs no time says `replays: accepted`,
+  which names the risk the source takes on.
+- **One rule.** `corvid_types::webhook` holds the schemes, their signature
+  headers and the window bounds (30 seconds to 1 hour). The checker
+  (E0718), the contract, OpenAPI and the server's window all read it. The
+  verifier's own scheme list lives in another crate, and
+  `the_checker_and_the_verifier_know_the_same_schemes` holds the two equal.
+- **Checker.** Refuses an unknown scheme, a missing, misplaced or
+  out-of-range window, an empty secret, `requires`, GET or DELETE, and an
+  `Upload` body.
+- **Server.** The secret is read at startup, and a missing or unusable one
+  refuses to start. The signature is checked over the raw body before
+  `requires`, decoding or the handler. A failure answers 401
+  `webhook_signature_invalid` or `webhook_expired`. The trace records
+  `webhook.verified` and `webhook.refused` with route, scheme and delivery
+  id, never the secret or signature.
+- **Decided when building.** A verified route skips body fields its type
+  does not declare. The provider defines its payload and adds fields, so
+  refusing them, as ordinary routes do for the app's own clients, would
+  refuse real Stripe events.
+- **`body Bytes`** on any route is the raw body. The contract and OpenAPI
+  publish it as `application/octet-stream`.
+- **Three tiers.** The backend owns the clause and the check. Frontend
+  development: the contract marks the route, and the generated TypeScript
+  client leaves it out. The dev console and the assistant endpoint list
+  only agents and actions, so they cannot reach a route. AI: no assistant
+  is ever offered a verified route. The events a handler records are
+  ordinary typed state the app's actions already show.
+- **Narrowed, by refusal.** Native code refuses a verified route's handler
+  (`VerifiedRouteNotNative`), because a native library's host would run it
+  unchecked. The roadmap holds native serving.
+
+Tests: `webhook_verify.rs` (recorded Stripe and Standard Webhooks requests,
+every tampered field, key roll, window edges, signature before time),
+`corvid_types::webhook` (bounds and pairing), `verified_webhooks.rs`
+(checker refusals, contract, native refusal), and `serve_webhooks.rs`, which
+runs a real server: a signed delivery runs the handler; a changed body,
+timestamp, header or key is refused; the recorded 2024 request is refused
+as expired; a `Bytes` body arrives intact; the published surfaces mark the
+route without its secret; a missing secret refuses to start.
+
 ### `try ... timeout` in native code (TE-3e)
 
 The interpreter bounds each attempt with `tokio::time::timeout`, which
@@ -45,6 +106,7 @@ Proof:
   30ms`, and the nested refusal;
 - a runtime test of the deadline stack;
 - tier picker tests for native timeouts and the `?` refusal.
+
 
 ### Native `try` catches outages in `approve` arguments
 

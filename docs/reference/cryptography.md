@@ -123,7 +123,7 @@ agent verify_standard_webhook(message_id: String, timestamp: String, signature_h
 
 Both programs are the acceptance test, run through the driver against recorded requests whose signatures were computed outside Corvid: the recorded requests verify, and a changed body byte, timestamp, message id, signature or key is rejected. The trace of a verification holds `<redacted>` for the secret read and nothing for the HMAC. Every request is checked in full: `==` on `Bytes` takes the same time whichever byte differs, so a forged signature cannot be guessed byte by byte.
 
-These programs check the signature only. A complete verifier also refuses a timestamp too far from the current time, so a recorded request cannot be replayed later, and reads the body exactly as it arrived. A reusable verifier, its declared tolerance, and raw request bodies in routes come with verified webhooks (B16).
+These programs check the signature only. A complete verifier also refuses a timestamp too far from the current time, so a recorded request cannot be replayed later, and reads the body exactly as it arrived. A route does all of that with one clause: `verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes)` checks the signature over the raw body, with the declared window, before the handler runs ([backend guide](../guides/backend.md), [verified webhooks](../proposals/verified-webhooks.md)). Write the check in code, as above, only for a scheme the clause does not know, taking the raw body with `body Bytes`.
 
 ## Signatures
 

@@ -292,6 +292,7 @@ mod tests {
             approval_policy: None,
             upload_format: None,
             policy: None,
+            verified: None,
             span: span(),
         }
     }

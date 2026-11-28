@@ -66,6 +66,11 @@ pub enum NotNativeReason {
     /// action's `requires` against the actor passed in (B10); native code
     /// does not yet, so it refuses rather than skip the check.
     CallerNotNative { agent: String },
+    /// A `verified` route's handler (verified webhooks, B16). `corvid
+    /// serve` checks the provider's signature before the handler runs;
+    /// a native library hands its handlers to a host that does not, so
+    /// it refuses rather than let a handler run unchecked.
+    VerifiedRouteNotNative { path: String },
     StreamLoweringNotImplemented,
     TestFixtureNotNative {
         name: String,
@@ -129,6 +134,10 @@ impl std::fmt::Display for NotNativeReason {
             Self::CallerNotNative { agent } => write!(
                 f,
                 "`{agent}` takes a `Caller`, whose action policy the interpreter checks on every call; native code does not yet (shared actions B10, on the roadmap)"
+            ),
+            Self::VerifiedRouteNotNative { path } => write!(
+                f,
+                "route `{path}` is `verified`: `corvid serve` checks the provider's signature before its handler runs, and a native library's host does not yet, so its handler is not compiled unchecked (verified webhooks, native serving on the roadmap)"
             ),
             Self::TryElseNotNative { reason } => write!(
                 f,
@@ -294,6 +303,14 @@ pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Res
             IrImportSource::Corvid
             | IrImportSource::RemoteCorvid
             | IrImportSource::PackageCorvid => {}
+        }
+    }
+    // A verified route's handler still in the program would be handed to
+    // a host with no signature check. A server build drops route
+    // handlers before this scan, so only a library build reaches this.
+    for route in ir.servers.iter().flat_map(|server| &server.routes) {
+        if route.verified.is_some() && ir.agents.iter().any(|agent| agent.name == route.handler_agent) {
+            return Err(NotNativeReason::VerifiedRouteNotNative { path: route.path.clone() });
         }
     }
     for agent in &ir.agents {

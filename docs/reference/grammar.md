@@ -350,7 +350,7 @@ server_decl       ::= 'server' IDENT ':' INDENT (route_decl | live_decl)+ DEDENT
 route_decl        ::= (upload_annotation NEWLINE (approval_annotation NEWLINE)?
                       | approval_annotation NEWLINE (upload_annotation NEWLINE)?)?
                       'route' http_method route_path
-                      (route_query route_payload? | route_payload route_query?)?
+                      (route_query route_payload? | route_payload route_query?)? route_verified?
                       '->' ('json' type_ref | 'html') uses_clause? route_policy? ':' INDENT block DEDENT
 
 # B14: a `live` names one table query; a subscriber receives the rows it
@@ -368,6 +368,13 @@ route_payload     ::= ('body' | 'form') type_ref
 # an omission. A `live` must have a `route_policy`; a route may leave it out.
 route_policy      ::= 'requires' 'anyone' | 'requires' route_requirement ('and' route_requirement)*
 route_requirement ::= 'authenticated' | ('role' | 'permission') '(' STRING_LITERAL ')'
+# Verified webhooks (B16): a provider's signed call, checked over the raw
+# body before it is decoded. The scheme is `stripe`, `standard_webhooks`,
+# `slack`, `github` or `linear`. A scheme that signs a time takes `within`
+# (30 seconds to 1 hour); one that signs none takes `replays: accepted`.
+# `verified` is contextual, and a verified route takes no `route_policy`.
+route_verified    ::= 'verified' IDENT '(' verified_arg (',' verified_arg)* ')'
+verified_arg      ::= 'secret' ':' STRING_LITERAL | 'within' ':' INT IDENT | 'replays' ':' 'accepted'
 
 upload_annotation ::= '@' 'upload' '(' (upload_arg (',' upload_arg)* ','?)? ')'
 upload_arg        ::= ('max_mb' | 'max_bytes' | 'retention_days') ':' INT | 'mime' ':' STRING_LITERAL

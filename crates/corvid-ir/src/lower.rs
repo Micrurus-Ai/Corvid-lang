@@ -718,6 +718,12 @@ impl<'a> Lowerer<'a> {
             approval_policy: r.approval.clone(),
             upload_format: r.body_ty.as_ref().and_then(upload_format_tag),
             policy: r.policy.as_ref().map(crate::types::IrRoutePolicy::from_ast),
+            verified: r.verified.as_ref().map(|clause| crate::types::IrWebhookVerification {
+                scheme: clause.scheme.name.clone(),
+                secret: clause.secret.clone(),
+                // The checker refused an unusable window before lowering.
+                window_secs: corvid_types::webhook::window_seconds(clause).ok().flatten(),
+            }),
             span: r.span,
         }
     }

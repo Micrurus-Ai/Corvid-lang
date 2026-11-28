@@ -77,6 +77,7 @@ mod live;
 mod own_origin;
 mod public_failure;
 mod route_stream;
+mod webhook;
 use browser_asset::browser_asset;
 use public_failure::{log_failure, public_failure};
 
@@ -535,6 +536,9 @@ pub(crate) fn cmd_serve(
                 route_path: route.path.clone(),
                 policy: route.policy.clone(),
                 approval_policy: route.approval_policy.clone(),
+                // A verified route whose secret is missing or unusable
+                // refuses to start rather than refusing every delivery.
+                webhook: webhook::RouteWebhook::load(route, &state.runtime)?,
             });
             let filter = method_filter(route.method);
             let mr = if route.upload_format.is_some() {
@@ -821,6 +825,10 @@ struct RouteMeta {
     policy: Option<corvid_ir::IrRoutePolicy>,
     /// Mandatory compiled policy when the route can reach `approve`.
     approval_policy: Option<corvid_ast::ApprovalSpec>,
+    /// A verified route's scheme, secret and window (verified webhooks,
+    /// B16), resolved at startup. The signature is checked before
+    /// anything else runs.
+    webhook: Option<webhook::RouteWebhook>,
 }
 
 struct RouteUploadPolicy {
@@ -1308,6 +1316,19 @@ async fn run_route(
     headers: axum::http::HeaderMap,
     body: RouteRequestBody,
 ) -> Response {
+    // Verified webhooks (B16): a provider's signature is checked over the
+    // exact bytes that arrived before anything else reads the request.
+    // The checker refuses `requires` and uploads on a verified route, so
+    // the body is always buffered here.
+    if let Some(webhook) = &meta.webhook {
+        let RouteRequestBody::Buffered(bytes) = &body else {
+            return internal_error("request_body_mode_mismatch", "a verified route reached the streaming upload path");
+        };
+        if let Err(refused) = webhook.verify(&state.runtime, &meta.route_path, &headers, bytes, epoch_ms()) {
+            return refused;
+        }
+    }
+
     // Slice 52f: enforce the route's `requires` policy BEFORE parsing the
     // body, assembling args, or executing any handler or effect. On
     // success it yields the authenticated typed `actor`; a missing/invalid
@@ -1391,6 +1412,17 @@ async fn run_route(
                 Err(resp) => return resp,
             }
         }
+        // `body Bytes`: the bytes exactly as they arrived, whatever their
+        // media type, for a signature or a format the program reads itself.
+        Some(Type::Bytes) => {
+            let RouteRequestBody::Buffered(body) = body else {
+                return internal_error(
+                    "request_body_mode_mismatch",
+                    "non-upload route reached the streaming upload request path",
+                );
+            };
+            Some(Value::Bytes(corvid_crypto::Bytes::new(&body)))
+        }
         Some(ty) => {
             let RouteRequestBody::Buffered(body) = body else {
                 return internal_error(
@@ -1404,7 +1436,12 @@ async fn run_route(
             };
             // Route bodies follow the published contract, which declares
             // `additionalProperties: false`, so undeclared keys are refused.
-            match decode_public_json(&json, ty, &types_by_id, UnknownFields::Reject) {
+            // A verified route's body is the provider's payload, which the
+            // provider defines and adds fields to without notice, as with
+            // `T.from_json` on an outside API; its declared fields are read
+            // and the rest skipped.
+            let unknown = if meta.webhook.is_some() { UnknownFields::Ignore } else { UnknownFields::Reject };
+            match decode_public_json(&json, ty, &types_by_id, unknown) {
                 Ok(v) => Some(v),
                 Err(e) => return invalid_body(&e),
             }

@@ -109,6 +109,20 @@ Notes on the shape:
   `None` until the person signs in again; encrypted storage and refresh
   are planned (user credentials C3), and native code refuses `by.token`
   by name (C4).
+- A provider's webhook is a verified route:
+  `route POST "/webhooks/stripe" body PaymentEvent verified stripe(secret: "STRIPE_WEBHOOK_SECRET", within: 5 minutes) -> json Nothing:`.
+  `corvid serve` checks the signature over the exact bytes that arrived
+  before the body is decoded, and answers 401 (`webhook_signature_invalid`
+  or `webhook_expired`) without running the handler. The schemes are
+  `stripe`, `standard_webhooks`, `slack`, `github` and `linear`. A scheme
+  that signs a time needs `within:` (30 seconds to 1 hour; there is no
+  default window), and `github` and `linear`, which sign none, say
+  `replays: accepted` instead. The secret is read at startup, and the
+  server refuses to start without it. A provider's payload may carry
+  fields the body type does not declare; they are skipped. `body Bytes`
+  on any route is the raw body, unchanged. **Narrowed for now:** native
+  code refuses a verified route's handler by name; native serving is on
+  the roadmap.
 
 The typechecker enforces:
 
