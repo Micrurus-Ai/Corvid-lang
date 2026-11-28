@@ -257,3 +257,26 @@ agent notice_for(failure: Failure) -> String:
 2. Are `Failure` and `FailureKind` free as built-in type names in your code and examples?
 
 **Answer:**
+
+---
+
+## 11. Dynamic fan-out (launch track B46)
+
+[Proposal](dynamic-fan-out.md), slices FO-1 to FO-4. Added 2026-11-28 by the Windows session. **Building starts 2026-12-01** without an objection here.
+
+```corvid
+agent summarize_all(docs: List<Document>) -> List<Summary> uses llm @budget($2.00):
+    summaries = parallel for doc in docs, at most 8:
+        summarize(doc)
+    return summaries
+```
+
+- `parallel for <name> in <list>, at most <N>:` runs the block for every item, at most `N` at a time, and gives the results in the input's order. The block's last expression is each item's value.
+- `at most N` is required (1 to 256): how hard to hit a provider and how fast to spend is written in source. `@budget` checks the whole fan-out before it starts.
+
+**Frontend owns:** parsing the statement. Later, a progress view for an action that fans out ("12 of 40"), with progress events agreed separately.
+
+**Question:**
+1. Does your side parse statements inside agent and action bodies, and is `parallel for <name> in <expr>, at most <expr>:` safe for it? `parallel` is already contextual (`parallel:`); this form begins `parallel for`.
+
+**Answer:**
