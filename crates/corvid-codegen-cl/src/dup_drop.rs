@@ -469,7 +469,7 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
                 *max_id = local_id.0;
             }
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => {}
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd | corvid_ir::IrOutage::DeadlineDepth) => {}
         IrExprKind::FieldAccess { target, .. } => scan_expr(target, max_id),
         IrExprKind::UnwrapGrounded { value } => scan_expr(value, max_id),
         IrExprKind::Index { target, index } => {
@@ -506,7 +506,7 @@ fn scan_expr(expr: &IrExpr, max_id: &mut u32) {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => scan_expr(inner, max_id),
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body) | corvid_ir::IrOutage::PendingFor(body)) | IrExprKind::TryRetry { body, .. } => {
             scan_expr(body, max_id)
         }
         IrExprKind::Replay {
@@ -568,7 +568,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
             expr_reads_local(receiver, target) || args.iter().any(|a| expr_reads_local(a, target))
         }
         IrExprKind::Local { local_id, .. } => *local_id == target,
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd | corvid_ir::IrOutage::DeadlineDepth) => false,
         IrExprKind::FieldAccess { target: t, .. } => expr_reads_local(t, target),
         IrExprKind::UnwrapGrounded { value } => expr_reads_local(value, target),
         IrExprKind::Index { target: t, index } => {
@@ -598,7 +598,7 @@ fn expr_reads_local(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_reads_local(inner, target),
-        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body, .. } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body) | corvid_ir::IrOutage::PendingFor(body)) | IrExprKind::TryRetry { body, .. } => {
             expr_reads_local(body, target)
         }
         IrExprKind::Replay {

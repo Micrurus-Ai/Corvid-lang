@@ -191,7 +191,7 @@ fn visit_expr(expr: &mut IrExpr, visit: &mut dyn FnMut(&mut Type)) {
         | IrExprKind::TryPropagate { inner }
         | IrExprKind::TrustBoundary { inner } => visit_expr(inner, visit),
         IrExprKind::Outage(outage) => {
-            if let crate::IrOutage::Checked(inner) = outage {
+            if let crate::IrOutage::Checked(inner) | crate::IrOutage::PendingFor(inner) = outage {
                 visit_expr(inner, visit);
             }
         }

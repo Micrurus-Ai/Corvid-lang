@@ -755,6 +755,13 @@ pub(in crate::lowering) fn declare_runtime_funcs(
     let outage_stop_if_pending_id = outage_fn(module, "corvid_outage_stop_if_pending", false)?;
     let outage_catching_id = outage_fn(module, "corvid_outage_catching", false)?;
     let deadline_end_id = outage_fn(module, "corvid_deadline_end", false)?;
+    let deadline_depth_id = outage_fn(module, "corvid_deadline_depth", true)?;
+    let mut pending_for_sig = module.make_signature();
+    pending_for_sig.params.push(AbiParam::new(I64));
+    pending_for_sig.returns.push(AbiParam::new(I64));
+    let outage_pending_for_id = module
+        .declare_function("corvid_outage_pending_for", Linkage::Import, &pending_for_sig)
+        .map_err(|e| CodegenError::cranelift(format!("declare corvid_outage_pending_for: {e}"), Span::new(0, 0)))?;
     let mut deadline_begin_sig = module.make_signature();
     deadline_begin_sig.params.push(AbiParam::new(I64));
     let deadline_begin_id = module
@@ -859,6 +866,8 @@ pub(in crate::lowering) fn declare_runtime_funcs(
         outage_catching: outage_catching_id,
         deadline_begin: deadline_begin_id,
         deadline_end: deadline_end_id,
+        deadline_depth: deadline_depth_id,
+        outage_pending_for: outage_pending_for_id,
         outage_plan: Default::default(),
         outage_checked: Default::default(),
         literal_counter: std::cell::Cell::new(0),

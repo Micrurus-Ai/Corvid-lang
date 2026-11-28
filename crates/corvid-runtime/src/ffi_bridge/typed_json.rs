@@ -177,7 +177,7 @@ pub unsafe extern "C" fn corvid_runtime_call(
         Err(err) => {
             runtime.record_connector_call(&name, false);
             crate::ffi_bridge::panic_if_replay_runtime_error(&format!("corvid: `{name}`"), &err);
-            crate::ffi_bridge::outage::fail(format!("corvid: `{name}`: {err}"), err.is_outage());
+            crate::ffi_bridge::outage::fail_error(format!("corvid: `{name}`: {err}"), &err);
             unsafe { payload.write(0) };
             return RESULT_TAG_OK;
         }

@@ -367,22 +367,36 @@ agent main() -> Int:
     assert!(stderr.contains("timed out after 30ms"), "{stderr}");
 }
 
+/// Nested timeouts belong to the `try` that set them, as on the
+/// interpreter, where an outer try's timeout cancels everything inside
+/// it: the nearer deadline fires, and only its own `try` (or one outside
+/// it) catches it.
 #[test]
-fn a_timed_try_that_can_nest_with_another_try_is_refused_by_name() {
+fn a_nested_timeout_is_caught_by_the_try_whose_deadline_fired() {
     let src = r#"
 tool slow_answer(ms: Int) -> Int
 
-agent inner() -> Int:
+agent long_inner() -> Int:
     return try slow_answer(400) timeout 10000 else -1
 
-agent main() -> Int:
-    return try inner() timeout 30 else -2
+agent short_inner() -> Int:
+    return try slow_answer(400) timeout 30 else -1
+
+agent untimed_inner() -> Int:
+    return try slow_answer(400) else -1
+
+agent main() -> String:
+    outer_fires = try long_inner() timeout 30 else -2
+    inner_fires = try short_inner() timeout 10000 else -2
+    untimed = try untimed_inner() timeout 30 else -3
+    return outer_fires.to_string() + " " + inner_fires.to_string() + " " + untimed.to_string()
 "#;
     let ir = ir_of(src);
+    let value = interpret_with_slow_tool(&ir).expect("interpreter run");
+    assert_eq!(value, corvid_vm::Value::String("-2 -1 -3".into()));
     let tmp = tempfile::tempdir().expect("tempdir");
-    let error = build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[test_tools_lib_path().as_path()])
-        .expect_err("nested timeouts stay on the interpreter");
-    let message = error.to_string();
-    assert!(message.contains("nested timeouts"), "{message}");
+    let (stdout, stderr, status) = run_with_leak_detector(&compile(&ir, &tmp));
+    assert!(status.success(), "compiled binary failed: {stderr}");
+    assert_eq!(stdout.trim(), "-2 -1 -3", "stderr={stderr}");
+    assert_no_leaks(&stderr, src);
 }
-

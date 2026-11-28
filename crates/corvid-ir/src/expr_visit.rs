@@ -133,7 +133,7 @@ pub fn walk_expr(expr: &IrExpr, visit: &mut dyn FnMut(&IrExpr)) {
         | IrExprKind::TryPropagate { inner }
         | IrExprKind::TrustBoundary { inner } => walk_expr(inner, visit),
         IrExprKind::Outage(outage) => {
-            if let crate::IrOutage::Checked(inner) = outage {
+            if let crate::IrOutage::Checked(inner) | crate::IrOutage::PendingFor(inner) = outage {
                 walk_expr(inner, visit);
             }
         }

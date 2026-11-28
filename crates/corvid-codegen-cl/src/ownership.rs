@@ -397,8 +397,8 @@ fn expr_consumes_target(
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_references(inner, target),
-        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
-        IrExprKind::TrustBoundary { inner: body } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd | corvid_ir::IrOutage::DeadlineDepth) => false,
+        IrExprKind::TrustBoundary { inner: body } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body) | corvid_ir::IrOutage::PendingFor(body)) | IrExprKind::TryRetry { body, .. } => {
             expr_references(body, target)
         }
         IrExprKind::Replay {
@@ -476,7 +476,7 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
         | IrExprKind::Ask { prompt: inner, .. }
         | IrExprKind::Choose { options: inner }
         | IrExprKind::TryPropagate { inner } => expr_references(inner, target),
-        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
+        IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd | corvid_ir::IrOutage::DeadlineDepth) => false,
         IrExprKind::Replay {
             trace,
             arms,
@@ -486,7 +486,7 @@ fn expr_references(expr: &IrExpr, target: LocalId) -> bool {
                 || arms.iter().any(|arm| expr_references(&arm.body, target))
                 || expr_references(else_body, target)
         }
-        IrExprKind::TrustBoundary { inner: body } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body)) | IrExprKind::TryRetry { body, .. } => {
+        IrExprKind::TrustBoundary { inner: body } | IrExprKind::Outage(corvid_ir::IrOutage::Checked(body) | corvid_ir::IrOutage::PendingFor(body)) | IrExprKind::TryRetry { body, .. } => {
             expr_references(body, target)
         }
     }

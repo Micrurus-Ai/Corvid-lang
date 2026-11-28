@@ -8572,7 +8572,7 @@ wiped from memory when the tool is done with it. A parameter declared as
 call that takes longer than the bound fails with
 `timed out after 2000ms`, which `else` catches and `retry` retries, each
 attempt with its own deadline. As in `corvid run`, a timeout fires at a
-call that waits, never in the middle of computation. A timed `try` that
-can nest with another `try`, or whose body uses `?`, still runs on the
-interpreter, and `corvid build` says why.
+call that waits, never in the middle of computation. Nested timeouts
+belong to the `try` whose deadline fired. A timed `try` whose body uses
+`?` still runs on the interpreter, and `corvid build` says why.
 

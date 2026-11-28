@@ -87,9 +87,8 @@ the body; with `retry`, the body runs again before the fallback is used.
 
 Compiled programs catch outages from tool, connector and prompt calls
 the same way, `match` arms and guards included. A `try` that can reach
-a failing call inside a lambda runs on the interpreter for now, as does
-a timed `try` that can nest with another, and `corvid build` names which
-one.
+a failing call inside a lambda runs on the interpreter for now, and
+`corvid build` names which one.
 
 ## Timeouts
 
@@ -112,10 +111,11 @@ between calls, in `corvid run` and in compiled programs alike. A call
 given up on is not stopped midway: it finishes in the background, and
 its answer is discarded.
 
-A compiled program does not yet lower a timed `try` that can run inside
-another `try`, or has another `try` inside it, or whose body uses `?`;
-such a program runs on the interpreter, and `corvid build` names the
-reason.
+When timed `try`s nest, the nearer deadline fires and belongs to the
+`try` that set it: an outer `try`'s timeout is caught by the outer
+`try`, never by one inside it. A compiled program does not yet lower a
+timed `try` whose body uses `?`; such a program runs on the
+interpreter, and `corvid build` names the reason.
 
 ## Circuit breakers
 

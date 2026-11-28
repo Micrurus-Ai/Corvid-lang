@@ -1037,6 +1037,12 @@ pub enum IrOutage {
     DeadlineBegin(u64),
     /// `Nothing`: end the innermost attempt's deadline.
     DeadlineEnd,
+    /// `Int`: how many deadlines are active, read when a `try` starts.
+    DeadlineDepth,
+    /// `Bool`: an outage is unwinding that the `try` which read this
+    /// depth at its start may catch: any outage but a timeout of a
+    /// deadline set outside that `try`.
+    PendingFor(Box<IrExpr>),
 }
 
 #[derive(Debug, Clone)]

@@ -88,7 +88,7 @@ The interpreter wraps each attempt in `tokio::time::timeout`, so a timeout fires
 
 A body containing `?` is refused by name: `?` returns from the agent from inside the attempt, past the statement that puts the deadline back.
 
-Narrowed when built: a timed `try` that can nest with another `try` is refused by name. On the interpreter an outer `try`'s timeout belongs to the outer `try`, while a single deadline stack cannot yet say whose deadline a failed call met, so an inner `try` would catch the outer one's timeout. The widening is on the roadmap.
+Nested tries: on the interpreter an outer `try`'s timeout belongs to the outer `try`, since it cancels everything inside it. Natively, each deadline records which deadline sets its time (its own, or a nearer outer one), and a held timeout records that owner. Each `try` reads the deadline depth when it starts and catches a timeout only when its owner is at that depth or deeper (`corvid_outage_pending_for`); anything else it leaves held, and a test after its loop passes it on. First built narrowed (nested timed tries refused by name), then widened the same day.
 
 A call given up on is not cut off midway, on either tier: its blocking work finishes in the background. Native shutdown waits for such calls before tearing the runtime down, which before this would abort the program.
 

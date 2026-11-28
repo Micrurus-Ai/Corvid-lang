@@ -16,9 +16,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 static CATCHING: AtomicBool = AtomicBool::new(false);
-static PENDING: Mutex<Option<String>> = Mutex::new(None);
+static PENDING: Mutex<Option<Held>> = Mutex::new(None);
 
-fn pending() -> std::sync::MutexGuard<'static, Option<String>> {
+/// A held outage: the line it stops the program with, and, for a
+/// timeout, the stack position of the deadline that fired.
+struct Held {
+    message: String,
+    deadline: Option<usize>,
+}
+
+fn pending() -> std::sync::MutexGuard<'static, Option<Held>> {
     PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -27,10 +34,24 @@ fn pending() -> std::sync::MutexGuard<'static, Option<String>> {
 /// catch one, and the caller then returns zero bits; anything else, and
 /// any outage in a program that cannot catch it, stops the program now.
 pub(crate) fn fail(message: String, outage: bool) {
+    fail_held(message, outage, None);
+}
+
+/// [`fail`] for an error the runtime classifies: a timeout remembers the
+/// deadline that fired, so only the `try` that set it, or one inside it,
+/// catches it.
+pub(crate) fn fail_error(message: String, error: &crate::RuntimeError) {
+    let deadline = matches!(error, crate::RuntimeError::TimedOut { .. })
+        .then(|| DEADLINES.with(|stack| stack.borrow().last().map(|d| d.owner)))
+        .flatten();
+    fail_held(message, error.is_outage(), deadline);
+}
+
+fn fail_held(message: String, outage: bool, deadline: Option<usize>) {
     if outage && CATCHING.load(Ordering::Relaxed) {
         let mut slot = pending();
         if slot.is_none() {
-            *slot = Some(message);
+            *slot = Some(Held { message, deadline });
         }
         return;
     }
@@ -51,6 +72,15 @@ pub extern "C" fn corvid_outage_pending() -> i64 {
     i64::from(pending().is_some())
 }
 
+/// 1 when an outage is unwinding that the `try` which read `depth` from
+/// [`corvid_deadline_depth`] at its start may catch: any outage but a
+/// timeout of a deadline set outside it. On the interpreter an outer
+/// try's timeout cancels everything inside it, so no inner `try` sees it.
+#[no_mangle]
+pub extern "C" fn corvid_outage_pending_for(depth: i64) -> i64 {
+    i64::from(pending().as_ref().is_some_and(|held| held.deadline.is_none_or(|owner| owner as i64 >= depth)))
+}
+
 /// A `try` took the outage: forget it.
 #[no_mangle]
 pub extern "C" fn corvid_outage_clear() {
@@ -63,8 +93,8 @@ pub extern "C" fn corvid_outage_clear() {
 /// whose position cannot unwind.
 #[no_mangle]
 pub extern "C" fn corvid_outage_stop_if_pending() {
-    if let Some(message) = pending().take() {
-        eprintln!("{message}");
+    if let Some(held) = pending().take() {
+        eprintln!("{}", held.message);
         std::process::exit(1);
     }
 }
@@ -75,6 +105,9 @@ pub extern "C" fn corvid_outage_stop_if_pending() {
 struct Deadline {
     at: std::time::Instant,
     milliseconds: u64,
+    /// The stack position of the deadline that sets this one's time: its
+    /// own, or an outer one that is nearer.
+    owner: usize,
 }
 
 thread_local! {
@@ -90,14 +123,23 @@ pub extern "C" fn corvid_deadline_begin(milliseconds: i64) {
         let mut stack = stack.borrow_mut();
         let mut at = std::time::Instant::now() + std::time::Duration::from_millis(milliseconds);
         let mut reported = milliseconds;
+        let mut owner = stack.len();
         if let Some(outer) = stack.last() {
             if outer.at < at {
                 at = outer.at;
                 reported = outer.milliseconds;
+                owner = outer.owner;
             }
         }
-        stack.push(Deadline { at, milliseconds: reported });
+        stack.push(Deadline { at, milliseconds: reported, owner });
     });
+}
+
+/// How many deadlines are active: a `try` reads this when it starts,
+/// and [`corvid_outage_pending_for`] compares a timeout's deadline to it.
+#[no_mangle]
+pub extern "C" fn corvid_deadline_depth() -> i64 {
+    DEADLINES.with(|stack| stack.borrow().len() as i64)
 }
 
 /// End the innermost attempt's deadline. Compiled code ends every attempt
@@ -133,14 +175,22 @@ pub(crate) fn within_deadline<T>(
 mod tests {
     use super::*;
 
+    /// The tests share the process-wide holding switch and slot, so they
+    /// take turns; a `fail` with holding off would exit the test process.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn an_outage_is_held_only_while_catching_and_a_clear_forgets_it() {
+        let _serial = serial();
         // The exit paths cannot run in a unit test; holding and clearing can.
         CATCHING.store(true, Ordering::Relaxed);
         fail("corvid: `lookup`: first".into(), true);
         fail("corvid: `lookup`: second".into(), true);
         assert_eq!(corvid_outage_pending(), 1);
-        assert_eq!(pending().as_deref(), Some("corvid: `lookup`: first"), "the first outage is the one reported");
+        assert_eq!(pending().as_ref().map(|held| held.message.as_str()), Some("corvid: `lookup`: first"), "the first outage is the one reported");
         corvid_outage_clear();
         assert_eq!(corvid_outage_pending(), 0);
         CATCHING.store(false, Ordering::Relaxed);
@@ -159,5 +209,27 @@ mod tests {
         DEADLINES.with(|stack| assert_eq!(stack.borrow().len(), 1));
         corvid_deadline_end();
         DEADLINES.with(|stack| assert!(stack.borrow().is_empty()));
+    }
+
+    #[test]
+    fn an_outer_timeout_is_caught_only_by_the_try_that_set_it() {
+        let _serial = serial();
+        CATCHING.store(true, Ordering::Relaxed);
+        let outer_try = corvid_deadline_depth();
+        corvid_deadline_begin(30);
+        let inner_try = corvid_deadline_depth();
+        corvid_deadline_begin(10_000);
+        // The inner call meets the outer deadline, the nearer one.
+        fail_error("corvid: `slow`: timed out after 30ms".into(), &crate::RuntimeError::TimedOut { milliseconds: 30 });
+        assert_eq!(corvid_outage_pending_for(inner_try), 0, "the inner try does not own it");
+        assert_eq!(corvid_outage_pending_for(outer_try), 1, "the outer try does");
+        corvid_outage_clear();
+        // Any other outage is the inner try's to catch.
+        fail("corvid: `lookup`: down".into(), true);
+        assert_eq!(corvid_outage_pending_for(inner_try), 1);
+        corvid_outage_clear();
+        corvid_deadline_end();
+        corvid_deadline_end();
+        CATCHING.store(false, Ordering::Relaxed);
     }
 }

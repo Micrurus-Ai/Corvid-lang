@@ -1541,6 +1541,18 @@ fn lower_outage(
             builder.ins().call(begin, &[milliseconds]);
             Ok(builder.ins().iconst(I64, 0))
         }
+        corvid_ir::IrOutage::DeadlineDepth => {
+            let depth = module.declare_func_in_func(runtime.deadline_depth, builder.func);
+            let call = builder.ins().call(depth, &[]);
+            Ok(builder.inst_results(call)[0])
+        }
+        corvid_ir::IrOutage::PendingFor(depth) => {
+            let depth = lower_expr(builder, depth, current_return_ty, env, scope_stack, func_ids_by_def, module, runtime)?;
+            let pending = module.declare_func_in_func(runtime.outage_pending_for, builder.func);
+            let call = builder.ins().call(pending, &[depth]);
+            let held = builder.inst_results(call)[0];
+            Ok(builder.ins().icmp_imm(IntCC::NotEqual, held, 0))
+        }
         corvid_ir::IrOutage::DeadlineEnd => {
             let end = module.declare_func_in_func(runtime.deadline_end, builder.func);
             builder.ins().call(end, &[]);

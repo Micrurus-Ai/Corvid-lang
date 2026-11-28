@@ -167,6 +167,10 @@ pub(in crate::lowering) struct RuntimeFuncs {
     /// `try ... timeout` attempt's deadline (TE-3e).
     pub deadline_begin: FuncId,
     pub deadline_end: FuncId,
+    /// `corvid_deadline_depth()` and `corvid_outage_pending_for(depth)`:
+    /// which outages a `try` may catch when deadlines nest.
+    pub deadline_depth: FuncId,
+    pub outage_pending_for: FuncId,
     /// Which calls can raise an outage (recoverable failures TE-3).
     pub outage_plan: crate::outage_plan::OutagePlan,
     /// Set while lowering the call inside an `IrOutage::Checked`, whose

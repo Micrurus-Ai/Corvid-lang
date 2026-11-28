@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Nested native timeouts belong to the `try` that set them
+
+On the interpreter an outer `try`'s timeout cancels everything inside
+it, so no inner `try` sees it. The first native timeout slice refused
+nested timed tries, because one deadline stack could not say whose
+deadline fired. Now it can:
+- **The owner:** each deadline records its owner, the stack position of
+  the deadline that sets its time (its own, or a nearer outer one), and
+  a held timeout records the owner of the deadline it met.
+- **Catching:** every `try` reads the deadline depth when it starts. Its
+  tests catch only an outage `corvid_outage_pending_for(depth)` allows:
+  any outage but a timeout whose deadline is owned outside that `try`.
+- **Passing it on:** an outage the `try` may not catch leaves the
+  attempt still held, and a test after the loop passes it outward.
+
+The nesting refusal and its call-graph analysis are removed.
+
+Proof:
+- A parity test runs three nestings: an inner long timeout inside an
+  outer short one (the outer fires), an inner short one inside an outer
+  long one (the inner fires), and an untimed inner `try` inside a timed
+  outer one (the outer catches). Both tiers give `-2 -1 -3`, under the
+  leak detector.
+- A runtime test checks that the owner decides who catches.
+
+Also found: the two outage unit tests shared the process-wide holding
+switch and raced, so one could exit the test process. They now take
+turns.
+
 ### Verified webhooks W1 to W3: a provider's signed call, checked before the handler
 
 Frontend development agreed on 2026-11-27 (review item 3). A `verified` clause

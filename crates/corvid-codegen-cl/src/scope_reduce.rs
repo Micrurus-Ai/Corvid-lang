@@ -242,7 +242,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
             expr_mentions_local(receiver, local_id)
                 || args.iter().any(|a| expr_mentions_local(a, local_id))
         }
-        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd) => false,
+        IrExprKind::Literal(_) | IrExprKind::Decl { .. } | IrExprKind::OptionNone | IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Clear | corvid_ir::IrOutage::Unwind | corvid_ir::IrOutage::DeadlineBegin(_) | corvid_ir::IrOutage::DeadlineEnd | corvid_ir::IrOutage::DeadlineDepth) => false,
         IrExprKind::Local {
             local_id: current, ..
         } => *current == local_id,
@@ -265,7 +265,7 @@ fn expr_mentions_local(expr: &IrExpr, local_id: LocalId) -> bool {
         | IrExprKind::Choose { options: target }
         | IrExprKind::TryPropagate { inner: target }
         | IrExprKind::TrustBoundary { inner: target }
-        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target))
+        | IrExprKind::Outage(corvid_ir::IrOutage::Checked(target) | corvid_ir::IrOutage::PendingFor(target))
         | IrExprKind::TryRetry { body: target, .. }
         | IrExprKind::UnOp {
             operand: target, ..

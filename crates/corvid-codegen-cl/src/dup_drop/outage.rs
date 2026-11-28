@@ -43,7 +43,7 @@ pub(crate) enum Unwind {
     Return,
     /// To the enclosing `try`'s loop; `timed` when its attempts run
     /// under a deadline, which every way out of an attempt ends.
-    Try { left: LocalId, failed: LocalId, timed: bool },
+    Try { left: LocalId, failed: LocalId, timed: bool, depth: LocalId },
 }
 
 fn local(id: LocalId, name: &str, ty: Type, span: Span) -> IrExpr {
@@ -102,7 +102,7 @@ fn test(cx: &Cx, span: Span) -> IrStmt {
             };
             vec![IrStmt::Return { value, span }]
         }
-        Unwind::Try { left, failed, timed } => {
+        Unwind::Try { left, failed, timed, depth } => {
             let more = binop(
                 BinaryOp::Gt,
                 local(left, "__corvid_try_left", Type::Int, span),
@@ -114,8 +114,18 @@ fn test(cx: &Cx, span: Span) -> IrStmt {
             // Give up: note it for after the loop and leave.
             let retry = leave_attempt(timed, IrStmt::Continue { span }, vec![clear(span)], span);
             let failed = assign(failed, "__corvid_try_failed", Type::Bool, literal(IrLiteral::Bool(true), Type::Bool, span), span);
-            let mut leave = vec![if_(more, retry, None, span)];
-            leave.extend(leave_attempt(timed, IrStmt::Break { span }, vec![failed], span));
+            let mut catch = vec![if_(more, retry, None, span)];
+            catch.extend(leave_attempt(timed, IrStmt::Break { span }, vec![failed], span));
+            // A timeout of a deadline set outside this `try` is not its to
+            // catch: leave the attempt with the outage held, and the test
+            // after the loop passes it on.
+            let ours = IrExpr {
+                kind: IrExprKind::Outage(IrOutage::PendingFor(Box::new(local(depth, "__corvid_try_depth", Type::Int, span)))),
+                ty: Type::Bool,
+                span,
+            };
+            let mut leave = vec![if_(ours, catch, None, span)];
+            leave.extend(leave_attempt(timed, IrStmt::Break { span }, Vec::new(), span));
             leave
         }
     };
@@ -260,7 +270,10 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
     output.push(let_(value_failed, "__corvid_try_value_failed", Type::Bool, bool_lit(false), span));
 
     let timed = timeout_ms.is_some();
-    let inner = Cx { return_ty: cx.return_ty, outages: cx.outages, unwind: Unwind::Try { left, failed, timed } };
+    // Which deadlines are this `try`'s own: those set from here on.
+    let depth = fresh(next);
+    output.push(let_(depth, "__corvid_try_depth", Type::Int, outage(IrOutage::DeadlineDepth, Type::Int, span), span));
+    let inner = Cx { return_ty: cx.return_ty, outages: cx.outages, unwind: Unwind::Try { left, failed, timed, depth } };
     let left_local = || local(left, "__corvid_try_left", Type::Int, span);
     let mut attempt = vec![assign(
         left,
@@ -334,5 +347,7 @@ pub(super) fn expand_try(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &mu
         None,
         span,
     ));
+    // An outage this `try` did not own goes on to whatever encloses it.
+    output.push(test(cx, span));
     *expr = local(value, "__corvid_try_value", ty, span);
 }

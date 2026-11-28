@@ -89,7 +89,9 @@ pub unsafe extern "C" fn corvid_prompt_call_typed(
             Ok(reply) => reply,
             Err(e) => {
                 record_json_bridge_ns(bridge_start, prompt_wait_before, mock_dispatch_before);
-                return fail(format!("corvid: prompt `{prompt_name}`: {e}"), e.is_outage(), payload);
+                super::outage::fail_error(format!("corvid: prompt `{prompt_name}`: {e}"), &e);
+                unsafe { payload.write(0) };
+                return 0;
             }
         };
         match decode(reply.clone()) {
