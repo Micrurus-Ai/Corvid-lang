@@ -45,8 +45,8 @@ Never reached: tool archive_order (src/main.cor:41)
 ## Slices
 
 - [x] G1 (2026-11-28). The cost tree records approvals and each node's source span, and marks `dangerous` tools; `corvid graph` prints the text form for one agent or every entry point, with the never-reached list.
-- [ ] G2. `--format mermaid` and `--format json`, with the JSON shape documented and tested; the invention's public proof (README and catalog rows, a `corvid tour --topic agent-graph` demo, the proof-matrix row), which waits for the JSON form an assistant reads.
-- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON.
+- [x] G2 (2026-11-28). `--format mermaid` and `--format json`: the JSON is `GraphDocument`, a public serde type in `corvid-driver` that B22 serializes too, with a stable id, location, kind, effects, numeric worst case and an approval's guarded tool per step (fields asked for by B22's owner). Documented in [the reference](../reference/agent-graph.md), with the invention's public proof.
+- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON; routes, schedules and table operations become steps of their own, and the graph spans a project's files.
 
 ## Not in scope
 

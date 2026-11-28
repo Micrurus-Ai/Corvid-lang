@@ -1,17 +1,21 @@
 //! `corvid graph` (B47): print each entry point's tree, the one `@budget`
 //! checks, as steps a reader follows, and the tools and prompts nothing
 //! reaches. See `docs/proposals/agent-graph.md`. This facade checks the
-//! program and hands the graph to one form's renderer.
+//! program, holds what the text and Mermaid forms both say about a step,
+//! and hands the graph to one form's renderer. The JSON form is the
+//! driver's, so every reader of it gets the same shape.
 
+mod mermaid;
 mod text;
 
+use crate::cli::GraphFormat;
 use anyhow::{Context, Result};
-use corvid_driver::agent_graph::{agent_graph, AgentGraphError};
+use corvid_driver::agent_graph::{agent_graph, has_unbounded_loop, AgentGraphError, GraphDocument};
 use corvid_driver::{load_corvid_config_for, render_all_pretty};
 use corvid_types::{CostNodeKind, CostTreeNode};
 use std::path::Path;
 
-pub(crate) fn run_graph(file: &Path, agent: Option<&str>) -> Result<u8> {
+pub(crate) fn run_graph(file: &Path, agent: Option<&str>, format: GraphFormat) -> Result<u8> {
     let source = std::fs::read_to_string(file).with_context(|| format!("cannot read `{}`", file.display()))?;
     let config = load_corvid_config_for(file);
     let graph = match agent_graph(&source, file, config.as_ref(), agent) {
@@ -26,7 +30,14 @@ pub(crate) fn run_graph(file: &Path, agent: Option<&str>) -> Result<u8> {
         }
     };
     let place = Place { file, source: &source };
-    print!("{}", text::render(&graph, &place));
+    match format {
+        GraphFormat::Text => print!("{}", text::render(&graph, &place)),
+        GraphFormat::Mermaid => print!("{}", mermaid::render(&graph, &place)),
+        GraphFormat::Json => {
+            let document = GraphDocument::new(&graph, &place.file_name(), &source);
+            println!("{}", serde_json::to_string_pretty(&document)?);
+        }
+    }
     Ok(0)
 }
 
@@ -50,15 +61,44 @@ impl Place<'_> {
     }
 }
 
-/// The steps a reader sees: grouping nodes (a statement, a condition)
-/// are not steps, so their children take their place.
-fn steps(children: &[CostTreeNode]) -> Vec<&CostTreeNode> {
-    let mut out = Vec::new();
-    for child in children {
-        match child.kind {
-            CostNodeKind::Sequence | CostNodeKind::Condition => out.extend(steps(&child.children)),
-            _ => out.push(child),
+/// What a step is, as a reader says it.
+fn label(node: &CostTreeNode) -> String {
+    match &node.kind {
+        CostNodeKind::Tool if node.dangerous => format!("tool {} (dangerous)", node.name),
+        CostNodeKind::Tool => format!("tool {}", node.name),
+        CostNodeKind::Prompt => format!("prompt {}", node.name),
+        CostNodeKind::Agent => format!("agent {}", node.name),
+        CostNodeKind::Approval => format!("approve {}", node.name),
+        CostNodeKind::Branch => "one of these paths".to_string(),
+        CostNodeKind::Loop { iterations: Some(n) } => format!("loop, at most {n} times"),
+        CostNodeKind::Loop { iterations: None } if node.name == "lambda" => {
+            "lambda, called any number of times".to_string()
+        }
+        CostNodeKind::Loop { iterations: None } => "loop, unbounded".to_string(),
+        CostNodeKind::Sequence | CostNodeKind::Condition => node.name.clone(),
+    }
+}
+
+/// What a step can cost: its worst case, `free`, `a person decides` for an
+/// approval, or `no bound` when a loop inside it has none (its numbers
+/// would then be one pass, not a worst case).
+fn detail(node: &CostTreeNode) -> String {
+    if node.kind == CostNodeKind::Approval {
+        return "a person decides".to_string();
+    }
+    if has_unbounded_loop(node) {
+        return "no bound".to_string();
+    }
+    let mut parts = Vec::new();
+    for dim in ["cost", "tokens", "latency_ms"] {
+        let value = node.costs.get(dim).copied().unwrap_or(0.0);
+        if value > f64::EPSILON {
+            parts.push(corvid_types::format_numeric_dimension(dim, value));
         }
     }
-    out
+    if parts.is_empty() {
+        "free".to_string()
+    } else {
+        parts.join(", ")
+    }
 }

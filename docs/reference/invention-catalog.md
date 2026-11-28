@@ -815,6 +815,32 @@ Roadmap: slice 45m in [ROADMAP.md](../../ROADMAP.md)
 Proof: [end-to-end time/math/random test](../../crates/corvid-driver/tests/executing_time_through_driver.rs) + [replay substitution test](../../crates/corvid-runtime/tests/replay_quarantine_corpus.rs)
 Non-scope: UTC only (no timezone database or calendar arithmetic); no seeded PRNG surface — reproducibility comes from replay.
 
+#### The Agent Graph, Drawn from the Code
+
+`corvid graph` draws each entry point's steps from the compiled program: every tool, prompt, nested agent and `approve`, the paths of each branch and each loop's bound, with each step's worst-case cost and source line. Dangerous tools are marked, and tools and prompts no entry point reaches are listed.
+
+It is the tree `@budget` checks, not a graph built by hand beside the code, so it cannot drift from what the code does. `--format mermaid` writes a flowchart for a pull request, and `--format json` is the typed document an assistant reads.
+
+```console
+$ corvid graph refund.cor --agent refund_bot
+agent refund_bot                                 worst case $0.030
+├─ tool lookup_order                             free                     refund.cor:22
+├─ approve IssueRefund                           a person decides         refund.cor:23
+├─ one of these paths                            $0.020                   refund.cor:25
+│  ├─ path 1
+│  │  └─ prompt escalate                         $0.020                   refund.cor:26
+│  └─ path 2
+│     └─ tool issue_refund (dangerous)           $0.010                   refund.cor:28
+└─ loop, at most 50 times                        $0.010                   refund.cor:29
+   └─ tool notify                                $0.0002                  refund.cor:30
+```
+
+Spec: [agent graph reference](./agent-graph.md)
+Tour: `corvid tour --topic agent-graph`
+Roadmap: B47 in [backend-ai-roadmap.md](../backend-ai-roadmap.md)
+Proof: [driver tests](../../crates/corvid-driver/tests/agent_graph.rs) + [command tests](../../crates/corvid-cli/tests/graph_cmd.rs)
+Non-scope: a run's actual path (`corvid trace lineage`); one file's agents; routes, schedules and table operations are not yet steps of their own.
+
 ### The Application Surface
 
 #### Define Once, Get Everything

@@ -15,7 +15,7 @@
 //! `cli::package`. The 16 remaining enums in this file are
 //! candidates for the same per-group treatment in Tier B.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 pub use super::abi::AbiCommand;
@@ -97,6 +97,10 @@ pub enum Command {
         /// Draw one agent instead of every entry point.
         #[arg(long)]
         agent: Option<String>,
+        /// `text` to read, `mermaid` for a pull request or the docs, `json`
+        /// for an assistant, the dev console or a test.
+        #[arg(long, value_enum, default_value_t = GraphFormat::Text)]
+        format: GraphFormat,
     },
     /// Format Corvid source files. Defaults to project sources and tests.
     Fmt {
@@ -1022,4 +1026,12 @@ pub enum McpCommand {
         /// The server name as configured in `[mcp.servers.<name>]`.
         name: String,
     },
+}
+
+/// How `corvid graph` writes the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum GraphFormat {
+    Text,
+    Mermaid,
+    Json,
 }

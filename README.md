@@ -188,6 +188,7 @@ Each entry has a runnable tour, a specification and tests. The [full catalog](do
 | Verification | [MCP With Governance](./docs/reference/invention-catalog.md#mcp-with-governance) | — |
 | Verification | [Governed Concurrency](./docs/reference/invention-catalog.md#governed-concurrency) | — |
 | Verification | [Executing Time & Randomness Surface](./docs/reference/invention-catalog.md#executing-time--randomness-surface) | `corvid tour --topic deterministic-time` |
+| Verification | [The Agent Graph, Drawn from the Code](./docs/reference/invention-catalog.md#the-agent-graph-drawn-from-the-code) | `corvid tour --topic agent-graph` |
 | The Application Surface | [Define Once, Get Everything](./docs/reference/invention-catalog.md#define-once-get-everything) | `corvid tour --topic application-surface` |
 | The Complete Application Runtime | [The Backend Proves Its Own Contract, Or Refuses To Start](./docs/reference/invention-catalog.md#the-backend-proves-its-own-contract-or-refuses-to-start) | `corvid tour --topic contract-closure` |
 | The Complete Application Runtime | [Cancel Fast, But Never Past a Point of No Return](./docs/reference/invention-catalog.md#cancel-fast-but-never-past-a-point-of-no-return) | `corvid tour --topic parallel-cancellation` |

@@ -90,7 +90,7 @@ fn the_tree_records_approvals_dangerous_tools_loop_bounds_and_call_sites() {
 #[test]
 fn never_reached_lists_tools_and_prompts_no_entry_point_calls() {
     let graph = graph(REFUND, None);
-    let names: Vec<_> = graph.never_reached.iter().map(|(kind, name, _)| (*kind, name.as_str())).collect();
+    let names: Vec<_> = graph.never_reached.iter().map(|(kind, name, _)| (kind.word(), name.as_str())).collect();
     assert_eq!(names, vec![("tool", "archive_order")]);
     let (_, _, span) = &graph.never_reached[0];
     assert_eq!(line_at(REFUND, *span), line_of(REFUND, "tool archive_order"));
@@ -125,4 +125,64 @@ fn an_unknown_agent_and_a_program_that_does_not_check_are_refused() {
         agent_graph(broken, Path::new("broken.cor"), None, None),
         Err(AgentGraphError::Diagnostics(d)) if !d.is_empty()
     ));
+}
+
+#[test]
+fn the_document_names_each_step_with_its_id_location_effects_and_cost() {
+    use corvid_driver::agent_graph::{GraphDocument, StepKind, AGENT_GRAPH_SCHEMA};
+    let doc = GraphDocument::new(&graph(REFUND, Some("refund_bot")), "refund.cor", REFUND);
+    assert_eq!(doc.schema, AGENT_GRAPH_SCHEMA);
+    let entry = &doc.entries[0];
+    assert_eq!((entry.id.as_str(), entry.kind), ("refund_bot", StepKind::Agent));
+    assert_eq!(entry.effects, vec!["dangerous", "lookup", "message", "model_call", "payment"]);
+    let total = entry.worst_case.as_ref().expect("bounded")["cost"];
+    assert!((total - 0.03).abs() < 1e-9, "the number @budget checks, in dollars: {total}");
+
+    let approval = &entry.steps[1];
+    assert_eq!(approval.id, "refund_bot/2");
+    assert_eq!(approval.kind, StepKind::Approval);
+    assert_eq!(approval.guards.as_deref(), Some("issue_refund"));
+    assert_eq!(approval.dangerous, Some(true));
+    assert_eq!((approval.location.line, approval.location.column), (line_of(REFUND, "approve IssueRefund"), 5));
+
+    let branch = &entry.steps[2];
+    assert_eq!(branch.kind, StepKind::Branch);
+    let refund = &branch.paths[1][0];
+    assert_eq!(refund.id, "refund_bot/3/path2/1");
+    assert_eq!((refund.kind, refund.dangerous), (StepKind::Tool, Some(true)));
+    assert_eq!(refund.effects, vec!["dangerous", "payment"]);
+
+    let lp = &entry.steps[3];
+    assert_eq!((lp.kind, lp.iterations), (StepKind::Loop, Some(50)));
+    assert_eq!(lp.steps[0].id, "refund_bot/4/1");
+
+    assert_eq!(doc.never_reached[0].name, "archive_order");
+    // B22 and the dev console read the same struct back.
+    let text = serde_json::to_string(&doc).unwrap();
+    assert_eq!(serde_json::from_str::<GraphDocument>(&text).unwrap(), doc);
+}
+
+#[test]
+fn an_unbounded_loop_keeps_its_steps_and_reports_no_bound() {
+    use corvid_driver::agent_graph::{GraphDocument, StepKind};
+    let source = r#"effect message:
+    cost: $0.01
+
+tool notify(item: Int) -> String uses message
+
+agent drain(items: List<Int>) -> Int:
+    for item in items:
+        sent = notify(item)
+    return 0
+"#;
+    let graph = graph(source, None);
+    // The body of a loop nothing bounds is still drawn, so its tool is
+    // reached, not listed as unused.
+    assert!(graph.never_reached.is_empty(), "{:?}", graph.never_reached);
+    let doc = GraphDocument::new(&graph, "drain.cor", source);
+    let entry = &doc.entries[0];
+    assert_eq!(entry.worst_case, None);
+    let lp = &entry.steps[0];
+    assert_eq!((lp.kind, lp.iterations, lp.worst_case.is_none()), (StepKind::Loop, None, true));
+    assert_eq!(lp.steps[0].name.as_deref(), Some("notify"));
 }

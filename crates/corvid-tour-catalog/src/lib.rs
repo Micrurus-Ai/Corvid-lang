@@ -1052,6 +1052,48 @@ agent board_controls(card: Int) -> String:
     return move + archive
 "#,
     },
+    TourTopic {
+        name: "agent-graph",
+        title: "The Agent Graph, Drawn from the Code",
+        category: "Verification",
+        pitch: "`corvid graph app.cor` draws each entry point's steps from the compiled program: every tool, prompt, nested agent and `approve`, the paths of each branch and each loop's bound, with the worst-case cost of each step and where it is in the source. Dangerous tools are marked, and tools and prompts no entry point reaches are listed. It is the tree `@budget` checks, not a second description, so it cannot drift from the code and its numbers are the budget's. `--format mermaid` writes a flowchart for a pull request; `--format json` is the typed document an assistant or the dev console reads. Load this demo, then run `corvid graph` on the same source.",
+        spec: "docs/reference/agent-graph.md",
+        roadmap: "docs/backend-ai-roadmap.md",
+        test: "crates/corvid-driver/tests/agent_graph.rs",
+        non_scope: "A run's actual path is `corvid trace lineage`; the graph draws the agents of one file; routes, schedules and table operations are not yet nodes of their own.",
+        source: r#"effect lookup:
+    cost: $0.00
+
+effect model_call:
+    cost: $0.02
+
+effect payment:
+    cost: $0.01
+
+effect message:
+    cost: $0.0002
+
+tool lookup_order(id: String) -> Int uses lookup
+tool issue_refund(id: String, amount: Int) -> String dangerous uses payment
+tool notify(item: Int) -> String uses message
+tool archive_order(id: String) -> String uses lookup
+
+prompt escalate(amount: Int) -> String uses model_call:
+    "Should we escalate a refund of {amount}?"
+
+agent refund_bot(id: String, items: Int where between(1, 50)) -> String:
+    amount = lookup_order(id)
+    approve IssueRefund(id, amount)
+    outcome = ""
+    if amount > 100:
+        outcome = escalate(amount)
+    else:
+        outcome = issue_refund(id, amount)
+    for i in range(0, items):
+        sent = notify(i)
+    return outcome
+"#,
+    },
 ];
 
 /// Look up a topic by its stable kebab-case `name`.

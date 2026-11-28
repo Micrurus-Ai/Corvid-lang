@@ -1,7 +1,7 @@
 //! The text form of `corvid graph`: a tree a person reads in a terminal.
 
-use super::{steps, Place};
-use corvid_driver::agent_graph::AgentGraph;
+use super::{detail, label, Place};
+use corvid_driver::agent_graph::{has_unbounded_loop, steps, AgentGraph};
 use corvid_types::{CostNodeKind, CostTreeNode};
 
 pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
@@ -15,7 +15,7 @@ pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
     if !graph.never_reached.is_empty() {
         out.push_str("\nNever reached:\n");
         for (kind, name, span) in &graph.never_reached {
-            out.push_str(&format!("  {kind} {name} ({})\n", place.at(*span)));
+            out.push_str(&format!("  {} {name} ({})\n", kind.word(), place.at(*span)));
         }
     }
     out
@@ -33,7 +33,11 @@ fn pad(text: &str, width: usize) -> String {
 }
 
 fn render_entry(tree: &CostTreeNode, bounded: bool, place: &Place<'_>, out: &mut String) {
-    let worst = if bounded { costs(tree) } else { "no bound: a loop has none".to_string() };
+    let worst = if bounded && !has_unbounded_loop(tree) {
+        detail(tree)
+    } else {
+        "no bound: a loop has none".to_string()
+    };
     out.push_str(&format!("{} worst case {worst}\n", pad(&format!("agent {}", tree.name), STEP_WIDTH)));
     let steps = steps(&tree.children);
     for (index, step) in steps.iter().enumerate() {
@@ -43,21 +47,8 @@ fn render_entry(tree: &CostTreeNode, bounded: bool, place: &Place<'_>, out: &mut
 
 fn render_step(node: &CostTreeNode, prefix: &str, last: bool, place: &Place<'_>, out: &mut String) {
     let branch = if last { "└─ " } else { "├─ " };
-    let label = match &node.kind {
-        CostNodeKind::Tool if node.dangerous => format!("tool {} (dangerous)", node.name),
-        CostNodeKind::Tool => format!("tool {}", node.name),
-        CostNodeKind::Prompt => format!("prompt {}", node.name),
-        CostNodeKind::Agent => format!("agent {}", node.name),
-        CostNodeKind::Approval => format!("approve {}", node.name),
-        CostNodeKind::Branch => "one of these paths".to_string(),
-        CostNodeKind::Loop { iterations: Some(n) } => format!("loop, at most {n} times"),
-        CostNodeKind::Loop { iterations: None } => "loop, unbounded".to_string(),
-        CostNodeKind::Sequence | CostNodeKind::Condition => node.name.clone(),
-    };
-    let detail = match node.kind {
-        CostNodeKind::Approval => "a person decides".to_string(),
-        _ => costs(node),
-    };
+    let label = label(node);
+    let detail = detail(node);
     let left = format!("{prefix}{branch}{label}");
     out.push_str(&format!("{} {detail:<24} {}\n", pad(&left, STEP_WIDTH), place.at(node.span)));
     let inner = format!("{prefix}{}", if last { "   " } else { "│  " });
@@ -83,21 +74,5 @@ fn render_step(node: &CostTreeNode, prefix: &str, last: bool, place: &Place<'_>,
                 render_step(child, &inner, index + 1 == children.len(), place, out);
             }
         }
-    }
-}
-
-/// A node's worst-case costs, the dimensions that are not zero, or `free`.
-fn costs(node: &CostTreeNode) -> String {
-    let mut parts = Vec::new();
-    for dim in ["cost", "tokens", "latency_ms"] {
-        let value = node.costs.get(dim).copied().unwrap_or(0.0);
-        if value > f64::EPSILON {
-            parts.push(corvid_types::format_numeric_dimension(dim, value));
-        }
-    }
-    if parts.is_empty() {
-        "free".to_string()
-    } else {
-        parts.join(", ")
     }
 }

@@ -78,6 +78,7 @@ The event JavaScript includes inline version 3 source maps for generated export 
 corvid doctor                           # environment health check
 corvid audit <file>                     # static report: approvals, replay, budgets, secrets
 corvid graph [file] [--agent NAME]      # each entry point's steps, approvals and worst-case cost, and what nothing reaches
+corvid graph --format mermaid|json      # the same graph as a flowchart, or the typed document (docs/reference/agent-graph.md)
 corvid contract list                    # registry of compile-time guarantees
 corvid contract list --format=json
 corvid claim --explain <id>             # human-readable rationale for a guarantee

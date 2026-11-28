@@ -2,6 +2,42 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `corvid graph --format mermaid|json` (B47 G2)
+
+The graph now comes in three forms. `mermaid` is a flowchart for a pull
+request. `json` is `GraphDocument`, a public serde type in
+`corvid-driver`, so the dev console and B22's compiler-over-MCP
+serialize the same struct instead of a copy. Desktop, which owns B22,
+asked for these fields per step, and each step has them:
+- a stable id (`refund_bot/3/path2/1`);
+- line and column;
+- a kind, telling a tool from a connector operation or a Python function,
+  and an action from an agent;
+- its declared effects;
+- its numeric worst case in dollars;
+- for an approval, the dangerous tool it guards.
+
+Found and fixed while building it:
+- An unbounded `for` loop dropped its body from the cost tree, so the
+  graph would have listed every tool inside it as never reached. A
+  `while` loop and an effectful lambda kept their bodies, but not as
+  loops. All three are now a loop node with no bound, holding the body.
+  `@budget` compares no number from an unbounded estimate, so no verdict
+  changes. Every form reads `no bound` there, never the one-pass number.
+- The approve-label rule had two copies, the checker's and the
+  reachability audit's, which had already drifted. It is now one public
+  `approve_label_for`, in its own commit.
+- The never-reached list now covers connector operations.
+
+The text form moved to `graph_cmd/text.rs` in a refactor commit first;
+Mermaid has its own file.
+
+Proof: the driver tests check the document's ids, locations, effects,
+guarded tool and round trip, plus an unbounded loop. The CLI tests run
+all three forms and the refusal. The invention is in the README, the
+catalog, the proof matrix and `corvid tour --topic agent-graph`.
+Reference: `docs/reference/agent-graph.md`.
+
 ### `corvid graph` draws each agent from the tree `@budget` checks (B47 G1)
 
 `corvid graph [file] [--agent NAME]` prints each entry point's steps:

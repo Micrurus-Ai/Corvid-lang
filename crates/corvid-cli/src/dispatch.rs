@@ -79,7 +79,9 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             with_python_tools,
         }) => cmd_new(&name, with_python_tools, web),
         Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
-        Some(Command::Graph { file, agent }) => graph_cmd::run_graph(&resolve_project_source(file)?, agent.as_deref()),
+        Some(Command::Graph { file, agent, format }) => {
+            graph_cmd::run_graph(&resolve_project_source(file)?, agent.as_deref(), format)
+        },
         Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {
             crate::cli::root::AddCommand::Skill {
