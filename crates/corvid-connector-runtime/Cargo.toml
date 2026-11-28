@@ -8,6 +8,8 @@ description = "Shared connector contracts, manifests, mock/replay/runtime suppor
 [dependencies]
 corvid-text = { workspace = true }
 corvid-hex = { workspace = true }
+# The webhook verifier's HMAC, constant-time comparison and wiped key.
+corvid-crypto = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

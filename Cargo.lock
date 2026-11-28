@@ -886,6 +886,7 @@ name = "corvid-connector-runtime"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "corvid-crypto",
  "corvid-hex",
  "corvid-text",
  "hmac 0.12.1",

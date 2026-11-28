@@ -79,5 +79,5 @@ pub use test_kit::{
 };
 pub use trace::ConnectorTraceEvent;
 pub use webhook_verify::{
-    verify_webhook, WebhookProvider, WebhookVerificationOutcome, WebhookVerifyInputs,
+    verify_webhook, ReplayWindow, WebhookProvider, WebhookVerificationOutcome, WebhookVerifyInputs,
 };

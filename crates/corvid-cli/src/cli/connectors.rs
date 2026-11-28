@@ -140,10 +140,11 @@ pub enum ConnectorsCommand {
     /// Verify an inbound webhook payload's HMAC-SHA256 signature
     /// against a manifest-declared secret stored in an env var.
     /// Exits 0 on a valid signature, 1 on mismatch. Pass
-    /// `--provider github|slack|linear` to use the per-provider
-    /// header conventions from
-    /// `corvid-connector-runtime::webhook_verify` (Slack includes
-    /// timestamp replay protection); without `--provider`, the
+    /// `--provider stripe|standard_webhooks|slack|github|linear` to use
+    /// the per-provider header conventions from
+    /// `corvid-connector-runtime::webhook_verify`, with
+    /// `--within-seconds` for a provider that signs a timestamp;
+    /// without `--provider`, the
     /// generic HMAC-SHA256 verifier consumes the `--signature`
     /// value directly.
     VerifyWebhook {
@@ -159,11 +160,17 @@ pub enum ConnectorsCommand {
         /// File containing the raw webhook body bytes.
         #[arg(long, value_name = "FILE")]
         body_file: PathBuf,
-        /// Provider preset: `github`, `slack`, or `linear`. Selects
-        /// the per-provider header conventions and (Slack) the
-        /// timestamp replay-protection window.
+        /// Provider preset: `stripe`, `standard_webhooks`, `slack`,
+        /// `github`, or `linear`. Selects the per-provider header
+        /// conventions.
         #[arg(long)]
         provider: Option<String>,
+        /// How old a signed request may be, in seconds. Required for a
+        /// provider that signs a timestamp (`stripe`,
+        /// `standard_webhooks`, `slack`) and refused for one that signs
+        /// none: the replay window is never a default.
+        #[arg(long, value_name = "SECONDS")]
+        within_seconds: Option<u64>,
         /// `Header-Name=value` pair (repeatable) to feed into the
         /// per-provider verifier. Required for `--provider` modes
         /// (e.g. `--header X-Hub-Signature-256=sha256=...` for

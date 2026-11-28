@@ -1856,14 +1856,16 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
         class: GuaranteeClass::RuntimeChecked,
         phase: Phase::Runtime,
         description:
-            "Inbound webhook payloads from Slack, GitHub, and Linear \
-             are HMAC-SHA256 verified against the manifest's shared \
-             secret before any handler runs. Per-provider schemes are \
-             honored: GitHub uses `X-Hub-Signature-256: sha256=<hex>`, \
-             Slack uses `v0:<ts>:<body>` with a 5-minute replay \
-             window, and Linear uses a bare hex digest. Comparison is \
-             constant-time; a malformed header, mismatched digest, or \
-             stale Slack timestamp returns a categorical \
+            "Inbound webhook payloads from Stripe, Standard Webhooks, \
+             Slack, GitHub, and Linear are HMAC-SHA256 verified against \
+             the declared shared secret before any handler runs. \
+             Per-provider schemes are honored, every signature a header \
+             carries is tried so a key can be rolled, and the replay \
+             window is stated by the caller for every scheme that signs \
+             a timestamp, never a default. The signature is checked \
+             before the timestamp, and tags are compared as bytes in \
+             constant time; a malformed header, mismatched digest, or \
+             stale timestamp returns a categorical \
              `WebhookVerificationOutcome` that the dispatcher must \
              reject before any side effect.",
         out_of_scope_reason: "",
@@ -1871,6 +1873,8 @@ pub static GUARANTEE_REGISTRY: &[Guarantee] = &[
             "crates/corvid-connector-runtime/src/webhook_verify.rs::github_verifies_correct_signature",
             "crates/corvid-connector-runtime/src/webhook_verify.rs::slack_verifies_correct_signature_inside_window",
             "crates/corvid-connector-runtime/src/webhook_verify.rs::linear_verifies_correct_signature",
+            "crates/corvid-connector-runtime/src/webhook_verify.rs::a_recorded_stripe_request_verifies_and_every_tampered_field_is_refused",
+            "crates/corvid-connector-runtime/src/webhook_verify.rs::a_recorded_standard_webhook_verifies_and_every_tampered_field_is_refused",
         ],
         adversarial_test_refs: &[
             "crates/corvid-connector-runtime/tests/threat_corpus.rs::t7_github_webhook_forgery_rejected",

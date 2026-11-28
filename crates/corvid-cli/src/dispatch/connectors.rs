@@ -319,6 +319,7 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
             secret_env,
             body_file,
             provider,
+            within_seconds,
             headers,
         } => {
             let parsed_headers = headers
@@ -335,6 +336,7 @@ pub(crate) fn cmd_connectors(command: ConnectorsCommand) -> Result<u8> {
                 secret_env,
                 body_file,
                 provider,
+                within_seconds,
                 headers: parsed_headers,
             })?;
             println!(

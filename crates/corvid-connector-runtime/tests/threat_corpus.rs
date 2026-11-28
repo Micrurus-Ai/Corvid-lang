@@ -34,9 +34,10 @@ use corvid_connector_runtime::{
     ConnectorAuthState, ConnectorManifest, ConnectorRealClient, ConnectorRequest,
     ConnectorRuntime, ConnectorRuntimeError, ConnectorRuntimeMode, GitHubEndpoints,
     InMemoryOAuth2Store, OAuth2RefreshHook, OAuth2RefreshResolver, OAuth2Tokens,
-    OperationEndpoints, RealCallContext, WebhookProvider, WebhookVerificationOutcome,
-    WebhookVerifyInputs,
+    OperationEndpoints, RealCallContext, ReplayWindow, WebhookProvider,
+    WebhookVerificationOutcome, WebhookVerifyInputs,
 };
+use corvid_crypto::Secret;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -559,7 +560,8 @@ fn t7_github_webhook_forgery_rejected() {
         "X-Hub-Signature-256".to_string(),
         format!("sha256={forged}"),
     );
-    let inputs = WebhookVerifyInputs::new(WebhookProvider::GitHub, &headers, body, secret, 0);
+    let secret = Secret::new(std::str::from_utf8(secret).unwrap());
+    let inputs = WebhookVerifyInputs::new(WebhookProvider::GitHub, &headers, body, &secret, 0, ReplayWindow::ReplaysAccepted);
     let outcome = corvid_connector_runtime::verify_webhook(inputs);
     assert_eq!(outcome, WebhookVerificationOutcome::BadSignature);
 }
@@ -583,7 +585,9 @@ fn t7_slack_webhook_replay_outside_window_rejected() {
     );
     // 10 minutes past the freshness window.
     let now_ms = (then_s + 600).saturating_mul(1_000);
-    let inputs = WebhookVerifyInputs::new(WebhookProvider::Slack, &headers, body, secret, now_ms);
+    let secret = Secret::new(std::str::from_utf8(secret).unwrap());
+    let window = ReplayWindow::Within { max_age_ms: 5 * 60 * 1_000 };
+    let inputs = WebhookVerifyInputs::new(WebhookProvider::Slack, &headers, body, &secret, now_ms, window);
     let outcome = corvid_connector_runtime::verify_webhook(inputs);
     assert!(matches!(outcome, WebhookVerificationOutcome::Stale { .. }));
 }
@@ -594,12 +598,14 @@ fn t7_linear_webhook_wrong_secret_rejected() {
     let sig = hmac_hex(b"correct-secret", body);
     let mut headers = BTreeMap::new();
     headers.insert("Linear-Signature".to_string(), sig);
+    let wrong = Secret::new("wrong-secret");
     let inputs = WebhookVerifyInputs::new(
         WebhookProvider::Linear,
         &headers,
         body,
-        b"wrong-secret",
+        &wrong,
         0,
+        ReplayWindow::ReplaysAccepted,
     );
     let outcome = corvid_connector_runtime::verify_webhook(inputs);
     assert_eq!(outcome, WebhookVerificationOutcome::BadSignature);
