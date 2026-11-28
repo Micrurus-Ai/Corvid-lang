@@ -53,6 +53,9 @@ pub(super) fn lower_runtime_call(
         if !borrowed && is_refcounted_type(&arg.ty) {
             runtime.return_temporaries.borrow_mut().push(value);
         }
+        // Checked before the tool runs, so its implementation never sees
+        // an out-of-range value (parameter refinements PR-2).
+        super::expr::hold_parameter_refinement(builder, module, runtime, &tool.name, param, value, arg.span)?;
         if takes_secret {
             encoded.push(lower_tool_argument_encode(builder, module, runtime, name, &param.ty, value, false, arg.span)?);
             revealed.push(lower_tool_argument_encode(builder, module, runtime, name, &param.ty, value, true, arg.span)?);

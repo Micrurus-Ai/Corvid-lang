@@ -2,6 +2,46 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native code checks refined parameters (PR-2)
+
+Native code now checks a refined parameter when a call starts:
+- **Where:** an agent's parameters right after they are bound in its
+  entry block, and a tool's or a prompt's arguments before the call, so
+  a tool never sees an out-of-range value.
+- **How:** through the check refined fields already used, now one
+  `emit_refinement_check`. Its C handlers take the text after the value,
+  so a parameter's message has the interpreter's wording, with the value
+  in the middle:
+  `` `limit` is 500, outside `between(1, 50)`, in this call to `page` ``.
+- **The refusal is gone:** PR-1's native refusal of refined parameters
+  is removed.
+
+With that, `std:crypto` declares its bounds:
+- `random_token(bytes: Int where between(16, 1024))`;
+- `PasswordCost`'s `memory_kib` from 7168 KiB (the least any OWASP
+  setting uses, now `corvid_crypto::MIN_MEMORY_KIB`) to 4 GiB;
+- at least one iteration (up to `u32::MAX`) and one lane (up to
+  Argon2's `MAX_LANES`).
+
+OWASP's rule relating memory to iterations stays a runtime check.
+`std/crypto.cor` cannot import a Rust constant, so a driver test holds
+its declared bounds to the crate's constants, and a crypto test holds
+`MIN_MEMORY_KIB` to the OWASP table.
+
+Two tests changed meaning:
+- **`random_token(8)`:** it no longer compiles, so the runtime test
+  passes a computed 8 and now sees the refinement's message.
+- **The weak-cost test:** it uses 7168 KiB with 4 iterations, which is
+  inside the field bounds and still below OWASP.
+
+Proof:
+- native parity tests: a value in range, computed agent arguments (Int
+  and String) out of range, and a tool argument stopped before the tool
+  runs, each with the interpreter's message;
+- a checker test that `random_token(8)` and `PasswordCost(4096, 0, 1)`
+  fail to compile;
+- the bounds-agreement test.
+
 ### Encryption at rest K2 and K3: a `Secret` column, sealed to its row
 
 Frontend development agreed on 2026-11-27 (review item 8), asking that

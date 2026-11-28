@@ -38,6 +38,13 @@ pub const MAX_MEMORY_KIB: u32 = 4 * 1024 * 1024;
 const OWASP_2023_EQUIVALENT_SETTINGS: [(u32, u32); 5] =
     [(47_104, 1), (19_456, 2), (12_288, 3), (9_216, 4), (7_168, 5)];
 
+/// The least memory any OWASP 2023 setting uses, so the least a cost may
+/// declare: `PasswordCost.memory_kib`'s lower bound in `std/crypto.cor`.
+pub const MIN_MEMORY_KIB: u32 = 7_168;
+
+/// The most lanes Argon2id runs, `PasswordCost.lanes`'s upper bound.
+pub const MAX_LANES: u32 = 0xFF_FFFF;
+
 /// The cost of one Argon2id hash: memory in KiB, iterations (passes
 /// over the memory) and lanes (degree of parallelism).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +173,12 @@ pub fn verify_password(password: &[u8], hash: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_declared_memory_floor_is_the_least_any_owasp_setting_uses() {
+        let least = OWASP_2023_EQUIVALENT_SETTINGS.iter().map(|&(memory, _)| memory).min();
+        assert_eq!(least, Some(MIN_MEMORY_KIB));
+    }
+
     use super::*;
 
     // Known answers computed outside this crate with OpenSSL 3.6's

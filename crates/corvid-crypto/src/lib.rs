@@ -33,7 +33,7 @@ pub use constant_time::constant_time_eq;
 pub use digest::{sha256, sha384, sha512};
 pub use entropy::fill_random;
 pub use mac::{hmac_sha256, hmac_sha512, HmacKey};
-pub use password::{hash_password, verify_password, PasswordCost, MAX_MEMORY_KIB};
+pub use password::{hash_password, verify_password, PasswordCost, MAX_LANES, MAX_MEMORY_KIB, MIN_MEMORY_KIB};
 pub use secret::{Secret, SECRET_DISPLAY};
 
 /// Overwrite `text`'s bytes with zeros and empty it: for a copy of a

@@ -308,7 +308,7 @@ pub(super) fn lower_prompt_call(
     let pinned_locals = runtime.prompt_pins.get(&span);
     let mut arg_vals: Vec<ClValue> = Vec::with_capacity(args.len());
     let outer_temporaries = runtime.return_temporaries.borrow().len();
-    for a in args {
+    for (a, param) in args.iter().zip(&prompt.params) {
         let (v, borrowed) = lower_container_maybe_borrowed(
             builder,
             a,
@@ -319,6 +319,8 @@ pub(super) fn lower_prompt_call(
             module,
             runtime,
         )?;
+        // Checked before the model is called (parameter refinements PR-2).
+        super::expr::hold_parameter_refinement(builder, module, runtime, &prompt.name, param, v, a.span)?;
         let pinned = is_string_like_prompt_arg(&a.ty)
             && matches!(&a.kind, IrExprKind::Local { .. })
             && pinned_locals.is_some_and(|set| {

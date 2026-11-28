@@ -61,3 +61,36 @@ fn a_variant_payload_holds_its_refinement_on_both_tiers() {
         "`ColumnFull.limit` must be between(1, 50), but this value is 80",
     );
 }
+
+/// Refined parameters (PR-2): native code checks a parameter's
+/// refinement when a call starts, with the interpreter's message, and
+/// lets a value in range through.
+#[test]
+fn a_refined_parameter_admits_a_value_in_range_on_both_tiers() {
+    let text = assert_parity_text(
+        "agent page(limit: Int where between(1, 50), term: String where len_between(1, 20)) -> Int:\n    return limit + term.length()\n\nagent main() -> Int:\n    n = 40\n    return page(n + 2, \"dune\")\n",
+    );
+    assert_eq!(text, "46");
+}
+
+#[test]
+fn a_computed_argument_outside_a_parameter_refinement_stops_the_call() {
+    assert_parity_stop(
+        "agent page(limit: Int where between(1, 50)) -> Int:\n    return limit\n\nagent main() -> Int:\n    n = 25\n    return page(n * 20)\n",
+        "`limit` is 500, outside `between(1, 50)`, in this call to `page`",
+    );
+    assert_parity_stop(
+        "agent titled(name: String where len_between(1, 5)) -> Int:\n    return name.length()\n\nagent main() -> Int:\n    words = \"too \" + \"long\"\n    return titled(words)\n",
+        "`name` is \"too long\", outside `len_between(1, 5)`, in this call to `titled`",
+    );
+}
+
+/// A tool's refined parameter is checked before the tool runs, natively
+/// through the runtime call as on the interpreter.
+#[test]
+fn a_tool_argument_outside_its_refinement_stops_before_the_tool_runs() {
+    assert_parity_stop(
+        "tool double_int(n: Int where between(1, 50)) -> Int\n\nagent main() -> Int:\n    n = 250\n    return double_int(n * 2)\n",
+        "`n` is 500, outside `between(1, 50)`, in this call to `double_int`",
+    );
+}

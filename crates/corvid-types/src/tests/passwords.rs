@@ -117,3 +117,20 @@ fn a_password_must_be_a_secret_not_text() {
     .errors;
     assert!(!errors.is_empty(), "a String password is refused");
 }
+
+/// `std/crypto.cor` declares `random_token`'s 16 to 1024 bytes and
+/// `PasswordCost`'s field bounds, so a constant outside them fails to
+/// compile instead of failing when the program runs.
+#[test]
+fn a_constant_token_size_or_cost_outside_stds_bounds_does_not_compile() {
+    let checked = check(&with_std_crypto(
+        "agent short() -> Bool:\n    key = random_token(8)\n    return key == key\n\nagent weak(key: Secret) -> String:\n    return hash_password(key, PasswordCost(4096, 0, 1))\n",
+    ));
+    let messages: Vec<String> = checked.errors.iter().map(|e| e.kind.message()).collect();
+    assert!(
+        messages.iter().any(|m| m == "`bytes` is 8, outside `between(16, 1024)`, in this call to `random_token`"),
+        "{messages:?}"
+    );
+    assert!(messages.iter().any(|m| m.contains("`PasswordCost.memory_kib`") && m.contains("4096")), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("`PasswordCost.iterations`") && m.contains("0")), "{messages:?}");
+}

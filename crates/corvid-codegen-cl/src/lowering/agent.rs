@@ -532,6 +532,12 @@ pub(super) fn define_agent(
                 }
             }
         }
+        // A refined parameter is checked when the call starts, as on the
+        // interpreter (parameter refinements PR-2).
+        for (i, p) in agent.params.iter().enumerate() {
+            let block_arg = builder.block_params(entry)[i];
+            super::expr::hold_parameter_refinement(&mut builder, module, runtime, &agent.name, p, block_arg, p.span)?;
+        }
 
         // A refcounted local first bound inside a loop but needed after
         // an iteration is bound here, with no value, as a parameter is, so

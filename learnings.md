@@ -8585,7 +8585,7 @@ works as anywhere else.
 A parameter can carry the refinement a field carries:
 `limit: Int where between(1, 50)`. A constant argument outside it fails
 to compile at the call, and a computed one stops the call before it
-runs, naming the parameter, the value and the bound. Compiled code does
-not check refined parameters yet, so such a program runs on the
-interpreter for now.
+runs, naming the parameter, the value and the bound, in `corvid run` and
+compiled programs alike. `random_token(8)` and a `PasswordCost` with too
+little memory now fail to compile.
 

@@ -71,16 +71,22 @@ static void corvid_write_string(FILE* out, const corvid_string* s) {
     fwrite(s->bytes_ptr, 1, (size_t)s->length, out);
 }
 
-void corvid_refinement_violated_int(void* message, long long value) {
+/* A value that breaks a refinement: `message`, the value, then `suffix`,
+ * the interpreter's wording. A field's check passes an empty suffix
+ * (`... but this value is 500`); a parameter's puts the value mid-line
+ * (`` `limit` is 500, outside `between(1, 50)`, in this call to `page` ``). */
+void corvid_refinement_violated_int(void* message, long long value, void* suffix) {
     fputs("corvid: runtime error: ", stderr);
     corvid_write_string(stderr, (const corvid_string*)message);
-    fprintf(stderr, "%lld\n", value);
+    fprintf(stderr, "%lld", value);
+    corvid_write_string(stderr, (const corvid_string*)suffix);
+    fputc('\n', stderr);
     exit(1);
 }
 
 /* The value as JSON text, the form the interpreter prints: quoted, with
  * `"`, `\` and control characters escaped as serde_json escapes them. */
-void corvid_refinement_violated_text(void* message, void* value) {
+void corvid_refinement_violated_text(void* message, void* value, void* suffix) {
     const corvid_string* text = (const corvid_string*)value;
     fputs("corvid: runtime error: ", stderr);
     corvid_write_string(stderr, (const corvid_string*)message);
@@ -103,7 +109,9 @@ void corvid_refinement_violated_text(void* message, void* value) {
                 }
         }
     }
-    fputs("\"\n", stderr);
+    fputc('"', stderr);
+    corvid_write_string(stderr, (const corvid_string*)suffix);
+    fputc('\n', stderr);
     exit(1);
 }
 

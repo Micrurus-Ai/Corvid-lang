@@ -520,9 +520,10 @@ starts, so a tool's implementation never sees an out-of-range value,
 and the call stops with the same message. That stop is a bug in the
 caller, not an outage, so `try … else` does not catch it.
 
-Compiled code does not check a refined parameter yet, so a program with
-one runs on the interpreter, and `corvid build` says so; native checks
-are next on the roadmap.
+Compiled code checks a refined parameter the same way, with the same
+message. The standard library uses the form: `random_token`'s
+`bytes: Int where between(16, 1024)` makes `random_token(8)` a compile
+error.
 
 ## Sum types (enums)
 

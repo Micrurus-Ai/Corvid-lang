@@ -34,10 +34,15 @@ public effect crypto_random:
 # The cost of one Argon2id hash: memory in KiB, iterations (passes over
 # the memory) and lanes (degree of parallelism). Any value may be higher
 # than `owasp_2023()`'s; a weaker one is refused when the hash is made.
+# Each field is bounded on its own: memory from 7168 KiB (the least any
+# OWASP setting uses) to 4 GiB, and at least one iteration and one lane.
+# A constant outside them fails to compile. OWASP's rule relates memory
+# to iterations (7168 KiB needs 5 passes, 19456 needs 2), which a bound
+# per field cannot state, so that stays a check when the hash is made.
 public type PasswordCost:
-    memory_kib: Int
-    iterations: Int
-    lanes: Int
+    memory_kib: Int where between(7168, 4194304)
+    iterations: Int where between(1, 4294967295)
+    lanes: Int where between(1, 16777215)
 
 # The OWASP Password Storage Cheat Sheet's 2023 minimum for Argon2id:
 # 19 MiB of memory, 2 iterations, 1 lane.
@@ -47,9 +52,9 @@ public fn owasp_2023() -> PasswordCost:
 # `bytes` random bytes from the operating system, as a `Secret` holding
 # their URL-safe base64 text without padding: `random_token(32)` is 43
 # characters. `bytes` must be from 16 (128 bits, the floor for a token
-# that cannot be guessed) to 1024; any other value stops the call with
-# an error.
-public tool random_token(bytes: Int) -> Secret uses crypto_random
+# that cannot be guessed) to 1024: a constant outside that fails to
+# compile, and a computed one stops the call before a token is drawn.
+public tool random_token(bytes: Int where between(16, 1024)) -> Secret uses crypto_random
 
 # The Argon2id hash of `password` at `cost` under a fresh random salt, as
 # a PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`.

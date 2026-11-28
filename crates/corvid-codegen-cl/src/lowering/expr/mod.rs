@@ -23,7 +23,7 @@ pub(super) use operand::{
     lower_string_operand_maybe_borrowed,
 };
 pub(super) use overflow::{trap_if, with_overflow_trap};
-pub(super) use refinement::hold_refinement;
+pub(super) use refinement::{hold_parameter_refinement, hold_refinement};
 pub(super) use try_propagate::{lower_try_propagate_option, lower_try_propagate_result};
 pub(super) use try_retry::{lower_try_retry_option, lower_try_retry_result};
 

@@ -78,15 +78,16 @@ agent main() -> List<Bool>:
 async fn a_token_shorter_than_sixteen_bytes_stops_the_run() {
     let src = format!(
         "{STD_CRYPTO}
-agent main() -> Bool:
-    key = random_token(8)
+agent main(bytes: Int) -> Bool:
+    key = random_token(bytes)
     return key == key
 "
     );
+    // A computed size outside `random_token`'s refinement stops the call
+    // before a token is drawn; a constant one does not compile.
     let ir = ir_of(&src);
-    let error = run_agent(&ir, "main", vec![], &empty_runtime()).await.expect_err("refused").to_string();
-    assert!(error.contains("random_token(8) is too short to be safe"), "{error}");
-    assert!(error.contains("at least 16 random bytes"), "{error}");
+    let error = run_agent(&ir, "main", vec![Value::Int(8)], &empty_runtime()).await.expect_err("refused");
+    assert_eq!(error.kind.to_string(), "`bytes` is 8, outside `between(16, 1024)`, in this call to `random_token`");
 }
 
 #[tokio::test]
@@ -95,7 +96,7 @@ async fn a_cost_below_the_owasp_minimum_stops_the_hash() {
         "{STD_CRYPTO}
 agent main() -> String:
     key = random_token(32)
-    return hash_password(key, PasswordCost(4096, 1, 1))
+    return hash_password(key, PasswordCost(7168, 4, 1))
 "
     );
     let ir = ir_of(&src);

@@ -62,9 +62,6 @@ pub enum NotNativeReason {
     /// A `try` native code cannot catch exactly yet (recoverable
     /// failures TE-3), with the reason from the shared outage plan.
     TryElseNotNative { reason: String },
-    /// A parameter with a `where` refinement: native code does not yet
-    /// check one when a call starts (parameter refinements PR-2).
-    RefinedParameterNotNative { callable: String, param: String },
     /// An agent takes a `Caller`. The interpreter checks a called
     /// action's `requires` against the actor passed in (B10); native code
     /// does not yet, so it refuses rather than skip the check.
@@ -141,10 +138,6 @@ impl std::fmt::Display for NotNativeReason {
             Self::VerifiedRouteNotNative { path } => write!(
                 f,
                 "route `{path}` is `verified`: `corvid serve` checks the provider's signature before its handler runs, and a native library's host does not yet, so its handler is not compiled unchecked (verified webhooks, native serving on the roadmap)"
-            ),
-            Self::RefinedParameterNotNative { callable, param } => write!(
-                f,
-                "parameter `{param}` of `{callable}` has a `where` refinement, which native code does not yet check when a call starts (parameter refinements PR-2, on the roadmap)"
             ),
             Self::TryElseNotNative { reason } => write!(
                 f,
@@ -295,9 +288,6 @@ pub(crate) fn native_ability_with_tools(ir: &IrFile, has_tools_lib: bool) -> Res
     // into agents of their own, so the outage plan judges the same IR.
     let lifted = corvid_codegen_cl::outage_lift::lift_failing_arms(ir);
     let ir = lifted.as_ref().unwrap_or(ir);
-    if let Some((callable, param)) = corvid_codegen_cl::first_refined_parameter(ir) {
-        return Err(NotNativeReason::RefinedParameterNotNative { callable, param });
-    }
     let outages = corvid_codegen_cl::outage_plan::OutagePlan::for_file(ir);
     let context = ScanContext { outages: &outages, types: &ir.types, has_tools_lib, connectors: &ir.connectors, tools: &ir.tools };
     if let Some((module, _)) = ir.tools.iter().find_map(|tool| tool.python.as_ref()) {

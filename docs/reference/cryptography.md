@@ -306,7 +306,7 @@ agent new_session_key() -> Secret:
     return random_token(32)
 ```
 
-`random_token(32)` is 43 characters and holds 256 bits. `bytes` must be from 16 to 1024. Fewer than 16 bytes (128 bits) is refused, because a shorter token can be guessed by an attacker with enough attempts, and more than 1024 is refused as a mistake, such as a length in bits or characters written where bytes are meant. Either stops the call with an error that says so.
+`random_token(32)` is 43 characters and holds 256 bits. `bytes` must be from 16 to 1024. Fewer than 16 bytes (128 bits) is refused, because a shorter token can be guessed by an attacker with enough attempts, and more than 1024 is refused as a mistake, such as a length in bits or characters written where bytes are meant. The bound is part of the signature, `bytes: Int where between(16, 1024)`, so a constant outside it fails to compile, and a computed one stops the call before a token is drawn, on both tiers.
 
 Because a token is a `Secret`, everything [Secrets](#secrets) says applies: the program can compare it with `==` in constant time, hash it, check it with `verify_password` and pass it to a tool, and it can never be printed, turned into text, stored or sent to a model. Its recorded `ToolResult` is `<redacted>`:
 
@@ -363,7 +363,7 @@ hash = hash_password(password, owasp_2023())
 stronger = hash_password(password, PasswordCost(65536, 3, 1))
 ```
 
-`PasswordCost(memory_kib, iterations, lanes)` declares another cost. Any value may be higher than the minimum. A cost weaker than every setting OWASP lists as equal to the minimum (47104 KiB with 1 iteration, 19456 KiB with 2, 12288 KiB with 3, 9216 KiB with 4, 7168 KiB with 5) stops the call with an error that names them:
+`PasswordCost(memory_kib, iterations, lanes)` declares another cost. Any value may be higher than the minimum. Each field is bounded on its own, and a constant outside a bound fails to compile: memory from 7168 KiB, the least any OWASP setting uses, to 4 GiB, and at least one iteration and one lane. A cost weaker than every setting OWASP lists as equal to the minimum (47104 KiB with 1 iteration, 19456 KiB with 2, 12288 KiB with 3, 9216 KiB with 4, 7168 KiB with 5) stops the call with an error that names them:
 
 ```text
 tool `hash_password` failed: a password cost of 4096 KiB and 1 iteration is below the OWASP 2023 minimum for Argon2id; use owasp_2023() (19456 KiB, 2 iterations, 1 lane) or a setting OWASP lists as equal: 47104 KiB with 1 iteration, 12288 KiB with 3, 9216 KiB with 4 or 7168 KiB with 5
