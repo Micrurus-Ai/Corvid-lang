@@ -505,9 +505,13 @@ A query returns at most its `take` count of rows, so a `@budget` agent
 that loops over `Member.all().take(3)` is charged three times the loop's
 body. The count may be a refined field, `take(search.limit)` with `limit:
 Int where between(1, 50)`, which charges fifty times: every value of a
-refined field holds its refinement, so the maximum is a real bound. A
-loop over a query whose count has no such bound has none the compiler
-can prove, and the budget check warns rather than guessing.
+refined field holds its refinement, so the maximum is a real bound. The
+count may also be a refined parameter the body never reassigns,
+`take(limit)` with `limit: Int where between(1, 50)`, and the same
+bounds apply to a `for` loop over `range(start, end)`, charged at the
+largest end less the smallest start. A loop over a query whose count has
+no such bound has none the compiler can prove, and the budget check
+warns rather than guessing.
 
 ## Replay
 

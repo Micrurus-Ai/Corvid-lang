@@ -92,3 +92,40 @@ fn a_refinement_and_an_ownership_annotation_combine_on_a_parameter() {
     );
     assert!(checked.errors.is_empty(), "{:?}", checked.errors);
 }
+
+fn cost_program(param: &str, body_prefix: &str) -> String {
+    format!(
+        "effect paid_notice:\n    cost: $0.30\n\ntool notify(n: Int) -> String uses paid_notice\n\n@budget($1.00)\nagent notify_all(limit: {param}) -> String:\n    sent = \"\"\n{body_prefix}    for i in range(0, limit):\n        sent = notify(i)\n    return sent\n"
+    )
+}
+
+fn unbounded(c: &crate::Checked) -> bool {
+    c.warnings.iter().any(|w| matches!(w.kind, crate::errors::TypeWarningKind::UnboundedCostAnalysis { .. }))
+}
+
+fn over_budget(c: &crate::Checked) -> bool {
+    c.errors.iter().any(|e| matches!(&e.kind, TypeErrorKind::EffectConstraintViolation { dimension, .. } if dimension == "cost"))
+}
+
+/// Parameter refinements PR-4: a loop over `range(0, limit)` runs at most
+/// `limit`'s `between` maximum times, so `@budget` can bound it, as a
+/// refined field's `take` already is.
+#[test]
+fn a_loop_over_a_refined_parameter_is_bounded_by_its_refinement() {
+    let three = check(&cost_program("Int where between(1, 3)", ""));
+    assert!(!over_budget(&three) && !unbounded(&three), "errors {:?} warnings {:?}", three.errors, three.warnings);
+
+    let fifty = check(&cost_program("Int where between(1, 50)", ""));
+    assert!(over_budget(&fifty), "fifty notices at $0.30 exceed $1.00: {:?}", fifty.errors);
+
+    let unrefined = check(&cost_program("Int", ""));
+    assert!(unbounded(&unrefined), "an unrefined count has no bound: {:?}", unrefined.warnings);
+}
+
+/// A parameter the body rebinds is checked only when the call starts, so
+/// its refinement says nothing about the value the loop reads.
+#[test]
+fn a_rebound_parameter_bounds_no_loop() {
+    let rebound = check(&cost_program("Int where between(1, 3)", "    limit = 1000\n"));
+    assert!(unbounded(&rebound), "the loop reads 1000, not a value in 1..3: {:?}", rebound.warnings);
+}

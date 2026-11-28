@@ -2,6 +2,28 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `@budget` bounds loops by refined parameters (PR-4)
+
+The cost analysis bounded a loop only by a list literal or a query's
+`take` of a literal or a refined field. One function, `int_bounds`, now
+gives the least and greatest value an `Int` expression can have: a
+literal, a refined field, or a refined parameter. Two uses read it:
+- a query's `take(n)` is charged at `n`'s greatest value;
+- a `for` loop over `range(start, end)` is charged at the greatest end
+  less the least start.
+
+That also bounds `range` over literals, which before left every `range`
+loop unbounded.
+
+Found while building it: a parameter is checked only when the call
+starts, so one the body rebinds (`limit = 1000`, `limit += 1`) could
+leave its refinement, and trusting it would make `@budget` unsound.
+Only parameters the body never rebinds give a bound (`rebound_locals`).
+
+Proof: checker tests cover a `range(0, limit)` loop under a $1.00
+budget. With `limit` bounded at 3 it passes, at 50 it is refused, and
+unrefined it warns as unbounded. A rebound parameter bounds nothing.
+
 ### Parameter bounds reach the contract (PR-3, backend half)
 
 The contract carried a refined field's bounds but not a parameter's. A

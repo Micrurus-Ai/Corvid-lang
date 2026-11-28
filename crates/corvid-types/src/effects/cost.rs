@@ -81,6 +81,9 @@ struct CostAnalyzer<'a> {
     expr_types: Option<&'a HashMap<corvid_ast::Span, crate::types::Type>>,
     memo: HashMap<String, CostEstimate>,
     visiting: HashSet<String>,
+    /// Each refined parameter's `between` bounds, by its local, so a loop
+    /// bounded by one is charged at the bound (parameter refinements PR-4).
+    param_bounds: HashMap<corvid_resolve::LocalId, (i64, i64)>,
 }
 
 impl<'a> CostAnalyzer<'a> {
@@ -96,6 +99,7 @@ impl<'a> CostAnalyzer<'a> {
             expr_types: None,
             memo: HashMap::new(),
             visiting: HashSet::new(),
+            param_bounds: refined_param_bounds(file, resolved),
         }
     }
 
@@ -379,29 +383,52 @@ impl<'a> CostAnalyzer<'a> {
     }
 
     /// The most times a `for` loop over `expr` runs, when that is known
-    /// before it runs: the items of a list literal, or the count a table
-    /// query ends with (B09), which returns at most that many rows: a
-    /// literal (`take(10)`) or a refined field (`take(search.limit)` with
-    /// `limit: Int where between(1, 50)` gives 50).
+    /// before it runs: the items of a list literal, `range(start, end)`,
+    /// or the count a table query ends with (B09), which returns at most
+    /// that many rows. A count is a literal (`take(10)`), a refined field
+    /// (`take(search.limit)` with `limit: Int where between(1, 50)` gives
+    /// 50) or a refined parameter (`range(0, limit)`).
     fn static_loop_bound(&self, expr: &corvid_ast::Expr) -> Option<u64> {
         match expr {
             corvid_ast::Expr::List { items, .. } => Some(items.len() as u64),
             corvid_ast::Expr::Call { callee, args, .. } => {
-                let query = crate::table_ops::table_query_call(callee, args, self.file, &self.resolved.symbols, &self.resolved.bindings)?;
-                match query.take? {
-                    corvid_ast::Expr::Literal { value: corvid_ast::Literal::Int(count), .. } => u64::try_from(*count).ok(),
-                    corvid_ast::Expr::FieldAccess { target, field, .. } => self.refined_maximum(target, &field.name),
-                    _ => None,
+                // `range(start, end)` runs `end - start` times: at most the
+                // largest end less the smallest start.
+                if let (corvid_ast::Expr::Ident { name, .. }, [start, end]) = (callee.as_ref(), args.as_slice()) {
+                    if matches!(self.resolved.bindings.get(&name.span), Some(corvid_resolve::Binding::BuiltIn(corvid_resolve::BuiltIn::Range))) {
+                        let (_, end_max) = self.int_bounds(end)?;
+                        let (start_min, _) = self.int_bounds(start)?;
+                        return Some(u64::try_from(end_max.saturating_sub(start_min)).unwrap_or(0));
+                    }
                 }
+                let query = crate::table_ops::table_query_call(callee, args, self.file, &self.resolved.symbols, &self.resolved.bindings)?;
+                let (_, max) = self.int_bounds(query.take?)?;
+                Some(u64::try_from(max).unwrap_or(0))
             }
             _ => None,
         }
     }
 
-    /// The `between` maximum of `target.field`, read from the record
-    /// type the checker gave `target`. A negative maximum bounds the
-    /// rows at zero, since `take` of a negative count stops the run.
-    fn refined_maximum(&self, target: &corvid_ast::Expr, field: &str) -> Option<u64> {
+    /// The least and greatest value an `Int` expression can have, when
+    /// that is known before the program runs: a literal, a refined
+    /// parameter, or a refined field (every value of one holds its
+    /// refinement).
+    fn int_bounds(&self, expr: &corvid_ast::Expr) -> Option<(i64, i64)> {
+        match expr {
+            corvid_ast::Expr::Literal { value: corvid_ast::Literal::Int(n), .. } => Some((*n, *n)),
+            corvid_ast::Expr::Ident { name, .. } => match self.resolved.bindings.get(&name.span)? {
+                corvid_resolve::Binding::Local(local) => self.param_bounds.get(local).copied(),
+                _ => None,
+            },
+            corvid_ast::Expr::FieldAccess { target, field, .. } => self.refined_bounds(target, &field.name),
+            _ => None,
+        }
+    }
+
+    /// The `between` bounds of `target.field`, read from the record type
+    /// the checker gave `target`. A negative maximum bounds the rows at
+    /// zero, since `take` of a negative count stops the run.
+    fn refined_bounds(&self, target: &corvid_ast::Expr, field: &str) -> Option<(i64, i64)> {
         let crate::types::Type::Struct(id) = self.expr_types?.get(&target.span())?.ungrounded() else {
             return None;
         };
@@ -412,7 +439,7 @@ impl<'a> CostAnalyzer<'a> {
             _ => None,
         })?;
         match fields.iter().find(|f| f.name.name == field)?.refinement? {
-            corvid_ast::Refinement::Between { max, .. } => Some(u64::try_from(max).unwrap_or(0)),
+            corvid_ast::Refinement::Between { min, max } => Some((min, max)),
             corvid_ast::Refinement::LenBetween { .. } => None,
         }
     }
@@ -1061,3 +1088,63 @@ fn rename_tree(mut tree: CostTreeNode, name: &str) -> CostTreeNode {
     tree.name = name.to_string();
     tree
 }
+
+/// The `between` bounds of every refined `Int` parameter in `file`, by
+/// the local its name binds.
+fn refined_param_bounds(
+    file: &corvid_ast::File,
+    resolved: &corvid_resolve::Resolved,
+) -> HashMap<corvid_resolve::LocalId, (i64, i64)> {
+    let mut out = HashMap::new();
+    // A parameter the body rebinds (`limit = 1000`, `limit += 1`) is
+    // checked only when the call starts, so its later values may leave
+    // the refinement: only a parameter never rebound bounds a loop.
+    let mut add = |params: &[corvid_ast::Param], body: &corvid_ast::Block| {
+        let mut rebound = HashSet::new();
+        rebound_locals(body, resolved, &mut rebound);
+        for param in params {
+            if let (Some(corvid_ast::Refinement::Between { min, max }), Some(corvid_resolve::Binding::Local(local))) =
+                (param.refinement, resolved.bindings.get(&param.name.span))
+            {
+                if !rebound.contains(local) {
+                    out.insert(*local, (min, max));
+                }
+            }
+        }
+    };
+    for decl in &file.decls {
+        match decl {
+            corvid_ast::Decl::Agent(agent) => add(&agent.params, &agent.body),
+            corvid_ast::Decl::Fn(f) => add(&f.params, &f.body),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Every local a `let` or an assignment in `block` binds again.
+fn rebound_locals(block: &corvid_ast::Block, resolved: &corvid_resolve::Resolved, out: &mut HashSet<corvid_resolve::LocalId>) {
+    use corvid_ast::Stmt;
+    let local_at = |span: &corvid_ast::Span, out: &mut HashSet<corvid_resolve::LocalId>| {
+        if let Some(corvid_resolve::Binding::Local(local)) = resolved.bindings.get(span) {
+            out.insert(*local);
+        }
+    };
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, .. } => local_at(&name.span, out),
+            Stmt::Assign { target: corvid_ast::Expr::Ident { name, .. }, .. } => local_at(&name.span, out),
+            Stmt::If { then_block, else_block, .. } => {
+                rebound_locals(then_block, resolved, out);
+                if let Some(block) = else_block {
+                    rebound_locals(block, resolved, out);
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::Atomic { body, .. } => {
+                rebound_locals(body, resolved, out)
+            }
+            _ => {}
+        }
+    }
+}
+

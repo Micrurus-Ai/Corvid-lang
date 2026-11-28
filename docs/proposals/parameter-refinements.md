@@ -81,7 +81,7 @@ with its existing message.
 
 ## Status
 
-PR-1 and PR-2 built 2026-11-28, after frontend development approved (item 5 of the review brief). `std:crypto`'s bounds move to PR-2: declared now, they would keep every native program that uses `random_token` on the interpreter, since PR-1 refuses refined parameters natively until native code checks them.
+PR-1, PR-2, PR-3's backend half and PR-4 built 2026-11-28, after frontend development approved (item 5 of the review brief). `std:crypto`'s bounds move to PR-2: declared now, they would keep every native program that uses `random_token` on the interpreter, since PR-1 refuses refined parameters natively until native code checks them.
 
 ## Slices
 
