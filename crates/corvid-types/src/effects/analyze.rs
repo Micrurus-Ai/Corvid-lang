@@ -74,10 +74,11 @@ pub fn analyze_effects(
         // <level>` clause sets the minimum model capability its
         // dispatch needs; the agent-level composed requirement is
         // the strictest capability any call needs.
-        let mut capabilities: Vec<String> = Vec::new();
+        let mut capabilities = Capabilities::default();
+        capabilities.visited.insert(def_id);
         collect_body_capabilities(&agent.body, file, resolved, &mut capabilities);
-        if !capabilities.is_empty() {
-            let mut iter = capabilities.into_iter();
+        if !capabilities.names.is_empty() {
+            let mut iter = capabilities.names.into_iter();
             let mut acc = iter.next().unwrap();
             for next in iter {
                 acc = capability_max(&acc, &next).to_string();
@@ -128,6 +129,14 @@ fn collect_body_effects(
     }
 }
 
+/// The capabilities a body's prompt calls require, and the agents whose
+/// bodies the walk has entered.
+#[derive(Default)]
+struct Capabilities {
+    names: Vec<String>,
+    visited: std::collections::HashSet<DefId>,
+}
+
 /// Phase 20h: walk a block and collect the `capability_required`
 /// string from every prompt call. Mirrors `collect_body_effects`'s
 /// recursion pattern but looks at prompt-level attributes instead of
@@ -136,7 +145,7 @@ fn collect_body_capabilities(
     block: &corvid_ast::Block,
     file: &corvid_ast::File,
     resolved: &corvid_resolve::Resolved,
-    caps: &mut Vec<String>,
+    caps: &mut Capabilities,
 ) {
     for stmt in &block.stmts {
         collect_stmt_capabilities(stmt, file, resolved, caps);
@@ -147,7 +156,7 @@ fn collect_stmt_capabilities(
     stmt: &corvid_ast::Stmt,
     file: &corvid_ast::File,
     resolved: &corvid_resolve::Resolved,
-    caps: &mut Vec<String>,
+    caps: &mut Capabilities,
 ) {
     match stmt {
         corvid_ast::Stmt::Let { value, .. } => {
@@ -205,7 +214,7 @@ fn collect_expr_capabilities(
     expr: &corvid_ast::Expr,
     file: &corvid_ast::File,
     resolved: &corvid_resolve::Resolved,
-    caps: &mut Vec<String>,
+    caps: &mut Capabilities,
 ) {
     match expr {
         corvid_ast::Expr::Call { callee, args, .. } => {
@@ -217,11 +226,14 @@ fn collect_expr_capabilities(
                     if matches!(entry.kind, corvid_resolve::DeclKind::Prompt) {
                         if let Some(prompt) = find_prompt(file, &entry.name) {
                             if let Some(req) = &prompt.capability_required {
-                                caps.push(req.name.clone());
+                                caps.names.push(req.name.clone());
                             }
                         }
                     }
-                    if matches!(entry.kind, corvid_resolve::DeclKind::Agent) {
+                    // Each agent's body is walked once: a recursive agent
+                    // (or two calling each other) used to recurse here
+                    // until the compiler overflowed its stack.
+                    if matches!(entry.kind, corvid_resolve::DeclKind::Agent) && caps.visited.insert(*def_id) {
                         if let Some(agent) = find_agent(file, &entry.name) {
                             collect_body_capabilities(&agent.body, file, resolved, caps);
                         }

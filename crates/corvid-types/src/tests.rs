@@ -4107,6 +4107,25 @@ agent planner(items: List<String>) -> String:
     );
 }
 
+/// Two agents calling each other used to overflow the compiler's stack in
+/// the capability walk of the effect analysis.
+#[test]
+fn mutually_recursive_agents_check_without_overflowing() {
+    let src = r#"
+agent ping(n: Int) -> Int:
+    if n == 0:
+        return 0
+    return pong(n - 1)
+
+agent pong(n: Int) -> Int:
+    if n == 0:
+        return 0
+    return ping(n - 1)
+"#;
+    let c = check(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
 #[test]
 fn sub_agent_costs_propagate_into_outer_agent() {
     let src = "\
