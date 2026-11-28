@@ -391,3 +391,39 @@ async fn passwords_replay_on_the_other_tier() {
     let interpreter_trace = recording.tracer().path().to_path_buf();
     assert_eq!(run_native(&binary, &[("CORVID_REPLAY_TRACE_PATH", &interpreter_trace)]), recorded_natively);
 }
+
+/// A Rust `#[tool]` whose parameter is a `Secret` receives the revealed
+/// text as one: the macro builds it from the argument without a copy,
+/// and it wipes its text on drop, so the tool never holds a plain copy.
+/// A 16-byte random token is 22 characters of base64url on both tiers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rust_tool_receives_a_secret_argument_as_a_secret() {
+    let program = r#"
+import "./std/crypto" use random_token
+
+tool secret_length(key: Secret) -> Int
+
+agent main() -> Int:
+    return secret_length(random_token(16))
+"#;
+    let project = project(program);
+    let runtime = Runtime::builder()
+        .approver(std::sync::Arc::new(corvid_runtime::ProgrammaticApprover::always_yes()))
+        .tool("secret_length", |args| async move {
+            Ok(serde_json::json!(args[0].as_str().map(|text| text.chars().count() as i64).unwrap_or(-1)))
+        })
+        .build();
+    let interpreted = run_ir_with_runtime(&project.ir, None, vec![], &runtime).await.expect("interpreter run");
+    assert_eq!(interpreted, Value::Int(22));
+
+    link_current_runtime();
+    let out = tempfile::tempdir().unwrap();
+    let binary = corvid_codegen_cl::build_native_to_disk(
+        &project.ir,
+        "corvid_native_secrets",
+        &out.path().join("prog"),
+        &[corvid_test_paths::test_tools_staticlib().as_path()],
+    )
+    .expect("native build with the tools library");
+    assert_eq!(run_native(&binary, &[]), "22");
+}

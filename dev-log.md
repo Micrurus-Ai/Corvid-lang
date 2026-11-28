@@ -2,6 +2,23 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### A Rust tool can take a secret as a `Secret`
+
+The last copy of a secret's text was the argument a tool's
+implementation received: a plain `String`, the tool's own. A `#[tool]`
+whose parameter is `corvid_runtime::corvid_crypto::Secret`, which the
+runtime now re-exports, receives the revealed text as a `Secret`. The
+macro takes the JSON string out of the call's argument array and moves
+it into `Secret::from_text`, so no copy is made, and the `Secret` wipes
+on drop. Every other argument is also taken out of the array instead of
+cloned.
+
+Proof: a driver test runs `secret_length(random_token(16))` with the
+test tools library's `secret_length(key: Secret)`. Both tiers give 22.
+
+The parity crypto module's header still said native code has no
+`Secret`; it now says what native code does.
+
 ### Native code's revealed secret text is wiped
 
 To hand a tool a secret, compiled code encodes the argument's revealed

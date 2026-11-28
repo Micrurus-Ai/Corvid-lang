@@ -8555,3 +8555,10 @@ compiled program alike. A tool returning plain `T` cannot fail, as
 before. Host tools written in C can report a failure with
 `corvid_tool_failed`.
 
+### A Rust tool can hold a secret without a plain copy
+
+Declare a `#[tool]` parameter as `corvid_runtime::corvid_crypto::Secret`
+and the tool receives a secret argument as a `Secret`, whose text is
+wiped from memory when the tool is done with it. A parameter declared as
+`String` still receives the text as before.
+

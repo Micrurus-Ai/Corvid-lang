@@ -128,6 +128,14 @@ async fn greet_string(name: String) -> String {
 
 /// Fails with a message when `name` is empty, as a tool whose service
 /// is down does: the `Err` reaches Corvid as a failed call, an outage.
+/// Takes a secret as a `Secret`, which wipes its text on drop, and
+/// answers only its length: the tool reads the text without holding a
+/// plain copy.
+#[tool("secret_length")]
+async fn secret_length(key: corvid_runtime::corvid_crypto::Secret) -> i64 {
+    key.expose_text().map(|text| text.chars().count() as i64).unwrap_or(-1)
+}
+
 #[tool("lookup_or_fail")]
 async fn lookup_or_fail(name: String) -> Result<i64, String> {
     if name.is_empty() {

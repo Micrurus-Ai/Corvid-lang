@@ -33,6 +33,10 @@
 //! - It doesn't decide which Rust types map to which Corvid ABI types
 //!   — that mapping lives in `corvid-runtime::abi` and is shared with
 //!   the codegen side. The macro just calls the conversion traits.
+//! - A parameter of type `corvid_crypto::Secret` (re-exported as
+//!   `corvid_runtime::corvid_crypto::Secret`) receives a secret argument
+//!   as a `Secret`, taking the revealed text without a copy and wiping it
+//!   on drop, so the tool never holds the text as a plain `String`.
 //! - A tool fails by returning `Err`. An `async fn` returning
 //!   `Result<T, E>` with `E: Display` gives Corvid the `T`, or, on `Err`,
 //!   a failed tool call carrying `E`'s message: an outage, which
@@ -208,13 +212,32 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         .iter()
         .enumerate()
         .map(|(idx, (arg_name, native_ty))| {
+            // Each argument is taken out of the array, not cloned, so a
+            // revealed secret's text is never copied here.
+            let taken = quote! {
+                __args_arr
+                    .get_mut(#idx)
+                    .map(::std::mem::take)
+                    .unwrap_or(::corvid_runtime::serde_json::Value::Null)
+            };
+            if is_secret_type(native_ty) {
+                // A `Secret` parameter receives the revealed text as a
+                // `Secret`, which takes the text's buffer and wipes it on
+                // drop, so the tool never holds a plain copy.
+                return quote! {
+                    let #arg_name: #native_ty = match #taken {
+                        ::corvid_runtime::serde_json::Value::String(__text) => {
+                            ::corvid_runtime::corvid_crypto::Secret::from_text(__text)
+                        }
+                        _ => panic!(concat!(
+                            "#[tool] `", #tool_name,
+                            "`: argument `", stringify!(#arg_name), "` is not a secret's text"
+                        )),
+                    };
+                };
+            }
             quote! {
-                let #arg_name: #native_ty = ::corvid_runtime::serde_json::from_value(
-                    __args_arr
-                        .get(#idx)
-                        .cloned()
-                        .unwrap_or(::corvid_runtime::serde_json::Value::Null),
-                )
+                let #arg_name: #native_ty = ::corvid_runtime::serde_json::from_value(#taken)
                 .expect(concat!(
                     "#[tool] `", #tool_name,
                     "`: failed to deserialize argument `", stringify!(#arg_name), "` from JSON"
@@ -303,7 +326,7 @@ fn expand_tool(name_lit: LitStr, f: ItemFn) -> syn::Result<TokenStream2> {
         ) -> *mut ::std::ffi::c_char {
             let __handle = ::corvid_runtime::ffi_bridge::tokio_handle();
             let __bytes = ::std::slice::from_raw_parts(__args_ptr as *const u8, __args_len);
-            let __args_arr: ::std::vec::Vec<::corvid_runtime::serde_json::Value> =
+            let mut __args_arr: ::std::vec::Vec<::corvid_runtime::serde_json::Value> =
                 ::corvid_runtime::serde_json::from_slice::<::corvid_runtime::serde_json::Value>(__bytes)
                     .ok()
                     .and_then(|v| match v {
@@ -405,6 +428,12 @@ fn abi_type_for(ty: &Type) -> syn::Result<TokenStream2> {
             ),
         )),
     }
+}
+
+/// Whether `ty` is `Secret` (as `Secret` or a path ending in it).
+fn is_secret_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    path.path.segments.last().is_some_and(|segment| segment.ident == "Secret" && segment.arguments.is_empty())
 }
 
 /// Whether `ty` is a `Result<T, E>`: the last path segment is `Result`

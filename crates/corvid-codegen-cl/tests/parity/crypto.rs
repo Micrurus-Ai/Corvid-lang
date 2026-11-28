@@ -4,7 +4,8 @@
 //! 8032 and two recorded payment-provider webhooks) pin what that text
 //! is. `==` on byte strings is the runtime's constant-time comparison
 //! on both tiers, inside records, lists, options and results too.
-//! Native code has no `Secret`; the last test pins that refusal.
+//! Native code holds a `Secret` as the runtime's object, and a Rust tool
+//! can take one as a `Secret` that wipes its text on drop.
 
 use super::ir_of;
 use super::scalar_harness::assert_parity_text;

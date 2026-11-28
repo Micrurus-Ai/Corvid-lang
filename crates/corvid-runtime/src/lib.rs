@@ -140,6 +140,9 @@ pub use inventory;
 // can marshal args/results without the user crate adding a serde_json
 // dependency of its own.
 pub use serde_json;
+// Re-exported so a `#[tool]` that takes a `Secret` receives one, built
+// from the revealed text without a copy, which wipes itself on drop.
+pub use corvid_crypto;
 
 /// C runtime source fingerprint. Used by the native-tier compile
 /// cache (`corvid-driver::native_cache`) to invalidate cached
