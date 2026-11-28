@@ -217,3 +217,91 @@ fn a_step_id_survives_adding_an_unrelated_step_and_repeats_are_numbered() {
     assert!(after.contains(&"refund_bot/archive_order".to_string()));
     assert!(after.contains(&"refund_bot/lookup_order#2".to_string()));
 }
+
+const BOARD: &str = r#"identity users:
+    provider google
+    provisioning:
+        first_login: open
+        tenant: fixed("public")
+    roles:
+        board_member: "board.view"
+        board_editor: "board.edit"
+
+database boards:
+    engine: sqlite
+    location: "boards.sqlite"
+
+table Card:
+    key card: Int
+    board: String
+    column: String
+    title: String
+
+effect notify_cost:
+    cost: $0.001
+
+tool notify_watchers(card: Int) -> Int uses notify_cost
+tool audit_view(card: String) -> Int uses notify_cost
+
+action archive_card(card: Int, by: Caller) -> Int requires permission("board.edit"):
+    assistants: confirm "Archive a card."
+    sent = notify_watchers(card)
+    return card
+
+action rename_card(card: Int, by: Caller) -> Int requires permission("board.edit"):
+    return card
+
+server board_app:
+    live "/boards/{board}/cards" -> Card requires permission("board.view"):
+        return Card.where(fn (c) -> c.board == path.board).order_by(fn (c) -> c.card)
+
+    route GET "/cards/{card}" -> html requires permission("board.view"):
+        seen = audit_view(path.card)
+        return button_for(archive_card, 1, "Archive")
+
+    route GET "/health" -> json Int:
+        return 1
+"#;
+
+#[test]
+fn routes_and_live_declarations_are_roots_and_a_tool_only_a_route_calls_is_reached() {
+    use corvid_driver::agent_graph::{GraphDocument, StepKind};
+    let graph = graph(BOARD, None);
+    assert!(graph.never_reached.is_empty(), "audit_view is called by a route: {:?}", graph.never_reached);
+    let doc = GraphDocument::new(&graph, "board.cor", BOARD);
+    let ids: Vec<_> = doc.routes.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, vec!["board_app:live /boards/{board}/cards", "board_app:GET /cards/{card}", "board_app:GET /health"]);
+
+    let live = &doc.routes[0];
+    assert_eq!(live.live.as_deref(), Some("Card"));
+    assert_eq!(live.requires.as_ref().map(|r| r.permissions.clone()), Some(vec!["board.view".to_string()]));
+
+    let card = &doc.routes[1];
+    assert_eq!(card.steps[0].id, "board_app:GET /cards/{card}/audit_view");
+    assert_eq!(card.steps[0].kind, StepKind::Tool);
+    assert!((card.worst_case.as_ref().unwrap()["cost"] - 0.001).abs() < 1e-12);
+    assert_eq!(card.effects, vec!["notify_cost"]);
+
+    assert_eq!(doc.routes[2].requires, None, "a public route says so, never an empty policy");
+}
+
+#[test]
+fn an_action_says_its_route_policy_assistant_offer_and_the_forms_that_call_it() {
+    use corvid_driver::agent_graph::{GraphDocument, StepKind};
+    let doc = GraphDocument::new(&graph(BOARD, None), "board.cor", BOARD);
+    let archive = doc.entries.iter().find(|e| e.name == "archive_card").unwrap();
+    assert_eq!(archive.kind, StepKind::Action);
+    let call = archive.action.as_ref().expect("an action's calling surface");
+    assert_eq!((call.method.as_str(), call.path.as_str()), ("POST", "/actions/archive_card"));
+    assert_eq!(call.requires.permissions, vec!["board.edit"]);
+    let offer = call.assistants.as_ref().expect("offered with confirm");
+    assert_eq!((offer.mode.as_str(), offer.description.as_str()), ("confirm", "Archive a card."));
+    assert_eq!(call.used_by.len(), 1);
+    assert_eq!(call.used_by[0].builder, "button_for");
+    assert_eq!(call.used_by[0].container, "board_app:GET /cards/{card}");
+    assert_eq!(call.used_by[0].location.line, line_of(BOARD, "return button_for"));
+
+    let rename = doc.entries.iter().find(|e| e.name == "rename_card").unwrap();
+    assert_eq!(rename.action.as_ref().unwrap().assistants, None, "nothing is offered to an assistant by default");
+    assert!(doc.entries.iter().all(|e| e.kind == StepKind::Action || e.action.is_none()));
+}

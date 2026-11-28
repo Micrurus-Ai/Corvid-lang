@@ -72,6 +72,35 @@ pub fn compute_worst_case_cost_with_types(
     analyzer.analyze_agent(agent_name)
 }
 
+/// A route handler's worst case, by the same analysis as an agent's body,
+/// as a tree rooted at a node named `name` (B47 G3a: routes are roots of
+/// the agent graph).
+pub fn compute_route_cost_with_types(
+    file: &corvid_ast::File,
+    resolved: &corvid_resolve::Resolved,
+    registry: &EffectRegistry,
+    route: &corvid_ast::HttpRouteDecl,
+    name: &str,
+    expr_types: &HashMap<corvid_ast::Span, crate::types::Type>,
+) -> CostEstimate {
+    let mut analyzer = CostAnalyzer::new(file, resolved, registry);
+    analyzer.expr_types = Some(expr_types);
+    let body = analyzer.analyze_block(&route.body, name);
+    CostEstimate {
+        dimensions: body.dimensions.clone(),
+        tree: CostTreeNode {
+            name: name.to_string(),
+            kind: CostNodeKind::Agent,
+            costs: body.dimensions,
+            children: body.tree.children,
+            span: route.span,
+            dangerous: false,
+        },
+        warnings: body.warnings,
+        bounded: body.bounded,
+    }
+}
+
 struct CostAnalyzer<'a> {
     file: &'a corvid_ast::File,
     resolved: &'a corvid_resolve::Resolved,

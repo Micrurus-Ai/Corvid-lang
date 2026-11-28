@@ -46,7 +46,33 @@ Never reached: tool archive_order (src/main.cor:41)
 
 - [x] G1 (2026-11-28). The cost tree records approvals and each node's source span, and marks `dangerous` tools; `corvid graph` prints the text form for one agent or every entry point, with the never-reached list.
 - [x] G2 (2026-11-28). `--format mermaid` and `--format json`: the JSON is `GraphDocument`, a public serde type in `corvid-driver` that B22 serializes too, with a stable id, location, kind, effects, numeric worst case and an approval's guarded tool per step (fields asked for by B22's owner). Documented in [the reference](../reference/agent-graph.md), with the invention's public proof.
-- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON. In the order B22's `callers_of` and `impact_of_change` need them: (1) routes and live declarations as roots (method and path, the handler's steps under them), and an action's routes and forms; (2) an action's assistant exposure (the `assistants:` mode and description), so who can call it includes agents; (3) table operations as steps (table and operation); then schedules; and the graph spans a project's files.
+- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON (G3a shipped 2026-11-28: routes and live declarations as roots, and an action's route, policy, assistant offer and forms; see below). In the order B22's `callers_of` and `impact_of_change` need them: (1) routes and live declarations as roots (method and path, the handler's steps under them), and an action's routes and forms; (2) an action's assistant exposure (the `assistants:` mode and description), so who can call it includes agents; (3) table operations as steps (table and operation); then schedules; and the graph spans a project's files.
+
+## G3a: routes, live declarations, and who can call an action
+
+B22's `callers_of` and `impact_of_change` must answer "what reaches this tool, and who can call that" without reading source. Routes and actions are where outside callers enter, so G3a adds them to the document. Both additions are new fields, so a `v1` reader that ignores unknown fields keeps working.
+
+```json
+"routes": [
+  { "id": "shop:GET /orders/{id}", "server": "shop", "method": "GET", "path": "/orders/{id}",
+    "live": null, "requires": { "authenticated": true, "roles": [], "permissions": ["orders.read"] },
+    "location": { "line": 40, "column": 5 }, "effects": ["lookup"], "worst_case": { "cost": 0.0 },
+    "steps": [ { "id": "shop:GET /orders/{id}/lookup_order", "kind": "tool" } ] }
+],
+"entries": [
+  { "id": "move_card", "kind": "action",
+    "action": { "method": "POST", "path": "/actions/move_card",
+                "requires": { "authenticated": true, "roles": [], "permissions": ["board.edit"] },
+                "assistants": { "mode": "allow", "description": "Move a card to another column." },
+                "used_by": [ { "builder": "form_for", "in": "board_controls", "location": { "line": 33, "column": 12 } } ] } }
+]
+```
+
+- **Routes are roots.** A route's handler is costed by the same analysis as an agent's body, so its steps and worst case are the budget analysis's. A `live` declaration is a route whose `live` names the row type it delivers. `requires` is `null` for a public route, so a reader never mistakes a missing policy for an empty one. The id is the server, method and path, unique in a program, and step ids under a route start with it.
+- **An action says how it is called.** The route is built from `ACTIONS_PATH`, the constant `corvid serve` mounts, never a copy. `requires` is the action's policy. `assistants` is the mode and description, or `null` when no assistant is offered it; because nothing is exposed to an AI unless the source says so, `null` is the common case. `used_by` lists every `form_for` and `button_for` that names the action, with the agent or route containing it.
+- **Rejected:** a separate list of callers per tool. It would be a second copy of the tree, and B22's `callers_of` can derive it from step ids.
+
+Table operations as steps (G3b) and schedules (G3c) follow in that order.
 
 ## Not in scope
 

@@ -6,20 +6,21 @@
 //! subroutine, an approval a parallelogram, a branch a diamond, a loop a
 //! hexagon. Dangerous tools are outlined in red.
 
-use super::{detail, label, Place};
+use super::{detail, entry_title, label, route_title, surface_line, Place};
 use corvid_driver::agent_graph::{has_unbounded_loop, steps, AgentGraph};
 use corvid_types::{CostNodeKind, CostTreeNode};
 
 pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
     let mut chart = Chart { lines: vec!["flowchart TD".to_string()], next: 0, dangerous: Vec::new() };
     for entry in &graph.entries {
-        let worst = if entry.bounded && !has_unbounded_loop(&entry.tree) {
-            format!("worst case {}", detail(&entry.tree))
-        } else {
-            "no bound: a loop has none".to_string()
-        };
-        let start = chart.node(&format!("agent {}", entry.tree.name), &worst, place.at(entry.tree.span), Shape::Stadium);
-        chart.sequence(&steps(&entry.tree.children), vec![start], place);
+        let mut title = entry_title(graph, &entry.tree);
+        if let Some(surface) = graph.actions.get(&entry.tree.name) {
+            title = format!("{title}<br/>{}", surface_line(&entry.tree.name, surface, place));
+        }
+        chart.root(&title, &entry.tree, entry.bounded, place);
+    }
+    for route in &graph.routes {
+        chart.root(&route_title(route), &route.estimate.tree, route.estimate.bounded, place);
     }
     if !graph.never_reached.is_empty() {
         chart.lines.push("  subgraph never_reached [\"Never reached\"]".to_string());
@@ -74,6 +75,16 @@ impl Chart {
         };
         self.lines.push(format!("  {id}{open}{body}{close}"));
         id
+    }
+
+    fn root(&mut self, title: &str, tree: &CostTreeNode, bounded: bool, place: &Place<'_>) {
+        let worst = if bounded && !has_unbounded_loop(tree) {
+            format!("worst case {}", detail(tree))
+        } else {
+            "no bound: a loop has none".to_string()
+        };
+        let start = self.node(title, &worst, place.at(tree.span), Shape::Stadium);
+        self.sequence(&steps(&tree.children), vec![start], place);
     }
 
     fn edges(&mut self, from: &[String], to: &str) {

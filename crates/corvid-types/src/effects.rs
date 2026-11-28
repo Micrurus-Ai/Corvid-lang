@@ -650,7 +650,7 @@ use compose::{
     infer_composition_rule,
 };
 pub use cost::{
-    compute_worst_case_cost, compute_worst_case_cost_with_types, cost_path_for_dimension, format_numeric_dimension,
+    compute_worst_case_cost, compute_route_cost_with_types, compute_worst_case_cost_with_types, cost_path_for_dimension, format_numeric_dimension,
     numeric_constraint_value, render_cost_tree,
 };
 pub use grounded::{

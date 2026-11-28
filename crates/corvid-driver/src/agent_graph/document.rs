@@ -3,7 +3,7 @@
 //! (B22) all serialize, so they cannot drift. Documented in
 //! `docs/reference/agent-graph.md`, versioned by [`AGENT_GRAPH_SCHEMA`].
 
-use super::{has_unbounded_loop, steps, AgentGraph, Declared};
+use super::{has_unbounded_loop, steps, ActionSurface, AgentGraph, Declared};
 use corvid_types::{CostNodeKind, CostTreeNode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +20,72 @@ pub struct GraphDocument {
     /// The source file, as the command was given it.
     pub file: String,
     pub entries: Vec<GraphEntry>,
+    /// Each route and `live` declaration, rooted at its handler (G3a).
+    #[serde(default)]
+    pub routes: Vec<GraphRoute>,
     pub never_reached: Vec<NeverReached>,
+}
+
+/// A route or `live` declaration: where outside callers enter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GraphRoute {
+    /// `server:METHOD path`, or `server:live path` for a `live`
+    /// declaration, unique in a program; step ids under it start with it.
+    pub id: String,
+    pub server: String,
+    pub method: String,
+    pub path: String,
+    /// For a `live` declaration, the row type it delivers.
+    pub live: Option<String>,
+    /// Who may call it; `None` (JSON `null`) for a public route.
+    pub requires: Option<Requires>,
+    pub location: Location,
+    pub effects: Vec<String>,
+    /// Worst-case cost by dimension (`cost` in US dollars), or `None` when
+    /// a loop has no bound.
+    pub worst_case: Option<BTreeMap<String, f64>>,
+    pub steps: Vec<GraphStep>,
+}
+
+/// A `requires` policy: every listed role and permission is needed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Requires {
+    pub authenticated: bool,
+    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
+}
+
+/// How an action is called from outside the program.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionCall {
+    /// The route `corvid serve` mounts it at: `POST /actions/<name>`.
+    pub method: String,
+    pub path: String,
+    pub requires: Requires,
+    /// Whether an assistant is offered it; `None` (JSON `null`) when not,
+    /// which is the case unless the source says so.
+    pub assistants: Option<AssistantOffer>,
+    /// Each `form_for` and `button_for` naming it, in source order.
+    pub used_by: Vec<ActionUse>,
+}
+
+/// An action's `assistants:` line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssistantOffer {
+    /// `confirm` (each call waits for the person) or `allow`.
+    pub mode: String,
+    pub description: String,
+}
+
+/// A `form_for` or `button_for` that calls an action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionUse {
+    /// `form_for` or `button_for`.
+    pub builder: String,
+    /// The id of the agent or route containing it.
+    #[serde(rename = "in")]
+    pub container: String,
+    pub location: Location,
 }
 
 /// One entry point: an action, or an agent nothing else calls.
@@ -38,6 +103,9 @@ pub struct GraphEntry {
     /// `@budget` checks. `None` (JSON `null`) when a loop has no bound.
     pub worst_case: Option<BTreeMap<String, f64>>,
     pub steps: Vec<GraphStep>,
+    /// For an action, how it is called from outside the program (G3a).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ActionCall>,
 }
 
 /// One step a path takes.
@@ -148,6 +216,27 @@ impl GraphDocument {
                     effects: union(&steps),
                     worst_case: (entry.bounded && !has_unbounded_loop(tree)).then(|| worst_case(tree)),
                     steps,
+                    action: graph.actions.get(&tree.name).map(|surface| build.action(&tree.name, surface)),
+                }
+            })
+            .collect();
+        let routes = graph
+            .routes
+            .iter()
+            .map(|route| {
+                let tree = &route.estimate.tree;
+                let steps = build.step_list(&tree.children, &route.id);
+                GraphRoute {
+                    id: route.id.clone(),
+                    server: route.server.clone(),
+                    method: route.method.to_string(),
+                    path: route.path.clone(),
+                    live: route.live.clone(),
+                    requires: route.policy.as_ref().map(requires),
+                    location: build.location(tree.span),
+                    effects: union(&steps),
+                    worst_case: (route.estimate.bounded && !has_unbounded_loop(tree)).then(|| worst_case(tree)),
+                    steps,
                 }
             })
             .collect();
@@ -156,7 +245,7 @@ impl GraphDocument {
             .iter()
             .map(|(kind, name, span)| NeverReached { kind: *kind, name: name.clone(), location: build.location(*span) })
             .collect();
-        GraphDocument { schema: AGENT_GRAPH_SCHEMA.to_string(), file: file.to_string(), entries, never_reached }
+        GraphDocument { schema: AGENT_GRAPH_SCHEMA.to_string(), file: file.to_string(), entries, routes, never_reached }
     }
 }
 
@@ -170,6 +259,27 @@ impl Builder<'_> {
         let before = &self.source[..span.start.min(self.source.len())];
         let line_start = before.rfind('\n').map_or(0, |at| at + 1);
         Location { line: before.matches('\n').count() + 1, column: before[line_start..].chars().count() + 1 }
+    }
+
+    fn action(&self, name: &str, surface: &ActionSurface) -> ActionCall {
+        ActionCall {
+            method: "POST".to_string(),
+            path: format!("{}{name}", corvid_types::action_input::ACTIONS_PATH),
+            requires: requires(&surface.policy),
+            assistants: surface.assistants.as_ref().map(|offer| AssistantOffer {
+                mode: offer.mode.as_str().to_string(),
+                description: offer.description.clone(),
+            }),
+            used_by: surface
+                .used_by
+                .iter()
+                .map(|(builder, container, span)| ActionUse {
+                    builder: builder.to_string(),
+                    container: container.clone(),
+                    location: self.location(*span),
+                })
+                .collect(),
+        }
     }
 
     fn step_list(&self, children: &[CostTreeNode], parent: &str) -> Vec<GraphStep> {
@@ -267,6 +377,14 @@ fn id_segment(node: &CostTreeNode) -> String {
         CostNodeKind::Branch => "branch".to_string(),
         CostNodeKind::Loop { .. } if node.name == "lambda" => "lambda".to_string(),
         CostNodeKind::Loop { .. } | CostNodeKind::Sequence | CostNodeKind::Condition => "loop".to_string(),
+    }
+}
+
+fn requires(policy: &corvid_ast::RoutePolicy) -> Requires {
+    Requires {
+        authenticated: policy.requires_auth(),
+        roles: policy.roles.clone(),
+        permissions: policy.permissions.clone(),
     }
 }
 

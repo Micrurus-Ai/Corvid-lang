@@ -1,6 +1,6 @@
 //! The text form of `corvid graph`: a tree a person reads in a terminal.
 
-use super::{detail, label, Place};
+use super::{detail, entry_title, label, route_title, surface_line, Place};
 use corvid_driver::agent_graph::{has_unbounded_loop, steps, AgentGraph};
 use corvid_types::{CostNodeKind, CostTreeNode};
 
@@ -10,7 +10,14 @@ pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
         if index > 0 {
             out.push('\n');
         }
-        render_entry(&entry.tree, entry.bounded, place, &mut out);
+        render_root(&entry_title(graph, &entry.tree), &entry.tree, entry.bounded, place, &mut out);
+        if let Some(surface) = graph.actions.get(&entry.tree.name) {
+            out.push_str(&format!("   {}\n", surface_line(&entry.tree.name, surface, place)));
+        }
+    }
+    for route in &graph.routes {
+        out.push('\n');
+        render_root(&route_title(route), &route.estimate.tree, route.estimate.bounded, place, &mut out);
     }
     if !graph.never_reached.is_empty() {
         out.push_str("\nNever reached:\n");
@@ -32,13 +39,13 @@ fn pad(text: &str, width: usize) -> String {
     format!("{text}{}", " ".repeat(width.saturating_sub(count)))
 }
 
-fn render_entry(tree: &CostTreeNode, bounded: bool, place: &Place<'_>, out: &mut String) {
+fn render_root(title: &str, tree: &CostTreeNode, bounded: bool, place: &Place<'_>, out: &mut String) {
     let worst = if bounded && !has_unbounded_loop(tree) {
         detail(tree)
     } else {
         "no bound: a loop has none".to_string()
     };
-    out.push_str(&format!("{} worst case {worst}\n", pad(&format!("agent {}", tree.name), STEP_WIDTH)));
+    out.push_str(&format!("{} worst case {worst}\n", pad(title, STEP_WIDTH)));
     let steps = steps(&tree.children);
     for (index, step) in steps.iter().enumerate() {
         render_step(step, "", index + 1 == steps.len(), place, out);

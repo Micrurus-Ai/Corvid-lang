@@ -105,10 +105,43 @@ Each **step** has these fields:
 | `steps` | The steps inside a nested agent, action or loop. |
 | `paths` | A branch's paths, each a list of steps. An empty list is a path that does nothing. |
 
-`never_reached` lists each tool, connector operation and prompt that no entry point's tree reaches, with its `kind`, `name` and declared `location`.
+`never_reached` lists each tool, connector operation and prompt that no entry point or route reaches, with its `kind`, `name` and declared `location`.
+
+### Routes and actions
+
+Routes and `live` declarations are where outside callers enter, so each is a root of its own in `routes`, drawn under the other entry points in the text and Mermaid forms:
+
+```console
+action archive_card                              worst case $0.001
+└─ tool notify_watchers                          $0.001                   board.cor:31
+   POST /actions/archive_card, needs permission board.edit, offered to assistants (confirm), button_for in board_app:GET /cards/{card} (board.cor:42)
+
+live /boards/{board}/cards -> Card, needs permission board.view worst case free
+```
+
+A **route** has these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | `server:METHOD path`, or `server:live path` for a `live` declaration, which may share a GET route's path. Step ids under the route start with it. |
+| `server`, `method`, `path` | As declared. |
+| `live` | For a `live` declaration, the row type it delivers; otherwise `null`. |
+| `requires` | `{authenticated, roles, permissions}`, or `null` for a public route, so a missing policy is never mistaken for an empty one. |
+| `location`, `effects`, `worst_case`, `steps` | As for an entry. The handler is costed by the analysis that costs an agent's body. |
+
+An agent a route calls is drawn under the route, not as an entry of its own, unless it is public or an action.
+
+An **action** entry also has `action`:
+
+| Field | Meaning |
+| --- | --- |
+| `method`, `path` | The route `corvid serve` mounts it at: `POST /actions/<name>`. |
+| `requires` | The action's `requires` policy. |
+| `assistants` | `{mode, description}` from its `assistants:` line, or `null` when no assistant is offered it. Nothing is offered to an assistant unless the source says so. |
+| `used_by` | Each `form_for` and `button_for` naming the action: its `builder`, the id of the agent or route it is `in`, and its `location`. |
 
 ## Not in scope
 
 - A run's actual path. `corvid trace lineage` draws that.
 - Editing the graph. The code is the graph.
-- Several files at once. The graph draws the agents of one file. A route, a schedule and a table operation are not yet steps of their own. The graph's G3 slice brings them in, with the dev console and B22 reading this document.
+- Several files at once. The graph draws the agents and routes of one file. Table operations and schedules are not yet steps of their own; they come next, in that order, then a project's files.

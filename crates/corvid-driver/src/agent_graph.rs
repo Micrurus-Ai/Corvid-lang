@@ -6,7 +6,10 @@
 
 mod document;
 
-pub use document::{GraphDocument, GraphEntry, GraphStep, Location, NeverReached, StepKind, AGENT_GRAPH_SCHEMA};
+pub use document::{
+    ActionCall, ActionUse, AssistantOffer, GraphDocument, GraphEntry, GraphRoute, GraphStep, Location, NeverReached,
+    Requires, StepKind, AGENT_GRAPH_SCHEMA,
+};
 
 use crate::pipeline::typecheck_driver_file;
 use crate::Diagnostic;
@@ -24,17 +27,49 @@ pub enum AgentGraphError {
     NoSuchAgent(String),
 }
 
-/// The program's graph: one tree per entry point drawn, and the tools and
-/// prompts no entry point reaches.
+/// The program's graph: one tree per entry point and route drawn, and the
+/// tools and prompts nothing reaches.
 #[derive(Debug, Clone)]
 pub struct AgentGraph {
     pub entries: Vec<CostEstimate>,
+    /// Each route and `live` declaration, in source order, rooted at its
+    /// handler. Empty when one agent is drawn.
+    pub routes: Vec<RouteGraph>,
+    /// How each action is called from outside the program, by name.
+    pub actions: BTreeMap<String, ActionSurface>,
     /// What each callable the trees can name is, by the name the tree
     /// records: its kind, declared effects, and whether it is dangerous.
     pub declared: BTreeMap<String, Declared>,
     /// `(kind, name, declared at)`, in source order: the tools, connector
     /// operations and prompts no entry point reaches.
     pub never_reached: Vec<(StepKind, String, Span)>,
+}
+
+/// A route's handler, costed as an agent's body is.
+#[derive(Debug, Clone)]
+pub struct RouteGraph {
+    /// `server:METHOD path`, or `server:live path` for a `live`
+    /// declaration, unique in a program.
+    pub id: String,
+    pub server: String,
+    pub method: &'static str,
+    pub path: String,
+    /// For a `live` declaration, the row type it delivers, as written.
+    pub live: Option<String>,
+    /// `None` for a public route.
+    pub policy: Option<corvid_ast::RoutePolicy>,
+    pub estimate: CostEstimate,
+}
+
+/// How outside callers reach an action.
+#[derive(Debug, Clone)]
+pub struct ActionSurface {
+    pub policy: corvid_ast::RoutePolicy,
+    /// `None` when no assistant is offered it.
+    pub assistants: Option<corvid_ast::AssistantExposure>,
+    /// Each `form_for` or `button_for` naming it: `(builder, the agent or
+    /// route containing it, where)`, in source order.
+    pub used_by: Vec<(&'static str, String, Span)>,
 }
 
 /// A declaration a step calls.
@@ -83,7 +118,28 @@ pub fn agent_graph(
             _ => None,
         })
         .collect();
-    let called: HashSet<String> = agents.iter().flat_map(|a| called_names(&a.body)).collect();
+    let route_decls: Vec<(&corvid_ast::ServerDecl, &corvid_ast::HttpRouteDecl)> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Server(server) => Some(server),
+            _ => None,
+        })
+        .flat_map(|server| server.routes.iter().map(move |route| (server, route)))
+        .collect();
+    // A `live` declaration may share a GET route's path, so it is told
+    // apart by `live` in place of the method.
+    let route_id = |server: &corvid_ast::ServerDecl, route: &corvid_ast::HttpRouteDecl| {
+        let method = if route.response.live_row().is_some() { "live" } else { route.method.as_str() };
+        format!("{}:{method} {}", server.name.name, route.path)
+    };
+    // An agent a route or another agent calls is drawn under its caller.
+    let called: HashSet<String> = agents
+        .iter()
+        .map(|a| &a.body)
+        .chain(route_decls.iter().map(|(_, route)| &route.body))
+        .flat_map(called_names)
+        .collect();
     let entry_names: Vec<String> = agents
         .iter()
         .filter(|a| {
@@ -93,12 +149,52 @@ pub fn agent_graph(
         })
         .map(|a| a.name.name.clone())
         .collect();
+    let all_routes: Vec<RouteGraph> = route_decls
+        .iter()
+        .map(|(server, route)| {
+            let id = route_id(server, route);
+            RouteGraph {
+                server: server.name.name.clone(),
+                method: route.method.as_str(),
+                path: route.path.clone(),
+                live: route.response.live_row().map(|ty| {
+                    let span = ty.span();
+                    source[span.start..span.end].to_string()
+                }),
+                policy: route.policy.clone(),
+                estimate: corvid_types::compute_route_cost_with_types(&file, &resolved, &registry, route, &id, types),
+                id,
+            }
+        })
+        .collect();
+
+    let mut actions: BTreeMap<String, ActionSurface> = agents
+        .iter()
+        .filter_map(|a| {
+            let spec = a.action.as_ref()?;
+            Some((
+                a.name.name.clone(),
+                ActionSurface { policy: spec.policy.clone(), assistants: spec.assistants.clone(), used_by: Vec::new() },
+            ))
+        })
+        .collect();
+    let bodies = agents
+        .iter()
+        .map(|a| (a.name.name.clone(), &a.body))
+        .chain(route_decls.iter().map(|(server, route)| (route_id(server, route), &route.body)));
+    for (container, body) in bodies {
+        for (builder, action, span) in action_builders(body) {
+            if let Some(surface) = actions.get_mut(&action) {
+                surface.used_by.push((builder, container.clone(), span));
+            }
+        }
+    }
 
     let declared = declarations(&file);
     let all_entries: Vec<CostEstimate> = entry_names.iter().filter_map(|name| estimate(name)).collect();
     let mut reached = HashSet::new();
-    for entry in &all_entries {
-        collect_calls(&entry.tree, &mut reached);
+    for tree in all_entries.iter().map(|e| &e.tree).chain(all_routes.iter().map(|r| &r.estimate.tree)) {
+        collect_calls(tree, &mut reached);
     }
     let mut never_reached = Vec::new();
     for decl in &file.decls {
@@ -118,13 +214,13 @@ pub fn agent_graph(
         }
     }
 
-    let entries = match agent {
+    let (entries, routes) = match agent {
         Some(name) => {
-            vec![estimate(name).ok_or_else(|| AgentGraphError::NoSuchAgent(name.to_string()))?]
+            (vec![estimate(name).ok_or_else(|| AgentGraphError::NoSuchAgent(name.to_string()))?], Vec::new())
         }
-        None => all_entries,
+        None => (all_entries, all_routes),
     };
-    Ok(AgentGraph { entries, declared, never_reached })
+    Ok(AgentGraph { entries, routes, actions, declared, never_reached })
 }
 
 /// What every callable a tree can name is: tools, connector operations,
@@ -203,6 +299,27 @@ fn collect_calls(node: &CostTreeNode, out: &mut HashSet<String>) {
     for child in &node.children {
         collect_calls(child, out);
     }
+}
+
+/// Each `form_for(action, ...)` and `button_for(action, ...)` in `body`:
+/// `(builder, action, where)`.
+fn action_builders(body: &corvid_ast::Block) -> Vec<(&'static str, String, Span)> {
+    let mut out = Vec::new();
+    corvid_ast::visit::walk_block(body, &mut |_| {}, &mut |expr| {
+        if let Expr::Call { callee, args, span, .. } = expr {
+            let (Expr::Ident { name, .. }, Some(Expr::Ident { name: action, .. })) = (callee.as_ref(), args.first())
+            else {
+                return;
+            };
+            let builder = match name.name.as_str() {
+                "form_for" => "form_for",
+                "button_for" => "button_for",
+                _ => return,
+            };
+            out.push((builder, action.name.clone(), *span));
+        }
+    });
+    out
 }
 
 /// The names `body` calls directly, by the callee written at each call.

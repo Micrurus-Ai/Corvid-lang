@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+`corvid graph` now draws each route and `live` declaration with the steps its handler takes and who may call it. Each action shows its `POST /actions/<name>` route, its `requires` policy, whether it is offered to assistants, and the `form_for` and `button_for` calls that use it. A tool called only from a route is no longer listed under "Never reached".
+
 Put an agent's graph in a pull request: `corvid graph app.cor --format mermaid` writes a flowchart of each entry point's steps, with dangerous tools outlined in red. `--format json` gives the same graph as a typed document (schema `corvid.agent_graph.v1`): every step's id, line and column, kind, effects, worst-case cost in dollars, and, for an `approve`, the tool it guards. A loop nothing bounds now shows its steps, with `no bound` as its cost. See [the agent graph reference](docs/reference/agent-graph.md).
 
 See what an agent does before it runs: `corvid graph app.cor --agent refund_bot` prints its steps (each tool, prompt, nested agent and `approve`, the paths of each branch, each loop's bound) with the worst-case cost of each and where it is in the source, and marks `dangerous` tools. Without `--agent` it draws every entry point, then lists the tools and prompts nothing calls. The numbers are the ones `@budget` checks. Costs below a tenth of a cent now show their digits (`$0.0002`) instead of `$0.000`.

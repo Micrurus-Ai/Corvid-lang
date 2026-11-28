@@ -2,6 +2,35 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Routes are roots of the agent graph, and actions say who can call them (B47 G3a)
+
+B22's `callers_of` and `impact_of_change` need to know where outside
+callers enter. Desktop gave this as the first G3 need.
+- Every route and `live` declaration is now a root. The cost analysis
+  that costs an agent's body costs its handler
+  (`compute_route_cost_with_types`).
+- Its id is `server:METHOD path`, or `server:live path`, because a `live`
+  declaration may share a GET route's path.
+- `requires` is `null` for a public route, so a missing policy is never
+  mistaken for an empty one.
+- An action's entry gains `action`: its `POST /actions/<name>` route
+  (built from `ACTIONS_PATH`, the constant `corvid serve` mounts), its
+  policy, its `assistants:` mode and description (`null` unless the source
+  offers it), and every `form_for` and `button_for` that names it.
+- An agent only a route calls is drawn under that route.
+
+Found while building it: routes were not roots, so a tool called only
+from a route handler was listed as never reached. That is fixed by the
+same change and covered by a test.
+
+The document stays `corvid.agent_graph.v1`: `routes` and `action` are new
+fields, and a reader that ignores unknown fields keeps working.
+
+Proof: two driver tests cover the route ids, the `live` row and policy,
+a public route's `null`, a route's tool steps and cost, an action's
+route, policy and assistant offer, its `button_for` caller, and the
+default of no assistant offer.
+
 ### A graph step's id names what it calls
 
 G2's step ids were positions (`refund_bot/3/path2/1`), so adding a step

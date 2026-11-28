@@ -10,7 +10,9 @@ mod text;
 
 use crate::cli::GraphFormat;
 use anyhow::{Context, Result};
-use corvid_driver::agent_graph::{agent_graph, has_unbounded_loop, AgentGraphError, GraphDocument};
+use corvid_driver::agent_graph::{
+    agent_graph, has_unbounded_loop, ActionSurface, AgentGraph, AgentGraphError, GraphDocument, RouteGraph, StepKind,
+};
 use corvid_driver::{load_corvid_config_for, render_all_pretty};
 use corvid_types::{CostNodeKind, CostTreeNode};
 use std::path::Path;
@@ -58,6 +60,53 @@ impl Place<'_> {
 
     fn file_name(&self) -> String {
         self.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    }
+}
+
+/// An entry point's heading: `agent refund_bot` or `action move_card`.
+fn entry_title(graph: &AgentGraph, tree: &CostTreeNode) -> String {
+    let kind = graph.declared.get(&tree.name).map_or(StepKind::Agent, |d| d.kind);
+    format!("{} {}", kind.word(), tree.name)
+}
+
+/// A route's heading: `route GET /orders/{id}`, or `live /boards -> Card`
+/// for a live declaration, with who may call it.
+fn route_title(route: &RouteGraph) -> String {
+    let head = match &route.live {
+        Some(row) => format!("live {} -> {row}", route.path),
+        None => format!("route {} {}", route.method, route.path),
+    };
+    format!("{head}, {}", policy_text(route.policy.as_ref()))
+}
+
+/// How outside callers reach an action: its route, policy, assistant
+/// offer and the forms and buttons naming it.
+fn surface_line(name: &str, surface: &ActionSurface, place: &Place<'_>) -> String {
+    let mut parts = vec![
+        format!("POST {}{name}", corvid_types::action_input::ACTIONS_PATH),
+        policy_text(Some(&surface.policy)),
+        match &surface.assistants {
+            Some(offer) => format!("offered to assistants ({})", offer.mode.as_str()),
+            None => "not offered to assistants".to_string(),
+        },
+    ];
+    for (builder, container, span) in &surface.used_by {
+        parts.push(format!("{builder} in {container} ({})", place.at(*span)));
+    }
+    parts.join(", ")
+}
+
+fn policy_text(policy: Option<&corvid_ast::RoutePolicy>) -> String {
+    let Some(policy) = policy.filter(|p| p.requires_auth()) else {
+        return "public".to_string();
+    };
+    let mut needs = Vec::new();
+    needs.extend(policy.roles.iter().map(|role| format!("role {role}")));
+    needs.extend(policy.permissions.iter().map(|permission| format!("permission {permission}")));
+    if needs.is_empty() {
+        "signed in".to_string()
+    } else {
+        format!("needs {}", needs.join(" and "))
     }
 }
 
