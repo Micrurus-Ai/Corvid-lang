@@ -91,6 +91,8 @@ pub struct Runtime {
     usage_ledger: LlmUsageLedger,
     /// Provider tokens kept at sign-in (user credentials C2), in memory.
     pub(crate) caller_tokens: crate::caller_tokens::CallerTokens,
+    /// Data keys read for encrypted databases (encryption at rest K3).
+    pub(crate) data_keys: crate::data_keys::DataKeys,
     http: HttpClient,
     /// Slice 33S2a: policy carrying the configured `[http] allow`
     /// list + the always-on SSRF block. The `http_*` tool-
@@ -127,7 +129,7 @@ pub struct Runtime {
     /// One open handle per table database location (B09), shared by
     /// clones so every operation on a database uses one connection.
     pub(crate) table_databases: crate::tables::TableDatabases,
-    secrets: SecretRuntime,
+    pub(crate) secrets: SecretRuntime,
     /// In-memory cache shared across Runtime clones (worker pools,
     /// per-job tracer swaps). The stdlib cache tools lock it per
     /// operation.

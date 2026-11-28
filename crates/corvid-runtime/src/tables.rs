@@ -48,7 +48,7 @@ pub use exact_columns::{parse_zoned_time_column_text, register_sqlite_collations
 pub use transaction::TableTransaction;
 pub use migration::{plan_table_change, StoredColumn, TableChange};
 pub use query::{aggregate_sql, query_sql, InnerQuery, TableAggregate, TableFilter, TableQuery, MOST_LIST_VALUES};
-pub use schema::{column_kind, create_table_sql, create_table_sql_on, untainted, ColumnKind, TableSchema};
+pub use schema::{column_kind, create_table_sql, create_table_sql_on, is_sealed_column, untainted, ColumnKind, TableSchema};
 pub use postgres::VerifiedTls;
 use recorded::{call_name, json_row, row_json, value_json};
 use schema::{create_table_named, quote};

@@ -2,6 +2,55 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Encryption at rest K2 and K3: a `Secret` column, sealed to its row
+
+Frontend development agreed on 2026-11-27 (review item 8), asking that
+secret columns stay out of forms, client schemas and live rows. A secret
+already never crosses a route or action boundary, and a `live` on a table
+with a `Secret` column is now refused. K2 alone would have let a program
+declare columns the runtime stored in the clear, so K2 and K3 ship
+together, following the build plan written into the proposal first.
+
+- **Grammar.** `encryption: key(secret("NAME"))` in a `database` block.
+  `previous:` is refused by name until rotation, K4.
+- **Checker.** A `Secret` or `Option<Secret>` column is allowed only under a
+  declared key (E0601's message and hint now name both ways to keep a
+  secret). A secret inside a record column is still refused, because it
+  would be stored as JSON. `ColumnKind::not_comparable` is now the one rule
+  behind the `where`, grouping and `unique` refusals. Before, each place
+  tested for JSON by hand; now each also refuses a sealed column with its
+  reason. Ordering refuses it because it has no order. `live` refuses a
+  table with one.
+- **Storage.** `ColumnKind::Sealed` is `SEALED TEXT` on SQLite and a
+  `corvid_sealed` domain on Postgres, whose check requires the sealed
+  form.
+- **Sealing.** In the interpreter's table bridge. `value_row` seals each
+  `Secret` field with `corvid_crypto::DataKey`, bound to `table/column/row
+  key`, where the row key is `live_key`'s encoding, so a row's identity has
+  one spelling. `row_value` reads the plain columns first, then opens the
+  sealed ones for that row. The runtime and the trace therefore see only
+  ciphertext, and a replay opens recorded rows the same way, which is why
+  it needs the key.
+- **The key.** `Runtime::data_key` reads the named secret once, caches it
+  and wipes the text. It refuses a missing key or one that is not 32
+  bytes, naming the secret and never quoting the key. `corvid serve` reads
+  every declared key before it binds.
+- **Found and fixed.** The missing-key message first pointed at `corvid
+  keys new`, which K4 will build. It now says what a key is and how to
+  make one today.
+- **Three tiers.** Backend: one declared key per database, authenticated
+  encryption bound to the row. Frontend: secret columns never reach a
+  browser, including through `live`. AI: an assistant never sees a
+  `Secret`; an action can use a stored key to act for a customer, and the
+  trace shows the call without the key.
+
+Tests: `tables_sealed_columns.rs` on SQLite and Postgres. The stored
+text is ciphertext and reads back as the secret. A missing `Option<Secret>`
+is NULL. A value copied to another row does not open. The trace holds no
+plaintext, a replay with the key reads the row and one without it is
+refused. A short key is refused without being quoted. The test also covers
+each checker refusal and `previous:`. `data_keys` unit test.
+
 ### Refinements on parameters (PR-1)
 
 Frontend development approved item 5 of the review brief, so PR-1 is
@@ -35,6 +84,7 @@ refused, and a refinement combines with an ownership annotation. An
 interpreter test shows a computed argument stopping the call with the
 message, and the tool never called. A driver test covers the native
 refusal.
+
 
 ### Large uploads held on disk U1 and U2: memory bounded by the threshold, not the maximum
 

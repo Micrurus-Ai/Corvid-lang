@@ -1415,6 +1415,10 @@ pub struct IrDatabase {
     pub tls: Option<String>,
     /// The `connections:` setting, for a networked engine.
     pub connections: Option<u32>,
+    /// The secret naming the database's data key, from `encryption:
+    /// key(secret("NAME"))` (encryption at rest K2). Its `Secret` columns
+    /// are sealed with it.
+    pub encryption_key_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

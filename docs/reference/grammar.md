@@ -157,6 +157,10 @@ database_setting  ::= 'engine' ':' IDENT NEWLINE
                     | 'location' ':' (STRING | 'env' '(' STRING ')') NEWLINE
                     | 'tls' ':' IDENT NEWLINE                       # `required` or `disabled`; Postgres only
                     | 'connections' ':' INT NEWLINE                 # 1 to 1000; Postgres only
+                    | 'encryption' ':' 'key' '(' 'secret' '(' STRING ')' ')' NEWLINE
+# Encryption at rest (K2): the database's data key, read from the secret
+# store by name. A `Secret` or `Option<Secret>` column is allowed only
+# under it, and is stored sealed to its table, column and row.
 ```
 
 ## Type references

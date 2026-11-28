@@ -5,7 +5,7 @@
 use super::TableEngine;
 use corvid_types::Type;
 
-pub use corvid_types::table_columns::{column_kind, untainted, ColumnKind};
+pub use corvid_types::table_columns::{column_kind, is_sealed_column, untainted, ColumnKind};
 
 /// A table's declared shape: its name, key and typed columns, with
 /// `revision` last, and the history clauses the migration planner reads.

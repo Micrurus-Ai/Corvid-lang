@@ -68,12 +68,12 @@ impl<'ir> Interpreter<'ir> {
                     .collect::<Result<Vec<_>, String>>()
                     .map_err(fail)?;
                 match self.runtime.table_get(&target, key).await.map_err(runtime_error)? {
-                    Some(row) => Value::OptionSome(BoxedValue::new(self.row_value(record, row).map_err(fail)?)),
+                    Some(row) => Value::OptionSome(BoxedValue::new(self.row_value(record, table, row).map_err(fail)?)),
                     None => Value::OptionNone,
                 }
             }
             TableOp::Insert | TableOp::Save | TableOp::Delete => {
-                let row = self.value_row(record, &arg).map_err(fail)?;
+                let row = self.value_row(record, table, &arg).map_err(fail)?;
                 // How live subscriptions identify the row (B14), so the
                 // commit can name it and the revision it reached.
                 let key = self.live_key(record, table, &arg).map_err(fail)?;
@@ -84,10 +84,10 @@ impl<'ir> Interpreter<'ir> {
                     _ => self.runtime.table_delete(&target, row).await,
                 };
                 match outcome.map_err(runtime_error)? {
-                    Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, stored).map_err(fail)?)),
+                    Ok(stored) => Value::ResultOk(BoxedValue::new(self.row_value(record, table, stored).map_err(fail)?)),
                     Err(conflict) => {
                         let case = conflict.case();
-                        let row = conflict.into_row().map(|row| self.row_value(record, row)).transpose().map_err(fail)?;
+                        let row = conflict.into_row().map(|row| self.row_value(record, table, row)).transpose().map_err(fail)?;
                         Value::ResultErr(BoxedValue::new(Value::conflict(case, row)))
                     }
                 }
@@ -137,7 +137,7 @@ impl<'ir> Interpreter<'ir> {
             .table_query(&target, &query)
             .await
             .map_err(|e| InterpError::new(InterpErrorKind::Runtime(e), span))?;
-        let items = rows.into_iter().map(|row| self.row_value(record, row)).collect::<Result<Vec<_>, _>>().map_err(fail)?;
+        let items = rows.into_iter().map(|row| self.row_value(record, table, row)).collect::<Result<Vec<_>, _>>().map_err(fail)?;
         Ok(Value::List(crate::value::ListValue::new(items)))
     }
 
@@ -237,7 +237,7 @@ impl<'ir> Interpreter<'ir> {
                 let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
                 let mut entries = Vec::with_capacity(rows.len());
                 for row in rows {
-                    let value = self.row_value(record, row).map_err(fail)?;
+                    let value = self.row_value(record, table, row).map_err(fail)?;
                     let Value::Struct(fields) = &value else {
                         return Err(fail(format!("a `{}` row is not a record", table.name)));
                     };
@@ -301,7 +301,7 @@ impl<'ir> Interpreter<'ir> {
                 };
                 let rows = self.runtime.table_query(&target, &query).await.map_err(runtime_error)?;
                 let Some(row) = rows.into_iter().next() else { return Ok(Value::OptionNone) };
-                let Value::Struct(row) = self.row_value(record, row).map_err(fail)? else {
+                let Value::Struct(row) = self.row_value(record, table, row).map_err(fail)? else {
                     return Err(fail(format!("a `{}` row is not a record", table.name)));
                 };
                 let value = row.get_field(&column).ok_or_else(|| fail(format!("a `{}` row has no `{column}`", table.name)))?;
@@ -517,9 +517,16 @@ impl<'ir> Interpreter<'ir> {
         Ok(serde_json::Value::Array(values).to_string())
     }
 
-    fn value_row(&self, record: &IrType, value: &Value) -> Result<Row, String> {
+    fn value_row(&self, record: &IrType, table: &IrTable, value: &Value) -> Result<Row, String> {
         let Value::Struct(fields) = value else {
             return Err(format!("a `{}` row is {}", record.name, value.type_name()));
+        };
+        // Encryption at rest (K3): each `Secret` column is sealed to this
+        // table, column and row, so the database and the trace hold only
+        // ciphertext.
+        let sealing = match self.sealing_key(record, table)? {
+            Some(key) => Some((key, self.live_key(record, table, value)?)),
+            None => None,
         };
         record
             .fields
@@ -528,34 +535,74 @@ impl<'ir> Interpreter<'ir> {
                 let field_value = fields
                     .get_field(&field.name)
                     .ok_or_else(|| format!("a `{}` row has no `{}`", record.name, field.name))?;
-                self.to_column(&field_value, &field.ty)
+                match &sealing {
+                    Some((key, row_key)) if corvid_runtime::tables::is_sealed_column(&field.ty) => {
+                        seal_column(key, &field_value, &sealed_context(table, &field.name, row_key))
+                            .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))
+                    }
+                    _ => self.to_column(&field_value, &field.ty),
+                }
             })
             .collect()
     }
 
+    /// The data key of a table with `Secret` columns, or `None` when it
+    /// has none. The checker allows such columns only under a declared
+    /// key, so a missing one here is the secret store's.
+    fn sealing_key(&self, record: &IrType, table: &IrTable) -> Result<Option<Arc<corvid_crypto::DataKey>>, String> {
+        if !record.fields.iter().any(|field| corvid_runtime::tables::is_sealed_column(&field.ty)) {
+            return Ok(None);
+        }
+        let Some(secret) = &table.database.encryption_key_secret else {
+            return Err(format!("table `{}` has `Secret` columns, but its database declares no data key", table.name));
+        };
+        self.runtime.data_key(&table.database.name, secret).map(Some)
+    }
+
     /// A stored row as a record value.
-    fn row_value(&self, record: &IrType, row: Row) -> Result<Value, String> {
-        let fields = record
-            .fields
-            .iter()
-            .zip(row)
-            .map(|(field, column)| {
-                let value = self
-                    .from_column(column, &field.ty)
+    fn row_value(&self, record: &IrType, table: &IrTable, row: Row) -> Result<Value, String> {
+        let key = self.sealing_key(record, table)?;
+        let sealed = |field: &corvid_ir::IrField| key.is_some() && corvid_runtime::tables::is_sealed_column(&field.ty);
+        // The row's key is read first, from its plain columns, to name the
+        // place each sealed column was sealed for.
+        let mut sealed_columns = Vec::new();
+        let mut fields = Vec::with_capacity(record.fields.len());
+        for (field, column) in record.fields.iter().zip(row) {
+            if sealed(field) {
+                sealed_columns.push((field, column));
+                continue;
+            }
+            fields.push(self.row_field(record, field, column)?);
+        }
+        if let Some(key) = key {
+            let plain = Value::Struct(StructValue::new(record.id, record.name.clone(), fields.clone()));
+            let row_key = self.live_key(record, table, &plain)?;
+            for (field, column) in sealed_columns {
+                let value = open_column(&key, column, &field.ty, &sealed_context(table, &field.name, &row_key))
                     .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))?;
-                // A stored row holds its refinements too; one that does
-                // not was written outside this program.
-                if let Some(shown) = crate::conv::refinement_breach(field, &value) {
-                    let refinement = field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default();
-                    return Err(format!(
-                        "a stored `{}` row breaks `{}.{}` must be {refinement}: it holds {shown}",
-                        record.name, record.name, field.name
-                    ));
-                }
-                Ok((field.name.clone(), value))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                fields.push((field.name.clone(), value));
+            }
+            // In declaration order, as every reader of a row expects.
+            fields.sort_by_key(|(name, _)| record.fields.iter().position(|f| &f.name == name));
+        }
         Ok(Value::Struct(StructValue::new(record.id, record.name.clone(), fields)))
+    }
+
+    /// One plain column of a stored row as its field value.
+    fn row_field(&self, record: &IrType, field: &corvid_ir::IrField, column: DbValue) -> Result<(String, Value), String> {
+        let value = self
+            .from_column(column, &field.ty)
+            .map_err(|reason| format!("column `{}` of table `{}`: {reason}", field.name, record.name))?;
+        // A stored row holds its refinements too; one that does not was
+        // written outside this program.
+        if let Some(shown) = crate::conv::refinement_breach(field, &value) {
+            let refinement = field.refinement.as_ref().map(|r| r.describe()).unwrap_or_default();
+            return Err(format!(
+                "a stored `{}` row breaks `{}.{}` must be {refinement}: it holds {shown}",
+                record.name, record.name, field.name
+            ));
+        }
+        Ok((field.name.clone(), value))
     }
 
     /// A field value as its column value, stored as `column_kind` says.
@@ -620,6 +667,47 @@ impl<'ir> Interpreter<'ir> {
         };
         Ok(if nullable { Value::OptionSome(BoxedValue::new(scalar)) } else { scalar })
     }
+}
+
+/// What a sealed column is bound to: its table, column and row key, so a
+/// value copied to another row or column does not open.
+fn sealed_context(table: &IrTable, column: &str, row_key: &str) -> Vec<u8> {
+    format!("{}/{column}/{row_key}", table.name).into_bytes()
+}
+
+/// A `Secret` field sealed as its column stores it.
+fn seal_column(key: &corvid_crypto::DataKey, value: &Value, context: &[u8]) -> Result<DbValue, String> {
+    let secret = match value {
+        Value::Secret(secret) => secret,
+        Value::OptionNone | Value::Nothing => return Ok(DbValue::Null),
+        Value::OptionSome(payload) => match payload.get() {
+            Value::Secret(secret) => return seal_secret(key, &secret, context),
+            other => return Err(format!("{} where the column holds a Secret", other.type_name())),
+        },
+        other => return Err(format!("{} where the column holds a Secret", other.type_name())),
+    };
+    seal_secret(key, secret, context)
+}
+
+fn seal_secret(key: &corvid_crypto::DataKey, secret: &corvid_crypto::Secret, context: &[u8]) -> Result<DbValue, String> {
+    let text = secret
+        .expose_text()
+        .ok_or("a decoded key is not stored; store the secret's text it was decoded from")?;
+    key.seal(text.as_bytes(), context).map(DbValue::Text).map_err(|e| e.to_string())
+}
+
+/// A sealed column opened for its row, as the `Secret` it holds.
+fn open_column(key: &corvid_crypto::DataKey, column: DbValue, ty: &Type, context: &[u8]) -> Result<Value, String> {
+    let nullable = matches!(untainted(ty), Type::Option(_));
+    let sealed = match column {
+        DbValue::Null if nullable => return Ok(Value::OptionNone),
+        DbValue::Text(sealed) => sealed,
+        other => return Err(format!("the database holds {other:?} where a sealed Secret belongs")),
+    };
+    let opened = key.open(&sealed, context).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(opened.to_vec()).map_err(|_| "the sealed value is not text".to_string())?;
+    let secret = Value::Secret(corvid_crypto::Secret::from_text(text));
+    Ok(if nullable { Value::OptionSome(BoxedValue::new(secret)) } else { secret })
 }
 
 /// A money or time value from the text its column stores (B09 P8a),

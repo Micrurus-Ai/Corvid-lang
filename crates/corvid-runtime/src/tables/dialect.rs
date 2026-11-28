@@ -55,7 +55,7 @@ impl TableEngine {
             // JSON, money and time travel as text and are cast in SQL to
             // the column's type, because the client's binary encodings of
             // `jsonb`, `numeric` and the domains are not text.
-            Self::Postgres { .. } if kind == ColumnKind::Json || kind.is_exact_text() => {
+            Self::Postgres { .. } if kind == ColumnKind::Json || kind.is_exact_text() || kind == ColumnKind::Sealed => {
                 format!("(${n}::text)::{}", postgres_type(kind))
             }
             Self::Postgres { .. } => {
@@ -132,7 +132,7 @@ impl TableEngine {
             .iter()
             .zip(table.kinds)
             .map(|(column, kind)| match (self.is_postgres(), kind) {
-                (true, kind) if *kind == ColumnKind::Json || kind.is_exact_text() => {
+                (true, kind) if *kind == ColumnKind::Json || kind.is_exact_text() || *kind == ColumnKind::Sealed => {
                     format!("{}::text AS {}", quote(column), quote(column))
                 }
                 _ => quote(column),
@@ -203,6 +203,9 @@ fn postgres_type(kind: ColumnKind) -> &'static str {
         ColumnKind::TimeZone => "corvid_time_zone",
         ColumnKind::Currency => "corvid_currency",
         ColumnKind::Locale => "corvid_locale",
+        // Encryption at rest (K2): sealed text, so the schema says the
+        // column holds a secret and a value that is not sealed is refused.
+        ColumnKind::Sealed => "corvid_sealed",
     }
 }
 
@@ -219,6 +222,7 @@ fn postgres_domain_base(kind: ColumnKind) -> Option<&'static str> {
             r#"text COLLATE "C" CHECK (VALUE ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}Z$')"#
         }
         ColumnKind::ZonedTime | ColumnKind::TimeZone | ColumnKind::Currency | ColumnKind::Locale => r#"text COLLATE "C""#,
+        ColumnKind::Sealed => r#"text CHECK (VALUE LIKE 'corvid:v1:%')"#,
         _ => return None,
     })
 }

@@ -962,7 +962,7 @@ impl TypeErrorKind {
                 format!("{boundary} cannot hold a `Secret`{at}: a secret's text never leaves the program")
             }
             Self::SecretTableColumn { column, at } => {
-                format!("table column `{column}` cannot hold a `Secret`{at}: a stored secret could be read back and shown")
+                format!("table column `{column}` cannot hold a `Secret`{at}: a secret is stored only sealed, in a `Secret` or `Option<Secret>` column of a database that declares `encryption: key(secret(\"NAME\"))`")
             }
             Self::ReservedTypeName { name } => {
                 format!("`{name}` is a built-in type, so a program cannot declare its own `{name}`")
@@ -1515,7 +1515,7 @@ impl TypeErrorKind {
             Self::SecretAtBoundary { hint, .. } => Some(hint.clone()),
             Self::ReservedTypeName { name } => Some(format!("give your type another name, such as `{name}Value`")),
             Self::SecretTableColumn { .. } => Some(
-                "never store a secret's text. To check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09)".into(),
+                "to use the value again, give the table's database a data key, `encryption: key(secret(\"BILLING_DATA_KEY\"))`, and declare the column `Secret`; it is stored sealed to its row. To only check a value later, store its hash, `hash_password(value, owasp_2023())` from std/crypto, in a `String` column and check it with `value.verify_password(hash)`".into(),
             ),
             Self::SecretShownToPerson { .. } => Some(
                 "read secrets from the environment with `secret(name)` from std/secrets; never ask a person to type one or show them one".into(),

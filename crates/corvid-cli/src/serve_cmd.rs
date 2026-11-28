@@ -320,6 +320,18 @@ pub(crate) fn cmd_serve(
     )
     .build();
 
+    // Encryption at rest (K3): every data key the program's databases
+    // declare is read now, so a missing key, or one that is not 32 bytes,
+    // refuses to start instead of failing the first request that touches
+    // a `Secret` column. A database imported from another module is read
+    // at its first use, with the same error.
+    for (database, secret) in declared_data_keys(&source) {
+        if let Err(problem) = runtime.data_key(&database, &secret) {
+            eprintln!("error: {} cannot start: {problem}", file.display());
+            return Ok(1);
+        }
+    }
+
     // Connector startup closure, the same one `corvid run` enforces: a
     // program that declares connectors must have a real, executable mode
     // selected for every operation, or it refuses to start. Refusing here
@@ -801,6 +813,23 @@ fn serve_data_dir() -> Result<Option<std::path::PathBuf>, String> {
         }
         _ => Ok(None),
     }
+}
+
+/// Each `database` block in the source that declares `encryption:
+/// key(secret("NAME"))`, as its name and the key's secret name. The
+/// source already compiled, so a parse here surfaces no errors.
+fn declared_data_keys(source: &str) -> Vec<(String, String)> {
+    let Ok(tokens) = corvid_syntax::lex(source) else { return Vec::new() };
+    let (file, _errors) = corvid_syntax::parse_file(&tokens);
+    file.decls
+        .iter()
+        .filter_map(|decl| match decl {
+            corvid_ast::Decl::Database(database) => {
+                database.encryption.as_ref().map(|encryption| (database.name.name.clone(), encryption.secret.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Extract the declared `identity` block from the source, if any. The

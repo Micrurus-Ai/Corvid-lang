@@ -284,6 +284,22 @@ impl<'a> Checker<'a> {
             invalid(self, format!("delivers `{row_name}`, which is not a table; a `live` delivers the rows of a `table` declaration"));
             return;
         }
+        // A live row is sent to the browser, which never receives a
+        // secret (encryption at rest K2; frontend review item 8).
+        let secret_column = self.file.decls.iter().find_map(|decl| match decl {
+            corvid_ast::Decl::Table(t) if t.name().name == row_name => t
+                .declared_fields()
+                .iter()
+                .find(|f| crate::table_columns::is_sealed_column(&self.type_ref_to_type(&f.ty)))
+                .map(|f| f.name.name.clone()),
+            _ => None,
+        });
+        if let Some(column) = secret_column {
+            invalid(self, format!(
+                "delivers `{row_name}`, whose `{column}` is a `Secret`; a live row is sent to the browser, which never receives a secret, so watch a table without one"
+            ));
+            return;
+        }
         let returned = match route.body.stmts.as_slice() {
             [corvid_ast::Stmt::Return { value: Some(value), .. }] => value,
             _ => {

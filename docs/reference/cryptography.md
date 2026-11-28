@@ -248,7 +248,7 @@ Each of these is a compile error that names the place and says what to write ins
 | `Credentials.from_json(text)`, `creds.to_json()` with a `Secret` field | A secret has no JSON form, in a record field too |
 | A route path, query, body or response holding a secret | A route's inputs and response are JSON a client sees |
 | A store field holding a secret | A store keeps its fields as JSON |
-| A table column holding a secret | A stored secret could be read back. To check a value later, store `hash_password(value, owasp_2023())` in a `String` column and check it with `value.verify_password(hash)`; to use the value again it needs an encrypted column, which is not built yet (tracked in B09). Never store the text |
+| A table column holding a secret, in a database without a data key | A secret is stored only sealed. To use the value again, give the database `encryption: key(secret("NAME"))` and declare the column `Secret`: it is sealed with XChaCha20-Poly1305 to its table, column and row, and cannot be filtered, ordered, made unique or sent through a `live` ([encryption at rest](../proposals/encryption-at-rest.md)). To only check a value later, store `hash_password(value, owasp_2023())` in a `String` column and check it with `value.verify_password(hash)`. Never store the text |
 | A prompt parameter or result holding a secret, including a function a model can call | No secret may reach a model, and a model cannot produce one |
 | A connector operation's parameter or result holding a secret | A connector's credential is declared once, as its `auth`, and never travels in its operations |
 | `ask(question, Secret)`, `choose(secrets)` | A person's answer is recorded, and `choose` shows its options |

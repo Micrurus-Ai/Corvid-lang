@@ -1607,6 +1607,20 @@ pub struct DatabaseDecl {
     /// their tables in it with `table Shelf in library:` (B09 P11).
     #[serde(default)]
     pub visibility: Visibility,
+    /// `encryption: key(secret("NAME"))` (encryption at rest K2): the
+    /// database's data key, read from the secret store. A `Secret` column
+    /// is legal only under it, and is stored sealed to its row. `None` =
+    /// nothing is encrypted and a `Secret` column is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<DatabaseEncryption>,
+    pub span: Span,
+}
+
+/// A database's `encryption: key(secret("NAME"))` item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatabaseEncryption {
+    /// The name the data key is read by from the secret store.
+    pub secret: String,
     pub span: Span,
 }
 

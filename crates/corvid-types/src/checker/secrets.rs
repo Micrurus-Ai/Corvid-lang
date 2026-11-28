@@ -176,7 +176,13 @@ impl<'a> Checker<'a> {
                         self.refuse_at(&field.ty, Boundary::StoreField);
                     }
                 }
-                Decl::Table(table) => self.refuse_secret_columns(&table.record.fields),
+                Decl::Table(table) => {
+                    // Encryption at rest (K2): a database with a data key
+                    // stores a `Secret` column sealed to its row.
+                    let sealed = crate::table_ops::table_database(self.file, &table.record.name.name)
+                        .is_some_and(|database| database.encryption.is_some());
+                    self.refuse_secret_columns(&table.record.fields, sealed)
+                }
                 Decl::Prompt(prompt) => self.refuse_in_prompt(&prompt.params, &prompt.return_ty),
                 Decl::Connector(connector) => {
                     for op in &connector.operations {
@@ -248,9 +254,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn refuse_secret_columns(&mut self, fields: &[Field]) {
+    /// A table's `Secret` columns. Under a database with a data key
+    /// (`sealed`), a column that is a `Secret` or an `Option<Secret>` is
+    /// stored sealed and allowed; a secret anywhere else in a column's type
+    /// (inside a record or list, stored as JSON) is still refused.
+    fn refuse_secret_columns(&mut self, fields: &[Field], sealed: bool) {
         for field in fields {
             let Some(resolved) = self.type_refs.get(&field.ty.span()).cloned() else { continue };
+            if sealed && crate::table_columns::is_sealed_column(&resolved) {
+                continue;
+            }
             if let Some(at) = self.secret_reached(&resolved) {
                 self.errors.push(TypeError::new(
                     TypeErrorKind::SecretTableColumn { column: field.name.name.clone(), at },

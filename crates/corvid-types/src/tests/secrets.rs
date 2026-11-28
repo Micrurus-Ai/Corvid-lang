@@ -202,12 +202,11 @@ fn a_table_column_names_the_two_ways_to_keep_a_secret() {
     let (message, hint) = message_and_hint(&error);
     assert_eq!(
         message,
-        "table column `api_key` cannot hold a `Secret`: a stored secret could be read back and shown"
+        "table column `api_key` cannot hold a `Secret`: a secret is stored only sealed, in a `Secret` or `Option<Secret>` column of a database that declares `encryption: key(secret(\"NAME\"))`"
     );
-    assert!(hint.contains("never store a secret's text"), "{hint}");
-    assert!(hint.contains("`hash_password(value, owasp_2023())` from std/crypto"), "{hint}");
+    assert!(hint.contains("encryption: key(secret("), "the sealed way: {hint}");
+    assert!(hint.contains("`hash_password(value, owasp_2023())` from std/crypto"), "the hashed way: {hint}");
     assert!(hint.contains("`value.verify_password(hash)`"), "{hint}");
-    assert!(hint.contains("encrypted column") && hint.contains("B09"), "{hint}");
 }
 
 #[test]

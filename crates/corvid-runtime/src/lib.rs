@@ -78,6 +78,7 @@ pub mod lineage_render;
 pub mod lineage_trace;
 pub mod agent_frames;
 pub mod caller_tokens;
+pub mod data_keys;
 pub mod held_upload;
 pub mod llm;
 pub mod models;

@@ -39,6 +39,11 @@ pub enum ColumnKind {
     /// B09 P8c — `Bytes`, as the bytes themselves: `BLOB` on SQLite,
     /// `bytea` on Postgres. Compared bytewise, with no order.
     Bytes,
+    /// Encryption at rest (K2): a `Secret` in a database with a data key,
+    /// as `corvid:v1:<key id>:<base64url>` sealed to its table, column and
+    /// row. The database holds only ciphertext under a fresh nonce, so the
+    /// column is neither compared nor ordered.
+    Sealed,
 }
 
 impl ColumnKind {
@@ -65,11 +70,12 @@ impl ColumnKind {
             Self::Currency => "CURRENCY TEXT",
             Self::Locale => "LOCALE TEXT",
             Self::Bytes => "BLOB",
+            Self::Sealed => "SEALED TEXT",
         }
     }
 
     /// Every kind, for reading a stored column's declared type back.
-    pub const ALL: [ColumnKind; 13] = [
+    pub const ALL: [ColumnKind; 14] = [
         Self::Integer,
         Self::Real,
         Self::Text,
@@ -83,6 +89,7 @@ impl ColumnKind {
         Self::Currency,
         Self::Locale,
         Self::Bytes,
+        Self::Sealed,
     ];
 
     /// The kind a stored column's declared type names, if Corvid
@@ -117,7 +124,20 @@ impl ColumnKind {
     /// different zones can be the same instant, and `Bytes` only by
     /// equality, as in Corvid.
     pub fn is_ordered(self) -> bool {
-        !matches!(self, Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale | Self::Bytes | Self::Json)
+        !matches!(self, Self::ZonedTime | Self::TimeZone | Self::Currency | Self::Locale | Self::Bytes | Self::Json | Self::Sealed)
+    }
+
+    /// Why the database cannot compare values of this kind, or `None`
+    /// when it can. JSON text compares as text, not as the value, and a
+    /// sealed `Secret` is ciphertext under a fresh nonce, so two equal
+    /// secrets never store the same text. A `where`, a `unique` rule and
+    /// a grouping all read this one rule.
+    pub fn not_comparable(self) -> Option<&'static str> {
+        match self {
+            Self::Json => Some("is stored as JSON"),
+            Self::Sealed => Some("is a `Secret`, stored sealed as ciphertext"),
+            _ => None,
+        }
     }
 
     /// The Corvid type a column of this kind holds, for messages.
@@ -136,6 +156,7 @@ impl ColumnKind {
             Self::Currency => "Currency",
             Self::Locale => "Locale",
             Self::Bytes => "Bytes",
+            Self::Sealed => "Secret",
         }
     }
 }
@@ -169,11 +190,21 @@ pub fn column_kind(ty: &Type) -> (ColumnKind, bool) {
         Type::Currency => (ColumnKind::Currency, false),
         Type::Locale => (ColumnKind::Locale, false),
         Type::Bytes => (ColumnKind::Bytes, false),
-        // A `Secret` is never stored: the checker refuses a `Secret`
-        // column (hash it, or wait for an encrypted column). Named here
-        // so no default arm decides its storage.
-        Type::Secret => (ColumnKind::Json, false),
+        // A `Secret` is stored sealed (K2); the checker allows the column
+        // only in a database that declares a data key.
+        Type::Secret => (ColumnKind::Sealed, false),
         _ => (ColumnKind::Json, false),
+    }
+}
+
+/// Whether a column of type `ty` is stored sealed: a `Secret`, or an
+/// `Option<Secret>` (a nullable sealed column). A secret deeper in a type
+/// would sit inside a JSON column, so it is not.
+pub fn is_sealed_column(ty: &Type) -> bool {
+    match untainted(ty) {
+        Type::Secret => true,
+        Type::Option(inner) => matches!(untainted(inner), Type::Secret),
+        _ => false,
     }
 }
 

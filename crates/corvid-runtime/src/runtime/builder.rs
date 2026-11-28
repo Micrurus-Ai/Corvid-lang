@@ -481,6 +481,7 @@ impl RuntimeBuilder {
             stores,
             usage_ledger: LlmUsageLedger::new(),
             caller_tokens: self.caller_tokens,
+            data_keys: crate::data_keys::DataKeys::default(),
             http,
             http_policy: self.http_policy,
             io,

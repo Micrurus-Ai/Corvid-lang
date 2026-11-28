@@ -110,15 +110,16 @@ impl<'a> Checker<'a> {
     /// Each `unique` line names columns of the table that the database can
     /// compare, once each, and says something the key does not already.
     fn check_unique_rules(&mut self, table: &TableDecl) {
-        use crate::table_columns::{column_kind, ColumnKind};
+        use crate::table_columns::column_kind;
         let mut seen: Vec<Vec<&str>> = Vec::new();
         for rule in &table.unique {
             let mut columns: Vec<&str> = Vec::new();
             for column in rule {
                 let problem = match table.declared_fields().iter().find(|f| f.name.name == column.name) {
                     None => Some(format!("`{}` is not a column of the table", column.name)),
-                    Some(field) if column_kind(&self.type_ref_to_type(&field.ty)).0 == ColumnKind::Json => {
-                        Some(format!("`{}` is stored as JSON, so the database cannot compare it", column.name))
+                    Some(field) if column_kind(&self.type_ref_to_type(&field.ty)).0.not_comparable().is_some() => {
+                        let why = column_kind(&self.type_ref_to_type(&field.ty)).0.not_comparable().unwrap_or_default();
+                        Some(format!("`{}` {why}, so the database cannot compare it", column.name))
                     }
                     Some(_) if columns.contains(&column.name.as_str()) => Some(format!("`{}` is named twice", column.name)),
                     Some(_) => None,
@@ -653,8 +654,11 @@ impl<'a> Checker<'a> {
     /// not a `Float`, whose equality is not exact (`0.1 + 0.2`).
     fn check_grouping_column(&mut self, name: &str, column: &str, ty: &Type, at: Span) {
         use crate::table_columns::{column_kind, ColumnKind};
-        match column_kind(ty).0 {
-            ColumnKind::Json => self.query_error(at, &format!("`{name}` groups by a column the database compares; `{column}` is stored as JSON")),
+        let kind = column_kind(ty).0;
+        if let Some(why) = kind.not_comparable() {
+            return self.query_error(at, &format!("`{name}` groups by a column the database compares; `{column}` {why}"));
+        }
+        match kind {
             ColumnKind::Real => self.query_error(at, &format!("`{name}` cannot group by the `Float` column `{column}`, whose values do not compare exactly")),
             _ => {}
         }
@@ -719,8 +723,8 @@ impl<'a> Checker<'a> {
     fn check_column_is_queryable(&mut self, table: &TableDecl, column: &str, span: Span) {
         let Some(field) = table.record.fields.iter().find(|f| f.name.name == column) else { return };
         let ty = self.type_ref_to_type(&field.ty);
-        if crate::table_columns::column_kind(&ty).0 == crate::table_columns::ColumnKind::Json {
-            self.query_error(span, &format!("column `{column}` is stored as JSON, so the database cannot compare it"));
+        if let Some(why) = crate::table_columns::column_kind(&ty).0.not_comparable() {
+            self.query_error(span, &format!("column `{column}` {why}, so the database cannot compare it"));
         }
     }
 

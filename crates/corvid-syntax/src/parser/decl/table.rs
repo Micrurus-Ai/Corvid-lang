@@ -179,10 +179,21 @@ impl<'a> Parser<'a> {
         let mut location = None;
         let mut tls = None;
         let mut connections = None;
+        let mut encryption = None;
         while !matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
             self.skip_newlines();
             if matches!(self.peek(), TokKind::Dedent | TokKind::Eof) {
                 break;
+            }
+            if self.peek_ident_is("encryption") {
+                match self.parse_database_encryption() {
+                    Ok(item) => encryption = Some(item),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_statement_boundary();
+                    }
+                }
+                continue;
             }
             if let Err(e) = self.parse_database_setting(&mut engine, &mut location, &mut tls, &mut connections) {
                 self.errors.push(e);
@@ -193,7 +204,63 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), TokKind::Dedent) {
             self.bump();
         }
-        Ok(DatabaseDecl { name: Ident::new(name, name_span), engine, location, tls, connections, visibility, span: start.merge(end) })
+        Ok(DatabaseDecl {
+            name: Ident::new(name, name_span),
+            engine,
+            location,
+            tls,
+            connections,
+            visibility,
+            encryption,
+            span: start.merge(end),
+        })
+    }
+
+    /// `encryption: key(secret("NAME"))` (encryption at rest K2). A
+    /// rotation's `previous:` key is K4, so it is refused by name rather
+    /// than read and ignored.
+    fn parse_database_encryption(&mut self) -> Result<corvid_ast::DatabaseEncryption, ParseError> {
+        let start = self.peek_span();
+        self.bump(); // encryption
+        self.expect(TokKind::Colon, "`:` after `encryption`")?;
+        let expected = |got: &TokKind, span| ParseError {
+            kind: ParseErrorKind::UnexpectedToken {
+                got: describe_token(got),
+                expected: "`key(secret(\"NAME\"))`, the secret holding the database's data key".into(),
+            },
+            span,
+        };
+        if !self.peek_ident_is("key") {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // key
+        self.expect(TokKind::LParen, "`(` after `key`")?;
+        if !self.peek_ident_is("secret") {
+            return Err(expected(self.peek(), self.peek_span()));
+        }
+        self.bump(); // secret
+        self.expect(TokKind::LParen, "`(` after `secret`")?;
+        let secret = match self.peek().clone() {
+            TokKind::StringLit(name) if !name.trim().is_empty() => {
+                self.bump();
+                name
+            }
+            other => return Err(expected(&other, self.peek_span())),
+        };
+        self.expect(TokKind::RParen, "`)` after the secret's name")?;
+        if matches!(self.peek(), TokKind::Comma) {
+            return Err(ParseError {
+                kind: ParseErrorKind::UnexpectedToken {
+                    got: "a second argument to `key(...)`".into(),
+                    expected: "one key for now; reading rows under a `previous:` key while rotating is encryption at rest K4, on the roadmap".into(),
+                },
+                span: self.peek_span(),
+            });
+        }
+        self.expect(TokKind::RParen, "`)` after `key(...)`")?;
+        let span = start.merge(self.prev_span());
+        self.expect_newline()?;
+        Ok(corvid_ast::DatabaseEncryption { secret, span })
     }
 
     fn parse_database_setting(
@@ -247,7 +314,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError {
                     kind: ParseErrorKind::UnexpectedToken {
                         got: format!("database setting `{other}`"),
-                        expected: "`engine`, `location`, `tls` or `connections`".into(),
+                        expected: "`engine`, `location`, `tls`, `connections` or `encryption`".into(),
                     },
                     span: setting_span,
                 })

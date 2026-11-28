@@ -339,6 +339,7 @@ type Order:
         r#"database library:
     engine: sqlite
     location: env("LIBRARY_DATABASE")
+    encryption: key(secret("LIBRARY_DATA_KEY"))
 
 table Shelf:
     key shelf: Int

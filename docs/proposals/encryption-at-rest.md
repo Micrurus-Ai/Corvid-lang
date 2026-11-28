@@ -1,5 +1,6 @@
 # Keys and encryption at rest
 
+**Built:** K1, K2 and K3 on 2026-11-27; K4 to K6 are on the roadmap.
 **Status:** proposal, 2026-11-27. It adds an item to the `database` block, which is in the shared grammar reference, so it is item 8 of [the review brief](frontend-review-2026-11-27.md) and is built after one working day without objection.
 **Owner:** backend (Claude Code).
 **Unblocks:** a `Secret` table column (B09), durable sign-in tokens ([user credentials](user-credentials.md) C3), and the key handling Ed25519 signing will reuse ([cryptography](cryptography.md), deferred work).
@@ -50,11 +51,26 @@ table Customer:
 | A cloud key service (KMS) | A billed service and the owner's decision; the `key(...)` form leaves room for `kms("...")` later without changing columns. |
 | Encrypting other columns (`ssn: String encrypted`) now | Useful for personal data, and a later slice. It needs the same query refusal, and a decision on whether such values may be shown. |
 
+### Build plan for K2 and K3 (2026-11-27)
+
+K2 alone would let a program declare `Secret` columns the runtime stores unencrypted, so K2 and K3 ship as one slice. Frontend development agreed (review item 8): keep secret columns out of forms, client schemas and live row projections, and keep public row types usable without the secret.
+
+1. **Grammar:** `encryption: key(secret("NAME"))` in a `database` block, as `DatabaseDecl.encryption`. `previous:` is refused by name until K4.
+2. **Checker:**
+   - A `Secret` column is allowed only in a table whose database declares a key. The existing `SecretTableColumn` error names the item to add.
+   - A `Secret` column is refused as the key, in `unique`, in an index, and in a `where`, `order_by` or aggregate.
+   - A `live` on a table with a `Secret` column is refused, since a live row is sent to a browser.
+3. **Storage:** a new `ColumnKind::Sealed`, stored as `SEALED TEXT` on SQLite and as a `corvid_sealed` text domain on Postgres, so the schema's round trip stays exact. The value is `corvid:v1:<key id>:<base64url>` from `corvid_crypto::DataKey::seal`.
+4. **Where encryption happens:** in the interpreter's table bridge, `corvid-vm/src/interp/tables.rs`. `value_row` seals each `Secret` field with the associated data `table/column/key`, and `row_value` opens it. The runtime and the trace therefore only ever see ciphertext, and a replay opens recorded rows the same way.
+5. **The key:** `Runtime::data_key(database)` reads the named secret once and caches the `DataKey`. A missing key, or one that is not 32 bytes of base64, is a typed error naming the secret. `corvid serve` reads every key its source's databases declare before it binds, so it refuses to start. `corvid run`, and a database imported from another module, read the key at the first row that needs it, with the same error.
+6. **Refusals:** a row sealed under another key id, or one that fails to open (moved to another row or column, or tampered with), is a typed error naming the table, column and key id, never a silent `None`.
+7. **Tests:** sealing and opening on SQLite and Postgres; the stored text is ciphertext; a value copied to another row fails; the trace holds no plaintext; replay with the key reads the rows and replay without it is refused; each checker refusal.
+
 ## Slices
 
 - [x] K1. `corvid-crypto` gains XChaCha20-Poly1305 sealing bound to associated data, with known-answer tests and a test that a ciphertext moved to another row fails. Built 2026-11-27 as `corvid_crypto::DataKey` (`seal`, `open`, `sealed_key_id`, `generate_base64`), checked against draft-irtf-cfrg-xchacha's published vector, with the key's bytes wiped on drop and its `Debug` showing only the key id.
-- [ ] K2. `encryption: key(secret(...))` parsed and checked; a `Secret` column allowed only under it; an encrypted column refused in `where` and `order_by`.
-- [ ] K3. Writes encrypt and reads decrypt on both engines, the trace holds ciphertext, and replay without the key is a typed refusal.
+- [x] K2. `encryption: key(secret(...))` parsed and checked; a `Secret` column allowed only under it; an encrypted column refused in `where` and `order_by`. Built 2026-11-27 with K3, following the plan above. The refusals also cover grouping, `unique` and `live`. One rule, `ColumnKind::not_comparable`, now gives every comparison refusal its reason.
+- [x] K3. Writes encrypt and reads decrypt on both engines, the trace holds ciphertext, and replay without the key is a typed refusal. Built 2026-11-27. Tests: `crates/corvid-driver/tests/tables_sealed_columns.rs`, on SQLite and Postgres, and `corvid-runtime`'s `data_keys` unit test.
 - [ ] K4. `previous:` keys, `corvid migrate rekey`, and `corvid keys new`.
 - [ ] K5. Durable sign-in tokens (user credentials C3) stored under the identity database's key.
 - [ ] K6. Native code, with native tables.
