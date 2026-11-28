@@ -222,3 +222,33 @@ pub unsafe extern "C" fn corvid_string_parse_int(value: CorvidString, payload: *
         }
     }
 }
+
+#[cfg(test)]
+mod wiping_tests {
+    use super::*;
+
+    extern "C" {
+        fn corvid_retain(payload: *const u8);
+    }
+
+    #[test]
+    fn only_a_sole_heap_string_is_wiped() {
+        unsafe {
+            let sole = string_from_str("sk_live_123");
+            assert!(sole.wipe_if_sole_owner());
+            assert!(sole.as_str().bytes().all(|b| b == 0), "the text is zeros");
+            release_string(sole);
+
+            let shared = string_from_str("sk_live_456");
+            corvid_retain(std::mem::transmute::<CorvidString, *const u8>(shared));
+            assert!(!shared.wipe_if_sole_owner(), "another holder still reads it");
+            assert_eq!(shared.as_str(), "sk_live_456");
+            release_string(shared);
+            release_string(shared);
+
+            let immortal = string_from_static_str("sk_live_789");
+            assert!(!immortal.wipe_if_sole_owner(), "an immortal string may be read-only");
+            assert_eq!(immortal.as_str(), "sk_live_789");
+        }
+    }
+}

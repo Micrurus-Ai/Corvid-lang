@@ -258,11 +258,7 @@ Task branches use descriptive names such as `backend/typed-json` and `ai/model-r
 - [ ] A form field bound to a `Secret` as a password input that is masked, never echoed and never prefilled, with password-manager hints: the contract leaves secret fields out today; the frontend binding needs a contract marker agreed with the frontend roadmap.
 - [ ] A `Secret` table column, for a value the program must use again: it needs an encrypted column (B09). Until then the checker refuses it and points at `hash_password(...)` for values that are only checked. Proposed 2026-11-27 as [keys and encryption at rest](proposals/encryption-at-rest.md): a `Secret` column becomes legal when its database declares `encryption: key(secret("..."))`, stored with XChaCha20-Poly1305 bound to its table, column and row. Item 8 of the frontend review brief; slices K1 to K6 after the review window. K1, the crypto primitive, has no grammar and can start now.
 - [x] Zero a secret's memory when the last reference drops: `corvid_crypto::Secret` holds its bytes in an `Arc<[u8]>`, freed but not wiped. Done 2026-11-27: the bytes sit in `Arc<zeroize::Zeroizing<Vec<u8>>>`, overwritten when the last clone drops; a test asserts at compile time that the storage is `ZeroizeOnDrop`.
-- [ ] Wipe the last copies of a secret's text outside `Secret`. Two remain:
-  - the argument values a Rust tool closure is handed, which it owns;
-  - the JSON text native code encodes in a Corvid string to reveal a secret to a tool of the program's own, released like any string.
-
-  Stronger: hand tool implementations a type that wipes on drop, and have the native revealed-argument encoder write into a buffer the runtime clears after the call. Request bodies carry no secret yet (item below).
+- [ ] Wipe the last copy of a secret's text outside `Secret`: the argument values a Rust tool closure is handed, which it owns. Stronger: hand tool implementations a type that wipes on drop. Request bodies carry no secret yet (item below). The JSON text native code encodes to reveal a secret to a tool is wiped since 2026-11-28: `corvid_runtime_call` zeroes each revealed string after parsing it, when compiled code holds its only reference (`CorvidString::wipe_if_sole_owner`, which leaves shared and immortal strings alone).
 - [x] Wipe the runtime's own copies of a secret's text. Done 2026-11-28. Wiped now:
   - `secret(name)`'s text, which the interpreter's `Secret` takes without a copy (`Secret::from_text`) and native decoding wipes;
   - the revealed arguments (`RevealedToolArguments` wipes on drop);

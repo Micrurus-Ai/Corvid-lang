@@ -151,7 +151,16 @@ pub unsafe extern "C" fn corvid_runtime_call(
     let values = parse(args);
     // A tool that takes a secret gets the revealed form; every record of
     // the call holds `values`, as on the interpreter.
+    let revealed_texts = revealed;
     let revealed = (!revealed.is_null()).then(|| crate::RevealedToolArguments::new(&values, parse(revealed)));
+    // Compiled code built the revealed texts for this call alone and
+    // releases them after it: wipe them now that they are parsed, so the
+    // secret does not linger in the freed strings.
+    if !revealed_texts.is_null() {
+        for index in 0..arg_count.max(0) as usize {
+            unsafe { (*revealed_texts.add(index)).wipe_if_sole_owner() };
+        }
+    }
     let state = crate::ffi_bridge::bridge();
     let runtime = state.corvid_runtime();
     let call_name = name.clone();

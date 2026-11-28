@@ -234,7 +234,7 @@ A secret's memory is wiped. A `Secret` holds its bytes in a buffer that is overw
 - the password `hash_password` hashed, once it is hashed;
 - the trace's copy of a result, before `<redacted>` replaces it.
 
-Two copies are not wiped yet: the arguments a tool's own implementation was handed, which are the implementation's, and the text native code encodes to pass a secret to a tool of its own (see [Not yet](#not-yet)).
+A compiled program wipes the text it builds to hand a secret to a tool, once the runtime has read it. One copy is not wiped yet: the arguments a tool's own implementation was handed, which are the implementation's (see [Not yet](#not-yet)).
 
 ### What the compiler refuses
 
@@ -293,7 +293,7 @@ The application contract publishes no secret. A public type's field that holds a
 
 ### Not yet
 
-Two copies of a secret's text are not wiped yet. One is the arguments a tool's implementation was handed, which are the implementation's to wipe. The other is the text native code encodes to hand a secret to a tool of the program's own, which is released like any string; it will be wiped when native code builds that text in a buffer it clears. Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
+One copy of a secret's text is not wiped yet: the arguments a tool's implementation was handed, which are the implementation's to wipe. Secrets come from the environment (`secret(name)`) and from `random_token(bytes)`; a request body cannot carry one yet, so a login form's password cannot reach an agent through a route (see [Passwords](#passwords)). A tool's own logging of the text it receives is outside what Corvid can see. A key made by `decode_base64_after` cannot be passed to a tool.
 
 ## Random tokens
 

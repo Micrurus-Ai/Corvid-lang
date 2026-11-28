@@ -2,6 +2,25 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native code's revealed secret text is wiped
+
+To hand a tool a secret, compiled code encodes the argument's revealed
+form as JSON in a Corvid string, passes it to `corvid_runtime_call`, and
+releases it after the call. The freed string still held the text. The
+runtime now zeroes each revealed string once it has parsed it, through
+`CorvidString::wipe_if_sole_owner`. That writes only when the caller
+holds the string's one reference and it is not immortal:
+- a shared string is still being read;
+- a literal may sit in read-only memory.
+
+The revealed text is built fresh for each call, so it is always the
+sole reference.
+
+Proof: a runtime test shows a sole string zeroed, a retained one and an
+immortal one left as they were. Native `hash_password`, which reveals
+its password through this path, still verifies against the hash on
+both tiers.
+
 ### B11-1 to B11-3: an assistant acts for its person, within their authority
 
 Frontend development approved the grammar on 2026-11-27 (review item 2).

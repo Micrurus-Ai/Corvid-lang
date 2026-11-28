@@ -339,6 +339,34 @@ impl CorvidString {
     pub(crate) fn descriptor_key(self) -> usize {
         self.descriptor as usize
     }
+
+    /// Overwrite this string's bytes with zeros when it is a heap string
+    /// whose only reference the caller holds, for text that carried a
+    /// secret and is about to be released. A shared string or an immortal
+    /// one (a literal, possibly in read-only memory) is left alone, and
+    /// `false` returned.
+    ///
+    /// # Safety
+    /// `descriptor` must point at a live Corvid string, laid out as the
+    /// comment above this type describes, that nothing reads afterwards.
+    pub(crate) unsafe fn wipe_if_sole_owner(&self) -> bool {
+        const RC_MASK: i64 = 0x1FFF_FFFF_FFFF_FFFF;
+        if self.descriptor.is_null() {
+            return false;
+        }
+        unsafe {
+            let refcount_word = *((self.descriptor as *const u8).sub(16) as *const i64);
+            if refcount_word == i64::MIN || (refcount_word & RC_MASK) != 1 {
+                return false;
+            }
+            let desc = &*self.descriptor;
+            if desc.bytes_ptr.is_null() || desc.length <= 0 {
+                return false;
+            }
+            std::ptr::write_bytes(desc.bytes_ptr as *mut u8, 0, desc.length as usize);
+        }
+        true
+    }
 }
 
 pub type CorvidGroundedHandle = u64;
