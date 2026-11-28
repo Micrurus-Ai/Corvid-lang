@@ -1,0 +1,12 @@
+# cargo-nextest runs test binaries in parallel. A few tests share a
+# resource beyond their own temporary directory, so they run one at a time.
+
+[test-groups]
+# The server-build tests run an inner `cargo build` of a generated server
+# wrapper, which uses the caller's CARGO_TARGET_DIR. Two at once can
+# replace each other's wrapper binary there before it runs.
+server-build = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(build_server)'
+test-group = 'server-build'
