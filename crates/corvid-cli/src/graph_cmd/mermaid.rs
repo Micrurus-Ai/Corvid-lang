@@ -13,15 +13,24 @@ use corvid_types::{CostNodeKind, CostTreeNode};
 
 pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
     let mut chart = Chart { lines: vec!["flowchart TD".to_string()], next: 0, dangerous: Vec::new() };
+    let mut starts = std::collections::HashMap::new();
     for entry in &graph.entries {
         let mut title = entry_title(graph, &entry.tree);
         if let Some(surface) = graph.actions.get(&entry.tree.name) {
             title = format!("{title}<br/>{}", surface_line(&entry.tree.name, surface, place));
         }
-        chart.root(&title, &entry.tree, entry.bounded, place);
+        let start = chart.root(&title, &entry.tree, entry.bounded, place);
+        starts.insert(entry.tree.name.as_str(), start);
+    }
+    for schedule in &graph.schedules {
+        let title = format!("schedule {} {}", schedule.cron, schedule.zone);
+        let id = chart.node(&title, "no caller", place.at(schedule.span), Shape::Stadium);
+        if let Some(start) = starts.get(schedule.runs.as_str()) {
+            chart.lines.push(format!("  {id} --> {start}"));
+        }
     }
     for route in &graph.routes {
-        chart.root(&route_title(route), &route.estimate.tree, route.estimate.bounded, place);
+        let _ = chart.root(&route_title(route), &route.estimate.tree, route.estimate.bounded, place);
     }
     if !graph.never_reached.is_empty() {
         chart.lines.push("  subgraph never_reached [\"Never reached\"]".to_string());
@@ -80,14 +89,15 @@ impl Chart {
         id
     }
 
-    fn root(&mut self, title: &str, tree: &CostTreeNode, bounded: bool, place: &Place<'_>) {
+    fn root(&mut self, title: &str, tree: &CostTreeNode, bounded: bool, place: &Place<'_>) -> String {
         let worst = if bounded && !has_unbounded_loop(tree) {
             format!("worst case {}", detail(tree))
         } else {
             "no bound: a loop has none".to_string()
         };
         let start = self.node(title, &worst, place.at(tree.span), Shape::Stadium);
-        self.sequence(&steps(&tree.children), vec![start], place);
+        self.sequence(&steps(&tree.children), vec![start.clone()], place);
+        start
     }
 
     fn edges(&mut self, from: &[String], to: &str) {

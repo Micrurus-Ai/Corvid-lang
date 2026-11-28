@@ -46,7 +46,7 @@ Never reached: tool archive_order (src/main.cor:41)
 
 - [x] G1 (2026-11-28). The cost tree records approvals and each node's source span, and marks `dangerous` tools; `corvid graph` prints the text form for one agent or every entry point, with the never-reached list.
 - [x] G2 (2026-11-28). `--format mermaid` and `--format json`: the JSON is `GraphDocument`, a public serde type in `corvid-driver` that B22 serializes too, with a stable id, location, kind, effects, numeric worst case and an approval's guarded tool per step (fields asked for by B22's owner). Documented in [the reference](../reference/agent-graph.md), with the invention's public proof.
-- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON (G3a and G3b shipped 2026-11-28: routes and live declarations as roots, an action's route, policy, assistant offer and forms, and table operations as steps; see below). In the order B22's `callers_of` and `impact_of_change` need them: (1) routes and live declarations as roots (method and path, the handler's steps under them), and an action's routes and forms; (2) an action's assistant exposure (the `assistants:` mode and description), so who can call it includes agents; (3) table operations as steps (table and operation); then schedules; and the graph spans a project's files.
+- [ ] G3. The dev console and B22's compiler-over-MCP read the JSON (G3a, G3b and G3c shipped 2026-11-28: routes and live declarations as roots, an action's route, policy, assistant offer and forms, table operations as steps, and schedules; see below; what remains is the dev console reading the document, B22 reading it on Desktop's side, and a project's files). In the order B22's `callers_of` and `impact_of_change` need them: (1) routes and live declarations as roots (method and path, the handler's steps under them), and an action's routes and forms; (2) an action's assistant exposure (the `assistants:` mode and description), so who can call it includes agents; (3) table operations as steps (table and operation); then schedules; and the graph spans a project's files.
 
 ## G3a: routes, live declarations, and who can call an action
 
@@ -82,6 +82,10 @@ An impact query that stops at the last tool never reaches persistence, so a chan
 - A write is `get`, `insert`, `save` or `delete`. A query chain (`Card.where(...).order_by(...).take(10)`) is one step whose operation is `query`, or the aggregate that ends it (`count`, `sum`, `min`, `max`, `count_by`, `sum_by`), because the chain runs as one statement.
 - The step id names the table and operation (`board_app:live /boards/{board}/cards/Card.query`), so it survives an unrelated edit as other ids do.
 - **Rejected:** one step per query stage. The stages are one statement to the database, and a reader asking "what touches `Card`" wants one answer per statement.
+
+## G3c: schedules as roots
+
+A schedule is the last way a program starts work without a caller, so `callers_of` an agent must include it. A schedule's target is an agent, already an entry, so the document lists schedules beside it rather than drawing the agent twice: `"schedules": [{"id": "schedule:daily_brief", "cron": "0 8 * * *", "zone": "America/New_York", "runs": "daily_brief", "location": {...}}]`. The id is the agent it runs, with `#2` for a second schedule of the same agent. Text prints `schedule 0 8 * * * America/New_York -> daily_brief`; Mermaid draws the schedule as a node with an edge to the agent's entry.
 
 ## Not in scope
 

@@ -7,8 +7,8 @@
 mod document;
 
 pub use document::{
-    ActionCall, ActionUse, AssistantOffer, GraphDocument, GraphEntry, GraphRoute, GraphStep, Location, NeverReached,
-    Requires, StepKind, AGENT_GRAPH_SCHEMA,
+    ActionCall, ActionUse, AssistantOffer, GraphDocument, GraphEntry, GraphRoute, GraphSchedule, GraphStep, Location,
+    NeverReached, Requires, StepKind, AGENT_GRAPH_SCHEMA,
 };
 
 use crate::pipeline::typecheck_driver_file;
@@ -35,6 +35,9 @@ pub struct AgentGraph {
     /// Each route and `live` declaration, in source order, rooted at its
     /// handler. Empty when one agent is drawn.
     pub routes: Vec<RouteGraph>,
+    /// Each `schedule`, in source order: `(id, cron, zone, the agent it
+    /// runs, where)`. Empty when one agent is drawn.
+    pub schedules: Vec<ScheduleRoot>,
     /// How each action is called from outside the program, by name.
     pub actions: BTreeMap<String, ActionSurface>,
     /// What each callable the trees can name is, by the name the tree
@@ -59,6 +62,17 @@ pub struct RouteGraph {
     /// `None` for a public route.
     pub policy: Option<corvid_ast::RoutePolicy>,
     pub estimate: CostEstimate,
+}
+
+/// A `schedule`: work the program starts with no caller.
+#[derive(Debug, Clone)]
+pub struct ScheduleRoot {
+    /// `schedule:<agent>`, with `#2` for a second schedule of one agent.
+    pub id: String,
+    pub cron: String,
+    pub zone: String,
+    pub runs: String,
+    pub span: Span,
 }
 
 /// How outside callers reach an action.
@@ -214,13 +228,40 @@ pub fn agent_graph(
         }
     }
 
-    let (entries, routes) = match agent {
-        Some(name) => {
-            (vec![estimate(name).ok_or_else(|| AgentGraphError::NoSuchAgent(name.to_string()))?], Vec::new())
-        }
-        None => (all_entries, all_routes),
+    let mut per_agent: BTreeMap<&str, usize> = BTreeMap::new();
+    let all_schedules: Vec<ScheduleRoot> = file
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Schedule(schedule) => Some(schedule),
+            _ => None,
+        })
+        .map(|schedule| {
+            let count = per_agent.entry(schedule.target.name.as_str()).or_insert(0);
+            *count += 1;
+            let id = match *count {
+                1 => format!("schedule:{}", schedule.target.name),
+                n => format!("schedule:{}#{n}", schedule.target.name),
+            };
+            ScheduleRoot {
+                id,
+                cron: schedule.cron.clone(),
+                zone: schedule.zone.clone(),
+                runs: schedule.target.name.clone(),
+                span: schedule.span,
+            }
+        })
+        .collect();
+
+    let (entries, routes, schedules) = match agent {
+        Some(name) => (
+            vec![estimate(name).ok_or_else(|| AgentGraphError::NoSuchAgent(name.to_string()))?],
+            Vec::new(),
+            Vec::new(),
+        ),
+        None => (all_entries, all_routes, all_schedules),
     };
-    Ok(AgentGraph { entries, routes, actions, declared, never_reached })
+    Ok(AgentGraph { entries, routes, schedules, actions, declared, never_reached })
 }
 
 /// What every callable a tree can name is: tools, connector operations,

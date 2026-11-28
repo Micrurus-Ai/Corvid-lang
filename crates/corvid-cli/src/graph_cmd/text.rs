@@ -15,6 +15,15 @@ pub(super) fn render(graph: &AgentGraph, place: &Place<'_>) -> String {
             out.push_str(&format!("   {}\n", surface_line(&entry.tree.name, surface, place)));
         }
     }
+    for schedule in &graph.schedules {
+        out.push_str(&format!(
+            "\nschedule {} {} -> {} ({})\n",
+            schedule.cron,
+            schedule.zone,
+            schedule.runs,
+            place.at(schedule.span)
+        ));
+    }
     for route in &graph.routes {
         out.push('\n');
         render_root(&route_title(route), &route.estimate.tree, route.estimate.bounded, place, &mut out);

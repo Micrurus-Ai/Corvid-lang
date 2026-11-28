@@ -2,6 +2,23 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Schedules are roots of the agent graph (B47 G3c)
+
+A schedule starts work with no caller, so `callers_of` an agent must
+include it. Its target is an agent that is already an entry. The
+document therefore lists `schedules` beside the entries, each with `id`
+`schedule:<agent>` (`#2` for a second schedule of the same agent), its
+`cron`, its `zone`, the agent it `runs` and its location, and does not
+draw the agent twice. Text prints one line per schedule; Mermaid draws
+an edge from the schedule to the agent.
+
+That finishes the three roots Desktop asked for in B22's order: routes,
+table operations, schedules. What remains of G3 is the dev console
+reading the document and a project's files.
+
+Proof: a driver test checks two schedules of one agent, their ids,
+fields and line, and that the agent is drawn once.
+
 ### Table operations are steps of the agent graph (B47 G3b)
 
 An impact query that stopped at the last tool never reached persistence,

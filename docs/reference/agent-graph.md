@@ -134,6 +134,15 @@ A **route** has these fields:
 
 An agent a route calls is drawn under the route, not as an entry of its own, unless it is public or an action.
 
+A **schedule** is work the program starts with no caller. The agent it runs is an entry, drawn once there, so `schedules` names it rather than drawing it again. Text prints `schedule 0 8 * * * America/New_York -> daily_brief (brief.cor:10)`, and Mermaid draws the schedule with an edge to the agent.
+
+| Field | Meaning |
+| --- | --- |
+| `id` | `schedule:<agent>`, with `#2` for a second schedule of the same agent. |
+| `cron`, `zone` | As declared; the cron is read in the IANA time zone `zone`. |
+| `runs` | The entry it runs. |
+| `location` | Where the schedule is declared. |
+
 An **action** entry also has `action`:
 
 | Field | Meaning |
@@ -147,4 +156,4 @@ An **action** entry also has `action`:
 
 - A run's actual path. `corvid trace lineage` draws that.
 - Editing the graph. The code is the graph.
-- Several files at once. The graph draws the agents and routes of one file. Schedules are not yet roots; they come next, then a project's files.
+- Several files at once. The graph draws the agents and routes of one file. A project's other files come next.

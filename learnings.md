@@ -1,5 +1,7 @@
 # Corvid — learnings
 
+`corvid graph` lists each `schedule` with its cron, time zone and the agent it runs, so the graph shows every way work starts: an action, a route, a `live` declaration, a schedule, or a public agent.
+
 `corvid graph` now shows each table operation as a step, such as `table Card.insert` or `table Card.query` for a whole `where(...).order_by(...)` chain. You can see which actions and routes read or write each table. In JSON the step carries `table` and `operation`.
 
 `corvid graph` now draws each route and `live` declaration with the steps its handler takes and who may call it. Each action shows its `POST /actions/<name>` route, its `requires` policy, whether it is offered to assistants, and the `form_for` and `button_for` calls that use it. A tool called only from a route is no longer listed under "Never reached".

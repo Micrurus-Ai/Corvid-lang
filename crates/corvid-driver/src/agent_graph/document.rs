@@ -23,6 +23,9 @@ pub struct GraphDocument {
     /// Each route and `live` declaration, rooted at its handler (G3a).
     #[serde(default)]
     pub routes: Vec<GraphRoute>,
+    /// Each `schedule`, naming the entry it runs (G3c).
+    #[serde(default)]
+    pub schedules: Vec<GraphSchedule>,
     pub never_reached: Vec<NeverReached>,
 }
 
@@ -45,6 +48,20 @@ pub struct GraphRoute {
     /// a loop has no bound.
     pub worst_case: Option<BTreeMap<String, f64>>,
     pub steps: Vec<GraphStep>,
+}
+
+/// A `schedule`: work the program starts with no caller. The agent it
+/// runs is an entry, drawn there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphSchedule {
+    /// `schedule:<agent>`, with `#2` for a second schedule of one agent.
+    pub id: String,
+    pub cron: String,
+    /// The IANA time zone the cron is read in.
+    pub zone: String,
+    /// The entry it runs.
+    pub runs: String,
+    pub location: Location,
 }
 
 /// A `requires` policy: every listed role and permission is needed.
@@ -257,7 +274,25 @@ impl GraphDocument {
             .iter()
             .map(|(kind, name, span)| NeverReached { kind: *kind, name: name.clone(), location: build.location(*span) })
             .collect();
-        GraphDocument { schema: AGENT_GRAPH_SCHEMA.to_string(), file: file.to_string(), entries, routes, never_reached }
+        let schedules = graph
+            .schedules
+            .iter()
+            .map(|s| GraphSchedule {
+                id: s.id.clone(),
+                cron: s.cron.clone(),
+                zone: s.zone.clone(),
+                runs: s.runs.clone(),
+                location: build.location(s.span),
+            })
+            .collect();
+        GraphDocument {
+            schema: AGENT_GRAPH_SCHEMA.to_string(),
+            file: file.to_string(),
+            entries,
+            routes,
+            schedules,
+            never_reached,
+        }
     }
 }
 

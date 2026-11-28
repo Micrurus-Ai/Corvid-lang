@@ -839,7 +839,7 @@ Spec: [agent graph reference](./agent-graph.md)
 Tour: `corvid tour --topic agent-graph`
 Roadmap: B47 in [backend-ai-roadmap.md](../backend-ai-roadmap.md)
 Proof: [driver tests](../../crates/corvid-driver/tests/agent_graph.rs) + [command tests](../../crates/corvid-cli/tests/graph_cmd.rs)
-Non-scope: a run's actual path (`corvid trace lineage`); one file; schedules are not yet roots.
+Non-scope: a run's actual path (`corvid trace lineage`); one file at a time.
 
 ### The Application Surface
 

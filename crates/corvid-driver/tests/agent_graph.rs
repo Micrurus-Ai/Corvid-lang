@@ -341,3 +341,28 @@ fn a_table_operation_is_one_step_naming_its_table_and_operation() {
     assert_eq!(live.steps.len(), 1);
     assert_eq!(live.steps[0].id, "board_app:live /boards/{board}/cards/Card.query");
 }
+
+#[test]
+fn a_schedule_is_a_root_naming_the_entry_it_runs() {
+    use corvid_driver::agent_graph::GraphDocument;
+    let source = r#"effect email:
+    cost: $0.05
+
+tool send_brief(text: String) -> Int uses email
+
+public @replayable
+agent daily_brief() -> Int uses email:
+    return send_brief("ok")
+
+schedule "0 8 * * *" zone "America/New_York" -> daily_brief() uses email
+schedule "0 18 * * *" zone "Europe/London" -> daily_brief() uses email
+"#;
+    let doc = GraphDocument::new(&graph(source, None), "brief.cor", source);
+    let ids: Vec<_> = doc.schedules.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["schedule:daily_brief", "schedule:daily_brief#2"]);
+    let first = &doc.schedules[0];
+    assert_eq!((first.cron.as_str(), first.zone.as_str(), first.runs.as_str()), ("0 8 * * *", "America/New_York", "daily_brief"));
+    assert_eq!(first.location.line, line_of(source, "schedule \"0 8"));
+    assert_eq!(doc.entries.len(), 1, "the agent it runs is drawn once, as an entry");
+    assert_eq!(doc.entries[0].name, "daily_brief");
+}
