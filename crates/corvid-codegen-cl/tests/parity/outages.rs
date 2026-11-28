@@ -160,28 +160,26 @@ agent main() -> String:
 }
 
 #[test]
-fn a_try_that_reaches_a_failing_call_in_a_match_guard_is_refused_by_name() {
-    let src = format!(
-        "{TOOLS}{}",
+fn an_outage_in_a_match_guard_unwinds_before_any_later_arm_runs() {
+    // `pick`'s guard fails for a name; the later arms would call
+    // `greet_string` and return 9, so a native `match` that went on past
+    // the failed guard would print something else.
+    let out = assert_parity(
         r#"
 agent pick(name: Option<String>) -> Int:
     return match name:
         Some(n) if echo_string(n) > 0 -> 1
+        Some(n) if greet_string(n).length() > 0 -> 9
         _ -> 0
 
-agent main() -> Int:
-    return try pick(Some("x")) else 3
-"#
+agent main() -> String:
+    held = "held"
+    a = try pick(Some("x")) else 2
+    b = try pick(None) else 3
+    return held + " " + a.to_string() + " " + b.to_string()
+"#,
     );
-    let ir = ir_of(&src);
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let error = build_native_to_disk(&ir, "corvid_parity_test", &tmp.path().join("prog"), &[test_tools_lib_path().as_path()])
-        .expect_err("native code refuses this try");
-    let message = error.to_string();
-    assert!(
-        message.contains("runs on the interpreter") && message.contains("`pick`") && message.contains("guard"),
-        "{message}"
-    );
+    assert_eq!(out, "held 2 0");
 }
 
 #[test]

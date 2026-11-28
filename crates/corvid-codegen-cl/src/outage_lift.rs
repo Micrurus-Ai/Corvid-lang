@@ -12,11 +12,13 @@
 //! expansion pass marks it checked and tests the slot right after the
 //! `match`.
 //!
-//! Only arms in positions the expansion pass hoists from are lifted;
-//! anything else is refused by the outage plan, as before. A guard is
-//! never lifted: an outage in a guard would read as `false` and the
-//! `match` would go on to try other arms before the test, so a `try` that
-//! can reach one stays on the interpreter.
+//! A guard that can fail is lifted the same way, into an agent returning
+//! `Bool`. An outage there leaves the guard `false`, so the expansion
+//! guards every later arm with "no outage is pending" and adds a last arm
+//! that yields the unwind value, and no later guard or body runs before
+//! the test after the `match`. Only `match` expressions in positions the
+//! expansion pass hoists from are lifted; anything else is refused by the
+//! outage plan, as before.
 
 use crate::outage_plan::OutagePlan;
 use corvid_ir::{IrAgent, IrBlock, IrCallKind, IrExpr, IrExprKind, IrFile, IrParam, IrPattern, IrStmt};
@@ -119,6 +121,11 @@ impl Lifter<'_> {
             Match { scrutinee, arms } => {
                 self.expr(scrutinee, owner);
                 for arm in arms {
+                    if let Some(guard) = &mut arm.guard {
+                        if self.plan.can_fail(guard) && !self.is_checkable_call(guard) {
+                            self.lift(guard, owner);
+                        }
+                    }
                     if self.plan.can_fail(&arm.body) && !self.is_checkable_call(&arm.body) {
                         self.lift(&mut arm.body, owner);
                     }

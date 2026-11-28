@@ -137,21 +137,59 @@ pub(super) fn hoist_checked_call(expr: &mut IrExpr, cx: &Cx, next: &mut u32, out
     *expr = local(id, "__corvid_outcome", ty, span);
 }
 
-/// Mark each `match` arm whose whole body is a call that can fail as
-/// checked (failing arms were lifted into such calls by `outage_lift`),
+/// Mark each `match` arm body or guard that is a call that can fail as
+/// checked (failing ones were lifted into such calls by `outage_lift`),
 /// returning whether any was. The `match` is then tested after it.
-pub(super) fn check_failing_arms(arms: &mut [corvid_ir::IrMatchArm], cx: &Cx) -> bool {
+///
+/// An outage in a guard leaves it `false`, and the `match` would go on to
+/// later arms. So every arm after the first failing guard is guarded by
+/// "no outage is pending" as well, and a last arm yields the unwind
+/// value: once a guard fails, no later guard or body runs.
+pub(super) fn check_failing_arms(arms: &mut Vec<corvid_ir::IrMatchArm>, ty: &Type, cx: &Cx) -> bool {
+    let fails = |expr: &IrExpr| matches!(&expr.kind, IrExprKind::Call { kind, .. } if cx.outages.call_can_fail(kind));
+    let checked = |expr: &mut IrExpr| {
+        let span = expr.span;
+        let ty = expr.ty.clone();
+        let call = std::mem::replace(expr, literal(IrLiteral::Nothing, Type::Nothing, span));
+        *expr = IrExpr { kind: IrExprKind::Outage(IrOutage::Checked(Box::new(call))), ty, span };
+    };
     let mut any = false;
-    for arm in arms {
-        if let IrExprKind::Call { kind, .. } = &arm.body.kind {
-            if cx.outages.call_can_fail(kind) {
-                let span = arm.body.span;
-                let ty = arm.body.ty.clone();
-                let call = std::mem::replace(&mut arm.body, literal(IrLiteral::Nothing, Type::Nothing, span));
-                arm.body = IrExpr { kind: IrExprKind::Outage(IrOutage::Checked(Box::new(call))), ty, span };
+    let mut first_failing_guard = None;
+    for (index, arm) in arms.iter_mut().enumerate() {
+        if let Some(guard) = &mut arm.guard {
+            if fails(guard) {
+                checked(guard);
                 any = true;
+                first_failing_guard.get_or_insert(index);
             }
         }
+        if fails(&arm.body) {
+            checked(&mut arm.body);
+            any = true;
+        }
+    }
+    if let Some(first) = first_failing_guard {
+        let span = arms[first].span;
+        let no_outage = || IrExpr {
+            kind: IrExprKind::UnOp {
+                op: corvid_ast::UnaryOp::Not,
+                operand: Box::new(outage(IrOutage::Pending, Type::Bool, span)),
+            },
+            ty: Type::Bool,
+            span,
+        };
+        for arm in arms.iter_mut().skip(first + 1) {
+            arm.guard = Some(match arm.guard.take() {
+                Some(guard) => binop(BinaryOp::And, no_outage(), guard, Type::Bool, span),
+                None => no_outage(),
+            });
+        }
+        arms.push(corvid_ir::IrMatchArm {
+            pattern: corvid_ir::IrPattern::Wildcard,
+            guard: None,
+            body: outage(IrOutage::Unwind, ty.clone(), span),
+            span,
+        });
     }
     any
 }

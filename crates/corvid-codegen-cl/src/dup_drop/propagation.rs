@@ -91,7 +91,7 @@ pub(super) fn expand_expr(expr: &mut IrExpr, cx: &Cx, next: &mut u32, output: &m
         }
         Match { scrutinee, arms } => {
             expand_expr(scrutinee, cx, next, output);
-            if super::outage::check_failing_arms(arms, cx) {
+            if super::outage::check_failing_arms(arms, &expr.ty, cx) {
                 super::outage::hoist_checked_match(expr, cx, next, output);
             }
         }

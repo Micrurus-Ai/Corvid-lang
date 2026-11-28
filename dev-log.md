@@ -2,6 +2,33 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### Native `try` catches outages inside `match` guards
+
+A guard that can fail is now lifted into an agent returning `Bool`, as
+an arm is, and its call is checked after the `match`. The catch was
+that an outage leaves the guard `false`, and the `match` would go on to
+try later arms, whose guards and bodies could call tools, before the
+test saw it.
+
+So the expansion guards every arm after the first failing guard with
+`not <outage pending>`, joined with `and` to any guard it had, and adds a
+last arm `_ -> <unwind value>`. Once a guard fails, no later guard or
+body runs; the last arm yields zero bits, and the test after the `match`
+unwinds. That is the interpreter's behavior: there, the guard's error
+leaves the `match` at once.
+
+Native `match` lowering now accepts, as operands:
+- `and` and `or` on `Bool`;
+- the pending test;
+- the unwind value.
+
+Proof: a parity test under the leak detector, where a later arm would
+call a tool and return 9 if the `match` went on, gives the fallback on
+both tiers. `outage_expansion.rs` checks the lifted guard, its `Bool`
+return, and the arm shape (failing guard, guarded `_`, unwind arm). The
+tier picker test now expects a `try` over a failing guard to run
+natively.
+
 ### A Rust tool can take a secret as a `Secret`
 
 The last copy of a secret's text was the argument a tool's

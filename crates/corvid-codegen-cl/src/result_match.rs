@@ -49,8 +49,16 @@ fn operand_supported(expr: &IrExpr) -> bool {
             args,
             ..
         } => args.iter().all(operand_supported),
-        // A call the expansion marked checked means exactly that call.
+        // A call the expansion marked checked means exactly that call; the
+        // pending test, `not` and `and` on it, and the unwind value are
+        // what the expansion adds around a guard that can fail.
         IrExprKind::Outage(corvid_ir::IrOutage::Checked(call)) => operand_supported(call),
+        IrExprKind::Outage(corvid_ir::IrOutage::Pending | corvid_ir::IrOutage::Unwind) => true,
+        IrExprKind::BinOp { op: corvid_ast::BinaryOp::And | corvid_ast::BinaryOp::Or, left, right }
+            if left.ty == Type::Bool && right.ty == Type::Bool =>
+        {
+            operand_supported(left) && operand_supported(right)
+        }
         _ => false,
     }
 }

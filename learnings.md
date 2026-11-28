@@ -8511,8 +8511,8 @@ body runs again first. The same holds for a prompt whose model call fails
 or whose reply never fits its type. Before, a compiled program stopped at
 the failing call. A program without such a `try` behaves exactly as
 before. A `try` that carries a `timeout`, or reaches a failing call
-inside a `match` guard or a lambda, still runs on the interpreter, and
-`corvid build` says which; `match` arms are caught natively.
+inside a lambda, still runs on the interpreter, and `corvid build` says
+which; `match` arms and guards are caught natively.
 
 
 ### A form that calls an action

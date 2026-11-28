@@ -37,7 +37,7 @@ agent main() -> String:
 }
 
 #[test]
-fn a_try_that_reaches_a_failing_call_in_a_match_guard_names_the_agent() {
+fn a_try_over_a_failing_guard_runs_natively() {
     let src = r#"
 prompt summarize(text: String) -> String:
     "Summarize {text}"
@@ -50,8 +50,7 @@ agent pick(text: Option<String>) -> String:
 agent main() -> String:
     return try pick(Some("notes")) else "no summary"
 "#;
-    let reason = ability(src).expect_err("a guard cannot unwind yet");
-    assert!(reason.contains("runs on the interpreter") && reason.contains("`pick`"), "{reason}");
+    assert_eq!(ability(src), Ok(()));
 }
 
 #[test]
