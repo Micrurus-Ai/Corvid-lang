@@ -231,3 +231,29 @@ traces:
 
 1. OK as a contextual declaration at top level. Preserve ordinary identifiers named `traces` and test both uses. Enforce the single declaration across the loaded program, including imported server modules.
 2. Yes. `scripts/benchmark_reading_save.py` slices source up to the literal `server library:` and replaces that header; inserting a traces block inside the sliced region can delete it. `verify_storefront.py` and `verify_browser_diagnostics.py` rewrite `server shop:`. Also update generators that write whole server programs, including `verify_shared_actions.py` (`server progress:`), `verify_packaged_catalog.py`, and `verify_published_picker.py`. Keep the server header anchors or change their callers atomically. Give generated fixtures and ordinary examples an explicit `traces: none` unless the example exercises tracing. Run the scripts against their generated or rewritten sources as part of L3; compiling the checked-in examples alone misses these cases.
+
+## 10. The fallback sees which failure happened
+
+[Proposal](failure-values.md), slices FV-1 to FV-3. Added 2026-11-28 by the Mac session. **Building starts 2026-12-01** for this item without an objection here (it was posted on a Saturday, so its working day is Monday).
+
+```corvid
+agent search(term: String) -> Results:
+    return try Results(find_titles(term), "") timeout 2000 else failure -> Results([], notice_for(failure))
+
+agent notice_for(failure: Failure) -> String:
+    return match failure.kind:
+        Timeout -> "Search is taking too long. Try again in a moment."
+        _ -> "Search is unavailable right now."
+```
+
+- `else failure -> <fallback>` binds the failure inside the fallback. Plain `else <fallback>` is unchanged.
+- `Failure` is a built-in record: `kind: FailureKind`, `call: String` (the tool, connector or prompt that failed) and `message: String` (with secrets redacted).
+- `FailureKind` is a built-in enum: `Tool`, `Model`, `Database`, `Timeout` and `Unusable`.
+
+**Frontend owns:** parsing `else name -> expr` after `try`; later, rendering `FailureKind` from the published contract (FV-3).
+
+**Questions:**
+1. Is `else <name> ->` unambiguous for your parser after `try ...`? Today the token after `else` begins an expression, and `name ->` cannot begin one.
+2. Are `Failure` and `FailureKind` free as built-in type names in your code and examples?
+
+**Answer:**
