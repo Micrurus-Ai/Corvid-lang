@@ -2,6 +2,34 @@
 
 Weekly journal. Non-negotiable. Every entry is one commit.
 
+### `corvid graph` draws each agent from the tree `@budget` checks (B47 G1)
+
+`corvid graph [file] [--agent NAME]` prints each entry point's steps:
+tools, prompts, nested agents, approvals, the paths of a branch and a
+loop's bound, each with its worst-case cost and `file:line`. Tools and
+prompts no entry point reaches are listed at the end. Entry points are
+public agents, actions and agents no other agent calls.
+
+The graph is the cost analyzer's tree, not a second walk, so its numbers
+are the budget check's. The tree gained what a reader needs and the
+budget never did:
+- an `Approval` node for each `approve`, costing nothing;
+- each node's source span, the call site for prompts and nested agents;
+- whether a tool is `dangerous`.
+
+`effect_registry_for` now builds the effect registry the checker uses,
+so the graph's costs come from the same effects, imported ones included.
+
+Found while building it: `format_numeric_dimension` showed a $0.0002
+tool as `$0.000`, which reads as free, and rounded $0.0125 to `$0.013`.
+It now keeps three decimals and shows up to six when they are needed,
+in every cost report. Fixed in its own commit, with a test.
+
+Proof: `crates/corvid-driver/tests/agent_graph.rs` checks the approval,
+dangerous, loop-bound and call-site fields, the entry choice, the
+never-reached list and the refusals. The JSON and Mermaid forms and the
+invention's public proof are G2.
+
 ### The REPL's replay reads run ids and timestamps through the accessors
 
 `corvid-repl`'s `replay.rs` listed every trace event kind three times:

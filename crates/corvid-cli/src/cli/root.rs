@@ -88,6 +88,16 @@ pub enum Command {
     },
     /// Type-check a source file or the current project's src/main.cor.
     Check { file: Option<PathBuf> },
+    /// Draw each entry point's steps, branches, loops, tool and prompt
+    /// calls, approvals and worst-case cost from the compiled program, the
+    /// tree `@budget` checks, and list the tools and prompts nothing reaches.
+    Graph {
+        /// Source file. Defaults to the current project's src/main.cor.
+        file: Option<PathBuf>,
+        /// Draw one agent instead of every entry point.
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Format Corvid source files. Defaults to project sources and tests.
     Fmt {
         /// Report files that need formatting and leave them untouched.

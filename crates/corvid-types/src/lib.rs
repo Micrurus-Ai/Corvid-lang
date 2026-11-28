@@ -27,6 +27,7 @@ pub mod type_receiver;
 pub mod types;
 
 pub use checker::{
+    effect_registry_for,
     typecheck, typecheck_with_config, typecheck_with_config_and_modules, typecheck_with_modules,
     Checked, ImportedCallKind, ImportedCallTarget,
 };
@@ -40,7 +41,7 @@ pub use determinism::{
 };
 pub use effects::{
     analyze_effects, check_grounded_returns, compose_dimension_public, compute_worst_case_cost, compute_worst_case_cost_with_types,
-    render_cost_tree, AgentEffectSummary, ComposedProfile, ConstraintViolation, CostEstimate,
+    format_numeric_dimension, render_cost_tree, AgentEffectSummary, ComposedProfile, ConstraintViolation, CostEstimate,
     CostNodeKind, CostTreeNode, CostWarning, CostWarningKind, EffectProfile, EffectRegistry,
     ProvenanceViolation,
 };

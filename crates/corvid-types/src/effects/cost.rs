@@ -123,6 +123,8 @@ impl<'a> CostAnalyzer<'a> {
                 kind: CostNodeKind::Agent,
                 costs: body_estimate.dimensions,
                 children: body_estimate.tree.children,
+                span: agent.span,
+                dangerous: false,
             },
             warnings: body_estimate.warnings,
             bounded: body_estimate.bounded,
@@ -199,6 +201,18 @@ impl<'a> CostAnalyzer<'a> {
                 estimate.tree.costs = estimate.dimensions.clone();
                 estimate.tree.children =
                     prune_children(std::mem::take(&mut estimate.tree.children));
+                // Where a person decides: after the arguments are worked out,
+                // before the program goes on.
+                if let corvid_ast::Stmt::Approve { .. } = stmt {
+                    let label = match value {
+                        corvid_ast::Expr::Call { callee, .. } => match callee.as_ref() {
+                            corvid_ast::Expr::Ident { name, .. } => name.name.clone(),
+                            _ => "approval".into(),
+                        },
+                        _ => "approval".into(),
+                    };
+                    estimate.tree.children.push(zero_estimate(&label, CostNodeKind::Approval, *span).tree);
+                }
                 estimate.tree = wrap_if_needed("stmt", estimate.tree, *span);
                 estimate
             }
@@ -851,11 +865,16 @@ impl<'a> CostAnalyzer<'a> {
             }
             corvid_resolve::DeclKind::Prompt => {
                 let prompt = find_prompt(self.file, &entry.name)?;
-                Some(effect_node_for_prompt(prompt, self.registry))
+                // A step is located where it is called, as tool steps are.
+                let mut node = effect_node_for_prompt(prompt, self.registry);
+                node.span = span;
+                Some(node)
             }
-            corvid_resolve::DeclKind::Agent => self
-                .analyze_agent(&entry.name)
-                .map(|estimate| rename_tree(estimate.tree, &entry.name)),
+            corvid_resolve::DeclKind::Agent => self.analyze_agent(&entry.name).map(|estimate| {
+                let mut node = rename_tree(estimate.tree, &entry.name);
+                node.span = span;
+                node
+            }),
             _ => {
                 let _ = agent_name;
                 None
@@ -864,7 +883,7 @@ impl<'a> CostAnalyzer<'a> {
     }
 }
 
-fn zero_estimate(name: &str, kind: CostNodeKind, _span: corvid_ast::Span) -> CostEstimate {
+fn zero_estimate(name: &str, kind: CostNodeKind, span: corvid_ast::Span) -> CostEstimate {
     let costs = zero_costs();
     CostEstimate {
         dimensions: costs.clone(),
@@ -873,6 +892,8 @@ fn zero_estimate(name: &str, kind: CostNodeKind, _span: corvid_ast::Span) -> Cos
             kind,
             costs,
             children: Vec::new(),
+            span,
+            dangerous: false,
         },
         warnings: Vec::new(),
         bounded: true,
@@ -890,7 +911,7 @@ fn sequence_tree(
     name: &str,
     kind: CostNodeKind,
     children: Vec<CostTreeNode>,
-    _span: corvid_ast::Span,
+    span: corvid_ast::Span,
 ) -> CostTreeNode {
     let children = prune_children(children);
     let mut costs = zero_costs();
@@ -902,6 +923,8 @@ fn sequence_tree(
         kind,
         costs,
         children,
+        span,
+        dangerous: false,
     }
 }
 
@@ -909,7 +932,7 @@ fn branch_tree(
     name: &str,
     then_tree: &CostTreeNode,
     else_tree: &CostTreeNode,
-    _span: corvid_ast::Span,
+    span: corvid_ast::Span,
 ) -> CostTreeNode {
     let mut costs = zero_costs();
     for dim in COST_DIMENSIONS {
@@ -922,6 +945,8 @@ fn branch_tree(
         kind: CostNodeKind::Branch,
         costs,
         children: prune_children(vec![then_tree.clone(), else_tree.clone()]),
+        span,
+        dangerous: false,
     }
 }
 
@@ -933,8 +958,14 @@ fn wrap_if_needed(name: &str, tree: CostTreeNode, span: corvid_ast::Span) -> Cos
     }
 }
 
+/// A step with nothing in it: no cost and no children. Only grouping
+/// nodes are dropped this way; a call or an approval stays even when it
+/// costs nothing, because it is a step the program takes and the agent
+/// graph shows it.
 fn tree_is_zero(tree: &CostTreeNode) -> bool {
-    tree.costs.values().all(|value| *value <= f64::EPSILON) && tree.children.is_empty()
+    matches!(tree.kind, CostNodeKind::Sequence | CostNodeKind::Condition)
+        && tree.costs.values().all(|value| *value <= f64::EPSILON)
+        && tree.children.is_empty()
 }
 
 fn prune_children(children: Vec<CostTreeNode>) -> Vec<CostTreeNode> {
@@ -952,7 +983,7 @@ fn add_costs(target: &mut HashMap<String, f64>, source: &HashMap<String, f64>) {
     }
 }
 
-fn scale_tree(tree: CostTreeNode, iterations: u64, _span: corvid_ast::Span) -> CostTreeNode {
+fn scale_tree(tree: CostTreeNode, iterations: u64, span: corvid_ast::Span) -> CostTreeNode {
     let name = tree.name.clone();
     let costs = tree
         .costs
@@ -966,6 +997,8 @@ fn scale_tree(tree: CostTreeNode, iterations: u64, _span: corvid_ast::Span) -> C
         },
         costs,
         children: vec![tree],
+        span,
+        dangerous: false,
     }
 }
 
@@ -984,7 +1017,7 @@ fn effect_node_for_decl(
     effect_row: &corvid_ast::EffectRow,
     legacy_effect: Effect,
     registry: &EffectRegistry,
-    _span: corvid_ast::Span,
+    span: corvid_ast::Span,
 ) -> CostTreeNode {
     let mut effect_names: Vec<&str> = effect_row
         .effects
@@ -1000,6 +1033,8 @@ fn effect_node_for_decl(
         kind,
         costs: numeric_dimensions_from_profile(&profile),
         children: Vec::new(),
+        span,
+        dangerous: matches!(legacy_effect, Effect::Dangerous),
     }
 }
 
@@ -1068,6 +1103,8 @@ fn effect_node_for_prompt(
         kind: CostNodeKind::Prompt,
         costs,
         children: Vec::new(),
+        span: prompt.span,
+        dangerous: false,
     }
 }
 

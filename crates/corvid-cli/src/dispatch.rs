@@ -55,7 +55,7 @@ use crate::run_cmd::cmd_run;
 use crate::serve_cmd::cmd_serve;
 use crate::verify_cmd::cmd_verify;
 use crate::{
-    abi_cmd, approver_cmd, audit_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
+    abi_cmd, approver_cmd, audit_cmd, graph_cmd, bench_cmd, bind_cmd, bundle_cmd, capsule_cmd, claim_cmd,
     connectors_cmd, contract_cmd, deploy_cmd, eval_cmd, jobs_explain_cmd, lineage_cmd, observe_cmd,
     ops_cmd, receipt_cmd, release_cmd, replay, review_queue_cmd, test_from_traces, tour, trace_cmd,
     trace_dag, trace_diff, upgrade_cmd,
@@ -79,6 +79,7 @@ pub(crate) fn run(cli: Cli) -> Result<u8> {
             with_python_tools,
         }) => cmd_new(&name, with_python_tools, web),
         Some(Command::Check { file }) => cmd_check(&resolve_project_source(file)?),
+        Some(Command::Graph { file, agent }) => graph_cmd::run_graph(&resolve_project_source(file)?, agent.as_deref()),
         Some(Command::Fmt { files, check }) => crate::fmt_cmd::run(files, check),
         Some(Command::Add(kind)) => match kind {
             crate::cli::root::AddCommand::Skill {

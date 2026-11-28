@@ -33,6 +33,7 @@ mod app_cmd;
 mod approvals_cmd;
 mod approver_cmd;
 mod audit_cmd;
+mod graph_cmd;
 mod auth_cmd;
 mod bench_cmd;
 mod beta_cmd;

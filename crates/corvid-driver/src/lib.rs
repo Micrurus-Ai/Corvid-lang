@@ -6,6 +6,7 @@
 //! See `ARCHITECTURE.md` §4.
 
 pub mod add_dimension;
+pub mod agent_graph;
 pub mod adversarial;
 pub mod approver;
 pub mod connector_startup;

@@ -75,9 +75,14 @@ pub struct CostTreeNode {
     pub kind: CostNodeKind,
     pub costs: HashMap<String, f64>,
     pub children: Vec<CostTreeNode>,
+    /// Where the step is in the source: the call, the statement, or the
+    /// agent's declaration. `corvid graph` shows it.
+    pub span: corvid_ast::Span,
+    /// A tool declared `dangerous`, which every call must be approved for.
+    pub dangerous: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CostNodeKind {
     Agent,
     Tool,
@@ -86,6 +91,9 @@ pub enum CostNodeKind {
     Branch,
     Loop { iterations: Option<u64> },
     Condition,
+    /// An `approve`: a person decides before the program goes on. It
+    /// costs nothing itself.
+    Approval,
 }
 
 #[derive(Debug, Clone)]

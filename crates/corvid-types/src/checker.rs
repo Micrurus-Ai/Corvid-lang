@@ -158,40 +158,12 @@ fn typecheck_with_everything(
     // callee's return type to `Grounded<T>`. The post-passes below
     // (analyze_effects, compute_worst_case_cost, check_grounded_returns)
     // reuse the same registry.
+    let registry = effect_registry_for(file, modules, config);
     let effect_decls: Vec<&corvid_ast::EffectDecl> = file
         .decls
         .iter()
-        .filter_map(|d| {
-            if let Decl::Effect(e) = d {
-                Some(e)
-            } else {
-                None
-            }
-        })
+        .filter_map(|d| if let Decl::Effect(e) = d { Some(e) } else { None })
         .collect();
-    let mut owned_decls: Vec<corvid_ast::EffectDecl> =
-        effect_decls.iter().cloned().cloned().collect();
-    // Slice 45o: imported PUBLIC effects join the registry so
-    // `import "./std/json" use json_egress_read` + `uses
-    // json_egress_read` composes exactly like a locally-declared
-    // effect. Local declarations win on name collisions (they are
-    // pushed after, and `from_decls` is last-wins), matching the
-    // shadowing story everywhere else.
-    if let Some(modules) = modules {
-        let mut imported: Vec<corvid_ast::EffectDecl> = Vec::new();
-        for module in modules.root_imports.values() {
-            for decl in &module.file.decls {
-                if let Decl::Effect(e) = decl {
-                    if !matches!(e.visibility, corvid_ast::Visibility::Private) {
-                        imported.push(e.clone());
-                    }
-                }
-            }
-        }
-        imported.extend(owned_decls);
-        owned_decls = imported;
-    }
-    let registry = crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config);
 
     let mut c = Checker::new(file, resolved, modules, &registry);
     c.warnings.extend(early_warnings);
@@ -1062,3 +1034,47 @@ fn refinement_problem(refinement: &corvid_ast::Refinement, type_name: &str, what
     }
 }
 
+/// The effect registry a program's checks compose costs with: its own
+/// effect declarations, and the public effects of the modules it imports.
+/// Local declarations win on a name collision. The checker's `@budget`
+/// analysis and `corvid graph` both use it, so they agree on every cost.
+pub fn effect_registry_for(
+    file: &File,
+    modules: Option<&corvid_resolve::ModuleResolution>,
+    config: Option<&crate::config::CorvidConfig>,
+) -> crate::effects::EffectRegistry {
+    let effect_decls: Vec<&corvid_ast::EffectDecl> = file
+        .decls
+        .iter()
+        .filter_map(|d| {
+            if let Decl::Effect(e) = d {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut owned_decls: Vec<corvid_ast::EffectDecl> =
+        effect_decls.iter().cloned().cloned().collect();
+    // Slice 45o: imported PUBLIC effects join the registry so
+    // `import "./std/json" use json_egress_read` + `uses
+    // json_egress_read` composes exactly like a locally-declared
+    // effect. Local declarations win on name collisions (they are
+    // pushed after, and `from_decls` is last-wins), matching the
+    // shadowing story everywhere else.
+    if let Some(modules) = modules {
+        let mut imported: Vec<corvid_ast::EffectDecl> = Vec::new();
+        for module in modules.root_imports.values() {
+            for decl in &module.file.decls {
+                if let Decl::Effect(e) = decl {
+                    if !matches!(e.visibility, corvid_ast::Visibility::Private) {
+                        imported.push(e.clone());
+                    }
+                }
+            }
+        }
+        imported.extend(owned_decls);
+        owned_decls = imported;
+    }
+    crate::effects::EffectRegistry::from_decls_with_config(&owned_decls, config)
+}
